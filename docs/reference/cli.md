@@ -29,7 +29,7 @@ parse/compile).
 | Flag                     | Effect                                                                                                |
 |--------------------------|-------------------------------------------------------------------------------------------------------|
 | `--invoke <name>[=a,b,…]` | run the named export instead of `_start`/`main`. Zero-arg form → result surfaces as the exit code. `=args` (comma-separated, parsed by param type i32/i64/f32/f64) → typed results print bare, one per line, on stdout. Interp engine only |
-| `--engine <interp\|jit>` | `interp` (default, full WASI) or `jit` (compute-only — SIMD/compute, no WASI I/O)                    |
+| `--engine <interp\|jit>` | `interp` (default) or `jit` — BOTH do full WASI (D-244); `jit` additionally executes SIMD-128             |
 | `--dir <host>[:<guest>]` | preopen a host directory for WASI (colon separator; guest path mirrors host when omitted)             |
 
 ### `compile`
@@ -40,9 +40,9 @@ artifact (ADR-0039) to the `-o` / `--output` path. `zwasm run
 
 ## Engine selection
 
-- `.cwasm` input → AOT-loaded directly.
-- `.wasm` input → interpreter by default; `--engine jit` opts into the
-  compute-only JIT.
+- `.cwasm` input → AOT-loaded directly (full WASI, D-251).
+- `.wasm` input → interpreter by default; `--engine jit` opts into the JIT
+  (full WASI via D-244, plus SIMD execution).
 
 ## Environment
 

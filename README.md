@@ -43,8 +43,9 @@ out of scope for v0.1.0.
 | WASI 0.1 (preview1)                  | ✅ functional        | interpreter: args / env / preopened dirs / clock / random / fd I/O |
 | WASI 0.2 (preview2, Component Model) | 📋 deferred to v0.2.0 |                                                                    |
 
-JIT execution is compute-only (no WASI I/O — use the interpreter for WASI
-guests); AOT-WASI is staged.
+All three execution paths do full WASI I/O — the interpreter, the JIT
+(`--engine jit`, D-244), and AOT (`.cwasm`, D-251). The JIT additionally
+executes SIMD-128 (the interpreter does not).
 
 ### Execution backends
 
@@ -66,7 +67,7 @@ adversarial use-after-free test on aarch64 + x86_64 (ADR-0160).
 zwasm                                  # print version + build options
 zwasm run <file.wasm|.cwasm> [args...] # run a module (WASI _start / main)
     [--invoke <name>[=a,b,…]]          #   run a named export; =args prints typed results
-    [--engine <interp|jit>]            #   interp (default, full WASI) or jit (compute-only)
+    [--engine <interp|jit>]            #   interp (default) or jit (both full WASI; jit adds SIMD)
     [--dir <host>[:<guest>]]           #   preopen a host directory for WASI
 zwasm compile <file.wasm> -o <out.cwasm>  # compile to a .cwasm AOT artifact
 zwasm --version | -V

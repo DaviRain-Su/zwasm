@@ -33,7 +33,7 @@ pub const usage =
     \\Usage:
     \\  zwasm run <file.wasm|file.cwasm> [args...]   Run a module (WASI _start / main)
     \\    [--invoke <name>]                          Invoke a named zero-arg export instead
-    \\    [--engine <interp|jit>]                    Engine: interp (default, full WASI) or jit (compute-only)
+    \\    [--engine <interp|jit>]                    Engine: interp (default) or jit (both full WASI; jit adds SIMD)
     \\    [--dir <host>[:<guest>]]                   Preopen a host directory for WASI
     \\  zwasm compile <file.wasm> -o <out.cwasm>     Compile to a .cwasm AOT artifact
     \\  zwasm --version | -V                         Print the version

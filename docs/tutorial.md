@@ -26,8 +26,8 @@ zwasm run --invoke 'add=2,3' math.wasm   # pass typed args; prints the result (â
 zwasm run --dir .:/ guest.wasm       # preopen the cwd as the guest's /
 ```
 
-The default engine is the interpreter (full WASI). `--engine jit` runs
-the compute-only JIT (SIMD/compute; no WASI I/O). Full flags:
+The default engine is the interpreter. `--engine jit` runs the JIT, which
+does full WASI too (D-244) and additionally executes SIMD. Full flags:
 [`reference/cli.md`](reference/cli.md).
 
 ## 3. Compile ahead-of-time

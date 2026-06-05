@@ -181,9 +181,9 @@ Key deltas from v1's CLI:
 
 - **`run` is explicit** — `zwasm run module.wasm` (v1 accepted a bare path). The
   trailing arguments after the `.wasm` path are the WASI guest's `argv`.
-- **`--engine <interp|jit>`** selects the engine. The **default is `interp`**
-  (full WASI). `--engine=jit` is **compute-only** (see §4); it rejects `--dir`.
-  (v1 defaulted to JIT.)
+- **`--engine <interp|jit>`** selects the engine. The **default is `interp`**.
+  `--engine=jit` does full WASI too (see §4), including `--dir`, and adds SIMD
+  execution. (v1 defaulted to JIT.)
 - **`--dir <host>[:<guest>]`** preopens a directory for WASI (as in v1).
 - **`compile` + `.cwasm`** — ahead-of-time compilation is new in v2. A `.cwasm`
   artifact is auto-detected by `run` and executes without re-parsing.
@@ -197,17 +197,15 @@ Key deltas from v1's CLI:
 
 ## 4. WASI
 
-WASI **0.1 (preview1)** support matches v1 — under the **interpreter** (the
-default engine), the full WASI surface is available. The capability model is
-deny-by-default.
+WASI **0.1 (preview1)** support matches v1 — the full 46-syscall surface is
+available, with a deny-by-default capability model.
 
-**New caveat:** the **JIT engine is compute-only**. `--engine=jit` (and the
-JIT execution path in the embedding API) executes pure computation (including
-SIMD) but does **not** perform WASI I/O yet — `fd_write` does not reach stdout,
-`proc_exit` does not carry an exit code, and `--dir` is rejected on the JIT
-path. Run WASI programs on the default interpreter; use the JIT for
-compute/embedding workloads. WASI 0.2 (preview2, Component Model) is a
-post-v0.1.0 item.
+**All-engine WASI:** WASI I/O works on **all three execution paths** — the
+interpreter, the JIT (`--engine=jit`, D-244), and AOT (`.cwasm`, D-251). On
+every path `fd_write` reaches stdout, `proc_exit` carries the exit code, argv /
+environ / clock / random resolve, and `--dir` preopens file ops. The JIT
+additionally executes SIMD-128, which the interpreter does not. WASI 0.2
+(preview2, Component Model) is a post-v0.1.0 item.
 
 ---
 

@@ -16,9 +16,9 @@
 //!                             export; exit with the guest's
 //!                             `proc_exit` code.
 //!   run --invoke <name>       Invoke the named func export (zero-args)
-//!   run --engine <interp|jit> Engine: interp (default, full WASI) or jit
-//!                             (ADR-0136; compute-only — SIMD/compute, no
-//!                             WASI I/O yet). `--engine=jit` also accepted.
+//!   run --engine <interp|jit> Engine: interp (default) or jit — BOTH do full
+//!                             WASI (D-244); jit additionally executes SIMD
+//!                             (the interp does not). `--engine=jit` accepted.
 //!     <path.wasm>             instead of the default `_start` / `main`
 //!                             selection. Phase 11 bench prerequisite
 //!                             per §9.12-G; arg marshalling + result
@@ -100,8 +100,8 @@ pub fn main(init: std.process.Init) !void {
             // single token so the trailing WASI argv stays unambiguous. Null =
             // the zero-arg entry form (`--invoke NAME`).
             var invoke_args: ?[]const u8 = null;
-            // ADR-0136 — `--engine=jit` routes the run through the JIT
-            // executor (compute-only). Default = interp (the C-API path).
+            // ADR-0136 — `--engine=jit` routes the run through the JIT executor
+            // (full WASI via D-244 + SIMD). Default = interp (the C-API path).
             var engine_jit = false;
             var preopen_list: std.ArrayList(cli_run.PreopenDir) = .empty;
             defer preopen_list.deinit(gpa);
@@ -173,7 +173,7 @@ pub fn main(init: std.process.Init) !void {
             // (WASI argv arrives via the host args_get, not the entry's
             // params). Reject `=ARGS` there rather than silently dropping.
             if (invoke_args != null and (engine_jit or (bytes.len >= 4 and std.mem.eql(u8, bytes[0..4], "CWAS")))) {
-                try printlnErr(io, "zwasm run: --invoke NAME=ARGS arg-passing requires the interp engine (JIT/.cwasm entry is zero-arg compute-only)");
+                try printlnErr(io, "zwasm run: --invoke NAME=ARGS arg-passing requires the interp engine (the JIT/.cwasm entry runner invokes a zero-arg export)");
                 std.process.exit(2);
             }
 

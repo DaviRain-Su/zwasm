@@ -50,7 +50,7 @@ has not yet been cut.
 
 ### Known limitations
 
-- JIT execution is compute-only (no WASI I/O — use the interpreter for
-  WASI guests); AOT-WASI is staged.
+- Sockets are stubbed (`sock_*` return `ENOTSOCK`; no host socket-preopen
+  yet) and WASI 0.2 (preview2 / Component Model) is deferred to v0.2.0.
 - Table funcref slots surface as opaque handles (not yet directly
   callable from the host).
