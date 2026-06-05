@@ -45,18 +45,25 @@ regression (surfaced by D-291). Audit-first, spans engines; four workstreams **A
 DISCHARGE (D-292): all engines emit clear per-kind trap messages + crash/trap/exception cleanly distinguished +
 audit-gap list closed-or-deferred.
 
-## ← LEAD (breadth, pivot from D-291): D-287 — validator control-stack cap
+## Recently completed (breadth, pivot from D-291)
 
-`shootout/switch.wasm` (LLVM-lowered big C switch) is REJECTED `ControlStackOverflow` at `zir.max_control_stack
-= 1024` (src/ir/zir.zig:29; runtime `frame.zig:34` sources it). wasmtime accepts the deeper nesting — rejecting
-valid real-toolchain wasm is a completeness miss. あるべき論 = raise the cap (autonomous-with-ADR per ADR-0153;
-not a user-gate). NEXT: measure switch.wasm's true depth + the per-frame label-stack memory model (fixed array
-vs dynamic) → ADR (new limit + memory rationale) → raise + test (switch.wasm validates + a deep-nest fixture).
+- ✅ **D-287 DONE** (`cf605260`, ADR-0165): raised `zir.max_control_stack` 1024→4096 so valid deeply-nested
+  wasm (shootout/switch.wasm, LLVM big C switch, depth 2568) validates + runs (wasmtime accepted it; we
+  rejected it). Memory-bounded by the validator's host-stack `control_buf` (~280KB at 4096, safe); runtime
+  label stack is hybrid-lazy. Tests: 2000-deep validates, 9000-deep overflows. Forward-ref: heap the validator
+  control_buf to remove the cap entirely (full spec-completeness).
+
+## ← LEAD: D-288 — interp call-depth cap
+
+The interp traps deeply-recursive programs at a frame-stack cap (ackermann ~1021-deep traps at a 256 cap;
+analogous to D-287 but for CALL depth, not control nesting). Likely a raise + ADR (or an inline+overflow
+redesign mirroring frame.zig's hybrid label stack). NEXT: Step 0 — find the interp frame/call-depth cap +
+its memory model (fixed vs hybrid) + a repro (ackermann), then ADR + raise/redesign + test.
 
 ## Queue (time-consuming first, per user directive)
 
-3. **D-288** (interp frame-stack inline+overflow redesign; ackermann 1021-deep traps at the 256 cap; ADR-likely).
 4. **D-293** (kinded-fixup refactor — remaining JIT trap kinds oob_table/conversion/null/cast/array; ~50 sites).
+5. **D-291** (paused; see above) · **D-292 B-core** (SIGSEGV→internal-error, needs ADR-0070 amend) · C · D.
 5. Moderate: **D-284** (interp/jit/aot entry-resolution unify) · **D-290** (wabt→wasm-tools, user-directed hygiene).
 6. Defer (low-signal / measure-first): **D-289 FP/param/stack large arms** · **D-286** (fill/init byte-loop).
    **D-285** (JIT byte-loop/bulk-memory codegen, ADR-0153 rework candidate — scheduled after this program).

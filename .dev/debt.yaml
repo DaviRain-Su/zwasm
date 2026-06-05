@@ -191,22 +191,6 @@ entries:
     last_reviewed: "2026-06-05"
     refs: |-
       `bench/runners/wasm/shootout/ackermann.wasm` (repro); `src/runtime/frame.zig:24` (max_frame_stack=256) +`:104-116` (label inline+overflow design to mirror); `src/runtime/runtime.zig:354,443` (frame_buf + pushFrame cap); ADR-0163 A; D-291 (JIT-side, distinct)
-  - id: "D-287"
-    layer: "code"
-    status: "note"
-    description: |-
-      note (ADR-0163 A breadth, 2026-06-05): the validator rejects valid deeply-nested modules at the
-      control-stack cap. `shootout/switch.wasm` (LLVM-lowered large C switch) → `ControlStackOverflow at
-      op 0x2 (block)`; zwasm's cap is `zir.max_control_stack = 1024` (src/ir/zir.zig:29, mirrored by the
-      runtime `frame.zig:34 max_label_stack`). wasmtime accepts the deeper nesting. Raising the cap is a
-      per-frame-memory tradeoff (the runtime must hold every depth the validator accepts), so it is a
-      DESIGN decision, not a reflexive bump — likely needs an ADR (touches a §-level limit). DISCHARGE:
-      raise + ADR (memory rationale) so switch.wasm validates, OR ADR documents 1024 as intentional + the
-      class of programs it rejects.
-    first_raised: "2026-06-05"
-    last_reviewed: "2026-06-05"
-    refs: |-
-      `bench/runners/wasm/shootout/switch.wasm` (repro); `src/ir/zir.zig:29` (max_control_stack=1024); `src/runtime/frame.zig:34`; ADR-0163 A
   - id: "D-286"
     layer: "code"
     status: "note"
