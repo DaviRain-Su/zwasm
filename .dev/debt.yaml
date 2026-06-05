@@ -121,49 +121,9 @@ entries:
     last_reviewed: "2026-06-04"
     refs: |-
       `src/engine/codegen/shared/entry.zig` invokeAndCheckVoid (the `@call` seam) + callVoidNoArgs; `src/engine/codegen/shared/jit_abi.zig:9+` (cohort X19/X24/X28 = arm64 callee-saved); ADR-0017 sub-2d-ii (MOV-install cohort, not stack-save) + D-210; `src/cli/run.zig` runWasmJit (Debug-only test); ADR-0136; ROADMAP §11.3 / 11.3-simd-gap bundle
-  - id: "D-244"
-    layer: "code"
-    status: "partial"
-    description: |-
-      **PARTIALLY DISCHARGED 2026-06-03 (`8011293a`, ADR-0136): `zwasm run --engine=jit`
-      now JIT-executes compute/SIMD modules — the compute-SIMD CLI gap is closed and §11.3
-      is unblocked. RESIDUAL: WASI I/O + `proc_exit` exit-code under the JIT (the d-3
-      follow-up) — `--engine=jit` is compute-only; realworld WASI tools still need the
-      interp (default).** (Historical root cause below.)
-      `zwasm run` (default interp) traps `Unreachable` on ANY SIMD-128 op. ROOT CAUSE
-      (2026-06-03, §11.3 ch3, corrected on 2nd dig):
-      **SIMD execution is JIT-ONLY by design; the interp has NO SIMD execution, and
-      `zwasm run` is always the interp.** Evidence: (1) `test/spec/simd_assert_runner.zig:1`
-      = "SIMD spec assertion runner — JIT-execute"; the interp-side runner is
-      `spec_assert_runner_non_simd` (the split is deliberate — §9.12-E exit shows
-      `simd_assert_runner` 13301 pass via JIT vs `spec_assert_runner_non_simd` for scalar).
-      (2) The per-op interp handlers are `NotMigrated` STUBS, not real impls
-      (`i32x4_add.zig:30 interp_i32x4_add() → error.NotMigrated`; signature
-      `fn() DispatchError!void` ≠ `InterpFn`, so `populateDispatchTable` correctly skips
-      them). (3) No `@Vector` SIMD arithmetic exists anywhere under `src/interp/`. (4)
-      `build_options.engine_mode` is DISCARDED at runtime (`main.zig:179 _ =
-      build_options.engine_mode`), so even an `-Dengine=jit` build's `zwasm run` stays on
-      the interp C-API path (`instance.zig:918 dispatchTable()` → `dispatch.zig:43`
-      `table.interp[idx] orelse Trap.Unreachable`). So a SIMD op → null interp slot → trap.
-      P12 (interp==jit) is NOT asserted for SIMD — interp SIMD was intentionally not built.
-      PROVEN: `(func (export "_start") (v128.store 0 (i32x4.add ...)))` traps on `zwasm run`,
-      runs clean on wasmtime/wazero/wasmer; an i32-only `_start` runs fine on zwasm.
-      IMPLICATIONS: (a) **§11.3 SIMD gap analysis cannot bench zwasm via `zwasm run`** — it
-      needs a JIT-EXECUTE bench path (zwasm JIT-compiles + runs the SIMD module + times it,
-      as `simd_assert_runner` does via `engine.runner.CompiledWasm`). There is no CLI/bench
-      JIT-execute entry point today. (b) Standalone v0.1.0 product gap: SIMD modules are
-      unrunnable via the CLI at all (only via the JIT test harness). Discharge options
-      (DESIGN-GRADE — may need an ADR): a `zwasm run --engine=jit` path that honours
-      engine_mode and routes SIMD modules through the JIT executor; OR a dedicated
-      bench-jit runner exe for §11.3 only; OR implement interp SIMD (huge: 207 ops, and
-      contradicts the JIT-only design). The §11.3 prerequisite = the JIT-execute bench path.
-    first_raised: "2026-06-03"
-    last_reviewed: "2026-06-03"
-    refs: |-
-      `test/spec/simd_assert_runner.zig:1` (JIT-execute SIMD runner) + `spec_assert_runner_non_simd` (interp scalar runner); `src/instruction/wasm_2_0/i32x4_add.zig:30` (interp_i32x4_add → NotMigrated stub); `src/interp/dispatch.zig:43` (null slot → Trap.Unreachable); `src/api/instance.zig:918` (interp-only dispatchTable); `src/cli/main.zig:179` (engine_mode discarded); `src/engine/runner.zig` CompiledWasm (the JIT-execute path); ROADMAP §9.12-E / §11.3 / D-074 / 11.3-simd-gap bundle
   - id: "D-239"
     layer: "code"
-    status: "partial"
+    status: "now"
     description: |-
       JIT compile-path REJECTS function-references modules (br_on_null / br_on_non_null /
       ref_as_non_null) — a §10-exit in-phase must-fix (ADR-0133 §4; NOT deferrable). TWO
@@ -205,7 +165,7 @@ entries:
       still first-cut (arch-parity, D-238 bucket). Other §10 rejects: tail-call return_call_indirect (D-210),
       gc i31.6 (D-240 class), UnsupportedEntrySignature ×7.
     first_raised: "2026-06-03"
-    last_reviewed: "2026-06-03"
+    last_reviewed: "2026-06-05"
     refs: |-
       `src/validate/validator.zig:359` (func_type_indices field) / `:2416-2423` (ref.func precise typing) / `:597`; `src/runtime/instance/instantiate.zig:128-143` (interp builds the map) + `:386` (passes it); `src/engine/compile.zig` (JIT validate call — must build+pass); `src/engine/codegen/arm64/emit.zig` (dispatch switch — add 3 cases) + `codegen/arm64/ops/wasm_3_0/{br_on_null,br_on_non_null,ref_as_non_null}.zig`; ADR-0123 D4; ADR-0133 §4 (in-phase must-fix); test/spec/wasm-3.0-assert/function-references/raw/br_on_null.wast
   - id: "D-238"

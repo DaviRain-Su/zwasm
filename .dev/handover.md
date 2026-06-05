@@ -20,17 +20,22 @@
   trap under `--engine jit` anyway). D-283 stays open for a subprocess-based full-corpus differential (the
   in-process lane can't per-fixture-timeout the slow JIT-compiles).
 
-## NEXT — pick a Phase-16 completion item (all-engine WASI program DONE)
+## NEXT — D-239: JIT/AOT validate accepts function-references modules (all-engine correctness gap)
 
-The user-directed program (complete WASI + all-engine + CM) is fulfilled except **CM (post-v0.1.0)**. Next,
-investigation-first, pick by concreteness:
-- **(a) D-211** precise GcRootMap + AOT-GC — **verify load-bearing FIRST**: conservative native-stack scan is
-  proven sufficient (ADR-0060), so Step 0 = look for a measured false-retention bug / heap bloat; if none, KEEP
-  deferred (document) and move to (b)/(c). Do NOT build precise roots speculatively.
-- **(b) Component Model** survey follow-up (A5 survey done; CM is post-v0.1.0 — scope/ADR work, not impl yet).
-- **(c) D-281** real socket I/O (sockets=notsock today) · **(d) D-255** C-API WASI io · debt-repayment sweep.
-- Recommended start: (a) D-211 load-bearing check (fast investigation → either schedules a real bundle or
-  confirms-deferred), then (c)/(d) debt repayment.
+**Confirmed real this cycle**: `compile.zig`/`runner.zig` do NOT build the `func_type_indices` map, so the JIT
+validate path types `ref.func N` as abstract `funcref` (validator.zig:359/2416-2423 gate on a non-empty map) →
+a `(ref $t)` param rejects it → **StackTypeMismatch**; the interp builds the map (`instantiate.zig:128-143`,
+passed at `:386`) so it accepts the SAME module. Net: JIT + AOT reject valid function-references modules the
+interp runs. **Repro (red test)**: `br_on_null.0` func[4] `nonnullable-f` = `(call $nn (ref.func $f))` →
+`runner.compileWasm` errors `StackTypeMismatch` (no br_on_null needed). **Fix recipe**: in the JIT compile-path
+validate (find where `compile.zig`/`runner_validate.zig` calls the shared validator), build the func-idx→typeidx
+map (imports-first, mirror `instantiate.zig:128-143`) and pass it into the validator's `func_type_indices` arg.
+Then verify the function-references spec subset compiles under `ZWASM_SPEC_ENGINE=jit` + AOT. **CAREFUL AREA**
+(validator + compile path) — fresh context; survey `instantiate.zig:128-143` + the validator's map param first.
+
+**After D-239**: (b) Component Model survey follow-up (post-v0.1.0). (c) D-281 socket I/O · D-255 C-API WASI io ·
+debt-repayment. (D-211 precise GcRootMap = **confirmed deferred** this cycle — conservative scan correctness-
+complete, ADR-0148/0060; only a moving collector / §12.5 AOT-GC would need it, neither adopted.)
 
 ## Step 0.7 (next resume) — verify remote logs
 
