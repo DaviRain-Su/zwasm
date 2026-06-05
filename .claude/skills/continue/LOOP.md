@@ -19,12 +19,14 @@ substrate→`zig build test`, logic/cohort→`zig build test-all`);
 the **background ubuntu** gate is unconditionally `zig build
 test-all` (ADR-0076 **D6** — no-wait async gate, so narrow scope
 saved no loop time but skipped the x86_64-RUN runners; D-260/D-262).
-The **windowsmini** (Win64) gate is now also a **per-turn background
-monitoring gate** (ADR-0076 **D7**, 2026-06-05) — kicked with ubuntu,
-verified next cycle; a windows red is heisenbug-classified (re-run once),
-NOT auto-reverted. (Supersedes the old ADR-0049 phase-boundary-only stance,
-which let Win64 bugs accumulate — the D-260/D-262 analog for Win64. The
-phase-boundary windows reconcile remains the strict A13-merge gate.)
+The **windowsmini** (Win64) gate is now a **cadence-driven background
+monitoring gate** (ADR-0076 **D7**, 2026-06-05) — the loop HONORS
+`should_gate_windows.sh` (run windows たまに: ABI-risk-path diff OR ≥4
+commits since the last windows run, NOT per-turn — windows is too slow,
+NOT phase-boundary-only — too rare). A windows red is heisenbug-classified
+(re-run once), NOT auto-reverted. (Supersedes the old ADR-0049 stance that
+IGNORED should_gate_windows.sh, letting Win64 bugs accumulate — the
+D-260/D-262 analog. The phase-boundary reconcile remains the strict A13 gate.)
 
 ubuntu does NOT block the current cycle (ADR-0076 D3): it runs
 in background after the single push and is verified at the NEXT

@@ -229,11 +229,20 @@ D-260/D-262 did for x86_64: a manual windows `test-all` — run only because we 
 Win64 MSVC-`link.exe` + rustc-`.exe`-suffix gap in the rust_host step. User
 directive: "win64 固有バグは回さないと積もる — 根本的に対処".
 
-**Decision: windowsmini joins the per-turn BACKGROUND gate, symmetric with ubuntu
-(D6).** Step 6+7 kicks BOTH `run_remote_ubuntu.sh test-all` AND
-`run_remote_windows.sh test-all` in background against the turn's HEAD; Step 0.7
-verifies BOTH next cycle. Win64 is now exercised EVERY turn (background → hidden
-loop wall-clock), not phase-boundary-only — closing the accumulation gap.
+**Decision: HONOR `should_gate_windows.sh` — windows runs OCCASIONALLY (たまに), on a
+cadence, NOT every turn (windows is too slow for per-turn) and NOT phase-boundary-only
+(too rare → bugs accumulate).** The right cadence ALREADY EXISTS in
+`scripts/should_gate_windows.sh`: gate when the turn's diff (since the last
+windows-tested SHA) hits a **Win64-risk path** (`x86_64/{abi,op_call,prologue}.zig`,
+`shared/{jit_abi,entry}.zig`, `build.zig`, `run_remote_windows.sh`) OR when **≥4
+commits** have landed without a windows run; else defer. The bug was the *policy*
+(ADR-0049 + the skip-note) **IGNORING** this script ("must NOT fire
+run_remote_windows regardless of should_gate_windows.sh's output"). D7 flips that:
+Step 6+7 runs `should_gate_windows.sh`; **exit 0 → kick `run_remote_windows.sh
+test-all` in background** (alongside the always-on ubuntu kick); after a green windows
+verify, `should_gate_windows.sh --record`. Win64 is thus exercised every few
+commits / on every ABI-risk turn — early enough to stop accumulation, light enough
+to respect windows' slowness.
 
 **Heisenbug-aware verification (the Win64-specific half).** Win64 is heisenbug-prone
 (FP-walk / X29-sentinel / RSP-parity lineage). Unlike ubuntu (auto-revert on red,
@@ -246,13 +255,15 @@ So windows is a regularly-exercised MONITORING gate: deterministic reds act, fla
 are tracked (investigation_discipline.md §2 discharge protocol).
 
 **Amends** ADR-0049/0067 (windowsmini was phase-boundary-deferred) + the
-windowsmini-skip policy: windows is no longer phase-boundary-only — it is a per-turn
-background monitoring gate. The phase-boundary windows reconcile remains the *strict*
-(deterministic, A13-merge) gate; D7 adds the early-warning cadence.
+windowsmini-skip policy: windows is no longer phase-boundary-only NOR ignored — the
+loop HONORS `should_gate_windows.sh`'s cadence (the early-warning monitoring gate).
+The phase-boundary windows reconcile remains the *strict* (deterministic, A13-merge)
+gate; D7 adds the every-few-commits cadence between boundaries.
 
-**Cost**: windowsmini runs every turn (idle otherwise); background → no loop wall-
-clock; a wider deferral window (windows slower than ubuntu) absorbed by the
-"OK-line-absent = still running, re-check" tolerance.
+**Cost**: windows runs only on the cadence (ABI-risk diff OR ≥4 commits), background
+→ no loop wall-clock; far cheaper than per-turn, far safer than phase-boundary-only.
+The deferral window (windows slower than ubuntu) is absorbed by the "OK-line-absent
+= still running, re-check" tolerance.
 
 ## Alternatives considered
 
@@ -345,4 +356,4 @@ exactly the wall-clock penalty of this block.
 | 2026-05-20 | `c1e16f7d` | D4 amend — pre-commit / pre-push hook slim-down (`gate_commit.sh --fast`; pre-push drops gate re-run).|
 | 2026-05-30 | `b39689e1` | D5 amend — in-turn chunk chaining + per-turn ubuntu batch (widens D3 one-chunk→one-turn) + gate-once + bigger-chunk default (user throughput directive). |
 | 2026-06-05 | `<backfill>` | D6 amend — background ubuntu gate unconditionally `test-all` (classifier drives Mac foreground only); closes D-262 x86_64-RUN coverage gap (justification removed by D5-b's no-wait ubuntu). |
-| 2026-06-05 | `<backfill>` | D7 amend — windowsmini joins the per-turn background gate (heisenbug-aware: re-run-to-classify, no auto-revert); closes the win64 accumulation gap (D-260/D-262 analog for Win64), user-directed. |
+| 2026-06-05 | `<backfill>` | D7 amend — loop HONORS `should_gate_windows.sh` cadence (windows runs たまに: ABI-risk diff OR ≥4 commits, NOT per-turn — windows too slow; NOT phase-boundary — too rare), heisenbug-aware (no auto-revert); closes the win64 accumulation gap, user-directed. |

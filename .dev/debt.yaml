@@ -989,8 +989,8 @@ entries:
       deterministic miscompile — the SIMD functionality is correct. Win64-only (Mac arm64 + ubuntu x86_64 green).
       Likely the Win64 FP-walk / X29-sentinel / RSP-parity heisenbug lineage (cf. D-180/D-245). This is exactly the
       "win64 bugs accumulate when not run often" class the user flagged — now systematically caught by **ADR-0076
-      D7** (windowsmini per-turn background monitoring gate). TRACK via `track_heisenbug.sh win64-spec-simd segv` as
-      D7 exercises windows every turn; discharge gate = `investigation_discipline.md` §2 (≥5 silent over ≥3 SHAs OR
+      D7** (windowsmini cadence-driven background monitoring gate via `should_gate_windows.sh`). TRACK via
+      `track_heisenbug.sh win64-spec-simd segv` as D7 exercises windows on its cadence; discharge = `investigation_discipline.md` §2 (≥5 silent over ≥3 SHAs OR
       named root cause). Do NOT auto-revert turns on this flake (D7). Lead: the `[d-163-jit]` dump + per-func bytes.
     first_raised: "2026-06-05"
     last_reviewed: "2026-06-05"

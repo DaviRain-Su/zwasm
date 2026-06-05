@@ -303,17 +303,17 @@ hard-gate / bucket-3 / user touchpoint, or a deliberate flush.
 6. **Single push (ADR-0076 D2)**. `git pull --rebase --autostash origin zwasm-from-scratch && git push origin zwasm-from-scratch`.
    One push lands ALL the turn's commit pairs (rebase integrates the
    bench-CI bot commits once).
-7. **Remote kicks (background; ADR-0076 D3+D5-b+D6+D7)**. Kick BOTH
-   remotes against the turn's final HEAD, **always `test-all`** (D6 — the
-   background gate does not scope-adapt; narrow `test` skipped the spec/edge
-   RUN runners → the D-260 foot-gun). `run_in_background: true`, do NOT wait:
-   - `bash scripts/run_remote_ubuntu.sh test-all > /tmp/ubuntu.log 2>&1` (x86_64).
-   - `bash scripts/run_remote_windows.sh test-all > /tmp/win.log 2>&1` (**Win64;
-     ADR-0076 D7** — windowsmini is now a per-turn background MONITORING gate, NOT
-     phase-boundary-only; closes the win64 accumulation gap, the D-260/D-262 analog).
-   Step 0.7 next cycle verifies BOTH. ubuntu red → auto-revert (D3). **windows red →
-   NOT auto-revert** (heisenbug-prone): re-run once → reproduces = real bug (debt+fix);
-   flake = `track_heisenbug.sh` + proceed (D7).
+7. **Remote kicks (background; ADR-0076 D3+D5-b+D6+D7)**. `run_in_background: true`,
+   do NOT wait. **ubuntu = always** (D6): `bash scripts/run_remote_ubuntu.sh test-all
+   > /tmp/ubuntu.log 2>&1` (x86_64, every turn). **windows = on cadence** (D7 — windows
+   is too slow for per-turn): run `bash scripts/should_gate_windows.sh`; **exit 0 →**
+   `bash scripts/run_remote_windows.sh test-all > /tmp/win.log 2>&1` (Win64), then
+   after the next-cycle green verify `scripts/should_gate_windows.sh --record`. The
+   cadence (ABI-risk-path diff OR ≥4 commits since last windows run) catches Win64
+   bugs every few commits — far more than phase-boundary (which let them accumulate,
+   the D-260/D-262 analog), far cheaper than per-turn. Step 0.7 verifies both. ubuntu
+   red → auto-revert (D3). **windows red → NOT auto-revert** (heisenbug-prone): re-run
+   once → reproduces = real bug (debt+fix); flake = `track_heisenbug.sh` + proceed.
 8. **Re-arm**: `ScheduleWakeup(delaySeconds=60, prompt="/continue")`.
    Literal `60` = harness floor (`[60, 3600]` clamp). The tool
    description's "default 1200–1800s" does NOT apply — see
