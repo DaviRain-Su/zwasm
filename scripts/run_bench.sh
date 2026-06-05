@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # scripts/run_bench.sh — interactive bench runner via hyperfine.
 #
-# Builds zwasm in ReleaseSafe and runs each fixture in
+# Builds zwasm in ReleaseFast (fair vs the release-optimized comparators;
+# --safe / BENCH_SAFE=1 forces ReleaseSafe) and runs each fixture in
 # bench/runners/wasm/{shootout,tinygo,handwritten}/*.wasm + the
 # 5 cljw_*.wasm guests from test/realworld/wasm/ (per §9.6 / 6.G).
-# Writes results to bench/results/recent.yaml.
+# Writes results to bench/results/recent.yaml (records the build mode).
 #
 # Usage:
 #   bash scripts/run_bench.sh                     # full (5 runs + 3 warmup)
@@ -84,6 +85,7 @@ for arg in "$@"; do
         --compare=*) COMPARE="${arg#--compare=}" ;;
         --capture-rss) CAPTURE_RSS=1 ;;
         --engines=*) ENGINES_CSV="${arg#--engines=}" ;;
+        --safe) BENCH_SAFE=1 ;;
     esac
 done
 
@@ -197,8 +199,15 @@ if [ "$CAPTURE_RSS" -eq 1 ]; then
     fi
 fi
 
-echo "[run_bench] building ReleaseSafe..."
-zig build -Doptimize=ReleaseSafe >&2
+# Build ReleaseFast by default: the comparator runtimes (wasmtime/wazero/wasmer/
+# wasmedge) are all release-optimized, so ReleaseSafe here would be an unfair
+# handicap (safety checks slow zwasm's interp loop + JIT-compile/startup). This
+# matches the s15p_parity_vs_v1 basis. `--safe` opts back into ReleaseSafe for a
+# safety-on measurement (records build: ReleaseSafe in the YAML).
+ZWASM_BUILD_MODE="${BENCH_SAFE:+ReleaseSafe}"
+ZWASM_BUILD_MODE="${ZWASM_BUILD_MODE:-ReleaseFast}"
+echo "[run_bench] building $ZWASM_BUILD_MODE..."
+zig build -Doptimize="$ZWASM_BUILD_MODE" >&2
 
 ZWASM=./zig-out/bin/zwasm
 if [ ! -x "$ZWASM" ]; then
@@ -283,7 +292,8 @@ date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     echo "- date: $date"
     echo "  commit: $commit"
     echo "  arch: $arch"
-    echo "  reason: \"local recent run (runs=$RUNS warmup=$WARMUP)\""
+    echo "  build: $ZWASM_BUILD_MODE"
+    echo "  reason: \"local recent run (runs=$RUNS warmup=$WARMUP build=$ZWASM_BUILD_MODE)\""
     echo "  runs: $RUNS"
     echo "  warmup: $WARMUP"
     echo "  benches:"
@@ -474,6 +484,7 @@ if [ $PHASE_RECORD -eq 1 ]; then
         echo "- date: $date"
         echo "  commit: $commit"
         echo "  arch: $arch"
+        echo "  build: $ZWASM_BUILD_MODE"
         echo "  reason: \"$REASON\""
         echo "  runs: $RUNS"
         echo "  warmup: $WARMUP"
