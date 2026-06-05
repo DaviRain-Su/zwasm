@@ -100,6 +100,19 @@ pub fn fdWrite(
     const io_opt = host.io;
     if (file_opt != null and io_opt == null) return .nosys;
 
+    // stdout/stderr with NO capture buffer but a live io context (the CLI
+    // `run` path) route to the real process stream — otherwise `zwasm run`
+    // silently drops guest output. Without a buffer AND without io (headless),
+    // the write is a no-op success.
+    const std_stream: ?std.Io.File = if (buffer == null and file_opt == null and io_opt != null)
+        switch (slot.kind) {
+            .stdout => std.Io.File.stdout(),
+            .stderr => std.Io.File.stderr(),
+            .stdin, .dir, .file, .closed => null,
+        }
+    else
+        null;
+
     var total: u32 = 0;
     var i: u32 = 0;
     while (i < ciovec_count) : (i += 1) {
@@ -109,6 +122,7 @@ pub fn fdWrite(
         const slice = sliceMemConst(mem, buf, buf_len) orelse return .fault;
         if (buffer) |b| b.appendSlice(host.alloc, slice) catch return .nomem;
         if (file_opt) |f| f.writeStreamingAll(io_opt.?, slice) catch return .io;
+        if (std_stream) |s| s.writeStreamingAll(io_opt.?, slice) catch return .io;
         total += buf_len;
     }
     return writeU32LE(mem, nwritten_ptr, total);
@@ -905,6 +919,26 @@ test "fdWrite: stdout capture buffer accumulates writes" {
 
     try testing.expectEqualStrings("hi\n", capture.items);
     try testing.expectEqual(@as(u32, 3), std.mem.readInt(u32, mem[16..20], .little));
+}
+
+test "fdWrite: stderr with no capture buffer routes to the real process stream (CLI path)" {
+    // The CLI `run` path sets no capture buffer; with a live io context, fd 1/2
+    // must reach the real process stream (else `zwasm run` silently drops
+    // output). Tested on fd 2 (stderr) — writing to fd 1 would corrupt the zig
+    // test --listen protocol. The single byte to stderr is harmless noise.
+    var h = try Host.init(testing.allocator);
+    defer h.deinit();
+    h.io = testing.io; // io set, no stderr_buffer → real stderr
+    var mem: [32]u8 = @splat(0);
+    mem[8] = 'x';
+    std.mem.writeInt(u32, mem[0..4], 8, .little); // ciovec.buf = 8
+    std.mem.writeInt(u32, mem[4..8], 1, .little); // ciovec.len = 1
+    try testing.expectEqual(p1.Errno.success, fdWrite(&h, &mem, 2, 0, 1, 16));
+    try testing.expectEqual(@as(u32, 1), std.mem.readInt(u32, mem[16..20], .little));
+
+    // No io AND no buffer (headless) → drop as a no-op success.
+    h.io = null;
+    try testing.expectEqual(p1.Errno.success, fdWrite(&h, &mem, 2, 0, 1, 16));
 }
 
 test "fdWrite: gather write across multiple ciovecs" {
