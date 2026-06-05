@@ -13,9 +13,12 @@
   memory[16777416]** because it's called with `local0 ≈ 16777416` — a WRONG result-buffer ptr. One of func 17's
   733 callers computes that stack-temp address wrong. **CONVERGES WITH D-289** (arm64 large-frame-offset): the
   temp is at a ~64KB frame offset (funcptr global ~65KB below the ~16.06MB stack top) → the caller uses the
-  D-289 `frameAddrLarge` path (or a still-capped FP/param/stack-args arm). D-291 ≈ a BUG in that large-frame
-  address computation, exposed once D-289 let ed25519 compile. NEXT: audit `gpr.frameAddrLarge`/`frameStrGpr`
-  + the D-289-REMAINING arms for a wrong offset → 16777416; or capture a func-17 caller's result-buffer address.
+  D-289 area. AUDIT DONE (read gpr.zig): the frame/spill helpers (gprLoad/StoreSpilled symmetric X-form;
+  frameAddrLarge correct for KB frames) are NOT the bug, and the D-289-REMAINING caps would ERROR not
+  miscompute. KEY: 16777416 is in the DATA region (>16MB); stack/heap live BELOW the data, so a stack temp
+  should be a LOW (<16MB) address → the caller computes one ~16MB TOO HIGH = a GROSS miscompile (likely a
+  __stack_pointer `global.get/set` or a wide i32 add/sub). NEXT: runtime-capture the func-17 caller's
+  result-buffer computation / SP at the clobbering store (needs a new field; mind the 733-call race).
 - **Continuity-memo**: ed25519 JIT traps `oob_table` = inline **call_indirect** bounds (code 2). All 3 cind
   sites: index = `i32.const 0; i32.load offset=16777416` (data seg inits that addr to **1**). **6 minimal repros
   ALL pass (JIT==interp)** — ruled OUT: large-offset load, single/same-addr/exact overlapping data segs,

@@ -104,11 +104,22 @@ entries:
       16777416. **CONVERGES WITH D-289** (arm64 large-frame-offset): 16777416 is ~65KB below the ~16.06MB stack
       top (mem=257 pages), so the temp sits at a ~64KB frame offset → the caller uses the D-289 `frameAddrLarge`
       two-ADD path (or a still-capped FP/param/stack-args arm D-289 flagged as REMAINING). D-291 is almost
-      certainly a BUG in that large-frame address computation, exposed once D-289 let ed25519 compile. NEXT:
-      audit `gpr.frameAddrLarge`/`frameStrGpr` + the D-289-REMAINING FP/param/stack-args arms for a wrong large
-      offset → 16777416; or capture a func-17 caller's computed result-buffer address to confirm. Permanent diag
-      infra (trap_aux..trap_aux4 + entry print) committed, gated `-Dtrace-stackprobe`. Repros: regen
-      `/tmp/d291*.wat`. DISCHARGE: the caller's large-frame address miscompile fixed + a minimal fixture; ed25519
+      certainly a BUG in that large-frame address computation, exposed once D-289 let ed25519 compile.
+      AUDIT (2026-06-06, subagent over gpr.zig frame* + emit.zig prologue/epilogue/param-marshal): RULED OUT the
+      simple `(off>>12)&0xFFF` >16MB truncation (it only bites at off ≥ 0x1000000; ed25519 frames are KB, not
+      16MB). VERIFIED (read gpr.zig): gprLoadSpilled (L150) + gprStoreSpilled (L203) are SYMMETRIC (both X-form,
+      cap 32760, then frameAddrLarge) → no asymmetry; frameAddrLarge (L53) is correct for ed25519-sized (KB)
+      frames; the D-289-REMAINING param/stack-args caps would ERROR (UnsupportedOp), not miscompute — so the bug
+      is NOT in these helpers. KEY: 16777416 is in the **DATA region (>16MB)**; the C stack/heap are BELOW the
+      data (16MB+), so a stack temp should be a LOW (<16MB) address — the caller computes an address ~16MB TOO
+      HIGH = a GROSS miscompile, not a small frame-offset slip. (Also noted a LATENT non-D-291 gap: arm64
+      epilogue frame-restore at emit.zig ~1636/~1675 lacks the prologue's `frame_bytes > 0xFFFFFF` guard.) NEXT:
+      runtime-capture the func-17 CALLER's result-buffer computation (it likely does `global.get $sp` or
+      `local.get $fp` + off, or a `memory.*`-style addr); a gated capture at the call site OR func-17 prologue
+      (W1 = incoming param-0, gated func_idx==17), keyed to the clobbering invocation (mind the 733-call race).
+      Likely a stack-pointer global (`global.get`/`global.set` of __stack_pointer) or a wide i32 add/sub miscompile.
+      Permanent diag infra (trap_aux..trap_aux4 + entry print) committed, gated `-Dtrace-stackprobe`. Repros:
+      regen `/tmp/d291*.wat`. DISCHARGE: the large-frame address miscompile fixed + a minimal fixture; ed25519
       jit matches wasmtime.
     first_raised: "2026-06-05"
     last_reviewed: "2026-06-06"
