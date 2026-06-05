@@ -304,6 +304,91 @@ pub fn fdAdvise(host: *Host, fd: p1.Fd, offset: u64, len: u64, advice: u8) p1.Er
 }
 
 // ============================================================
+// fd_pread / fd_pwrite  (D-278)
+// ============================================================
+
+/// `fd_pread(fd, iovec_ptr, iovec_count, offset, *nread_out) → errno` —
+/// positional scatter read at an explicit `offset` that does NOT move the
+/// fd cursor (`std.Io.File.readPositional`). EOF returns success with the
+/// short/zero total. File-only: stdio → `spipe`, dir → `isdir`.
+pub fn fdPread(
+    host: *Host,
+    mem: []u8,
+    fd: p1.Fd,
+    iovec_ptr: u32,
+    iovec_count: u32,
+    offset: u64,
+    nread_ptr: u32,
+) p1.Errno {
+    const slot = host.translateFd(fd) orelse return .badf;
+    switch (slot.kind) {
+        .file => {},
+        .stdin, .stdout, .stderr => return .spipe,
+        .dir => return .isdir,
+        .closed => return .badf,
+    }
+    const handle = slot.host_handle orelse return .badf;
+    const io = host.io orelse return .nosys;
+    const file: std.Io.File = .{ .handle = handle, .flags = .{ .nonblocking = false } };
+    var total: u32 = 0;
+    var cur_off = offset;
+    var i: u32 = 0;
+    while (i < iovec_count) : (i += 1) {
+        const entry_off = iovec_ptr + i * 8;
+        const buf = readU32LE(mem, entry_off) orelse return .fault;
+        const buf_len = readU32LE(mem, entry_off + 4) orelse return .fault;
+        const dst = sliceMem(mem, buf, buf_len) orelse return .fault;
+        if (dst.len == 0) continue;
+        const n = file.readPositional(io, &[_][]u8{dst}, cur_off) catch return .io;
+        if (n == 0) break; // EOF
+        total += @intCast(n);
+        cur_off += n;
+        if (n < dst.len) break; // short read
+    }
+    return writeU32LE(mem, nread_ptr, total);
+}
+
+/// `fd_pwrite(fd, ciovec_ptr, ciovec_count, offset, *nwritten_out) → errno`
+/// — positional gather write at `offset` without moving the fd cursor
+/// (`std.Io.File.writePositional`). File-only, same kind handling as
+/// `fd_pread`.
+pub fn fdPwrite(
+    host: *Host,
+    mem: []u8,
+    fd: p1.Fd,
+    ciovec_ptr: u32,
+    ciovec_count: u32,
+    offset: u64,
+    nwritten_ptr: u32,
+) p1.Errno {
+    const slot = host.translateFd(fd) orelse return .badf;
+    switch (slot.kind) {
+        .file => {},
+        .stdin, .stdout, .stderr => return .spipe,
+        .dir => return .isdir,
+        .closed => return .badf,
+    }
+    const handle = slot.host_handle orelse return .badf;
+    const io = host.io orelse return .nosys;
+    const file: std.Io.File = .{ .handle = handle, .flags = .{ .nonblocking = false } };
+    var total: u32 = 0;
+    var cur_off = offset;
+    var i: u32 = 0;
+    while (i < ciovec_count) : (i += 1) {
+        const entry_off = ciovec_ptr + i * 8;
+        const buf = readU32LE(mem, entry_off) orelse return .fault;
+        const buf_len = readU32LE(mem, entry_off + 4) orelse return .fault;
+        const src = sliceMemConst(mem, buf, buf_len) orelse return .fault;
+        if (src.len == 0) continue;
+        const n = file.writePositional(io, &[_][]const u8{src}, cur_off) catch return .io;
+        total += @intCast(n);
+        cur_off += n;
+        if (n < src.len) break; // short write
+    }
+    return writeU32LE(mem, nwritten_ptr, total);
+}
+
+// ============================================================
 // fd_fdstat_get / fd_fdstat_set_flags  (§9.4 / 4.5 chunk a)
 // ============================================================
 
@@ -762,6 +847,50 @@ test "fdSync / fdDatasync: real file fd succeeds; stdio noop; closed badf" {
     slot.kind = .closed;
     try testing.expectEqual(p1.Errno.badf, fdSync(&h, fd));
     try testing.expectEqual(p1.Errno.badf, fdDatasync(&h, fd));
+}
+
+test "fdPwrite / fdPread: positional round-trip at an offset (no cursor move)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var h = try Host.init(testing.allocator);
+    defer h.deinit();
+    h.io = testing.io;
+    const dirfd = try h.addPreopen(tmp.dir.handle, "/sandbox");
+
+    var mem: [128]u8 = @splat(0);
+    @memcpy(mem[0..8], "pos.txt\x00");
+    const oe = pathOpen(&h, &mem, dirfd, 0, 0, 7, p1.OFLAGS_CREAT, p1.RIGHTS_FD_WRITE | p1.RIGHTS_FD_READ, 0, 0, 96);
+    try testing.expectEqual(p1.Errno.success, oe);
+    const fd = std.mem.readInt(u32, mem[96..100], .little);
+
+    // ciovec at mem[16]: {buf=24, len=5}; payload "WORLD" at mem[24].
+    std.mem.writeInt(u32, mem[16..20], 24, .little);
+    std.mem.writeInt(u32, mem[20..24], 5, .little);
+    @memcpy(mem[24..29], "WORLD");
+    try testing.expectEqual(p1.Errno.success, fdPwrite(&h, &mem, fd, 16, 1, 3, 64));
+    try testing.expectEqual(@as(u32, 5), std.mem.readInt(u32, mem[64..68], .little));
+
+    // iovec at mem[40]: {buf=48, len=5}; pread the same offset back.
+    std.mem.writeInt(u32, mem[40..44], 48, .little);
+    std.mem.writeInt(u32, mem[44..48], 5, .little);
+    try testing.expectEqual(p1.Errno.success, fdPread(&h, &mem, fd, 40, 1, 3, 68));
+    try testing.expectEqual(@as(u32, 5), std.mem.readInt(u32, mem[68..72], .little));
+    try testing.expectEqualStrings("WORLD", mem[48..53]);
+
+    const slot = h.translateFd(fd).?;
+    const file: std.Io.File = .{ .handle = slot.host_handle.?, .flags = .{ .nonblocking = false } };
+    file.close(testing.io);
+    slot.kind = .closed;
+}
+
+test "fdPread / fdPwrite: stdio is spipe; out-of-range is badf" {
+    var h = try Host.init(testing.allocator);
+    defer h.deinit();
+    h.io = testing.io;
+    var mem: [32]u8 = @splat(0);
+    try testing.expectEqual(p1.Errno.spipe, fdPread(&h, &mem, 0, 0, 1, 0, 16));
+    try testing.expectEqual(p1.Errno.spipe, fdPwrite(&h, &mem, 1, 0, 1, 0, 16));
+    try testing.expectEqual(p1.Errno.badf, fdPread(&h, &mem, 999, 0, 1, 0, 16));
 }
 
 test "fdAdvise: valid advice on a stdio fd is spipe; invalid advice is inval; bad fd is badf" {

@@ -233,6 +233,24 @@ fn thunkFdAdvise(rt: *runtime.Runtime, ctx: *anyopaque) anyerror!void {
     const fd = rt.popOperand().u32;
     return pushErrno(rt, wasi_fd.fdAdvise(host, fd, offset, len, advice));
 }
+fn thunkFdPread(rt: *runtime.Runtime, ctx: *anyopaque) anyerror!void {
+    const host: *wasi_host.Host = @ptrCast(@alignCast(ctx));
+    const nread_ptr = rt.popOperand().u32;
+    const offset = rt.popOperand().u64;
+    const iovec_count = rt.popOperand().u32;
+    const iovec_ptr = rt.popOperand().u32;
+    const fd = rt.popOperand().u32;
+    return pushErrno(rt, wasi_fd.fdPread(host, rt.memory, fd, iovec_ptr, iovec_count, offset, nread_ptr));
+}
+fn thunkFdPwrite(rt: *runtime.Runtime, ctx: *anyopaque) anyerror!void {
+    const host: *wasi_host.Host = @ptrCast(@alignCast(ctx));
+    const nwritten_ptr = rt.popOperand().u32;
+    const offset = rt.popOperand().u64;
+    const ciovec_count = rt.popOperand().u32;
+    const ciovec_ptr = rt.popOperand().u32;
+    const fd = rt.popOperand().u32;
+    return pushErrno(rt, wasi_fd.fdPwrite(host, rt.memory, fd, ciovec_ptr, ciovec_count, offset, nwritten_ptr));
+}
 fn thunkFdSeek(rt: *runtime.Runtime, ctx: *anyopaque) anyerror!void {
     const host: *wasi_host.Host = @ptrCast(@alignCast(ctx));
     const new_pos_ptr = rt.popOperand().u32;
@@ -322,6 +340,8 @@ pub fn lookupWasiThunk(name: []const u8) ?HostThunkFn {
     if (std.mem.eql(u8, name, "fd_sync")) return thunkFdSync;
     if (std.mem.eql(u8, name, "fd_datasync")) return thunkFdDatasync;
     if (std.mem.eql(u8, name, "fd_advise")) return thunkFdAdvise;
+    if (std.mem.eql(u8, name, "fd_pread")) return thunkFdPread;
+    if (std.mem.eql(u8, name, "fd_pwrite")) return thunkFdPwrite;
     if (std.mem.eql(u8, name, "fd_seek")) return thunkFdSeek;
     if (std.mem.eql(u8, name, "fd_tell")) return thunkFdTell;
     if (std.mem.eql(u8, name, "fd_fdstat_get")) return thunkFdFdstatGet;
@@ -397,7 +417,8 @@ test "lookupWasiThunk: every supported WASI 0.1 import resolves" {
         "random_get",          "poll_oneoff",
         "fd_read",             "fd_close",
         "fd_sync",             "fd_datasync",
-        "fd_advise",           "fd_seek",
+        "fd_advise",           "fd_pread",
+        "fd_pwrite",           "fd_seek",
         "fd_tell",             "fd_fdstat_get",
         "fd_fdstat_set_flags", "path_open",
         "fd_prestat_get",      "fd_prestat_dir_name",
