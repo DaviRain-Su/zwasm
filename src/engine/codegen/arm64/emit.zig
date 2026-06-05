@@ -675,6 +675,9 @@ pub fn compile(
     // D-293 slice-4b — call_ref-null + ref.as_non_null (code 10 = null_reference).
     var null_ref_fixups: std.ArrayList(u32) = .empty;
     defer null_ref_fixups.deinit(allocator);
+    // D-293 slice-4d — ref.cast / ref.cast_null subtype mismatch (code 11 = cast_failure).
+    var cast_fail_fixups: std.ArrayList(u32) = .empty;
+    defer cast_fail_fixups.deinit(allocator);
     // ADR-0164 A3 / D-292 — memory oob (code 6) demuxed from bounds_fixups.
     var oob_fixups: std.ArrayList(u32) = .empty;
     defer oob_fixups.deinit(allocator);
@@ -772,6 +775,7 @@ pub fn compile(
         .overflow_fixups = &overflow_fixups,
         .invalid_conv_fixups = &invalid_conv_fixups,
         .null_ref_fixups = &null_ref_fixups,
+        .cast_fail_fixups = &cast_fail_fixups,
         .oob_fixups = &oob_fixups,
         .return_fixups = &return_fixups,
         .call_fixups = &call_fixups,
@@ -1777,6 +1781,8 @@ pub fn compile(
                 try EmitCindStub.emit(allocator, &buf, invalid_conv_fixups.items, 9, frame_bytes);
                 // D-293 slice-4b — call_ref-null + ref.as_non_null (B.EQ → code 10 = null_reference).
                 try EmitCindStub.emit(allocator, &buf, null_ref_fixups.items, 10, frame_bytes);
+                // D-293 slice-4d — ref.cast / ref.cast_null subtype mismatch (B.EQ → code 11 = cast_failure).
+                try EmitCindStub.emit(allocator, &buf, cast_fail_fixups.items, 11, frame_bytes);
                 try EmitCindStub.emit(allocator, &buf, oob_fixups.items, 6, frame_bytes);
                 // ADR-0105 D3 — stack-overflow trap stub. Probe fired
                 // BEFORE `SUB SP, SP, frame_bytes`, so the stub must

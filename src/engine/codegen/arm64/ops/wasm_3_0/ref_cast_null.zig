@@ -59,7 +59,7 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpImmX(0, 0));
     const fixup: u32 = @intCast(ctx.buf.items.len);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.eq, 0));
-    try ctx.bounds_fixups.append(ctx.allocator, fixup);
+    try ctx.cast_fail_fixups.append(ctx.allocator, fixup); // D-293 slice-4d cast_failure (code 11)
     // Match: rd = the returned ref (X0; rd may have been CALL-clobbered).
     if (rd != 0) try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(rd, 31, 0));
 

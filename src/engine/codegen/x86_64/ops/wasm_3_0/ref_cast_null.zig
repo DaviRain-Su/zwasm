@@ -51,7 +51,7 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
     try ctx.buf.appendSlice(ctx.allocator, inst.encTestRR(.q, .rax, .rax).slice());
     const fixup: u32 = @intCast(ctx.buf.items.len);
     try ctx.buf.appendSlice(ctx.allocator, inst.encJccRel32(.e, 0).slice());
-    try ctx.bounds_fixups.append(ctx.allocator, fixup);
+    try ctx.cast_fail_fixups.append(ctx.allocator, fixup); // D-293 slice-4d cast_failure (code 11)
     // Match: rd = the returned ref (RAX; rd may have been CALL-clobbered).
     if (rd != .rax) try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.q, rd, .rax).slice());
 

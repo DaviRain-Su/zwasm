@@ -55,6 +55,7 @@ pub const InitArgs = struct {
     overflow_fixups: *std.ArrayList(u32),
     invalid_conv_fixups: *std.ArrayList(u32),
     null_ref_fixups: *std.ArrayList(u32),
+    cast_fail_fixups: *std.ArrayList(u32),
     oob_fixups: *std.ArrayList(u32),
     oobtable_fixups: *std.ArrayList(u32),
     cind_sig_fixups: *std.ArrayList(u32),
@@ -152,6 +153,9 @@ pub const EmitCtx = struct {
     /// D-293 slice-4b — call_ref-null + ref.as_non_null null-reference (`JE rel32`,
     /// 6-byte) fixups, demuxed out of `bounds_fixups` → code 10 = null_reference.
     null_ref_fixups: *std.ArrayList(u32),
+    /// D-293 slice-4d — ref.cast / ref.cast_null subtype-mismatch (`JE rel32`,
+    /// 6-byte, on the jitGcRefCast 0-return) fixups → code 11 = cast_failure.
+    cast_fail_fixups: *std.ArrayList(u32),
     /// ADR-0164 A3 / D-292 — memory load/store/bulk-memory out-of-bounds
     /// (`JA rel32`, 6-byte) fixups, demuxed out of `bounds_fixups` so oob_memory
     /// reaches a dedicated trap stub recording code 6. Other `bounds_fixups`
@@ -325,6 +329,7 @@ pub const EmitCtx = struct {
             .overflow_fixups = args.overflow_fixups,
             .invalid_conv_fixups = args.invalid_conv_fixups,
             .null_ref_fixups = args.null_ref_fixups,
+            .cast_fail_fixups = args.cast_fail_fixups,
             .oob_fixups = args.oob_fixups,
             .oobtable_fixups = args.oobtable_fixups,
             .cind_sig_fixups = args.cind_sig_fixups,

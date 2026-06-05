@@ -711,6 +711,9 @@ pub fn compile(
     // D-293 slice-4b — call_ref-null + ref.as_non_null (code 10 = null_reference).
     var null_ref_fixups: std.ArrayList(u32) = .empty;
     defer null_ref_fixups.deinit(allocator);
+    // D-293 slice-4d — ref.cast / ref.cast_null subtype mismatch (code 11 = cast_failure).
+    var cast_fail_fixups: std.ArrayList(u32) = .empty;
+    defer cast_fail_fixups.deinit(allocator);
     // ADR-0164 A3 / D-292 — memory oob (code 6) demuxed from bounds_fixups.
     var oob_fixups: std.ArrayList(u32) = .empty;
     defer oob_fixups.deinit(allocator);
@@ -792,6 +795,7 @@ pub fn compile(
         .overflow_fixups = &overflow_fixups,
         .invalid_conv_fixups = &invalid_conv_fixups,
         .null_ref_fixups = &null_ref_fixups,
+        .cast_fail_fixups = &cast_fail_fixups,
         .oob_fixups = &oob_fixups,
         .oobtable_fixups = &oobtable_fixups,
         .cind_sig_fixups = &cind_sig_fixups,

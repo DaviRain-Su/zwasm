@@ -123,6 +123,10 @@ pub const EmitCtx = struct {
     /// arm64 call_ref null check previously appended to `cind_bounds_fixups`
     /// (mis-reporting oob_table code 2); slice-4b re-routes it here.
     null_ref_fixups: *std.ArrayList(u32),
+    /// D-293 slice-4d — ref.cast / ref.cast_null subtype-mismatch (B.EQ on the
+    /// jitGcRefCast 0-return → code 11 = cast_failure) fixups, demuxed out of
+    /// `bounds_fixups`.
+    cast_fail_fixups: *std.ArrayList(u32),
     /// ADR-0164 A3 / D-292 — memory load/store/bulk-memory out-of-bounds
     /// (B.HI → code 6) fixups, demuxed out of `bounds_fixups` so oob_memory
     /// reaches a dedicated trap stub. Other `bounds_fixups` kinds (oob_table /

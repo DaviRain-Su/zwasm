@@ -250,3 +250,27 @@ test "runVoidExportWasi: JIT struct.get null → null_reference code 10; array.g
     try testing.expectEqual(@as(u32, 6), ag);
     try testing.expectEqual(trap_surface.TrapKind.oob_memory, trap_surface.jitTrapCode(ag).?);
 }
+
+// `(module (type $a (struct (field i32))) (type $b (struct (field i64)))
+//  (func (export "_start") struct.new_default $a ref.cast (ref $b) drop))` —
+// casting a `(ref $a)` to the unrelated `(ref $b)` fails (Wasm 3.0 GC §4.4.5).
+// D-293 slice-4d: cast_failure code 11. The `jitGcRefCast` trampoline returns 0
+// on null-or-mismatch; for ref.cast a null operand is itself a cast failure, so
+// the single 0-return trap maps cleanly to cast_failure.
+const refcast_fail_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x01, 0x0c, 0x03, 0x5f, 0x01, 0x7f, 0x00, 0x5f,
+    0x01, 0x7e, 0x00, 0x60, 0x00, 0x00, 0x03, 0x02,
+    0x01, 0x02, 0x07, 0x0a, 0x01, 0x06, 0x5f, 0x73,
+    0x74, 0x61, 0x72, 0x74, 0x00, 0x00, 0x0a, 0x0b,
+    0x01, 0x09, 0x00, 0xfb, 0x01, 0x00, 0xfb, 0x16,
+    0x01, 0x1a, 0x0b,
+};
+
+test "runVoidExportWasi: JIT ref.cast subtype mismatch → precise cast_failure code 11 (D-293 slice-4d)" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    var cf: u32 = 99;
+    try testing.expectError(entry.Error.Trap, runner.runVoidExportWasi(testing.allocator, &refcast_fail_wasm, "_start", null, &cf));
+    try testing.expectEqual(@as(u32, 11), cf);
+    try testing.expectEqual(trap_surface.TrapKind.cast_failure, trap_surface.jitTrapCode(cf).?);
+}
