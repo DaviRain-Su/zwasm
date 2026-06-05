@@ -49,9 +49,23 @@ item is now resolved-deferred by a *considered* check, not avoidance:
 - The substantive remaining lever — **v0.2.0 / Component Model / WASI 0.2** — is ROADMAP-deferred (§3 lines
   117/223/224) and structurally needs a **user scope decision**.
 
-**Next cycle**: per ADR-0156 keep scanning for any genuinely-new completion refinement (a real fix/finding, NOT
-repeating the test matrix). The genuine finds are now very rare. If a cycle surfaces only repetition, do the
-**bucket-3 surface** (no re-arm): tell the user v0.1.0 is thoroughly complete and ask whether to open v0.2.0.
+## Open questions / blockers (bucket-3 — surfaced 2026-06-05)
+
+**The loop has reached a legitimate bucket-3 stop.** The v0.1.0-scope program is thoroughly complete and every
+autonomous lever has been pulled; the one substantive remaining lever structurally needs a **user scope decision**.
+
+- **Autonomous prep walked (this session)**: AOT-WASI feature (D-251, 3-host green) + realworld validation (D-283)
+  + full syscall test matrix + doc-accuracy fix + scaffolding audit (0 block) + debt cleanup (75→59, 0 `now`) +
+  perf confirmed (D-265 closed, no deficiency) + every ambiguous item resolved-deferred by a considered check
+  (D-281 sockets = not a v1-parity miss; D-255 = ADR-0143; D-211 = ADR-0148/0060; D-266 = D-265-closed).
+- **The user touchpoint**: the next substantive work is **v0.2.0 — Component Model + WASI 0.2 (preview2)**, fully
+  scoped already in **ADR-0161 §3** (WIT parser + Canonical ABI + P2 adapter; a v1-parity item) and **deliberately
+  deferred to v0.2.0** by ADR-0161 + ROADMAP §3 (lines 117/223/224). Opening it would *override that deferral* — a
+  load-bearing scope expansion (months-long; scope choices: full WIT vs minimal, resources, async) that is the
+  user's call, not autonomous. **Decision needed**: open v0.2.0 (Component Model / WASI 0.2) scope, or hold v0.1.0
+  as the completion target, or new direction.
+- **Re-entry**: a fresh `/continue` will re-evaluate (if a genuinely-new in-scope refinement appears it proceeds);
+  a v0.2.0 go-ahead opens the CM bundle per ADR-0161 §3.
 
 ## Step 0.7 (next resume) — verify remote logs
 
