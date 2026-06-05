@@ -7,19 +7,28 @@ entries:
     layer: "code"
     status: "note"
     description: |-
-      note (ADR-0163 A breadth, 2026-06-05): the JIT FAILS to compile a valid module the interpreter
-      runs — `shootout/ed25519.wasm` func[9] (params=0 results=1, large): `arm64/emit: failing op
-      \`local.set\` at func[9] pc=4337 → UnsupportedOp` (x86_64 likely same). local.set is supported
-      everywhere else, so this is a SIZE/pressure limit in a large function (local-index or spill-slot
-      bound, or a regalloc cap), not a missing opcode. This is a COMPLETENESS gap vs the D-244 "all-engine
-      WASI" claim: the JIT should compile any validator-accepted module. interp runs ed25519 (just slow).
-      INVESTIGATE: disasm func[9] near pc=4337, find the exact emit precondition that fails (local count?
-      spill exhaustion? const-pool?). DISCHARGE: JIT compiles ed25519 (+ a large-func/many-locals edge
-      fixture) on both backends.
+      note (ADR-0163 A breadth; mechanism CONFIRMED 2026-06-05): the arm64 JIT cannot compile valid
+      LARGE functions — `shootout/ed25519.wasm` func[9] fails at body `local.set` (emit.zig:1046 `offset_u
+      > cap`). ROOT CAUSE = pervasive arm64 frame-offset imm12 cap: frame-relative LDR/STR use a scaled
+      imm12 (max byte off 16380 W / 32760 X / 65520 Q), and a function whose frame (locals+spills) exceeds
+      that overflows at ~12 emit sites: body local.get/set/tee, prologue local zero-init (emit.zig:555/561),
+      home-seed (:583/587), param marshal (:397-455), stack args (:466-531), AND gpr.zig spill load/store
+      (:94/140). This is x86_64-CLEAN (disp32 ≈ 2GB cap). COMPLETENESS gap vs D-244 (JIT should compile any
+      validator-accepted module). NOT a missing opcode; not perf — a correctness/robustness gap.
+      FIX (READY — bundle next cycle): add a centralized large-offset frame helper in gpr.zig —
+      `frameAddrLarge(buf, addr_gpr, off)` materialising SP+off into a scratch via the prologue's two-ADD
+      idiom (encAddImm12 + encAddImm12Lsl12; off < 16 MiB). Use **X16/IP0 as the scratch** (NOT allocatable,
+      NOT a runtime invariant, free at every frame-access boundary — no call/memory-op mid-flight there).
+      At each of the ~12 sites: `if off > cap { frameAddrLarge(..,16,off); enc{Ldr,Str}…(reg, 16, 0) }
+      else { existing imm12 form }`. Phase-II: a wasm with >4096 i64 locals all kept live forces the
+      overflow; pin behaviour, then ed25519 jit must compile + match wasmtime. Test on arm64 NATIVE (this
+      host); x86_64 unaffected. A partial gpr.zig-only attempt (2026-06-05) was reverted — the failing site
+      is local.set in emit.zig, so the fix must cover all sites at once (ed25519 = the integration test).
+      DISCHARGE: ed25519 jit compiles+runs+matches wasmtime + a large-locals edge fixture green.
     first_raised: "2026-06-05"
     last_reviewed: "2026-06-05"
     refs: |-
-      `bench/runners/wasm/shootout/ed25519.wasm` (repro); `src/engine/codegen/arm64/` (emit local.set path); ADR-0163 A; D-244 (all-engine WASI completeness claim)
+      `bench/runners/wasm/shootout/ed25519.wasm` (repro); `src/engine/codegen/arm64/emit.zig:1046` (local.set cap) +:555/561/583/587/397-531; `src/engine/codegen/arm64/gpr.zig:94/140`; `src/engine/codegen/arm64/inst.zig` encAddImm12Lsl12; `abi.zig` X16/IP0; D-244
   - id: "D-288"
     layer: "code"
     status: "note"
