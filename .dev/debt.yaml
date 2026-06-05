@@ -101,14 +101,20 @@ entries:
       (interp / wasmtime / wazero) time bare instantiation, NOT the n-body computation — nbody's bench
       row is meaningless. Surfaced a secondary inconsistency: `zwasm run` on a no-entry module errors
       under jit (ExportNotFound) but exits 0 silently under interp — engines disagree on the
-      no-`_start`-no-`main` case. DISCHARGE: either give run_bench.sh an `--invoke <fn>` path for
-      non-WASI compute fixtures (then nbody benches `run`) OR drop nbody from the inventory OR
-      regenerate it with a WASI `_start` wrapper; separately, reconcile the interp-vs-jit no-entry
-      behaviour (both should agree — error or no-op).
+      no-`_start`-no-`main` case. MECHANISM (confirmed 2026-06-05): the 3 engines use DIFFERENT entry
+      resolution — interp `runWasmCaptured` + AOT `runCwasm.resolveEntry` both chain `invoke → _start →
+      main → first-func-export` (lenient → nbody runs first export, exit 0), but JIT `runWasmJit`
+      (run.zig:52) resolves `_start` ONLY (`entry_name = invoke_name orelse "_start"`) → ExportNotFound →
+      exit 1. wasmtime/wazero exit 0 (run start-section, no _start = ok); wasmer errors. The bug is the
+      INTRA-zwasm disagreement. FIX: unify runWasmJit's resolution to match runWasmCaptured (instantiate,
+      then run _start if present, else main/first-export or instantiate-only → exit 0) — needs a small JIT
+      runner change (runVoidExportWasi errors on missing entry before side effects; add an instantiate-
+      then-optional-entry path). DISCHARGE: nbody (+ a no-_start fixture) gives the SAME exit code on
+      interp/jit/aot; pick the wasmtime-aligned exit-0 semantics (zwasm's differential reference).
     first_raised: "2026-06-05"
     last_reviewed: "2026-06-05"
     refs: |-
-      `bench/runners/wasm/handwritten/nbody.wasm`; `scripts/run_bench.sh` (BENCHES, _start-only); `bench/results/all_engine_matrix.md` §Caveat 3; `src/cli/run.zig` (no-entry handling)
+      `bench/runners/wasm/handwritten/nbody.wasm`; `src/cli/run.zig:52` (runWasmJit _start-only) vs `:172` (runWasmCaptured chain) vs `:95` (runCwasm.resolveEntry chain); `src/engine/runner.zig:256` (findExportFunc→ExportNotFound); `bench/results/all_engine_matrix.md` §Caveat 3
   - id: "D-255"
     layer: "code"
     status: "blocked-by"
