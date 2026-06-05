@@ -39,12 +39,14 @@ post-v0.1.0). (c) **D-281** real socket I/O. Pick by concreteness; investigation
 
 ## Step 0.7 (next resume) — verify remote logs
 
-`tail -3 /tmp/ubuntu.log` — was `OK (HEAD=4adc4d5b)`. `tail -3 /tmp/win.log` — windows was kicked this cycle
-(cadence: 7 commits); AOT exec is Win64-deferred (`skip.phaseEnd(.win64)`) so it won't exercise the new exec test,
-but it verifies the v0.4 format/produce/load tests (run on all hosts) + the rest. Windows red → NOT auto-revert:
-re-run once → reproduces = real Win64 bug (debt+fix) else `track_heisenbug.sh`. After a green windows verify run
-`bash scripts/should_gate_windows.sh --record`. **DISCIPLINE**: Win64 std `TODO implement … windows` panics only
-surface on the actual windows run — reroute the op like `20b9f860`/`f320db6f`.
+`tail -3 /tmp/ubuntu.log` — was `OK (HEAD=4adc4d5b)`, code green. **Windows: D-028 flake hit + re-run in flight.**
+First windows run (HEAD 4adc4d5b) FAILED with the exact **D-028** signature — `error: test runner failed to respond
+for 1m…` in the spec_assert_runner (unreachable-trap area), 2404/2513 passed / 0-failed (a hang, not an assertion;
+~6% flake, Defender-at-spawn, "retry succeeds"). NOT from AOT-WASI (same code green on Mac+ubuntu; AOT exec is
+Win64-deferred). Recorded `track_heisenbug.sh d028 fail`; **re-kicked windows** (D-028 retry-once + D7 classify) →
+`tail -3 /tmp/win.log`: green = flake confirmed (proceed; `should_gate_windows.sh --record`); same hang again =
+still D-028 (proceed, no revert — Mac+ubuntu authoritative). **DISCIPLINE**: Win64 std `TODO implement … windows`
+panics only surface on the actual windows run — reroute the op like `20b9f860`/`f320db6f`.
 
 ## Key files (AOT-WASI, just landed)
 
