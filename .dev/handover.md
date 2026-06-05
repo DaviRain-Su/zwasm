@@ -25,8 +25,11 @@
 **The v0.1.0-scope program is COMPLETE + validated + hardened.** WASI 46/46 (interp+JIT+AOT), all-engine
 validated on the realworld corpus (D-283, 7/7 byte-match), scaffolding audited clean (`6a9d4b56`, 0 block), debt
 clean (0 `now`, ledger 59), all 完成形 dimensions met (D-265 perf rework CLOSED 2026-06-04 — no measured
-deficiency). AOT-WASI hardened this cycle: **fd_write→stdout-capture** (`9d0c60e8`) + **`--dir` preopen
-fd_prestat_get** (`3383bf7d`) unit tests in `zig build test` (beyond the proc_exit dispatch test).
+deficiency). AOT-WASI hardened: **fd_write→stdout-capture** (`9d0c60e8`) + **`--dir` preopen fd_prestat_get** (`3383bf7d`) +
+**argv→args_sizes_get** (`bd09fa59`) unit tests in `zig build test` — the args/stdout/exit trio + preopen, beyond
+the proc_exit dispatch test. **Doc-accuracy fix** (`046c6b9e`): CLI help/README/tutorial/cli-ref/migration/
+CHANGELOG/main.zig all stale-claimed `--engine jit` was "compute-only / no WASI / rejects --dir" — FALSE since
+D-244/D-251 (all 3 engines do full WASI; jit adds SIMD). Corrected.
 
 **Honest state**: the substantive remaining work is **v0.2.0-scope, ROADMAP-deferred** (§3 lines 117/223/224:
 "Component Model + WASI 0.2 — large surface, deferred to v0.2.0"; "CM = v0.2.0 entry point") — pulling it into
