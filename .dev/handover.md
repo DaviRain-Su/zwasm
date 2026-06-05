@@ -54,11 +54,13 @@ no auto-revert. Step 6+7: `should_gate_windows.sh` exit 0 → kick `run_remote_w
 
 ## Step 0.7 (next resume) — verify per-cadence remote logs
 
-Prior turn (`66efd1e7`): ubuntu + windows BOTH verified GREEN this resume (`OK HEAD=66efd1e7` / `[run_remote_windows]
-OK.`) — windows cadence recorded. This turn pushed the 3 WASI chunks (`bf0b8a56`/`fe02e638`/`4e1e31c6`) + kicked
-ubuntu (always) + windows (cadence). Step 0.7 next resume: `tail /tmp/ubuntu.log` (auto-revert on FAIL) +
-`tail /tmp/win.log` (D7 heisenbug-classify). **Gate**: Mac = `bash scripts/mac_gate.sh`; ubuntu = always (D6);
-windows = cadence (D7).
+**Win64 build break FIXED in-flight (`42e99737`)**: `fa72eb63` windows = compile error (`std.posix.fdatasync`
+rejects HANDLE fd on Win64) → fixed via `std.Io.File.sync` + cross-compile-verified (`-Dtarget=x86_64-windows-gnu`
+clean) + lesson (`abdaff1f`). Pushed `abdaff1f`; re-kicked ubuntu + windows. **Step 0.7 next resume: `tail
+/tmp/win.log` MUST show `[run_remote_windows] OK.` (else investigate) + `tail /tmp/ubuntu.log` (auto-revert on
+FAIL); then `should_gate_windows.sh --record` to reset the cadence.** **DISCIPLINE: cross-compile
+`zig build -Dtarget=x86_64-windows-gnu` before EVERY push touching `src/wasi/` or any `std.posix` code** (this
+turn's break was preventable). **Gate**: Mac = `bash scripts/mac_gate.sh`; ubuntu = always (D6); windows = cadence (D7).
 
 ## Deferred / open debt (D-274/275/276/257 discharged this session — removed)
 
