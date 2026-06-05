@@ -97,6 +97,74 @@ pub fn pathRemoveDirectory(host: *Host, mem: []const u8, dirfd: p1.Fd, path_ptr:
 }
 
 // ============================================================
+// path_filestat_get / path_filestat_set_times
+// ============================================================
+
+fn filetypeFromKind(kind: std.Io.File.Kind) p1.Filetype {
+    return switch (kind) {
+        .file => .regular_file,
+        .directory => .directory,
+        .sym_link => .symbolic_link,
+        .block_device => .block_device,
+        .character_device => .character_device,
+        .named_pipe, .unix_domain_socket, .whiteout, .door, .event_port, .unknown => .unknown,
+    };
+}
+
+fn setTimestampOf(flags: p1.Fstflags, now_bit: p1.Fstflags, set_bit: p1.Fstflags, ns: u64) std.Io.File.SetTimestamp {
+    if (flags & now_bit != 0) return .now;
+    if (flags & set_bit != 0) return .{ .new = std.Io.Timestamp.fromNanoseconds(@intCast(ns)) };
+    return .unchanged;
+}
+
+/// `path_filestat_get(dirfd, lookupflags, path, *filestat_out) → errno` — stat
+/// a path relative to `dirfd` (`std.Io.Dir.statFile`) and write the 64-byte
+/// `Filestat`. `lookupflags` bit 0 = follow-symlinks.
+pub fn pathFilestatGet(host: *Host, mem: []u8, dirfd: p1.Fd, lookupflags: u32, path_ptr: u32, path_len: u32, filestat_ptr: u32) p1.Errno {
+    const dst = blk: {
+        const end = @as(usize, filestat_ptr) + @sizeOf(p1.Filestat);
+        if (end > mem.len) return .fault;
+        break :blk mem[filestat_ptr..end];
+    };
+    var r: Resolved = undefined;
+    const e = resolve(host, mem, dirfd, path_ptr, path_len, &r);
+    if (e != .success) return e;
+    const io = host.io orelse return .nosys;
+    const st = r.dir.statFile(io, r.sub, .{ .follow_symlinks = lookupflags & p1.LOOKUPFLAGS_SYMLINK_FOLLOW != 0 }) catch |err| return mapDirErr(err);
+    const atim_ns: i96 = if (st.atime) |a| a.nanoseconds else st.mtime.nanoseconds;
+    const fs: p1.Filestat = .{
+        .dev = 0,
+        .ino = @intCast(st.inode),
+        .filetype = filetypeFromKind(st.kind),
+        .nlink = @intCast(st.nlink),
+        .size = st.size,
+        .atim = if (atim_ns > 0) @intCast(atim_ns) else 0,
+        .mtim = if (st.mtime.nanoseconds > 0) @intCast(st.mtime.nanoseconds) else 0,
+        .ctim = if (st.ctime.nanoseconds > 0) @intCast(st.ctime.nanoseconds) else 0,
+    };
+    @memcpy(dst, std.mem.asBytes(&fs));
+    return .success;
+}
+
+/// `path_filestat_set_times(dirfd, lookupflags, path, atim, mtim, fst_flags)
+/// → errno` — set a path's access/modify timestamps (`std.Io.Dir.setTimestamps`).
+/// Explicit-value + `*_NOW` for one stamp → `inval`.
+pub fn pathFilestatSetTimes(host: *Host, mem: []const u8, dirfd: p1.Fd, lookupflags: u32, path_ptr: u32, path_len: u32, atim: u64, mtim: u64, fst_flags: p1.Fstflags) p1.Errno {
+    if (fst_flags & p1.FSTFLAGS_ATIM != 0 and fst_flags & p1.FSTFLAGS_ATIM_NOW != 0) return .inval;
+    if (fst_flags & p1.FSTFLAGS_MTIM != 0 and fst_flags & p1.FSTFLAGS_MTIM_NOW != 0) return .inval;
+    var r: Resolved = undefined;
+    const e = resolve(host, mem, dirfd, path_ptr, path_len, &r);
+    if (e != .success) return e;
+    const io = host.io orelse return .nosys;
+    r.dir.setTimestamps(io, r.sub, .{
+        .follow_symlinks = lookupflags & p1.LOOKUPFLAGS_SYMLINK_FOLLOW != 0,
+        .access_timestamp = setTimestampOf(fst_flags, p1.FSTFLAGS_ATIM_NOW, p1.FSTFLAGS_ATIM, atim),
+        .modify_timestamp = setTimestampOf(fst_flags, p1.FSTFLAGS_MTIM_NOW, p1.FSTFLAGS_MTIM, mtim),
+    }) catch |err| return mapDirErr(err);
+    return .success;
+}
+
+// ============================================================
 // Tests
 // ============================================================
 
@@ -123,6 +191,33 @@ test "pathCreateDirectory / pathRemoveDirectory: round-trip on a real preopen" {
 
     try testing.expectEqual(p1.Errno.success, pathRemoveDirectory(&h, &mem, dirfd, 0, 6));
     try testing.expectError(error.FileNotFound, tmp.dir.statFile(testing.io, "newdir", .{}));
+}
+
+test "pathFilestatGet / pathFilestatSetTimes: stat a path + set its mtim" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "f.txt", .data = "hello" });
+    var h = try Host.init(testing.allocator);
+    defer h.deinit();
+    h.io = testing.io;
+    const dirfd = try h.addPreopen(tmp.dir.handle, "/sandbox");
+
+    var mem: [128]u8 = @splat(0);
+    writeGuestPath(&mem, 0, "f.txt");
+    const FS = 16; // filestat_ptr
+    try testing.expectEqual(p1.Errno.success, pathFilestatGet(&h, &mem, dirfd, p1.LOOKUPFLAGS_SYMLINK_FOLLOW, 0, 5, FS));
+    try testing.expectEqual(@as(u8, @intFromEnum(p1.Filetype.regular_file)), mem[FS + 16]); // filetype @+16
+    try testing.expectEqual(@as(u64, 5), std.mem.readInt(u64, mem[FS + 32 ..][0..8], .little)); // size @+32
+
+    // Set mtim to 3.0s (whole second) and read it back @+48.
+    try testing.expectEqual(p1.Errno.success, pathFilestatSetTimes(&h, &mem, dirfd, 0, 0, 5, 0, 3_000_000_000, p1.FSTFLAGS_MTIM));
+    try testing.expectEqual(p1.Errno.success, pathFilestatGet(&h, &mem, dirfd, 0, 0, 5, FS));
+    try testing.expectEqual(@as(u64, 3_000_000_000), std.mem.readInt(u64, mem[FS + 48 ..][0..8], .little));
+
+    // Conflicting explicit+NOW → inval; a missing path → noent.
+    try testing.expectEqual(p1.Errno.inval, pathFilestatSetTimes(&h, &mem, dirfd, 0, 0, 5, 0, 0, p1.FSTFLAGS_MTIM | p1.FSTFLAGS_MTIM_NOW));
+    writeGuestPath(&mem, 0, "nope!");
+    try testing.expectEqual(p1.Errno.noent, pathFilestatGet(&h, &mem, dirfd, 0, 0, 5, FS));
 }
 
 test "path_* resolution: escape / non-dir / out-of-bounds rejections" {

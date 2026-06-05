@@ -364,6 +364,26 @@ fn thunkPathRemoveDirectory(rt: *runtime.Runtime, ctx: *anyopaque) anyerror!void
     const dirfd = rt.popOperand().u32;
     return pushErrno(rt, wasi_path.pathRemoveDirectory(host, rt.memory, dirfd, path_ptr, path_len));
 }
+fn thunkPathFilestatGet(rt: *runtime.Runtime, ctx: *anyopaque) anyerror!void {
+    const host: *wasi_host.Host = @ptrCast(@alignCast(ctx));
+    const filestat_ptr = rt.popOperand().u32;
+    const path_len = rt.popOperand().u32;
+    const path_ptr = rt.popOperand().u32;
+    const lookupflags = rt.popOperand().u32;
+    const dirfd = rt.popOperand().u32;
+    return pushErrno(rt, wasi_path.pathFilestatGet(host, rt.memory, dirfd, lookupflags, path_ptr, path_len, filestat_ptr));
+}
+fn thunkPathFilestatSetTimes(rt: *runtime.Runtime, ctx: *anyopaque) anyerror!void {
+    const host: *wasi_host.Host = @ptrCast(@alignCast(ctx));
+    const fst_flags: u16 = @intCast(rt.popOperand().u32 & 0xFFFF);
+    const mtim = rt.popOperand().u64;
+    const atim = rt.popOperand().u64;
+    const path_len = rt.popOperand().u32;
+    const path_ptr = rt.popOperand().u32;
+    const lookupflags = rt.popOperand().u32;
+    const dirfd = rt.popOperand().u32;
+    return pushErrno(rt, wasi_path.pathFilestatSetTimes(host, rt.memory, dirfd, lookupflags, path_ptr, path_len, atim, mtim, fst_flags));
+}
 
 /// Map a WASI snapshot-1 import name to its host thunk, or
 /// null if the name is outside the supported set.
@@ -401,6 +421,8 @@ pub fn lookupWasiThunk(name: []const u8) ?HostThunkFn {
     if (std.mem.eql(u8, name, "path_unlink_file")) return thunkPathUnlinkFile;
     if (std.mem.eql(u8, name, "path_create_directory")) return thunkPathCreateDirectory;
     if (std.mem.eql(u8, name, "path_remove_directory")) return thunkPathRemoveDirectory;
+    if (std.mem.eql(u8, name, "path_filestat_get")) return thunkPathFilestatGet;
+    if (std.mem.eql(u8, name, "path_filestat_set_times")) return thunkPathFilestatSetTimes;
     return null;
 }
 
@@ -459,23 +481,24 @@ test "zwasm_wasi_config_set_envs: copies key/val pairs into host.envs" {
 
 test "lookupWasiThunk: every supported WASI 0.1 import resolves" {
     const names = [_][]const u8{
-        "fd_write",              "proc_exit",
-        "args_get",              "args_sizes_get",
-        "environ_get",           "environ_sizes_get",
-        "clock_time_get",        "clock_res_get",
-        "random_get",            "poll_oneoff",
-        "fd_read",               "fd_close",
-        "fd_sync",               "fd_datasync",
-        "fd_advise",             "fd_pread",
-        "fd_pwrite",             "fd_seek",
-        "fd_tell",               "fd_fdstat_get",
-        "fd_fdstat_set_flags",   "fd_fdstat_set_rights",
-        "path_open",             "fd_prestat_get",
-        "fd_prestat_dir_name",   "sched_yield",
-        "fd_filestat_get",       "fd_filestat_set_size",
-        "fd_filestat_set_times", "fd_allocate",
-        "path_unlink_file",      "path_create_directory",
-        "path_remove_directory",
+        "fd_write",                "proc_exit",
+        "args_get",                "args_sizes_get",
+        "environ_get",             "environ_sizes_get",
+        "clock_time_get",          "clock_res_get",
+        "random_get",              "poll_oneoff",
+        "fd_read",                 "fd_close",
+        "fd_sync",                 "fd_datasync",
+        "fd_advise",               "fd_pread",
+        "fd_pwrite",               "fd_seek",
+        "fd_tell",                 "fd_fdstat_get",
+        "fd_fdstat_set_flags",     "fd_fdstat_set_rights",
+        "path_open",               "fd_prestat_get",
+        "fd_prestat_dir_name",     "sched_yield",
+        "fd_filestat_get",         "fd_filestat_set_size",
+        "fd_filestat_set_times",   "fd_allocate",
+        "path_unlink_file",        "path_create_directory",
+        "path_remove_directory",   "path_filestat_get",
+        "path_filestat_set_times",
     };
     inline for (names) |n| {
         try testing.expect(lookupWasiThunk(n) != null);
