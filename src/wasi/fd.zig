@@ -506,6 +506,54 @@ pub fn fdFilestatSetTimes(host: *Host, fd: p1.Fd, atim: u64, mtim: u64, fst_flag
     return .success;
 }
 
+fn mapSetLengthError(err: anyerror) p1.Errno {
+    return switch (err) {
+        error.FileTooBig => .fbig,
+        error.AccessDenied, error.PermissionDenied => .acces,
+        error.NonResizable => .inval,
+        else => .io,
+    };
+}
+
+/// `fd_filestat_set_size(fd, size) → errno` — truncate or zero-extend a file
+/// fd to exactly `size` bytes via `std.Io.File.setLength`. File only
+/// (dir → `isdir`, stdio → `spipe`, closed → `badf`).
+pub fn fdFilestatSetSize(host: *Host, fd: p1.Fd, size: u64) p1.Errno {
+    const slot = host.translateFd(fd) orelse return .badf;
+    switch (slot.kind) {
+        .stdin, .stdout, .stderr => return .spipe,
+        .dir => return .isdir,
+        .closed => return .badf,
+        .file => {},
+    }
+    const io = host.io orelse return .nosys;
+    const handle = slot.host_handle orelse return .badf;
+    const file: std.Io.File = .{ .handle = handle, .flags = .{ .nonblocking = false } };
+    file.setLength(io, size) catch |err| return mapSetLengthError(err);
+    return .success;
+}
+
+/// `fd_allocate(fd, offset, len) → errno` — ensure the file holds at least
+/// `offset + len` bytes (the WASI/POSIX `posix_fallocate` contract: grow +
+/// zero-fill, never shrink, never truncate existing data). Implemented as a
+/// guarded grow: stat the current size and `setLength` up only when short.
+pub fn fdAllocate(host: *Host, fd: p1.Fd, offset: u64, len: u64) p1.Errno {
+    const slot = host.translateFd(fd) orelse return .badf;
+    switch (slot.kind) {
+        .stdin, .stdout, .stderr => return .spipe,
+        .dir => return .isdir,
+        .closed => return .badf,
+        .file => {},
+    }
+    const io = host.io orelse return .nosys;
+    const handle = slot.host_handle orelse return .badf;
+    const file: std.Io.File = .{ .handle = handle, .flags = .{ .nonblocking = false } };
+    const need = std.math.add(u64, offset, len) catch return .fbig;
+    const st = file.stat(io) catch |err| return mapOpenError(err);
+    if (st.size < need) file.setLength(io, need) catch |err| return mapSetLengthError(err);
+    return .success;
+}
+
 /// `path_open(dirfd, dirflags, path, oflags, rights_base,
 /// rights_inheriting, fdflags, *opened_fd_out) → errno` —
 /// opens a path RELATIVE to a preopen `dirfd`. Strict scope:
@@ -911,6 +959,49 @@ test "fdPwrite / fdPread: positional round-trip at an offset (no cursor move)" {
     try testing.expectEqual(p1.Errno.success, fdPread(&h, &mem, fd, 40, 1, 3, 68));
     try testing.expectEqual(@as(u32, 5), std.mem.readInt(u32, mem[68..72], .little));
     try testing.expectEqualStrings("WORLD", mem[48..53]);
+
+    const slot = h.translateFd(fd).?;
+    const file: std.Io.File = .{ .handle = slot.host_handle.?, .flags = .{ .nonblocking = false } };
+    file.close(testing.io);
+    slot.kind = .closed;
+}
+
+test "fdFilestatSetSize / fdAllocate: truncate-extend exact, allocate grows-only" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var h = try Host.init(testing.allocator);
+    defer h.deinit();
+    h.io = testing.io;
+    const dirfd = try h.addPreopen(tmp.dir.handle, "/sandbox");
+
+    var mem: [128]u8 = @splat(0);
+    @memcpy(mem[0..8], "sz.txt\x00\x00"[0..8]);
+    const oe = pathOpen(&h, &mem, dirfd, 0, 0, 6, p1.OFLAGS_CREAT, p1.RIGHTS_FD_WRITE, 0, 0, 96);
+    try testing.expectEqual(p1.Errno.success, oe);
+    const fd = std.mem.readInt(u32, mem[96..100], .little);
+
+    const sizeOf = struct {
+        fn f(hh: *Host, m: []u8, ffd: p1.Fd) u64 {
+            _ = fdFilestatGet(hh, m, ffd, 0);
+            return std.mem.readInt(u64, m[32..40], .little); // Filestat.size @32
+        }
+    }.f;
+
+    // set_size to exactly 100, then truncate back to 4.
+    try testing.expectEqual(p1.Errno.success, fdFilestatSetSize(&h, fd, 100));
+    try testing.expectEqual(@as(u64, 100), sizeOf(&h, &mem, fd));
+    try testing.expectEqual(p1.Errno.success, fdFilestatSetSize(&h, fd, 4));
+    try testing.expectEqual(@as(u64, 4), sizeOf(&h, &mem, fd));
+
+    // allocate grows to offset+len=50; a smaller request never shrinks.
+    try testing.expectEqual(p1.Errno.success, fdAllocate(&h, fd, 10, 40));
+    try testing.expectEqual(@as(u64, 50), sizeOf(&h, &mem, fd));
+    try testing.expectEqual(p1.Errno.success, fdAllocate(&h, fd, 0, 20));
+    try testing.expectEqual(@as(u64, 50), sizeOf(&h, &mem, fd));
+
+    // stdio / out-of-range rejections.
+    try testing.expectEqual(p1.Errno.spipe, fdFilestatSetSize(&h, 1, 0));
+    try testing.expectEqual(p1.Errno.badf, fdAllocate(&h, 999, 0, 1));
 
     const slot = h.translateFd(fd).?;
     const file: std.Io.File = .{ .handle = slot.host_handle.?, .flags = .{ .nonblocking = false } };
