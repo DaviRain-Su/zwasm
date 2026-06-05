@@ -6,17 +6,18 @@
 ## Active bundle
 
 - **Bundle-ID**: D-291-ed25519-cind-miscompile
-- **Cycles-remaining**: ~2 (needs a gated codegen diagnostic, then bisection)
-- **Continuity-memo**: ed25519 JIT traps `oob_table` = inline **call_indirect** bounds (code 2), index ≥2 into
-  a 2-slot table. All 3 cind sites: index = `i32.const 0; i32.load offset=16777416` (data seg inits that addr
-  to **1**). **6 minimal repros ALL pass (JIT==interp)** — ruled OUT: large-offset load, single/same-addr/exact
-  overlapping data segs, no-store-targets-0x1000028, the cind-index-from-load pattern. ⇒ a CONTEXT-DEPENDENT
-  regalloc/spill miscompile (load-base `i32.const 0` or the index corrupted at ed25519's scale), NOT memory/
-  data/cind-lowering. Structural minimal repros EXHAUSTED. NEXT (fresh-context): add a gated (`-Dtrace-stackprobe`,
-  arm64-ok) diag to the INLINE cind path — `op_call.zig` cind_bounds_fixups ~L398: store the index reg → a new
-  `JitRuntime.trap_aux` (jit_abi.zig, add at struct END to keep offsets) before the B.HS; print in entry.zig
-  when trap_kind==2 → capture the ACTUAL bad index + which of the 3 cind sites; then trim ed25519's call graph.
-  Repros: regen `/tmp/d291*.wat` from the D-291 row. Full lead: D-291.
+- **Cycles-remaining**: ~2 (localize load-vs-index, then shrink to a fixture)
+- **CAPTURED (`6e49ecad`)**: gated cind-index diag (`-Dtrace-stackprobe`) → ed25519 `cind_index=**2397**`
+  (table size 2). Wild garbage (not loaded-1, not overlap-8) ⇒ regalloc/spill/operand corruption. NEXT:
+  capture the `i32.load offset=16777416` VALUE vs the index — load==1 ⇒ corruption between load & cind
+  (spill/operand swap); load==2397 ⇒ load reads wrong addr. + per-site marker; then trim to a fixture.
+- **Continuity-memo**: ed25519 JIT traps `oob_table` = inline **call_indirect** bounds (code 2). All 3 cind
+  sites: index = `i32.const 0; i32.load offset=16777416` (data seg inits that addr to **1**). **6 minimal repros
+  ALL pass (JIT==interp)** — ruled OUT: large-offset load, single/same-addr/exact overlapping data segs,
+  no-store-targets-0x1000028, the cind-index-from-load pattern. The captured index 2397 (≠1, ≠8) confirms a
+  CONTEXT-DEPENDENT regalloc/spill/operand corruption at ed25519's scale, NOT memory/data/cind-lowering.
+  Diag lives in `jit_abi.zig` (`trap_aux`) + arm64 `EmitCindStub` + `entry.zig` (gated). Repros: regen
+  `/tmp/d291*.wat` from the D-291 row. Full lead: D-291.
 - **Exit-condition**: culprit interaction identified + a minimal `.wat` fixture reproduces the oob_table trap on
   JIT (passes interp); fix lands; ed25519 `--engine jit` matches wasmtime (exit 0).
 

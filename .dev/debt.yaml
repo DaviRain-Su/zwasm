@@ -86,13 +86,17 @@ entries:
       (param i32))` through a 2-slot table (elem func@1) runs CLEAN on JIT. ⇒ instantiation puts 1 @0x1000028
       and nothing structurally reproduces the corruption → it is a **context-dependent regalloc/spill miscompile**
       that corrupts the load-base (`i32.const 0`) or the index in ed25519's full execution scale, NOT a memory/
-      data/cind-lowering bug. NEXT (fresh-context session — structural minimal repros EXHAUSTED): add a gated
-      (`-Dtrace-stackprobe`, arm64-only ok) diag to the INLINE cind-bounds path (op_call.zig cind_bounds_fixups
-      ~L398; store the index reg → a new `JitRuntime.trap_aux` before the B.HS; print in entry.zig when
-      trap_kind==2) → capture the ACTUAL bad index + which of the 3 cind sites fires; then bisect by trimming
-      ed25519's real call graph. Not gated (ed25519 excluded from suite + bench). Repros saved in
-      `/tmp/d291*.wat` (regen from this row). DISCHARGE: culprit interaction + minimal fixture, fixed; ed25519
-      jit matches wasmtime.
+      data/cind-lowering bug. CAPTURED (6e49ecad, gated cind-index diag — `JitRuntime.trap_aux` repurposed from
+      _pad12, arm64 EmitCindStub kind=2 stores W17 (the index, live from `CMP W17,Wsize`) before clobber,
+      entry.zig prints `[d-291] cind_index`): ed25519 `--engine jit -Dtrace-stackprobe=true` → **cind_index=2397**
+      (table size 2). 2397 is WILD garbage — NOT the loaded 1, NOT the overlap-8 → the index register holds a
+      completely wrong value = a regalloc/spill/operand-selection corruption, not off-by-small. NEXT: localize —
+      capture the `i32.load offset=16777416` VALUE separately (vs the cind index): load==1 ⇒ corruption between
+      load and cind consume (spill reload of wrong slot, or arg/index operand swap in the cind lowering);
+      load==2397 ⇒ the load itself reads a wrong address (base `i32.const 0` corrupted in context). Also capture a
+      per-site marker (which of the 3 cind fires). Then trim ed25519's real call graph around that site to a
+      minimal fixture. Not gated (ed25519 excluded from suite + bench). Repros: regen `/tmp/d291*.wat` from this
+      row. DISCHARGE: culprit interaction + minimal fixture, fixed; ed25519 jit matches wasmtime.
     first_raised: "2026-06-05"
     last_reviewed: "2026-06-06"
     refs: |-
