@@ -90,13 +90,18 @@ entries:
       _pad12, arm64 EmitCindStub kind=2 stores W17 (the index, live from `CMP W17,Wsize`) before clobber,
       entry.zig prints `[d-291] cind_index`): ed25519 `--engine jit -Dtrace-stackprobe=true` → **cind_index=2397**
       (table size 2). 2397 is WILD garbage — NOT the loaded 1, NOT the overlap-8 → the index register holds a
-      completely wrong value = a regalloc/spill/operand-selection corruption, not off-by-small. NEXT: localize —
-      capture the `i32.load offset=16777416` VALUE separately (vs the cind index): load==1 ⇒ corruption between
-      load and cind consume (spill reload of wrong slot, or arg/index operand swap in the cind lowering);
-      load==2397 ⇒ the load itself reads a wrong address (base `i32.const 0` corrupted in context). Also capture a
-      per-site marker (which of the 3 cind fires). Then trim ed25519's real call graph around that site to a
-      minimal fixture. Not gated (ed25519 excluded from suite + bench). Repros: regen `/tmp/d291*.wat` from this
-      row. DISCHARGE: culprit interaction + minimal fixture, fixed; ed25519 jit matches wasmtime.
+      completely wrong value. RE-LOCALIZED (2026-06-06, 2 more gated diags — trap_aux2 from _pad4):
+      (i) load VALUE == cind index == 2397 (`2aadd509`) → NOT a spill/operand swap between load and cind;
+      (ii) load EFFECTIVE ADDRESS == **0x10000c8 = 16777416** (`5c70edcb`) → the funcptr load reads the CORRECT
+      address (earlier "0x1000028" was an arithmetic slip; 16777416 = 0x1000000+200). ⇒ the load + cind are
+      INNOCENT; **memory[16777416] is CLOBBERED** from its data-seg-init 1 to 2397 between instantiation and the
+      trapping cind. wasmtime keeps the index ≤1, so a v2 **STORE MISCOMPILE** writes 2397 onto the C funcptr
+      global at 0x10000c8 (a computed-address store landing there, or writing the wrong value). NEXT: gated
+      STORE-WATCHPOINT — in arm64 op_memory.zig store path, when the eff addr (ip0) == 16777416, capture
+      value+func_idx → `trap_aux`/print → identify the clobbering store; then minimise. Permanent diag infra
+      (trap_aux/trap_aux2 + entry print) is committed + gated behind `-Dtrace-stackprobe`. Not gated (ed25519
+      excluded from suite + bench). Repros: regen `/tmp/d291*.wat`. DISCHARGE: clobbering store identified +
+      minimal fixture, fixed; ed25519 jit matches wasmtime.
     first_raised: "2026-06-05"
     last_reviewed: "2026-06-06"
     refs: |-

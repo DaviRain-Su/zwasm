@@ -7,10 +7,11 @@
 
 - **Bundle-ID**: D-291-ed25519-cind-miscompile
 - **Cycles-remaining**: ~2 (localize load-vs-index, then shrink to a fixture)
-- **CAPTURED (`6e49ecad`)**: gated cind-index diag (`-Dtrace-stackprobe`) → ed25519 `cind_index=**2397**`
-  (table size 2). Wild garbage (not loaded-1, not overlap-8) ⇒ regalloc/spill/operand corruption. NEXT:
-  capture the `i32.load offset=16777416` VALUE vs the index — load==1 ⇒ corruption between load & cind
-  (spill/operand swap); load==2397 ⇒ load reads wrong addr. + per-site marker; then trim to a fixture.
+- **RE-LOCALIZED → STORE-SIDE** (`6e49ecad`+`2aadd509`+`5c70edcb`, gated `-Dtrace-stackprobe` diags): ed25519
+  → `cind_index=2397 load_value=2397 load_wasm_addr=0x10000c8`. The funcptr load reads the CORRECT addr
+  (0x10000c8 = 16777416) but memory there = 2397, not the data-init **1** ⇒ load+cind INNOCENT; **a v2 STORE
+  MISCOMPILE clobbers memory[16777416]** (wasmtime keeps index ≤1). NEXT: gated **store-watchpoint** in arm64
+  op_memory store path (eff addr ip0 == 16777416 → capture value+func_idx) → find the clobbering store; minimise.
 - **Continuity-memo**: ed25519 JIT traps `oob_table` = inline **call_indirect** bounds (code 2). All 3 cind
   sites: index = `i32.const 0; i32.load offset=16777416` (data seg inits that addr to **1**). **6 minimal repros
   ALL pass (JIT==interp)** — ruled OUT: large-offset load, single/same-addr/exact overlapping data segs,
@@ -67,8 +68,8 @@ audit-gap list closed-or-deferred.
   thoroughly complete + 3-host green (`deb97903`); ADR-0163 bench+docs program ALL DONE. Tag/publish/cutover are
   manual, user-only — there is no release gate.
 - Debt ledger: 0 `now`. Last full 3-host green = `635bd734` (Mac + ubuntu `701cbe60` + windows `OK`).
-  Mac+ubuntu green through B-diag `a2ac1b89`; windows = D-279 heisenbug (non-blocking, A1-A3 exonerated).
-  This turn = D-291 investigation advance (characterized + narrowed; debt+handover, no src change).
+  Mac green; ubuntu green through `0e076fc7`; windows = D-279 heisenbug (1-failed-step this run, non-blocking,
+  tracked `win64-testall segv @5c70edcb`). D-291 diagnostics are gated (`-Dtrace-stackprobe`) → default unaffected.
 
 ## Step 0.7 (next resume) — verify remote logs
 
