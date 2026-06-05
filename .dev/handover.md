@@ -3,31 +3,16 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Active bundle
+## D-291 — PAUSED for fresh context (standing investigation; full detail in the D-291 debt row)
 
-- **Bundle-ID**: D-291-ed25519-cind-miscompile
-- **Cycles-remaining**: ~2 (localize load-vs-index, then shrink to a fixture)
-- **ROOT-CAUSE LOCALIZED → D-289-convergent** (`6e49ecad`→`af2e1f18`, gated `-Dtrace-stackprobe` diags):
-  ed25519 → `cind_index=2397 load_wasm_addr=0x10000c8 clobber_store_val=2397 clobber_func_idx=17`. The funcptr
-  load + cind are INNOCENT (load reads the correct 0x10000c8=16777416); **func 17 (a 128-bit multiply) clobbers
-  memory[16777416]** because it's called with `local0 ≈ 16777416` — a WRONG result-buffer ptr. One of func 17's
-  733 callers computes that stack-temp address wrong. **CONVERGES WITH D-289** (arm64 large-frame-offset): the
-  temp is at a ~64KB frame offset (funcptr global ~65KB below the ~16.06MB stack top) → the caller uses the
-  D-289 area. AUDIT DONE (read gpr.zig): the frame/spill helpers (gprLoad/StoreSpilled symmetric X-form;
-  frameAddrLarge correct for KB frames) are NOT the bug, and the D-289-REMAINING caps would ERROR not
-  miscompute. KEY: 16777416 is in the DATA region (>16MB); stack/heap live BELOW the data, so a stack temp
-  should be a LOW (<16MB) address → the caller computes one ~16MB TOO HIGH = a GROSS miscompile (likely a
-  __stack_pointer `global.get/set` or a wide i32 add/sub). NEXT: runtime-capture the func-17 caller's
-  result-buffer computation / SP at the clobbering store (needs a new field; mind the 733-call race).
-- **Continuity-memo**: ed25519 JIT traps `oob_table` = inline **call_indirect** bounds (code 2). All 3 cind
-  sites: index = `i32.const 0; i32.load offset=16777416` (data seg inits that addr to **1**). **6 minimal repros
-  ALL pass (JIT==interp)** — ruled OUT: large-offset load, single/same-addr/exact overlapping data segs,
-  no-store-targets-0x1000028, the cind-index-from-load pattern. The captured index 2397 (≠1, ≠8) confirms a
-  CONTEXT-DEPENDENT regalloc/spill/operand corruption at ed25519's scale, NOT memory/data/cind-lowering.
-  Diag lives in `jit_abi.zig` (`trap_aux`) + arm64 `EmitCindStub` + `entry.zig` (gated). Repros: regen
-  `/tmp/d291*.wat` from the D-291 row. Full lead: D-291.
-- **Exit-condition**: culprit interaction identified + a minimal `.wat` fixture reproduces the oob_table trap on
-  JIT (passes interp); fix lands; ed25519 `--engine jit` matches wasmtime (exit 0).
+ed25519 JIT `oob_table` miscompile, EXHAUSTIVELY localized this session (commits `6e49ecad`→`af2e1f18`,
+gated `-Dtrace-stackprobe` diagnostics `trap_aux..trap_aux4`): func 17 (a 128-bit multiply) clobbers
+`memory[16777416]` because it is called with `local0 ≈ 16777416` — a WRONG result-buffer ptr that one of its
+733 callers computes ~16MB TOO HIGH (the addr lands in the DATA region, where a stack temp never should).
+Frame/spill helpers + data-seg + load + cind all RULED OUT. NEXT (fresh session): runtime-capture the func-17
+caller's result-buffer / SP computation (return-address → which caller → its WAT) → confirm __stack_pointer-
+global vs wide-i32-arith miscompile. Non-gating (ed25519 excluded from suite/bench). **Paused at turn ~14 of a
+long session per the debt row's "focused fresh-context session" guidance** — the diag infra makes resume cheap.
 
 ## Active program — ADR-0164: trap / crash / exception diagnostics & UX (D-292)
 
@@ -54,17 +39,24 @@ regression (surfaced by D-291). Audit-first, spans engines; four workstreams **A
     such signal in v2 = internal bug, since v2 uses NO signal-based wasm semantics — all traps are explicit
     checks) surfacing a distinct "internal error". NEEDS an **ADR-0070 (libc) amendment** + design ADR; bundle.
 - **C — exception(EH)-vs-trap distinction.** · **D — audit vs wasmtime/wasmer/WasmEdge/v1 → gap list.**
-- **← LEAD (D-291, A-unblocked): ed25519 JIT `oob_table` miscompile** — the program's MOTIVATING case, now a
-  concrete narrowed bug (see Active bundle above + D-291 row). Prioritised ahead of B-core/C/D (a real
-  correctness bug > polish/audit). The trap is a clean wasm trap (call_indirect bad index), not a SIGSEGV.
+- **D-291** (ed25519 `oob_table` miscompile, A-unblocked) — exhaustively localized this session, **PAUSED for
+  fresh context** (see the D-291 section above + debt row). B-core/C/D remain (B-core needs an ADR-0070 amend).
 
 DISCHARGE (D-292): all engines emit clear per-kind trap messages + crash/trap/exception cleanly distinguished +
 audit-gap list closed-or-deferred.
 
-## Queue after the active program (time-consuming first, per user directive)
+## ← LEAD (breadth, pivot from D-291): D-287 — validator control-stack cap
+
+`shootout/switch.wasm` (LLVM-lowered big C switch) is REJECTED `ControlStackOverflow` at `zir.max_control_stack
+= 1024` (src/ir/zir.zig:29; runtime `frame.zig:34` sources it). wasmtime accepts the deeper nesting — rejecting
+valid real-toolchain wasm is a completeness miss. あるべき論 = raise the cap (autonomous-with-ADR per ADR-0153;
+not a user-gate). NEXT: measure switch.wasm's true depth + the per-frame label-stack memory model (fixed array
+vs dynamic) → ADR (new limit + memory rationale) → raise + test (switch.wasm validates + a deep-nest fixture).
+
+## Queue (time-consuming first, per user directive)
 
 3. **D-288** (interp frame-stack inline+overflow redesign; ackermann 1021-deep traps at the 256 cap; ADR-likely).
-4. **D-287** (validator control-stack cap 1024 rejects valid deep nesting — raise + ADR; product-envelope call).
+4. **D-293** (kinded-fixup refactor — remaining JIT trap kinds oob_table/conversion/null/cast/array; ~50 sites).
 5. Moderate: **D-284** (interp/jit/aot entry-resolution unify) · **D-290** (wabt→wasm-tools, user-directed hygiene).
 6. Defer (low-signal / measure-first): **D-289 FP/param/stack large arms** · **D-286** (fill/init byte-loop).
    **D-285** (JIT byte-loop/bulk-memory codegen, ADR-0153 rework candidate — scheduled after this program).
