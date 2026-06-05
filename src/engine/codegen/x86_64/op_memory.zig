@@ -51,7 +51,7 @@ const Error = types.Error;
 ///   ADD RDX, offset             ; (skipped if offset == 0)
 ///   LEA RCX, [RDX + access_size]; RCX = ea + size, RDX 無修正 (load addressing 用)
 ///   CMP RCX, [R15 + mem_limit_off]
-///   JA  trap_stub               ; unsigned > ; bounds_fixups append
+///   JA  trap_stub               ; unsigned > ; oob_fixups append
 ///   MOV[ZX|SX] dst, ... [RAX + RDX]
 ///
 /// Per-op shape (store): same prologue, final form is
@@ -72,7 +72,7 @@ pub fn emitMemOp(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
-    bounds_fixups: *std.ArrayList(u32),
+    oob_fixups: *std.ArrayList(u32),
     spill_base_off: u32,
     op: zir.ZirOp,
     offset: u32,
@@ -162,7 +162,7 @@ pub fn emitMemOp(
     try buf.appendSlice(allocator, inst.encCmpR64MemDisp32(.rcx, abi.runtime_ptr_save_gpr, jit_abi.mem_limit_off).slice());
     const fixup_at: u32 = @intCast(buf.items.len);
     try buf.appendSlice(allocator, inst.encJccRel32(.a, 0).slice()); // unsigned >
-    try bounds_fixups.append(allocator, fixup_at);
+    try oob_fixups.append(allocator, fixup_at);
     // ADR-0028 M3-a-1: record bounds-check emit site (no-op when
     // -Dtrace-ringbuffer=false; comptime-folded out of release).
     trace.writeBounds(func_idx, fixup_at);
@@ -257,7 +257,7 @@ pub fn emitI32Load(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
         ctx.alloc,
         ctx.pushed_vregs,
         ctx.next_vreg,
-        ctx.bounds_fixups,
+        ctx.oob_fixups,
         ctx.spill_base_off,
         ins.op,
         @as(u32, @intCast(ins.payload)),
@@ -359,7 +359,7 @@ fn emitMemOpI64(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     try ctx.buf.appendSlice(ctx.allocator, inst.encCmpR64MemDisp32(.rcx, abi.runtime_ptr_save_gpr, jit_abi.mem_limit_off).slice());
     const fixup_at: u32 = @intCast(ctx.buf.items.len);
     try ctx.buf.appendSlice(ctx.allocator, inst.encJccRel32(.a, 0).slice());
-    try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+    try ctx.oob_fixups.append(ctx.allocator, fixup_at);
     trace.writeBounds(ctx.func_idx, fixup_at);
 
     if (is_store) {
@@ -427,7 +427,7 @@ pub fn emitMemoryFillCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!
         ctx.buf,
         ctx.alloc,
         ctx.pushed_vregs,
-        ctx.bounds_fixups,
+        ctx.oob_fixups,
         ctx.spill_base_off,
         ctx.func_idx,
     );
@@ -440,7 +440,7 @@ pub fn emitMemoryCopyCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!
         ctx.buf,
         ctx.alloc,
         ctx.pushed_vregs,
-        ctx.bounds_fixups,
+        ctx.oob_fixups,
         ctx.spill_base_off,
         ctx.func_idx,
     );
@@ -452,7 +452,7 @@ pub fn emitMemoryInitCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!
         ctx.buf,
         ctx.alloc,
         ctx.pushed_vregs,
-        ctx.bounds_fixups,
+        ctx.oob_fixups,
         ctx.spill_base_off,
         ctx.func_idx,
         @as(u32, @intCast(ins.payload)),
@@ -477,7 +477,7 @@ pub fn emitMemoryInitCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!
 //   RDX = src pointer (memory.copy) / val (memory.fill).
 //
 // The bounds-check trap stub (mem_limit overflow) is reached via a
-// JA Jcc patched via `bounds_fixups` exactly like emitMemOp.
+// JA Jcc patched via `oob_fixups` exactly like emitMemOp.
 // ============================================================
 
 /// Wasm spec §4.4.7 (memory.fill) — pop n / val / dst (top→bottom);
@@ -493,7 +493,7 @@ pub fn emitMemoryInitCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!
 ///   ;   MOV RAX, dst              ; RAX = dst (zero-ext)
 ///   ;   ADD RAX, n
 ///   ;   CMP RAX, [R15 + mem_limit_off]
-///   ;   JA  trap_stub             ; bounds_fixups append
+///   ;   JA  trap_stub             ; oob_fixups append
 ///   ;
 ///   ; pointer setup:
 ///   ;   MOV RAX, [R15 + vm_base_off]
@@ -513,7 +513,7 @@ pub fn emitMemoryFill(
     buf: *std.ArrayList(u8),
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
-    bounds_fixups: *std.ArrayList(u32),
+    oob_fixups: *std.ArrayList(u32),
     spill_base_off: u32,
     func_idx: u32,
 ) Error!void {
@@ -540,7 +540,7 @@ pub fn emitMemoryFill(
     try buf.appendSlice(allocator, inst.encCmpR64MemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.mem_limit_off).slice());
     const fixup_at: u32 = @intCast(buf.items.len);
     try buf.appendSlice(allocator, inst.encJccRel32(.a, 0).slice());
-    try bounds_fixups.append(allocator, fixup_at);
+    try oob_fixups.append(allocator, fixup_at);
     trace.writeBounds(func_idx, fixup_at);
 
     // Step C: convert dst to absolute pointer.
@@ -616,7 +616,7 @@ pub fn emitMemoryCopy(
     buf: *std.ArrayList(u8),
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
-    bounds_fixups: *std.ArrayList(u32),
+    oob_fixups: *std.ArrayList(u32),
     spill_base_off: u32,
     func_idx: u32,
 ) Error!void {
@@ -640,7 +640,7 @@ pub fn emitMemoryCopy(
     {
         const fixup_at: u32 = @intCast(buf.items.len);
         try buf.appendSlice(allocator, inst.encJccRel32(.a, 0).slice());
-        try bounds_fixups.append(allocator, fixup_at);
+        try oob_fixups.append(allocator, fixup_at);
         trace.writeBounds(func_idx, fixup_at);
     }
 
@@ -651,7 +651,7 @@ pub fn emitMemoryCopy(
     {
         const fixup_at: u32 = @intCast(buf.items.len);
         try buf.appendSlice(allocator, inst.encJccRel32(.a, 0).slice());
-        try bounds_fixups.append(allocator, fixup_at);
+        try oob_fixups.append(allocator, fixup_at);
         trace.writeBounds(func_idx, fixup_at);
     }
 
@@ -799,7 +799,7 @@ pub fn emitMemoryInit(
     buf: *std.ArrayList(u8),
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
-    bounds_fixups: *std.ArrayList(u32),
+    oob_fixups: *std.ArrayList(u32),
     spill_base_off: u32,
     func_idx: u32,
     dataidx: u32,
@@ -860,7 +860,7 @@ pub fn emitMemoryInit(
     {
         const fixup_at: u32 = @intCast(buf.items.len);
         try buf.appendSlice(allocator, inst.encJccRel32(.a, 0).slice());
-        try bounds_fixups.append(allocator, fixup_at);
+        try oob_fixups.append(allocator, fixup_at);
         trace.writeBounds(func_idx, fixup_at);
     }
 
@@ -871,7 +871,7 @@ pub fn emitMemoryInit(
     {
         const fixup_at: u32 = @intCast(buf.items.len);
         try buf.appendSlice(allocator, inst.encJccRel32(.a, 0).slice());
-        try bounds_fixups.append(allocator, fixup_at);
+        try oob_fixups.append(allocator, fixup_at);
         trace.writeBounds(func_idx, fixup_at);
     }
 

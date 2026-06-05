@@ -139,7 +139,7 @@ pub fn emitV128Load(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
-    bounds_fixups: *std.ArrayList(u32),
+    oob_fixups: *std.ArrayList(u32),
     spill_base_off: u32,
     offset: u32,
     func_idx: u32,
@@ -156,7 +156,7 @@ pub fn emitV128Load(
     // xmmStoreSpilledV128 flushes to the spill slot when needed.
     const dst_x = try gpr.xmmDefSpilledV128(alloc, result_v, 0);
 
-    try v128MemPrologue(allocator, buf, bounds_fixups, idx_r, offset, 16, func_idx);
+    try v128MemPrologue(allocator, buf, oob_fixups, idx_r, offset, 16, func_idx);
 
     try buf.appendSlice(allocator, inst.encMovupsMemBaseIdx(false, dst_x, .rax, .rdx).slice());
     try gpr.xmmStoreSpilledV128(allocator, buf, alloc, spill_base_off, result_v, 0);
@@ -172,7 +172,7 @@ pub fn emitV128Store(
     buf: *std.ArrayList(u8),
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
-    bounds_fixups: *std.ArrayList(u32),
+    oob_fixups: *std.ArrayList(u32),
     spill_base_off: u32,
     offset: u32,
     func_idx: u32,
@@ -185,7 +185,7 @@ pub fn emitV128Store(
     // ADR-0053 Part 3c: val v128 loads via MOVUPS when spilled.
     const val_x = try gpr.xmmLoadSpilledV128(allocator, buf, alloc, spill_base_off, val_v, 0);
 
-    try v128MemPrologue(allocator, buf, bounds_fixups, idx_r, offset, 16, func_idx);
+    try v128MemPrologue(allocator, buf, oob_fixups, idx_r, offset, 16, func_idx);
 
     try buf.appendSlice(allocator, inst.encMovupsMemBaseIdx(true, val_x, .rax, .rdx).slice());
 }
@@ -198,7 +198,7 @@ pub fn emitV128Store(
 pub fn v128MemPrologue(
     allocator: Allocator,
     buf: *std.ArrayList(u8),
-    bounds_fixups: *std.ArrayList(u32),
+    oob_fixups: *std.ArrayList(u32),
     idx_r: inst.Gpr,
     offset: u32,
     access_size: i8,
@@ -218,7 +218,7 @@ pub fn v128MemPrologue(
     try buf.appendSlice(allocator, inst.encCmpR64MemDisp32(.rcx, abi.runtime_ptr_save_gpr, jit_abi.mem_limit_off).slice());
     const fixup_at: u32 = @intCast(buf.items.len);
     try buf.appendSlice(allocator, inst.encJccRel32(.a, 0).slice());
-    try bounds_fixups.append(allocator, fixup_at);
+    try oob_fixups.append(allocator, fixup_at);
     trace.writeBounds(func_idx, fixup_at);
 }
 
@@ -234,7 +234,7 @@ pub fn emitV128Load8Splat(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
-    bounds_fixups: *std.ArrayList(u32),
+    oob_fixups: *std.ArrayList(u32),
     spill_base_off: u32,
     offset: u32,
     func_idx: u32,
@@ -249,7 +249,7 @@ pub fn emitV128Load8Splat(
     const dst_x = try gpr.resolveXmm(alloc, result_v);
     const scratch_x = abi.fp_spill_stage_xmms[0]; // XMM14: zero ctrl mask
 
-    try v128MemPrologue(allocator, buf, bounds_fixups, idx_r, offset, 1, func_idx);
+    try v128MemPrologue(allocator, buf, oob_fixups, idx_r, offset, 1, func_idx);
     try buf.appendSlice(allocator, inst.encMovzxR32_8MemBaseIdx(.rcx, .rax, .rdx).slice());
     try buf.appendSlice(allocator, inst.encMovdXmmFromR32(dst_x, .rcx).slice());
     try buf.appendSlice(allocator, inst.encPxor(scratch_x, scratch_x).slice());
@@ -267,7 +267,7 @@ pub fn emitV128Load16Splat(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
-    bounds_fixups: *std.ArrayList(u32),
+    oob_fixups: *std.ArrayList(u32),
     spill_base_off: u32,
     offset: u32,
     func_idx: u32,
@@ -281,7 +281,7 @@ pub fn emitV128Load16Splat(
     const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
     const dst_x = try gpr.resolveXmm(alloc, result_v);
 
-    try v128MemPrologue(allocator, buf, bounds_fixups, idx_r, offset, 2, func_idx);
+    try v128MemPrologue(allocator, buf, oob_fixups, idx_r, offset, 2, func_idx);
     try buf.appendSlice(allocator, inst.encMovzxR32_16MemBaseIdx(.rcx, .rax, .rdx).slice());
     try buf.appendSlice(allocator, inst.encMovdXmmFromR32(dst_x, .rcx).slice());
     try buf.appendSlice(allocator, inst.encPshuflw(dst_x, dst_x, 0).slice());
@@ -298,7 +298,7 @@ pub fn emitV128Load32Splat(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
-    bounds_fixups: *std.ArrayList(u32),
+    oob_fixups: *std.ArrayList(u32),
     spill_base_off: u32,
     offset: u32,
     func_idx: u32,
@@ -312,7 +312,7 @@ pub fn emitV128Load32Splat(
     const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
     const dst_x = try gpr.resolveXmm(alloc, result_v);
 
-    try v128MemPrologue(allocator, buf, bounds_fixups, idx_r, offset, 4, func_idx);
+    try v128MemPrologue(allocator, buf, oob_fixups, idx_r, offset, 4, func_idx);
     try buf.appendSlice(allocator, inst.encMovssMovsdMemBaseIdx(.f32, false, dst_x, .rax, .rdx).slice());
     try buf.appendSlice(allocator, inst.encPshufd(dst_x, dst_x, 0).slice());
     try pushed_vregs.append(allocator, result_v);
@@ -328,7 +328,7 @@ pub fn emitV128Load64Splat(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
-    bounds_fixups: *std.ArrayList(u32),
+    oob_fixups: *std.ArrayList(u32),
     spill_base_off: u32,
     offset: u32,
     func_idx: u32,
@@ -342,7 +342,7 @@ pub fn emitV128Load64Splat(
     const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
     const dst_x = try gpr.resolveXmm(alloc, result_v);
 
-    try v128MemPrologue(allocator, buf, bounds_fixups, idx_r, offset, 8, func_idx);
+    try v128MemPrologue(allocator, buf, oob_fixups, idx_r, offset, 8, func_idx);
     try buf.appendSlice(allocator, inst.encMovssMovsdMemBaseIdx(.f64, false, dst_x, .rax, .rdx).slice());
     try buf.appendSlice(allocator, inst.encPshufd(dst_x, dst_x, 0x44).slice());
     try pushed_vregs.append(allocator, result_v);
@@ -358,7 +358,7 @@ pub fn emitV128Load32Zero(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
-    bounds_fixups: *std.ArrayList(u32),
+    oob_fixups: *std.ArrayList(u32),
     spill_base_off: u32,
     offset: u32,
     func_idx: u32,
@@ -372,7 +372,7 @@ pub fn emitV128Load32Zero(
     const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
     const dst_x = try gpr.resolveXmm(alloc, result_v);
 
-    try v128MemPrologue(allocator, buf, bounds_fixups, idx_r, offset, 4, func_idx);
+    try v128MemPrologue(allocator, buf, oob_fixups, idx_r, offset, 4, func_idx);
     try buf.appendSlice(allocator, inst.encMovssMovsdMemBaseIdx(.f32, false, dst_x, .rax, .rdx).slice());
     try pushed_vregs.append(allocator, result_v);
 }
@@ -387,7 +387,7 @@ pub fn emitV128Load64Zero(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
-    bounds_fixups: *std.ArrayList(u32),
+    oob_fixups: *std.ArrayList(u32),
     spill_base_off: u32,
     offset: u32,
     func_idx: u32,
@@ -401,7 +401,7 @@ pub fn emitV128Load64Zero(
     const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
     const dst_x = try gpr.resolveXmm(alloc, result_v);
 
-    try v128MemPrologue(allocator, buf, bounds_fixups, idx_r, offset, 8, func_idx);
+    try v128MemPrologue(allocator, buf, oob_fixups, idx_r, offset, 8, func_idx);
     try buf.appendSlice(allocator, inst.encMovssMovsdMemBaseIdx(.f64, false, dst_x, .rax, .rdx).slice());
     try pushed_vregs.append(allocator, result_v);
 }
@@ -423,7 +423,7 @@ pub fn v128LoadExtend(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
-    bounds_fixups: *std.ArrayList(u32),
+    oob_fixups: *std.ArrayList(u32),
     spill_base_off: u32,
     offset: u32,
     func_idx: u32,
@@ -438,40 +438,40 @@ pub fn v128LoadExtend(
     const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
     const dst_x = try gpr.resolveXmm(alloc, result_v);
 
-    try v128MemPrologue(allocator, buf, bounds_fixups, idx_r, offset, 8, func_idx);
+    try v128MemPrologue(allocator, buf, oob_fixups, idx_r, offset, 8, func_idx);
     try buf.appendSlice(allocator, inst.encMovssMovsdMemBaseIdx(.f64, false, dst_x, .rax, .rdx).slice());
     try buf.appendSlice(allocator, extend_encoder(dst_x, dst_x).slice());
     try pushed_vregs.append(allocator, result_v);
 }
 
 /// Wasm spec §4.4.7 (v128.load8x8_s) — 8 i8 → 8 i16 sign-extend.
-pub fn emitV128Load8x8S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, bounds_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, func_idx: u32) Error!void {
-    return v128LoadExtend(allocator, buf, alloc, pushed_vregs, next_vreg, bounds_fixups, spill_base_off, offset, func_idx, inst.encPmovsxbw);
+pub fn emitV128Load8x8S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, oob_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, func_idx: u32) Error!void {
+    return v128LoadExtend(allocator, buf, alloc, pushed_vregs, next_vreg, oob_fixups, spill_base_off, offset, func_idx, inst.encPmovsxbw);
 }
 
 /// Wasm spec §4.4.7 (v128.load8x8_u) — 8 u8 → 8 i16 zero-extend.
-pub fn emitV128Load8x8U(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, bounds_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, func_idx: u32) Error!void {
-    return v128LoadExtend(allocator, buf, alloc, pushed_vregs, next_vreg, bounds_fixups, spill_base_off, offset, func_idx, inst.encPmovzxbw);
+pub fn emitV128Load8x8U(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, oob_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, func_idx: u32) Error!void {
+    return v128LoadExtend(allocator, buf, alloc, pushed_vregs, next_vreg, oob_fixups, spill_base_off, offset, func_idx, inst.encPmovzxbw);
 }
 
 /// Wasm spec §4.4.7 (v128.load16x4_s) — 4 i16 → 4 i32 sign-extend.
-pub fn emitV128Load16x4S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, bounds_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, func_idx: u32) Error!void {
-    return v128LoadExtend(allocator, buf, alloc, pushed_vregs, next_vreg, bounds_fixups, spill_base_off, offset, func_idx, inst.encPmovsxwd);
+pub fn emitV128Load16x4S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, oob_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, func_idx: u32) Error!void {
+    return v128LoadExtend(allocator, buf, alloc, pushed_vregs, next_vreg, oob_fixups, spill_base_off, offset, func_idx, inst.encPmovsxwd);
 }
 
 /// Wasm spec §4.4.7 (v128.load16x4_u) — 4 u16 → 4 i32 zero-extend.
-pub fn emitV128Load16x4U(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, bounds_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, func_idx: u32) Error!void {
-    return v128LoadExtend(allocator, buf, alloc, pushed_vregs, next_vreg, bounds_fixups, spill_base_off, offset, func_idx, inst.encPmovzxwd);
+pub fn emitV128Load16x4U(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, oob_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, func_idx: u32) Error!void {
+    return v128LoadExtend(allocator, buf, alloc, pushed_vregs, next_vreg, oob_fixups, spill_base_off, offset, func_idx, inst.encPmovzxwd);
 }
 
 /// Wasm spec §4.4.7 (v128.load32x2_s) — 2 i32 → 2 i64 sign-extend.
-pub fn emitV128Load32x2S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, bounds_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, func_idx: u32) Error!void {
-    return v128LoadExtend(allocator, buf, alloc, pushed_vregs, next_vreg, bounds_fixups, spill_base_off, offset, func_idx, inst.encPmovsxdq);
+pub fn emitV128Load32x2S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, oob_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, func_idx: u32) Error!void {
+    return v128LoadExtend(allocator, buf, alloc, pushed_vregs, next_vreg, oob_fixups, spill_base_off, offset, func_idx, inst.encPmovsxdq);
 }
 
 /// Wasm spec §4.4.7 (v128.load32x2_u) — 2 u32 → 2 i64 zero-extend.
-pub fn emitV128Load32x2U(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, bounds_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, func_idx: u32) Error!void {
-    return v128LoadExtend(allocator, buf, alloc, pushed_vregs, next_vreg, bounds_fixups, spill_base_off, offset, func_idx, inst.encPmovzxdq);
+pub fn emitV128Load32x2U(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, oob_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, func_idx: u32) Error!void {
+    return v128LoadExtend(allocator, buf, alloc, pushed_vregs, next_vreg, oob_fixups, spill_base_off, offset, func_idx, inst.encPmovzxdq);
 }
 
 // =============================================================
@@ -496,7 +496,7 @@ pub fn v128LoadLane(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
-    bounds_fixups: *std.ArrayList(u32),
+    oob_fixups: *std.ArrayList(u32),
     spill_base_off: u32,
     offset: u32,
     lane: u32,
@@ -514,7 +514,7 @@ pub fn v128LoadLane(
     const vec_x = try gpr.resolveXmm(alloc, vec_v);
     const dst_x = try gpr.resolveXmm(alloc, result_v);
 
-    try v128MemPrologue(allocator, buf, bounds_fixups, idx_r, offset, access_size, func_idx);
+    try v128MemPrologue(allocator, buf, oob_fixups, idx_r, offset, access_size, func_idx);
 
     // Load value into RCX (zero-extended), then merge dst with vec
     // and PINSR the new lane.
@@ -545,7 +545,7 @@ pub fn v128StoreLane(
     buf: *std.ArrayList(u8),
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
-    bounds_fixups: *std.ArrayList(u32),
+    oob_fixups: *std.ArrayList(u32),
     spill_base_off: u32,
     offset: u32,
     lane: u32,
@@ -575,7 +575,7 @@ pub fn v128StoreLane(
     // could be used as a holder, but the simplest path is the
     // PUSH/POP pair (2 bytes each).
     try buf.appendSlice(allocator, inst.encPushR(.rcx).slice());
-    try v128MemPrologue(allocator, buf, bounds_fixups, idx_r, offset, access_size, func_idx);
+    try v128MemPrologue(allocator, buf, oob_fixups, idx_r, offset, access_size, func_idx);
     try buf.appendSlice(allocator, inst.encPopR(.rcx).slice());
 
     const enc_store = switch (access_size) {
@@ -589,43 +589,43 @@ pub fn v128StoreLane(
 }
 
 /// Wasm spec §4.4.7 (v128.load8_lane) — load 1 byte; merge into lane.
-pub fn emitV128Load8Lane(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, bounds_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, lane: u32, func_idx: u32) Error!void {
-    return v128LoadLane(allocator, buf, alloc, pushed_vregs, next_vreg, bounds_fixups, spill_base_off, offset, lane, func_idx, 1);
+pub fn emitV128Load8Lane(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, oob_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, lane: u32, func_idx: u32) Error!void {
+    return v128LoadLane(allocator, buf, alloc, pushed_vregs, next_vreg, oob_fixups, spill_base_off, offset, lane, func_idx, 1);
 }
 
 /// Wasm spec §4.4.7 (v128.load16_lane) — load 2 bytes; merge into lane.
-pub fn emitV128Load16Lane(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, bounds_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, lane: u32, func_idx: u32) Error!void {
-    return v128LoadLane(allocator, buf, alloc, pushed_vregs, next_vreg, bounds_fixups, spill_base_off, offset, lane, func_idx, 2);
+pub fn emitV128Load16Lane(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, oob_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, lane: u32, func_idx: u32) Error!void {
+    return v128LoadLane(allocator, buf, alloc, pushed_vregs, next_vreg, oob_fixups, spill_base_off, offset, lane, func_idx, 2);
 }
 
 /// Wasm spec §4.4.7 (v128.load32_lane) — load 4 bytes; merge into lane.
-pub fn emitV128Load32Lane(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, bounds_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, lane: u32, func_idx: u32) Error!void {
-    return v128LoadLane(allocator, buf, alloc, pushed_vregs, next_vreg, bounds_fixups, spill_base_off, offset, lane, func_idx, 4);
+pub fn emitV128Load32Lane(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, oob_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, lane: u32, func_idx: u32) Error!void {
+    return v128LoadLane(allocator, buf, alloc, pushed_vregs, next_vreg, oob_fixups, spill_base_off, offset, lane, func_idx, 4);
 }
 
 /// Wasm spec §4.4.7 (v128.load64_lane) — load 8 bytes; merge into lane.
-pub fn emitV128Load64Lane(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, bounds_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, lane: u32, func_idx: u32) Error!void {
-    return v128LoadLane(allocator, buf, alloc, pushed_vregs, next_vreg, bounds_fixups, spill_base_off, offset, lane, func_idx, 8);
+pub fn emitV128Load64Lane(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, oob_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, lane: u32, func_idx: u32) Error!void {
+    return v128LoadLane(allocator, buf, alloc, pushed_vregs, next_vreg, oob_fixups, spill_base_off, offset, lane, func_idx, 8);
 }
 
 /// Wasm spec §4.4.7 (v128.store8_lane) — extract lane; store 1 byte.
-pub fn emitV128Store8Lane(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), bounds_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, lane: u32, func_idx: u32) Error!void {
-    return v128StoreLane(allocator, buf, alloc, pushed_vregs, bounds_fixups, spill_base_off, offset, lane, func_idx, 1);
+pub fn emitV128Store8Lane(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), oob_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, lane: u32, func_idx: u32) Error!void {
+    return v128StoreLane(allocator, buf, alloc, pushed_vregs, oob_fixups, spill_base_off, offset, lane, func_idx, 1);
 }
 
 /// Wasm spec §4.4.7 (v128.store16_lane) — extract lane; store 2 bytes.
-pub fn emitV128Store16Lane(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), bounds_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, lane: u32, func_idx: u32) Error!void {
-    return v128StoreLane(allocator, buf, alloc, pushed_vregs, bounds_fixups, spill_base_off, offset, lane, func_idx, 2);
+pub fn emitV128Store16Lane(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), oob_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, lane: u32, func_idx: u32) Error!void {
+    return v128StoreLane(allocator, buf, alloc, pushed_vregs, oob_fixups, spill_base_off, offset, lane, func_idx, 2);
 }
 
 /// Wasm spec §4.4.7 (v128.store32_lane) — extract lane; store 4 bytes.
-pub fn emitV128Store32Lane(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), bounds_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, lane: u32, func_idx: u32) Error!void {
-    return v128StoreLane(allocator, buf, alloc, pushed_vregs, bounds_fixups, spill_base_off, offset, lane, func_idx, 4);
+pub fn emitV128Store32Lane(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), oob_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, lane: u32, func_idx: u32) Error!void {
+    return v128StoreLane(allocator, buf, alloc, pushed_vregs, oob_fixups, spill_base_off, offset, lane, func_idx, 4);
 }
 
 /// Wasm spec §4.4.7 (v128.store64_lane) — extract lane; store 8 bytes.
-pub fn emitV128Store64Lane(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), bounds_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, lane: u32, func_idx: u32) Error!void {
-    return v128StoreLane(allocator, buf, alloc, pushed_vregs, bounds_fixups, spill_base_off, offset, lane, func_idx, 8);
+pub fn emitV128Store64Lane(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), oob_fixups: *std.ArrayList(u32), spill_base_off: u32, offset: u32, lane: u32, func_idx: u32) Error!void {
+    return v128StoreLane(allocator, buf, alloc, pushed_vregs, oob_fixups, spill_base_off, offset, lane, func_idx, 8);
 }
 
 /// Wasm spec §4.4.4 (v128.not) — pop one v128, push v128 with

@@ -18,18 +18,41 @@ entries:
       trap kind becomes one command away). INVESTIGATION/AUDIT FIRST (spans engines), then fix.
       PROGRESS (b6da8604, 2026-06-06): workstream A CLI surface done — JIT/AOT run paths thread trap_kind →
       trap_surface.jitTrapCode → CLI per-kind message; single-message interp-parity (double-`Trap` bug fixed,
-      genuine trap = exit 1 not re-raised error.Trap). REMAINING A: codegen widening — JIT records only generic
-      0/1 for unreachable/oob_memory/div_by_zero/int_overflow (only call_indirect+stack precise), so JIT still
-      prints "kind not yet distinguished" for the common traps. The generic bucket is also arch-INCONSISTENT
-      (unreachable → trap_kind 1 on arm64 vs 0 on x86_64; found via ubuntu test-all 4d58b315, fixed test
-      99b56f1c). Split the generic bucket at the trap sites (arm64/emit.zig + x86_64/op_control.zig) for full
-      parity AND unify the per-kind codes across arm64+x86_64. Then B (scope [stack_probe]) / C / D.
+      genuine trap = exit 1 not re-raised error.Trap).
+      PROGRESS (A1 6fcbabbd / A2 687d1a73 / A3 this-commit, 2026-06-06): codegen widening DONE for the COMMON 4
+      trap kinds — unreachable=5, oob_memory=6, div_by_zero=7, int_overflow=8 now record PRECISE per-kind codes,
+      UNIFIED across arm64+x86_64 (was the arch-divergent generic bucket). Mechanism: dedicated per-kind trap
+      stub + per-kind fixup channel demuxed from the shared bounds_fixups (arm64 EmitCindStub / x86_64
+      emitTrapExitStub). A1+A2 3-host green (Mac+ubuntu+windows, dca1b7a1). REMAINING A→0 for the common 4;
+      the OTHER still-generic kinds (oob_table, invalid_conversion, trunc int_overflow, null_reference,
+      cast_failure, array_oob) are filed as D-293. Then B (scope [stack_probe]) / C / D.
       DISCHARGE: all engines emit clear per-kind trap messages + crash/trap/exception cleanly distinguished +
       audit-gap list closed-or-deferred.
     first_raised: "2026-06-05"
     last_reviewed: "2026-06-06"
     refs: |-
       `.dev/decisions/0164_trap_crash_exception_diagnostics_ux.md`; `src/runtime/trap.zig` (Trap set); `src/cli/run.zig` (surfaceTrap + runWasmJit generic Trap); `src/cli/diag_print.zig`; `src/platform/stack_limit.zig`; `~/Documents/MyProducts/zwasm/src/cli.zig` (v1 per-kind msgs); D-291 (motivating case); D-165 (JIT trap-code infra)
+  - id: "D-293"
+    layer: "code"
+    status: "note"
+    description: |-
+      note (2026-06-06; spun out of D-292 A3): the JIT `bounds_fixups` channel is a generic catch-all that
+      multiplexes MANY trap kinds, not just oob_memory. D-292 A1–A3 demuxed the common 4 (unreachable / div /
+      overflow / oob_memory). STILL-GENERIC (report "kind not yet distinguished" on JIT/AOT, a v1/interp-parity
+      gap): oob_table (op_table.zig table.get/set/copy/init + call_indirect bounds), invalid_conversion +
+      trunc int_overflow (op_convert.zig / arm64 bounds_check.zig float→int trap), null_reference
+      (ref.as_non_null, struct/array null deref, call_ref null), cast_failure (ref.cast / i31.get), array_oob
+      (array.get/set/fill/copy/init/new_*). A per-site classification table exists (the A3 survey). The clean
+      fix is a KINDED-FIXUP REFACTOR: replace `bounds_fixups: ArrayList(u32)` with a kinded list (byte+kind) or
+      add a per-kind channel each, route every append to its kind, emit one stub per kind. ~50 sites across both
+      arches → an architectural/rework-style chunk, NOT a quick fix. Lower frequency than the common 4 so
+      deferred behind D-292 B/C/D; pick up as a follow-on widening (or fold into workstream D's audit-gap close).
+    first_raised: "2026-06-06"
+    last_reviewed: "2026-06-06"
+    refs: |-
+      D-292 (parent program, ADR-0164) + D-165 (trap-code infra); src/api/trap_surface.zig (jitTrapCode);
+      src/engine/codegen/{arm64,x86_64}/{op_table,op_convert,op_call,op_tail_call,ops/wasm_3_0/*}.zig +
+      arm64/bounds_check.zig (the still-generic append sites)
   - id: "D-291"
     layer: "code"
     status: "note"

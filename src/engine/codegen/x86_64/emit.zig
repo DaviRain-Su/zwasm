@@ -705,6 +705,9 @@ pub fn compile(
     defer divzero_fixups.deinit(allocator);
     var overflow_fixups: std.ArrayList(u32) = .empty;
     defer overflow_fixups.deinit(allocator);
+    // ADR-0164 A3 / D-292 — memory oob (code 6) demuxed from bounds_fixups.
+    var oob_fixups: std.ArrayList(u32) = .empty;
+    defer oob_fixups.deinit(allocator);
 
     // Direct-call placeholders awaiting linker patch.
     var call_fixups: std.ArrayList(CallFixup) = .empty;
@@ -775,6 +778,7 @@ pub fn compile(
         .unreach_fixups = &unreach_fixups,
         .divzero_fixups = &divzero_fixups,
         .overflow_fixups = &overflow_fixups,
+        .oob_fixups = &oob_fixups,
         .call_fixups = &call_fixups,
         .simd_const_fixups = &simd_const_fixups,
         .extra_consts = &extra_consts,
@@ -1264,44 +1268,44 @@ pub fn compile(
             // access_size=16 + MOVUPS final encoding. RAX/RCX/RDX
             // scratches reused (pool-excluded). bounds_fixups +
             // spill_base_off + ins.payload threading mirrors i32.load.
-            .@"v128.load" => try op_simd.emitV128Load(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
-            .@"v128.store" => try op_simd.emitV128Store(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
+            .@"v128.load" => try op_simd.emitV128Load(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &oob_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
+            .@"v128.store" => try op_simd.emitV128Store(allocator, &buf, alloc, &pushed_vregs, &oob_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
             // §9.7 / 9.7-ay: v128.load{8,16,32,64}_splat (4 ops).
             // All reuse v128MemPrologue with appropriate access_size
             // + a per-lane-width broadcast tail. 8/16-bit go through
             // GPR (MOVZX + MOVD); 32/64-bit use MOVSS/MOVSD direct
             // load + PSHUFD broadcast.
-            .@"v128.load8_splat" => try op_simd.emitV128Load8Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
-            .@"v128.load16_splat" => try op_simd.emitV128Load16Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
-            .@"v128.load32_splat" => try op_simd.emitV128Load32Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
-            .@"v128.load64_splat" => try op_simd.emitV128Load64Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
+            .@"v128.load8_splat" => try op_simd.emitV128Load8Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &oob_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
+            .@"v128.load16_splat" => try op_simd.emitV128Load16Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &oob_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
+            .@"v128.load32_splat" => try op_simd.emitV128Load32Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &oob_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
+            .@"v128.load64_splat" => try op_simd.emitV128Load64Splat(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &oob_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
             // §9.7 / 9.7-az: v128.load{32,64}_zero (2 ops). Single-
             // instruction MOVSS/MOVSD memory load — the scalar form
             // already zero-extends the upper bits per Intel SDM.
-            .@"v128.load32_zero" => try op_simd.emitV128Load32Zero(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
-            .@"v128.load64_zero" => try op_simd.emitV128Load64Zero(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
+            .@"v128.load32_zero" => try op_simd.emitV128Load32Zero(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &oob_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
+            .@"v128.load64_zero" => try op_simd.emitV128Load64Zero(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &oob_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
             // §9.7 / 9.7-ba: v128.load_lane / store_lane × 4 sizes
             // (8 ops). payload = memarg.offset; extra = lane byte.
             // Uses GPR roundtrip (MOVZX/MOV + PINSR/PEXTR reg-form);
             // store_lane PUSH/POPs RCX around the prologue's RCX-
             // clobbering LEA.
-            .@"v128.load8_lane" => try op_simd.emitV128Load8Lane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), ins.extra, func.func_idx),
-            .@"v128.load16_lane" => try op_simd.emitV128Load16Lane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), ins.extra, func.func_idx),
-            .@"v128.load32_lane" => try op_simd.emitV128Load32Lane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), ins.extra, func.func_idx),
-            .@"v128.load64_lane" => try op_simd.emitV128Load64Lane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), ins.extra, func.func_idx),
-            .@"v128.store8_lane" => try op_simd.emitV128Store8Lane(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), ins.extra, func.func_idx),
-            .@"v128.store16_lane" => try op_simd.emitV128Store16Lane(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), ins.extra, func.func_idx),
-            .@"v128.store32_lane" => try op_simd.emitV128Store32Lane(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), ins.extra, func.func_idx),
-            .@"v128.store64_lane" => try op_simd.emitV128Store64Lane(allocator, &buf, alloc, &pushed_vregs, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), ins.extra, func.func_idx),
+            .@"v128.load8_lane" => try op_simd.emitV128Load8Lane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &oob_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), ins.extra, func.func_idx),
+            .@"v128.load16_lane" => try op_simd.emitV128Load16Lane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &oob_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), ins.extra, func.func_idx),
+            .@"v128.load32_lane" => try op_simd.emitV128Load32Lane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &oob_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), ins.extra, func.func_idx),
+            .@"v128.load64_lane" => try op_simd.emitV128Load64Lane(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &oob_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), ins.extra, func.func_idx),
+            .@"v128.store8_lane" => try op_simd.emitV128Store8Lane(allocator, &buf, alloc, &pushed_vregs, &oob_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), ins.extra, func.func_idx),
+            .@"v128.store16_lane" => try op_simd.emitV128Store16Lane(allocator, &buf, alloc, &pushed_vregs, &oob_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), ins.extra, func.func_idx),
+            .@"v128.store32_lane" => try op_simd.emitV128Store32Lane(allocator, &buf, alloc, &pushed_vregs, &oob_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), ins.extra, func.func_idx),
+            .@"v128.store64_lane" => try op_simd.emitV128Store64Lane(allocator, &buf, alloc, &pushed_vregs, &oob_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), ins.extra, func.func_idx),
             // §9.7 / 9.7-bb: v128.load{8x8,16x4,32x2}_{s,u} (6 ops).
             // MOVSD load + PMOVSX/ZX{BW,WD,DQ} extend. No new
             // encoders. Closes the §9.7 v128 op surface.
-            .@"v128.load8x8_s" => try op_simd.emitV128Load8x8S(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
-            .@"v128.load8x8_u" => try op_simd.emitV128Load8x8U(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
-            .@"v128.load16x4_s" => try op_simd.emitV128Load16x4S(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
-            .@"v128.load16x4_u" => try op_simd.emitV128Load16x4U(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
-            .@"v128.load32x2_s" => try op_simd.emitV128Load32x2S(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
-            .@"v128.load32x2_u" => try op_simd.emitV128Load32x2U(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &bounds_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
+            .@"v128.load8x8_s" => try op_simd.emitV128Load8x8S(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &oob_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
+            .@"v128.load8x8_u" => try op_simd.emitV128Load8x8U(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &oob_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
+            .@"v128.load16x4_s" => try op_simd.emitV128Load16x4S(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &oob_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
+            .@"v128.load16x4_u" => try op_simd.emitV128Load16x4U(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &oob_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
+            .@"v128.load32x2_s" => try op_simd.emitV128Load32x2S(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &oob_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
+            .@"v128.load32x2_u" => try op_simd.emitV128Load32x2U(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &oob_fixups, spill_base_off, @as(u32, @intCast(ins.payload)), func.func_idx),
             // §9.7 / 9.7-af: native single-instr multiply-and-add
             // pair. PMULHRSW (SSSE3) implements Q15 multiply-round-
             // saturate exactly per Wasm spec; PMADDWD (SSE2)

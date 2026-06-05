@@ -532,15 +532,17 @@ test "compile: (i32.const 0) i32.load offset=0 end — ADR-0026 prologue + bound
     //   41 5F                       POP R15                           [55..57]
     //   5D                          POP RBP                           [57]
     //   C3                          RET                               [58]
-    // Bounds-check trap stub (kind=1) — UNCHANGED by D-165 cycle 4.
-    // The D-165 INC is added to the SEPARATE stack-probe trap stub
-    // (kind=4) which is appended AFTER this bounds stub.
+    // Out-of-bounds trap stub — now records the PRECISE oob_memory code 6
+    // (ADR-0164 A3 / D-292) via emitTrapExitStub(ctx, 6): trap_flag store
+    // PLUS an 11-byte trap_kind store (was trap_flag only, the generic kind=0
+    // bucket). The D-165 INC stays in the SEPARATE stack-probe stub (kind=4).
     //
-    //   41 C7 87 28 00 00 00 01 00 00 00   MOV [R15+40], 1            [59..70]
+    //   41 C7 87 28 00 00 00 01 00 00 00   MOV [R15+40], 1   (trap_flag)
+    //   41 C7 87 2C 00 00 00 06 00 00 00   MOV [R15+44], 6   (trap_kind=oob_memory)
     //   ...
     //
-    // Total length: 132 (pre-D-165) + 7 (INC in kind=4 stub) = 139.
-    try testing.expectEqual(@as(usize, 139), out.bytes.len);
+    // Total length: 139 (pre-A3) + 11 (the new trap_kind=6 store) = 150.
+    try testing.expectEqual(@as(usize, 150), out.bytes.len);
     // Spot-check the prologue (verifies ADR-0026 + ADR-0105 structure).
     // The MOV R15, <entry_arg0> byte differs by Cc; derive the
     // expected sequence dynamically so this works on both SysV

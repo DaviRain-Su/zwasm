@@ -669,6 +669,9 @@ pub fn compile(
     defer divzero_fixups.deinit(allocator);
     var overflow_fixups: std.ArrayList(u32) = .empty;
     defer overflow_fixups.deinit(allocator);
+    // ADR-0164 A3 / D-292 — memory oob (code 6) demuxed from bounds_fixups.
+    var oob_fixups: std.ArrayList(u32) = .empty;
+    defer oob_fixups.deinit(allocator);
 
     // Return fixup list (§9.7 / 7.5-return-op): each `return` op
     // emits its result marshal inline and an unconditional B
@@ -761,6 +764,7 @@ pub fn compile(
         .cind_sig_fixups = &cind_sig_fixups,
         .divzero_fixups = &divzero_fixups,
         .overflow_fixups = &overflow_fixups,
+        .oob_fixups = &oob_fixups,
         .return_fixups = &return_fixups,
         .call_fixups = &call_fixups,
         .simd_const_fixups = &simd_const_fixups,
@@ -1753,6 +1757,7 @@ pub fn compile(
                 try EmitCindStub.emit(allocator, &buf, unreach_fixups.items, 5, frame_bytes);
                 try EmitCindStub.emit(allocator, &buf, divzero_fixups.items, 7, frame_bytes);
                 try EmitCindStub.emit(allocator, &buf, overflow_fixups.items, 8, frame_bytes);
+                try EmitCindStub.emit(allocator, &buf, oob_fixups.items, 6, frame_bytes);
                 // ADR-0105 D3 — stack-overflow trap stub. Probe fired
                 // BEFORE `SUB SP, SP, frame_bytes`, so the stub must
                 // NOT add frame_bytes back (SP is still at the post-

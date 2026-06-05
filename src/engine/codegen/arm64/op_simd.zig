@@ -96,7 +96,7 @@ fn v128MemPrologue(ctx: *EmitCtx, addr_vreg: u32, offset_imm: u64, access_size: 
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegX(ip1, 27));
     const fixup_at: u32 = @intCast(ctx.buf.items.len);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.hi, 0));
-    try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+    try ctx.oob_fixups.append(ctx.allocator, fixup_at); // ADR-0164 A3 / D-292 (v128 load oob)
     trace.writeBounds(ctx.func.func_idx, fixup_at);
 }
 

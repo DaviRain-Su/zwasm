@@ -114,6 +114,11 @@ pub const EmitCtx = struct {
     /// dedicated trap stub recording its precise `trap_kind`.
     divzero_fixups: *std.ArrayList(u32),
     overflow_fixups: *std.ArrayList(u32),
+    /// ADR-0164 A3 / D-292 — memory load/store/bulk-memory out-of-bounds
+    /// (B.HI → code 6) fixups, demuxed out of `bounds_fixups` so oob_memory
+    /// reaches a dedicated trap stub. Other `bounds_fixups` kinds (oob_table /
+    /// conversion / ref-null / cast / array-oob) stay generic (D-293).
+    oob_fixups: *std.ArrayList(u32),
     /// `return` / `br <function-depth>` placeholders; patched at
     /// function-final `end` to share the regular epilogue path.
     return_fixups: *std.ArrayList(u32),

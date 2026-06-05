@@ -200,7 +200,7 @@ pub fn emitMemOp(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegX(ip1, 27));
     const fixup_at: u32 = @intCast(ctx.buf.items.len);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.hi, 0)); // unsigned >
-    try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+    try ctx.oob_fixups.append(ctx.allocator, fixup_at);
     // ADR-0028 M3-a-1: record bounds-check emit site (no-op when
     // -Dtrace-ringbuffer=false; comptime-folded out of release).
     trace.writeBounds(ctx.func.func_idx, fixup_at);
@@ -378,7 +378,7 @@ fn emitMemOpI64(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegX(ip1, 27));
     const fixup_at: u32 = @intCast(ctx.buf.items.len);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.hi, 0));
-    try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+    try ctx.oob_fixups.append(ctx.allocator, fixup_at);
     trace.writeBounds(ctx.func.func_idx, fixup_at);
 
     if (is_store) {
@@ -516,7 +516,7 @@ pub fn emitMemoryFill(ctx: *EmitCtx) Error!void {
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegX(15, 27));
     const fixup_at: u32 = @intCast(ctx.buf.items.len);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.hi, 0));
-    try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+    try ctx.oob_fixups.append(ctx.allocator, fixup_at);
     trace.writeBounds(ctx.func.func_idx, fixup_at);
 
     // Step C: Convert dst index to absolute pointer.
@@ -597,7 +597,7 @@ pub fn emitMemoryCopy(ctx: *EmitCtx) Error!void {
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegX(15, 27));
     const fixup_dst_at: u32 = @intCast(ctx.buf.items.len);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.hi, 0));
-    try ctx.bounds_fixups.append(ctx.allocator, fixup_dst_at);
+    try ctx.oob_fixups.append(ctx.allocator, fixup_dst_at);
     trace.writeBounds(ctx.func.func_idx, fixup_dst_at);
 
     // Step B2: Bounds check src + n.
@@ -605,7 +605,7 @@ pub fn emitMemoryCopy(ctx: *EmitCtx) Error!void {
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegX(15, 27));
     const fixup_src_at: u32 = @intCast(ctx.buf.items.len);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.hi, 0));
-    try ctx.bounds_fixups.append(ctx.allocator, fixup_src_at);
+    try ctx.oob_fixups.append(ctx.allocator, fixup_src_at);
     trace.writeBounds(ctx.func.func_idx, fixup_src_at);
 
     // Step C: Convert indices to absolute pointers.
@@ -787,7 +787,7 @@ pub fn emitMemoryInit(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     {
         const fixup_at: u32 = @intCast(ctx.buf.items.len);
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.hi, 0));
-        try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+        try ctx.oob_fixups.append(ctx.allocator, fixup_at);
         trace.writeBounds(ctx.func.func_idx, fixup_at);
     }
 
@@ -797,7 +797,7 @@ pub fn emitMemoryInit(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     {
         const fixup_at: u32 = @intCast(ctx.buf.items.len);
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.hi, 0));
-        try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+        try ctx.oob_fixups.append(ctx.allocator, fixup_at);
         trace.writeBounds(ctx.func.func_idx, fixup_at);
     }
 

@@ -1923,60 +1923,6 @@ test "runVoidExportWasi: JIT _start clock real with host (no trap); 0-stub traps
     try testing.expectError(entry.Error.Trap, runner.runVoidExportWasi(testing.allocator, &clock_start_wasm, "_start", null, null));
 }
 
-// `(module (func (export "_start") unreachable))` — the JIT lowers `unreachable`
-// to an unconditional branch into the shared trap stub, which records a trap-kind
-// code in `JitRuntime.trap_kind` before unwinding (ADR-0164 workstream A).
-const unreachable_start_wasm = [_]u8{
-    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
-    0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03, 0x02,
-    0x01, 0x00, 0x07, 0x0a, 0x01, 0x06, 0x5f, 0x73,
-    0x74, 0x61, 0x72, 0x74, 0x00, 0x00, 0x0a, 0x05,
-    0x01, 0x03, 0x00, 0x00, 0x0b,
-};
-
-test "runVoidExportWasi: a JIT `unreachable` surfaces the precise trap-kind code 5 (ADR-0164 A / D-292)" {
-    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
-    var trap_code: u32 = 99; // sentinel: must be overwritten by the trap path
-    try testing.expectError(entry.Error.Trap, runner.runVoidExportWasi(testing.allocator, &unreachable_start_wasm, "_start", null, &trap_code));
-    // D-292 widening: `unreachable` now records the PRECISE code 5 on BOTH arches
-    // (was the arch-divergent generic bucket — arm64 1, x86_64 0). 5 maps to
-    // TrapKind.unreachable_ via trap_surface.jitTrapCode, reaching interp-parity.
-    const trap_surface = @import("../api/trap_surface.zig");
-    try testing.expectEqual(@as(u32, 5), trap_code);
-    try testing.expectEqual(trap_surface.TrapKind.unreachable_, trap_surface.jitTrapCode(trap_code).?);
-}
-
-// `(module (func (export "_start") i32.const 1 i32.const 0 i32.div_s drop))` —
-// the div-by-zero check traps before the IDIV/SDIV (ADR-0164 A2 / D-292: code 7).
-const divzero_start_wasm = [_]u8{
-    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
-    0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03, 0x02,
-    0x01, 0x00, 0x07, 0x0a, 0x01, 0x06, 0x5f, 0x73,
-    0x74, 0x61, 0x72, 0x74, 0x00, 0x00, 0x0a, 0x0a,
-    0x01, 0x08, 0x00, 0x41, 0x01, 0x41, 0x00, 0x6d,
-    0x1a, 0x0b,
-};
-
-// `(module (func (export "_start") i32.const INT_MIN i32.const -1 i32.div_s drop))` —
-// signed-overflow check traps on INT_MIN / -1 (ADR-0164 A2 / D-292: code 8).
-const div_overflow_start_wasm = [_]u8{
-    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
-    0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03, 0x02,
-    0x01, 0x00, 0x07, 0x0a, 0x01, 0x06, 0x5f, 0x73,
-    0x74, 0x61, 0x72, 0x74, 0x00, 0x00, 0x0a, 0x0e,
-    0x01, 0x0c, 0x00, 0x41, 0x80, 0x80, 0x80, 0x80,
-    0x78, 0x41, 0x7f, 0x6d, 0x1a, 0x0b,
-};
-
-test "runVoidExportWasi: JIT div-by-zero → precise code 7; div_s overflow → code 8 (ADR-0164 A2 / D-292)" {
-    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
-    const trap_surface = @import("../api/trap_surface.zig");
-    var dz: u32 = 99;
-    try testing.expectError(entry.Error.Trap, runner.runVoidExportWasi(testing.allocator, &divzero_start_wasm, "_start", null, &dz));
-    try testing.expectEqual(@as(u32, 7), dz);
-    try testing.expectEqual(trap_surface.TrapKind.div_by_zero, trap_surface.jitTrapCode(dz).?);
-    var ov: u32 = 99;
-    try testing.expectError(entry.Error.Trap, runner.runVoidExportWasi(testing.allocator, &div_overflow_start_wasm, "_start", null, &ov));
-    try testing.expectEqual(@as(u32, 8), ov);
-    try testing.expectEqual(trap_surface.TrapKind.int_overflow, trap_surface.jitTrapCode(ov).?);
-}
+// Trap-KIND execution tests (ADR-0164 A / D-292: unreachable=5, oob_memory=6,
+// div_by_zero=7, int_overflow=8) live in the sibling `runner_trap_test.zig`
+// (split to keep this file under the 2000-line hard cap; mirrors runner_gc_test).

@@ -323,6 +323,7 @@ test {
     _ = @import("engine/runner.zig");
     _ = @import("engine/runner_test.zig");
     _ = @import("engine/runner_gc_test.zig");
+    _ = @import("engine/runner_trap_test.zig");
     _ = @import("ir/analysis/loop_info.zig");
     _ = @import("ir/analysis/liveness.zig");
     _ = @import("ir/verifier.zig");
