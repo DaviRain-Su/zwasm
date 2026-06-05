@@ -48,11 +48,59 @@ fn faultHandler(_: std.posix.SIG, _: *const std.posix.siginfo_t, _: ?*anyopaque)
     std.c._exit(INTERNAL_ERROR_EXIT_CODE);
 }
 
+// Windows (ADR-0166 cycle II): a production diagnostic-only vectored-exception
+// handler. Mirrors `windows_traphandler`'s API surface (ntdll VEH, no fresh
+// @extern), but — unlike that JIT-trap-RECOVERY VEH — this one is the last-resort
+// disposition: on a genuine fault it writes the "internal error" line and
+// `ExitProcess(70)` (never returns), instead of resuming. Production-only (NOT
+// the test harness), so it never shadows the recovery VEH (which production
+// never arms anyway).
+const win_impl = if (builtin.os.tag == .windows) struct {
+    const win = std.os.windows;
+    var veh_handle: ?win.PVOID = null;
+
+    // Zig 0.16's std.os.windows does not expose these kernel32 entry points;
+    // declare them per MSDN (mirrors windows_traphandler's MSDN constant decls).
+    // kernel32 is the Windows system library, not libc (ADR-0070 does not fire).
+    extern "kernel32" fn GetStdHandle(nStdHandle: win.DWORD) callconv(.winapi) win.HANDLE;
+    extern "kernel32" fn WriteFile(hFile: win.HANDLE, lpBuffer: [*]const u8, nBytes: win.DWORD, lpWritten: ?*win.DWORD, lpOverlapped: ?*anyopaque) callconv(.winapi) win.BOOL;
+    extern "kernel32" fn ExitProcess(uExitCode: win.UINT) callconv(.winapi) noreturn;
+    const STD_ERROR_HANDLE: win.DWORD = @bitCast(@as(i32, -12)); // MSDN
+
+    fn handler(exception_info: *win.EXCEPTION_POINTERS) callconv(.winapi) c_long {
+        const code = exception_info.ExceptionRecord.ExceptionCode;
+        switch (code) {
+            win.EXCEPTION_ACCESS_VIOLATION,
+            win.EXCEPTION_ILLEGAL_INSTRUCTION,
+            win.EXCEPTION_DATATYPE_MISALIGNMENT,
+            => {
+                const h = GetStdHandle(STD_ERROR_HANDLE);
+                var written: win.DWORD = 0;
+                _ = WriteFile(h, INTERNAL_ERROR_MSG.ptr, @intCast(INTERNAL_ERROR_MSG.len), &written, null);
+                ExitProcess(INTERNAL_ERROR_EXIT_CODE);
+            },
+            // Faults v2 doesn't own (e.g. a host-installed handler's) pass through.
+            else => return win.EXCEPTION_CONTINUE_SEARCH,
+        }
+    }
+
+    fn install() void {
+        if (veh_handle != null) return;
+        // First = 0 → back of the VEH chain (any host/recovery handler runs first;
+        // only a truly-unhandled fault reaches this last-resort exit).
+        veh_handle = win.ntdll.RtlAddVectoredExceptionHandler(0, &handler);
+    }
+} else struct {};
+
 /// Install the diagnostic-only internal-fault handler. Call once at CLI startup
-/// (production entry). No-op on Windows (ADR-0166 cycle II) + wasi. NOT installed
-/// by the test harness — the spec runners own their own (recovery) handler; this
-/// is the production last-resort disposition.
+/// (production entry). No-op on wasi. NOT installed by the test harness — the spec
+/// runners own their own (recovery) handler; this is the production last-resort
+/// disposition.
 pub fn installInternalFaultHandler() void {
+    if (comptime builtin.os.tag == .windows) {
+        win_impl.install();
+        return;
+    }
     if (comptime !enabled) return;
     std.posix.sigaltstack(&.{
         .sp = &alt_stack,

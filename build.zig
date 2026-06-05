@@ -956,11 +956,23 @@ pub fn build(b: *std.Build) void {
     const run_rust_host_step = b.step("run-rust-host", "Build + run the Rust host example (3-host per ADR-0162; needs native rust)");
     run_rust_host_step.dependOn(&run_rust_host.step);
 
+    // ADR-0166 (D-292 B-core): verify the production internal-fault handler
+    // end-to-end on EACH host. `zwasm --__selftest-crash` deliberately faults; the
+    // handler must catch it and exit with code 70 (a distinct "internal error"
+    // disposition, NOT a silent signal-death). Exercises the POSIX sigaction path
+    // (Mac/Linux) + the Windows VEH path — the only behavioural test of the latter.
+    const run_internal_fault = b.addRunArtifact(exe);
+    run_internal_fault.addArg("--__selftest-crash");
+    run_internal_fault.expectExitCode(70);
+    const test_internal_fault_step = b.step("test-internal-fault", "Verify the internal-fault handler exits 70 (ADR-0166 / D-292 B-core)");
+    test_internal_fault_step.dependOn(&run_internal_fault.step);
+
     // `zig build test-all` — aggregate all enabled test layers.
     // Phase 0: only `test`. Phase 1+ adds spec / e2e / realworld /
     // c_api / fuzz steps as they land. Each layer registers itself
     // here so the user's invocation surface stays stable.
     const test_all_step = b.step("test-all", "Run all enabled test layers");
+    test_all_step.dependOn(&run_internal_fault.step); // ADR-0166 B-core
     test_all_step.dependOn(&run_core_tests.step);
     test_all_step.dependOn(&run_cli_tests.step);
     test_all_step.dependOn(&run_spec_smoke.step);

@@ -71,6 +71,18 @@ pub fn main(init: std.process.Init) !void {
     _ = arg_it.next().?; // executable name
     const subcmd_opt = arg_it.next();
 
+    // ADR-0166 hidden test affordance (D-292 B-core): deliberately trigger an
+    // internal fault so the handler installed above is exercised end-to-end (→
+    // "internal error" line + exit 70). Used by the `test-internal-fault` build
+    // step to verify the handler on each host. Not advertised in `--help`.
+    if (subcmd_opt) |sc| {
+        if (std.mem.eql(u8, sc, "--__selftest-crash")) {
+            const p: *allowzero volatile u8 = @ptrFromInt(0);
+            p.* = 0;
+            unreachable; // the fault handler exits(70) before control returns here
+        }
+    }
+
     // Top-level verb routing (ADR-0159). help/version/unknown resolve
     // here; run/compile/banner fall through to the logic below (each
     // keeps its own arg parsing). An unrecognised first token is a
