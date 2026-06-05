@@ -32,12 +32,15 @@
   `81b3e1d3`, fd_read `20392074`) + `runWasmJit` creates+owns a Host with io (`0c3e4cef`, chunk 2c, main.zig threads
   io). **Plus a PRE-EXISTING CLI bug fixed (`f320db6f`): the shared fd_write only wrote to a capture buffer, so
   `zwasm run` (interp AND jit) silently DROPPED guest stdout — now routes to real std.Io.File.stdout()/stderr() when
-  no buffer + io set.** KEY DESIGN held — interp handlers reused, no 46-syscall re-impl. **NEXT — chunk 2d (refine
-  + complete)**: (1) JIT **proc_exit exit-code** — sets trap_flag, doesn't carry the code; thread it so `--engine jit`
-  exits with the guest's code. (2) **args/environ** — args_sizes_get/args_get/environ_* are still stubs (return 0);
-  reroute to shared handlers + have `runWasmJit` set `host.setArgs`/`setEnvs`. (3) `--dir` preopens for JIT (runWasmJit
-  rejects them currently). (4) register the other ~37 syscalls in `jit_dispatch.zig:lookup` (only 9 names there).
-  Win64 JIT-exec tests gate `skip.phaseEnd(.win64)`; real-stream test uses fd 2 (fd 1 corrupts zig-test protocol).
+  no buffer + io set.** Plus **proc_exit exit-code DONE (`1b01061f`)**: JIT proc_exit records `host.exit_code` (via
+  shared procExit) + unwinds; `runWasmJit` surfaces it (smoke: `--engine jit proc_exit(42)` → exit 42). KEY DESIGN
+  held — interp handlers reused, no 46-syscall re-impl. **NEXT — chunk 2d-rest**: (1) **args/environ** —
+  args_sizes_get/args_get/environ_* JIT stubs return 0; reroute to shared handlers (same pattern) + thread argv into
+  `runWasmJit` (main.zig has `argv_list.items` at the engine_jit branch) → `host.setArgs`. (2) `--dir` preopens for
+  JIT (runWasmJit rejects them; thread `preopens` + `cfg.addPreopen`-equiv on the Host). (3) register the other ~37
+  syscalls in `jit_dispatch.zig:lookup` (only 9 names there → most WASI imports trap on JIT). Recipe for each: `if
+  (rt.wasi_host) |hp| return @intCast(@intFromEnum(shared_handler(host, mem, @bitCast(args))))`. Win64 JIT-exec
+  tests gate `skip.phaseEnd(.win64)`; real-stream test uses fd 2 (fd 1 corrupts zig-test protocol).
   **D-251 AOT-WASI** (separate, later) needs `.cwasm`
   v0.3 import-metadata serialization (`aot/format.zig`) first. **DISCIPLINE: cross-compile windows-gnu; trust ubuntu
   for Linux-runtime divergence; read win crash lines (std Win64 TODOs only show at runtime).**
@@ -64,9 +67,8 @@ no auto-revert. Step 6+7: `should_gate_windows.sh` exit 0 → kick `run_remote_w
 
 ## Step 0.7 (next resume) — verify per-cadence remote logs
 
-ubuntu GREEN at `c042b5ca` (quartet). This turn pushed D-244 chunk 2c (`0c3e4cef` runWasmJit Host) + the CLI
-fd_write→real-stdout fix (`f320db6f`); re-kicked both. The fd.zig fd_write change affects interp too (now prints) —
-diff_runner still 50/55 matched (capture path unchanged). **Step 0.7 next resume:
+ubuntu GREEN at `9ac9aa5b` (chunk 2c + fd_write fix). This turn pushed D-244 proc_exit exit-code (`1b01061f`);
+re-kicked both. **Step 0.7 next resume:
 `tail /tmp/ubuntu.log` (must be OK, auto-revert on FAIL) + `tail /tmp/win.log` — distinguish the D-282 env-flake
 (ALL runners 0-failed + only `configure phase FileNotFound`) from a REAL crash (`' exited with code N`/`panic`/
 `TODO implement ... windows` + a named test). A std Win64 `TODO`-panic in an op I use → reroute like `20b9f860`.**
