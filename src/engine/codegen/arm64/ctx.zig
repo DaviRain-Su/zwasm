@@ -109,6 +109,11 @@ pub const EmitCtx = struct {
     /// (B.NE) fixups. Patched to a dedicated trap stub that
     /// writes `trap_kind = 3`. See `cind_bounds_fixups`.
     cind_sig_fixups: *std.ArrayList(u32),
+    /// ADR-0164 A2 / D-292 — div-by-zero (B.EQ → code 7) + div_s signed-overflow
+    /// (B.VS → code 8) fixups, demuxed out of `bounds_fixups` so each reaches a
+    /// dedicated trap stub recording its precise `trap_kind`.
+    divzero_fixups: *std.ArrayList(u32),
+    overflow_fixups: *std.ArrayList(u32),
     /// `return` / `br <function-depth>` placeholders; patched at
     /// function-final `end` to share the regular epilogue path.
     return_fixups: *std.ArrayList(u32),

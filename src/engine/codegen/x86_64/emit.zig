@@ -699,6 +699,12 @@ pub fn compile(
     // trap-stub block alongside bounds_fixups.
     var unreach_fixups: std.ArrayList(u32) = .empty;
     defer unreach_fixups.deinit(allocator);
+    // ADR-0164 A2 / D-292 — div-by-zero (7) + div_s overflow (8) demuxed from
+    // bounds_fixups so each reaches a precise per-kind trap stub.
+    var divzero_fixups: std.ArrayList(u32) = .empty;
+    defer divzero_fixups.deinit(allocator);
+    var overflow_fixups: std.ArrayList(u32) = .empty;
+    defer overflow_fixups.deinit(allocator);
 
     // Direct-call placeholders awaiting linker patch.
     var call_fixups: std.ArrayList(CallFixup) = .empty;
@@ -767,6 +773,8 @@ pub fn compile(
         .labels = &labels,
         .bounds_fixups = &bounds_fixups,
         .unreach_fixups = &unreach_fixups,
+        .divzero_fixups = &divzero_fixups,
+        .overflow_fixups = &overflow_fixups,
         .call_fixups = &call_fixups,
         .simd_const_fixups = &simd_const_fixups,
         .extra_consts = &extra_consts,

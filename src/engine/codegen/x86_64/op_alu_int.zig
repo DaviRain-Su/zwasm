@@ -780,7 +780,8 @@ fn emitDivRemImpl(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
-    bounds_fixups: *std.ArrayList(u32),
+    divzero_fixups: *std.ArrayList(u32),
+    overflow_fixups: *std.ArrayList(u32),
     spill_base_off: u32,
     width: inst.Width,
     is_signed: bool,
@@ -796,11 +797,11 @@ fn emitDivRemImpl(
     const rhs_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, rhs_v, 1);
     const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
 
-    // Div-by-zero check: TEST divisor, divisor ; JZ trap_stub.
+    // Div-by-zero check: TEST divisor, divisor ; JZ trap_stub (code 7).
     try buf.appendSlice(allocator, inst.encTestRR(width, rhs_r, rhs_r).slice());
     const fixup_at: u32 = @intCast(buf.items.len);
     try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice());
-    try bounds_fixups.append(allocator, fixup_at);
+    try divzero_fixups.append(allocator, fixup_at);
 
     // Signed overflow check (div_s / rem_s only). See the
     // function-level docstring for the 4-step guard sequence.
@@ -834,12 +835,12 @@ fn emitDivRemImpl(
             try buf.appendSlice(allocator, inst.encJmpRel32(0).slice());
         } else {
             // div_s: trap. Z is set from the second CMP (lhs == INT_MIN
-            // on this path), so JE is guaranteed taken. Use the same
-            // bounds_fixups channel as div-by-zero so the linker patches
-            // it to the function's trap stub.
+            // on this path), so JE is guaranteed taken. Routed to the
+            // dedicated signed-overflow stub (code 8) so it surfaces
+            // int_overflow, NOT div_by_zero (ADR-0164 A2 / D-292).
             const trap_jmp_at: u32 = @intCast(buf.items.len);
             try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice());
-            try bounds_fixups.append(allocator, trap_jmp_at);
+            try overflow_fixups.append(allocator, trap_jmp_at);
         }
 
         // Patch the two JNE rel32 placeholders to point at the
@@ -889,7 +890,8 @@ pub fn emitI32DivRem(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
-    bounds_fixups: *std.ArrayList(u32),
+    divzero_fixups: *std.ArrayList(u32),
+    overflow_fixups: *std.ArrayList(u32),
     spill_base_off: u32,
     op: zir.ZirOp,
 ) Error!void {
@@ -903,7 +905,7 @@ pub fn emitI32DivRem(
         .@"i32.div_s", .@"i32.div_u" => false,
         else => unreachable,
     };
-    return emitDivRemImpl(allocator, buf, alloc, pushed_vregs, next_vreg, bounds_fixups, spill_base_off, .d, is_signed, is_rem);
+    return emitDivRemImpl(allocator, buf, alloc, pushed_vregs, next_vreg, divzero_fixups, overflow_fixups, spill_base_off, .d, is_signed, is_rem);
 }
 
 /// Public entry — i64 div / rem dispatch.
@@ -913,7 +915,8 @@ pub fn emitI64DivRem(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
-    bounds_fixups: *std.ArrayList(u32),
+    divzero_fixups: *std.ArrayList(u32),
+    overflow_fixups: *std.ArrayList(u32),
     spill_base_off: u32,
     op: zir.ZirOp,
 ) Error!void {
@@ -927,7 +930,7 @@ pub fn emitI64DivRem(
         .@"i64.div_s", .@"i64.div_u" => false,
         else => unreachable,
     };
-    return emitDivRemImpl(allocator, buf, alloc, pushed_vregs, next_vreg, bounds_fixups, spill_base_off, .q, is_signed, is_rem);
+    return emitDivRemImpl(allocator, buf, alloc, pushed_vregs, next_vreg, divzero_fixups, overflow_fixups, spill_base_off, .q, is_signed, is_rem);
 }
 
 /// Wasm spec §4.4.1.4 (i32.wrap_i64 / i64.extend_i32_u /
@@ -994,7 +997,8 @@ pub fn emitI32DivS(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
         ctx.alloc,
         ctx.pushed_vregs,
         ctx.next_vreg,
-        ctx.bounds_fixups,
+        ctx.divzero_fixups,
+        ctx.overflow_fixups,
         ctx.spill_base_off,
         ins.op,
     );
@@ -1013,7 +1017,8 @@ pub fn emitI64DivS(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
         ctx.alloc,
         ctx.pushed_vregs,
         ctx.next_vreg,
-        ctx.bounds_fixups,
+        ctx.divzero_fixups,
+        ctx.overflow_fixups,
         ctx.spill_base_off,
         ins.op,
     );

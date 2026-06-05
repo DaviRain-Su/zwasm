@@ -663,6 +663,13 @@ pub fn compile(
     var unreach_fixups: std.ArrayList(u32) = .empty;
     defer unreach_fixups.deinit(allocator);
 
+    // ADR-0164 A2 / D-292 — div-by-zero (code 7) + div_s overflow (code 8)
+    // demuxed from bounds_fixups so each reaches a precise per-kind trap stub.
+    var divzero_fixups: std.ArrayList(u32) = .empty;
+    defer divzero_fixups.deinit(allocator);
+    var overflow_fixups: std.ArrayList(u32) = .empty;
+    defer overflow_fixups.deinit(allocator);
+
     // Return fixup list (§9.7 / 7.5-return-op): each `return` op
     // emits its result marshal inline and an unconditional B
     // placeholder; the byte_offset of the placeholder lives here.
@@ -752,6 +759,8 @@ pub fn compile(
         .bounds_fixups = &bounds_fixups,
         .cind_bounds_fixups = &cind_bounds_fixups,
         .cind_sig_fixups = &cind_sig_fixups,
+        .divzero_fixups = &divzero_fixups,
+        .overflow_fixups = &overflow_fixups,
         .return_fixups = &return_fixups,
         .call_fixups = &call_fixups,
         .simd_const_fixups = &simd_const_fixups,
@@ -1739,8 +1748,11 @@ pub fn compile(
                 };
                 try EmitCindStub.emit(allocator, &buf, cind_bounds_fixups.items, 2, frame_bytes);
                 try EmitCindStub.emit(allocator, &buf, cind_sig_fixups.items, 3, frame_bytes);
-                // ADR-0164 A / D-292 — `unreachable` stub, code 5 (interp-parity).
+                // ADR-0164 A / D-292 — `unreachable` (5) + div-by-zero (7) +
+                // div_s signed-overflow (8) stubs (interp-parity per-kind codes).
                 try EmitCindStub.emit(allocator, &buf, unreach_fixups.items, 5, frame_bytes);
+                try EmitCindStub.emit(allocator, &buf, divzero_fixups.items, 7, frame_bytes);
+                try EmitCindStub.emit(allocator, &buf, overflow_fixups.items, 8, frame_bytes);
                 // ADR-0105 D3 — stack-overflow trap stub. Probe fired
                 // BEFORE `SUB SP, SP, frame_bytes`, so the stub must
                 // NOT add frame_bytes back (SP is still at the post-

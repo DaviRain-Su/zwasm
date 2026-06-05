@@ -97,8 +97,10 @@ pub fn jitTrapCode(code: u32) ?TrapKind {
         2 => .oob_table, // call_indirect bounds (B.HS)
         3 => .indirect_call_mismatch, // call_indirect signature (B.NE)
         4 => .stack_overflow, // x86_64 stack-probe stub
-        5 => .unreachable_, // D-292 widening — dedicated `unreachable` stub (both arches)
-        else => null, // 0 unmarked / 1 generic — oob/div/overflow until A2/A3
+        5 => .unreachable_, // D-292 A1 — dedicated `unreachable` stub (both arches)
+        7 => .div_by_zero, // D-292 A2 — div-by-zero stub
+        8 => .int_overflow, // D-292 A2 — div_s INT_MIN/-1 signed-overflow stub
+        else => null, // 0 unmarked / 1 generic — oob_memory until A3
     };
 }
 
@@ -384,7 +386,9 @@ test "jitTrapCode: precise codes map to interp-parity kinds; generic bucket is n
     // D-292 widening — `unreachable` is the first of the common traps to leave the
     // generic bucket for a precise per-kind code (5), unified across arm64+x86_64.
     try testing.expectEqual(TrapKind.unreachable_, jitTrapCode(5).?);
-    // 0 (unmarked) + 1 (generic) remain the legacy bucket (oob/div/overflow until A2/A3).
+    try testing.expectEqual(TrapKind.div_by_zero, jitTrapCode(7).?);
+    try testing.expectEqual(TrapKind.int_overflow, jitTrapCode(8).?);
+    // 0 (unmarked) + 1 (generic) remain the legacy bucket (oob_memory until A3).
     try testing.expect(jitTrapCode(0) == null);
     try testing.expect(jitTrapCode(1) == null);
     // Precise codes reuse the interp message table — true parity.

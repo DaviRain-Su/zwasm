@@ -386,7 +386,7 @@ fn emitDivByZeroCheck(ctx: *EmitCtx, divisor: inst.Xn, is_64: bool) Error!void {
     }
     const fixup_at: u32 = @intCast(ctx.buf.items.len);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.eq, 0));
-    try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+    try ctx.divzero_fixups.append(ctx.allocator, fixup_at);
 }
 
 /// Wasm spec §4.4.1.1 (`i32.div_s` / `i64.div_s`) — signed
@@ -426,7 +426,7 @@ fn emitDivSignedOverflowCheck(
     }
     const fixup_at: u32 = @intCast(ctx.buf.items.len);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.vs, 0));
-    try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+    try ctx.overflow_fixups.append(ctx.allocator, fixup_at);
 }
 
 /// Wasm spec §4.4.1.1 (i32.div_s / i32.div_u / i32.rem_s /
