@@ -21,19 +21,20 @@
 ## Active bundle
 
 - **Bundle-ID**: wasi-p1-completion (D-278)
-- **Cycles-remaining**: ~3
-- **Continuity-memo**: 21→**31/46** wired (all `std.Io.File`-based, cross-compile-clean). DONE: clock_res_get,
-  fd_sync/datasync/advise, pread/pwrite (prior turn); **this turn**: fd_filestat_set_times (`1cf93b1a`,
-  setTimestamps), fd_filestat_set_size + fd_allocate (`32c078f7`, setLength guarded-grow), fd_fdstat_set_rights
-  (`c750fa9a`, narrow-only). **REMAINING 15**: **path_* ×8** (new `src/wasi/path.zig`: create_directory/
-  remove_directory/rename/link/symlink/readlink/filestat_get/filestat_set_times — std.Io.Dir.{createDir,deleteDir,
-  rename,symLink,readLink}, Dir.statFile; mirror pathOpen's preopen-resolve + `..`-escape guard), **fd_readdir**
-  (Dir.iterate + Dircookie cursor + dirent marshal), **proc_raise** (sandbox: notsup/abort, NOT real host raise —
-  short note), **sockets ×9 LAST** (std.posix.socket, ~500 LOC, std.net gone). Recipe: thunk in `wasi.zig` +
-  handler + `lookupWasiThunk` name + resolve-all test name + TDD. **DISCIPLINE: cross-compile `zig build
-  -Dtarget=x86_64-windows-gnu` before every push** (caught nothing new this turn; std.posix.* still banned for fd
-  ops). `src/wasi/fd.zig`=1190 LOC (WARN) → split candidate after the batch.
-- **Exit-condition**: lookupWasiThunk resolves 46/46 preview1 names + each has a green handler test, Mac+Linux.
+- **Cycles-remaining**: ~2
+- **Continuity-memo**: 21→**39/46** wired (all `std.Io.File`/`std.Io.Dir`-based, cross-compile-clean every push).
+  **fd file-meta DONE** (prior turn) + **path_* ×8 DONE this turn** in new `src/wasi/path.zig`:
+  create_directory/remove_directory (`aafd3bfd`), filestat_get/filestat_set_times (`6753570b`), symlink/readlink
+  (`d434757a`), rename/link (`89a6bbf2`). path.zig has shared resolve(preopen+`..`-guard) + mapDirErr; symlink/
+  hardlink tests are privilege-tolerant (acces→skip on Win-no-DevMode). **REMAINING ~7**: **fd_readdir**
+  (std.Io.Dir.iterate + Dircookie u64 cursor + dirent {next-cookie/ino/namlen/type}+name marshal — the one MEDIUM
+  op), **proc_raise** (sandbox: NOT a real host raise — map to notsup or a trap; short note, no real signal),
+  **sockets** (std.Io has NO sockets — std.net gone; std.posix.socket + manual sockaddr; **VERIFY exact preview1
+  socket count** — standard wasi_snapshot_preview1 has only sock_accept/recv/send/shutdown=4, NOT the survey's 9;
+  reconcile the 46 total against the canonical list at impl time). Recipe: thunk + handler + `lookupWasiThunk`
+  name + resolve-all test name + TDD. **DISCIPLINE: `zig build -Dtarget=x86_64-windows-gnu` before every push.**
+  `src/wasi/fd.zig`=1190 LOC + new path.zig — fd.zig split candidate after the batch.
+- **Exit-condition**: lookupWasiThunk resolves all preview1 names + each has a green handler test, Mac+Linux.
 
 ## NEXT — USER-DIRECTED PROGRAM 2026-06-05 (supersedes the bucket-3 plateau): complete WASI + all-engine + CM
 
@@ -47,8 +48,8 @@ work — **ADR-0161** (WASI completion) + **ADR-0162** (toolchain carve-out). Or
   comma-args by export param type (i32/i64/f32/f64; base-0+unsigned-wrap; floats) → boundary Vals; results vec
   sized to result arity (value-returning export now runs); typed results print bare on guest-stdout (wasmtime
   semantics). Interp only; JIT/.cwasm loudly reject `=ARGS`. Smoke-verified (add=2,3→5, swap multi-value, hex, neg).
-- **2. D-278 WASI preview1 21→46 (interp) — IN PROGRESS, see `## Active bundle` (31/46)**: all fd_* file-meta +
-  positional I/O landed. Remaining 15 = path_* ×8 (new path.zig) + fd_readdir + proc_raise + sockets ×9.
+- **2. D-278 WASI preview1 21→46 (interp) — IN PROGRESS, see `## Active bundle` (39/46)**: all fd_* file-meta +
+  positional I/O + the full path_* ×8 batch landed. Remaining ~7 = fd_readdir + proc_raise + sockets.
 - **3. All-engine WASI** (D-251 AOT + D-244 d-3 JIT). **4. Precise GC root + AOT-GC** (D-211; verify load-bearing first).
 - **Post-v0.1.0**: Component Model / WASI P2 (A5 survey informs). WASI 0.3/async (ClojureWasmFromScratch agent ref).
 
@@ -58,13 +59,12 @@ no auto-revert. Step 6+7: `should_gate_windows.sh` exit 0 → kick `run_remote_w
 
 ## Step 0.7 (next resume) — verify per-cadence remote logs
 
-**Win64 fdatasync break RESOLVED + VERIFIED**: the `std.posix.fdatasync` HANDLE bug was fixed (`42e99737`) and
-both remotes confirmed GREEN at `abdaff1f` (`[run_remote_windows] OK.` / `ubuntu OK HEAD=abdaff1f`); windows
-cadence recorded at `c750fa9a`. This turn pushed 4 WASI chunks (`1cf93b1a`/`32c078f7`/`c750fa9a` + handover) — all
-cross-compile-clean (`-Dtarget=x86_64-windows-gnu`) + windows force-kicked for runtime file-op verification. Step
-0.7 next resume: `tail /tmp/win.log` (must be OK; file-op semantics e.g. setLength/setTimestamps differ on Win64)
-+ `tail /tmp/ubuntu.log` (auto-revert on FAIL). **DISCIPLINE: cross-compile windows-gnu before every push touching
-`src/wasi/` or `std.posix`.** **Gate**: Mac = `bash scripts/mac_gate.sh`; ubuntu = always (D6); windows = cadence (D7).
+Prior turn (`b42c03bd`, fd file-meta): ubuntu GREEN + windows GREEN (file-op runtime verified `[run_remote_windows]
+OK.`); windows cadence recorded. This turn pushed the path_* batch (`aafd3bfd`/`6753570b`/`d434757a`/`89a6bbf2` +
+handover) — all `-Dtarget=x86_64-windows-gnu` cross-compile-clean + ubuntu/windows kicked. Step 0.7 next resume:
+`tail /tmp/win.log` (must be OK — Dir.rename/symLink/hardLink semantics differ on Win64; symlink tests are
+acces-tolerant) + `tail /tmp/ubuntu.log` (auto-revert on FAIL). **DISCIPLINE: cross-compile windows-gnu before
+every push touching `src/wasi/` or `std.posix`.** **Gate**: Mac = `mac_gate.sh`; ubuntu = always (D6); windows = cadence (D7).
 
 ## Deferred / open debt (D-274/275/276/257 discharged this session — removed)
 
