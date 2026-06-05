@@ -18,10 +18,17 @@ regression (surfaced by D-291). Audit-first, spans engines; four workstreams **A
   - The OTHER still-generic kinds (oob_table / invalid_conversion / trunc int_overflow / null_reference /
     cast_failure / array_oob — `bounds_fixups` is a multi-kind catch-all) are **D-293** (kinded-fixup refactor),
     deferred behind B/C/D. Trap-kind execution tests live in `src/engine/runner_trap_test.zig` (new this turn).
-- **← LEAD (B): crash-vs-trap distinction.** Internal SIGSEGV/@panic = INTERNAL ERROR, not `Trap`; ideal zero
-  host-crash; **restrict the `[stack_probe]` diag to genuine stack-overflow** (it currently prints on EVERY
-  JIT trap as stub context — the noise seen on `unreachable`; `src/platform/stack_limit.zig`). Step 0 survey
-  where `[stack_probe]` fires + how a genuine SIGSEGV/@panic surfaces today vs a clean wasm trap.
+- **B — crash-vs-trap distinction. IN PROGRESS.**
+  - ✅ diag hygiene (`80cba28a`): `[stack_probe]` + `[d-165] kind=4` prints gated behind `-Dtrace-stackprobe`
+    (default false) → clean Debug test stderr; D-279/D-165 primitives preserved (opt-in). Step-0 CORRECTED the
+    handover's premise — these are setup-time once-per-process Debug prints, NOT per-trap stub context.
+  - **← LEAD (B core): internal SIGSEGV/@panic → graceful INTERNAL ERROR (zero host-crash).** Step-0 finding:
+    there is NO signal handling anywhere (`grep` cli/+entry = empty) — a JIT/interp internal fault hits the OS
+    as raw signal 11 (exit 139), undistinguished from a clean wasm `Trap`. The fix is a `sigaction` SIGSEGV/
+    SIGBUS handler that (a) classifies wasm-guard-page faults vs genuine internal bugs, (b) surfaces a distinct
+    "internal error" message + exit code, not a wasm trap. NEEDS an **ADR-0070 (libc boundary) amendment** for
+    `sigaction`/`sigaltstack` + a design ADR; multi-cycle → run as a bundle. Step 0: how do wasmtime/wasmer
+    install their fault handlers (trap-handler.rs) + what does v1 do; survey `src/platform/` for an install hook.
 - **C — exception(EH)-vs-trap distinction.**
 - **D — audit vs wasmtime / wasmer / WasmEdge / v1** (messages, backtrace, exit codes) → gap list.
 - **then D-291** (ed25519 JIT trap) — once A's widening surfaces the KIND, debug_jit_auto PC→op + shrink to a
@@ -44,8 +51,8 @@ audit-gap list closed-or-deferred.
   thoroughly complete + 3-host green (`deb97903`); ADR-0163 bench+docs program ALL DONE. Tag/publish/cutover are
   manual, user-only — there is no release gate.
 - Debt ledger: 0 `now`. Last full 3-host green = `635bd734` (Mac + ubuntu `701cbe60` + windows `OK`).
-  Mac green through A3 `63e8c6eb`. **A1+A2 verified 3-host GREEN** (ubuntu `OK` + windows `OK` at dca1b7a1 —
-  D-279 heisenbug did NOT fire; trap-stub work clean on all hosts). A3 kicks fire at this turn's push.
+  Mac green through B-diag `80cba28a`. **A1+A2 3-host GREEN** (dca1b7a1); **A3 ubuntu GREEN** (`OK 85157236`),
+  A3 windows kick was in-flight at last check. This turn's push kicks remotes for `80cba28a`.
 
 ## Step 0.7 (next resume) — verify remote logs
 
