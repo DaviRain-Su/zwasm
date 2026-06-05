@@ -75,6 +75,27 @@ no ABI/libc surface, stays within the single-pass no-optimizing-tier principle
 (phase II): overlap (fwd/bwd), n=0, n<8, unaligned src/dst, exact-multiple-of-8,
 1-byte, full-memory-span; adversarial overlap-by-1.
 
+## Results (2026-06-05) — copy FIXED both backends
+
+Word-wise lowering landed: arm64 (`4e6d17fc`) + x86_64 (`838de5a1`). memmove
+zwasm-jit **254 → 38 ms (6.6×)** — now BEATS interp (141 ms; paradox resolved)
+and is 2.3× wasmtime (was 15×), within the normal single-pass trade. Validated:
+5 adversarial overlap/tail/word fixtures + 82 edge cases + spec `memory_copy.wast`
+under `ZWASM_SPEC_ENGINE=jit` + full `zig build test`, green on arm64 (native) AND
+x86_64 (Rosetta); cross-compiles clean for x86_64-linux.
+
+**base64 RE-ATTRIBUTED — NOT a D-285 bug.** Post-copy-fix, base64 zwasm-jit was
+unchanged (770 → 782 ms): its hot loop is 6-bit-grouping + table-lookup byte
+processing, not `memory.copy`. The ~13× vs wasmtime is the **genuine single-pass-
+vs-optimizer gap** (Cranelift vectorizes byte-shuffling; zwasm's single-pass JIT
+does not), i.e. the §1.3 designed trade amplified for this workload class — not a
+codegen defect. The docs' earlier "base64 = D-285 anomaly" framing is corrected.
+
+**`memory.fill` + `memory.init` carry the SAME byte-loop pattern** (arm64
+`op_memory.zig:538` / `:828`, x86_64 likewise) — same defect class, lower bench
+impact (memmove improved 6.6× without them). Filed **D-286** as the follow-on
+(fill needs a byte→word splat; init mirrors copy directly).
+
 ## Reproduction
 
 ```sh

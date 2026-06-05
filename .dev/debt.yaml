@@ -3,22 +3,33 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
+  - id: "D-286"
+    layer: "code"
+    status: "note"
+    description: |-
+      note (D-285 follow-on, 2026-06-05): `memory.fill` + `memory.init` JIT lowering carry the SAME
+      byte-at-a-time loop the now-fixed `memory.copy` had — arm64 `op_memory.zig:538` (fill STRB loop) /
+      `:828` (init LDRB/STRB), x86_64 likewise. Same defect class, lower bench impact (memmove improved
+      6.6x without touching them; no current bench is fill/init-bound). FIX: init mirrors the copy
+      word-wise rewrite directly (LDR/STR X + tail); fill needs a byte→word splat (e.g. multiply the fill
+      byte by 0x0101010101010101, then STR X 8/iter + byte tail). DISCHARGE: word-wise fill+init on both
+      backends, green on the spec fill/init wast under ZWASM_SPEC_ENGINE=jit + edge fixtures.
+    first_raised: "2026-06-05"
+    last_reviewed: "2026-06-05"
+    refs: |-
+      `.dev/findings/d285_jit_bulk_memory_byteloop.md` §Results; `src/engine/codegen/arm64/op_memory.zig:483` (emitMemoryFill) `:763` (emitMemoryInit); `src/engine/codegen/x86_64/op_memory.zig`; D-285 (the copy fix, resolved)
   - id: "D-285"
     layer: "code"
-    status: "now"
+    status: "resolved"
     description: |-
-      now (ADR-0163 A; phase-I CONFIRMED 2026-06-05): JIT lowers `memory.copy` as a byte-at-a-time
-      loop on BOTH backends — arm64 `op_memory.zig:670-680` (LDRB/STRB +1/iter), x86_64
-      `op_memory.zig:724-734` (MOVZX/MOV byte +1/iter). The interp uses `std.mem.copyForwards`/
-      `copyBackwards` (`instruction/wasm_2_0/bulk_memory.zig:75-77`, auto-vectorizable), so on large
-      copies the interp BEATS the JIT → memmove jit 254ms > interp 138ms (paradox); base64 ~13x
-      wasmtime (which lowers to native memmove). NOT the §1.3 trade — wrong lowering of one op. Full
-      analysis + ROI + fix decision: `.dev/findings/d285_jit_bulk_memory_byteloop.md`. FIX (phase III
-      seed): word-wise (8-byte) loop + byte tail, self-contained, both backends, reuses existing
-      bounds/direction logic; check memory.fill/init for the same pattern. Normal bounded TDD fix, NOT
-      an ADR-0153 campaign. Phase-II correctness gate first: overlap fwd/bwd, n=0, n<8, unaligned,
-      multiple-of-8, full-span, adversarial overlap-by-1. DISCHARGE: jit memmove <= interp + edge
-      fixtures green on both arches.
+      RESOLVED 2026-06-05 (4e6d17fc arm64 + 838de5a1 x86_64): word-wise `memory.copy` lowering (8-byte
+      LDR/STR + ≤7-byte tail, fwd+bwd) replaced the byte loop. memmove zwasm-jit 254→38ms (6.6x), now
+      BEATS interp (141ms; the jit-slower-than-interp paradox is gone), 2.3x wasmtime (was 15x). Validated:
+      5 adversarial overlap/tail/word fixtures + 82 edge + spec memory_copy.wast under jit + zig build test,
+      green arm64 native + x86_64 Rosetta; clean x86_64-linux cross-compile; native ubuntu via this turn's
+      gate. base64 (also flagged initially) RE-ATTRIBUTED — NOT a copy bug, it's the genuine single-pass-vs-
+      optimizer gap on byte-shuffling (§1.3 trade). fill/init same-class follow-on → D-286. Findings:
+      `.dev/findings/d285_jit_bulk_memory_byteloop.md`. [delete next cycle — git retains]
     first_raised: "2026-06-05"
     last_reviewed: "2026-06-05"
     refs: |-

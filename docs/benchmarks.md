@@ -80,10 +80,13 @@ The optimizing JITs (wasmtime/wasmer/wazero) lead zwasm-jit/aot by ~1.5–3.9× 
 fib2/sieve/matrix/heapsort/keccak — the expected single-pass-vs-optimizer gap.
 zwasm-jit ≈ zwasm-aot everywhere (shared codegen; AOT's payoff is cold-start).
 
-> † `base64` (~13×) and `memmove` (~15×, and slower than zwasm's own interpreter)
-> are **outliers past the normal trade** — a known zwasm-JIT codegen gap on
-> byte-manipulation / bulk-memory loops, tracked as a fix candidate (debt D-285).
-> They are not representative of the typical 1.5–3.9× compute gap.
+> † `memmove` was an outlier (jit slower than zwasm's own interpreter) — a
+> byte-at-a-time `memory.copy` codegen defect, now **FIXED** (word-wise lowering,
+> both backends): memmove zwasm-jit dropped from 254→38 ms (faster than interp,
+> 2.3× wasmtime). `base64` (~13×) is a separate case — its hot loop is
+> table-lookup byte processing, so it reflects the normal single-pass-vs-optimizer
+> gap amplified for byte-shuffling, not a bug. (Numbers above predate the memmove
+> fix + the ReleaseFast switch; a refreshed table follows the re-measure.)
 
 ## Startup-bound short workloads — mean ms (measures cold start, not throughput)
 
