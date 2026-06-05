@@ -39,6 +39,56 @@ pub fn writeU32(allocator: Allocator, buf: *std.ArrayList(u8), word: u32) !void 
     try buf.appendSlice(allocator, &bytes);
 }
 
+/// Largest frame byte-offset the imm12 LDR/STR forms encode (8-byte X scale ×
+/// 4095). Past this a frame access must go through `frameAddrLarge` (D-289).
+pub const max_frame_imm_off: u32 = 32760;
+
+/// D-289: materialise `SP + off` into `scratch` (a GPR) so a frame load/store
+/// whose byte offset exceeds the LDR/STR imm12 range can address `[scratch, #0]`.
+/// Uses the prologue's two-ADD idiom (`ADD scratch, SP, #(off&0xFFF); ADD
+/// scratch, scratch, #(off>>12), LSL #12`) — `ADD (immediate)` reads Rn==31 as
+/// SP. `off` must be < 16 MiB (vreg/local counts bound it; beyond is genuinely
+/// unencodable). The caller picks a `scratch` that is dead at the call site
+/// (the load destination itself, the other spill-stage reg, or X16/IP0).
+pub fn frameAddrLarge(allocator: Allocator, buf: *std.ArrayList(u8), scratch: inst.Xn, off: u32) Error!void {
+    if (off >= (1 << 24)) return Error.SlotOverflow;
+    try writeU32(allocator, buf, inst.encAddImm12(scratch, 31, @intCast(off & 0xFFF)));
+    try writeU32(allocator, buf, inst.encAddImm12Lsl12(scratch, scratch, @intCast((off >> 12) & 0xFFF)));
+}
+
+/// D-289: emit `LDR{,W} dst, [SP, #off]` (frame load), large-off-safe. The load
+/// destination doubles as the address scratch on the large path (materialise
+/// SP+off into `dst`, then LDR `dst, [dst]`), so no extra register is needed.
+/// `is_w` selects the 32-bit W-form (i32, imm12×4 cap 16380) vs 64-bit X-form
+/// (i64/ref, imm12×8 cap 32760).
+pub fn frameLdrGpr(allocator: Allocator, buf: *std.ArrayList(u8), dst: inst.Xn, off: u32, is_w: bool) Error!void {
+    const cap: u32 = if (is_w) 16380 else max_frame_imm_off;
+    if (off <= cap) {
+        const w = if (is_w) inst.encLdrImmW(dst, 31, @intCast(off)) else inst.encLdrImm(dst, 31, @intCast(off));
+        try writeU32(allocator, buf, w);
+    } else {
+        try frameAddrLarge(allocator, buf, dst, off);
+        const w = if (is_w) inst.encLdrImmW(dst, dst, 0) else inst.encLdrImm(dst, dst, 0);
+        try writeU32(allocator, buf, w);
+    }
+}
+
+/// D-289: emit `STR{,W} src, [SP, #off]` (frame store), large-off-safe. The
+/// store value occupies `src`, so the large path materialises SP+off into
+/// `scratch` (caller passes a reg dead at this point — X16/IP0 at body sites,
+/// the other spill-stage reg at spill sites). `is_w` as in `frameLdrGpr`.
+pub fn frameStrGpr(allocator: Allocator, buf: *std.ArrayList(u8), src: inst.Xn, off: u32, is_w: bool, scratch: inst.Xn) Error!void {
+    const cap: u32 = if (is_w) 16380 else max_frame_imm_off;
+    if (off <= cap) {
+        const w = if (is_w) inst.encStrImmW(src, 31, @intCast(off)) else inst.encStrImm(src, 31, @intCast(off));
+        try writeU32(allocator, buf, w);
+    } else {
+        try frameAddrLarge(allocator, buf, scratch, off);
+        const w = if (is_w) inst.encStrImmW(src, scratch, 0) else inst.encStrImm(src, scratch, 0);
+        try writeU32(allocator, buf, w);
+    }
+}
+
 /// Resolve a vreg's home register (GPR class). Returns the
 /// allocated reg or `Error.UnsupportedOp` for spilled vregs
 /// (handlers that haven't been migrated to spill-aware emission).
@@ -90,12 +140,19 @@ pub fn gprLoadSpilled(
         .spill => |off| blk: {
             const stage = abi.spill_stage_gprs[stage_idx];
             const abs_off = spill_base_off + off;
-            // X-form imm12 scales by 8; max byte offset is 8*4095 = 32760.
-            if (abs_off > 32760 or (abs_off & 7) != 0) {
-                std.debug.print("arm64/gpr: SlotOverflow gprLoadSpilled.spill vreg={d} abs_off={d} (base={d}+off={d})\n", .{ vreg, abs_off, spill_base_off, off });
+            if ((abs_off & 7) != 0) {
+                std.debug.print("arm64/gpr: SlotOverflow gprLoadSpilled.spill misaligned vreg={d} abs_off={d}\n", .{ vreg, abs_off });
                 return Error.SlotOverflow;
             }
-            try writeU32(allocator, buf, inst.encLdrImm(stage, 31, @intCast(abs_off)));
+            // X-form LDR imm12 scales by 8; max byte offset is 8*4095 = 32760.
+            // D-289: a large frame spills past that — materialise SP+abs_off into
+            // the stage reg (also the load destination), then LDR from it.
+            if (abs_off <= max_frame_imm_off) {
+                try writeU32(allocator, buf, inst.encLdrImm(stage, 31, @intCast(abs_off)));
+            } else {
+                try frameAddrLarge(allocator, buf, stage, abs_off);
+                try writeU32(allocator, buf, inst.encLdrImm(stage, stage, 0));
+            }
             break :blk stage;
         },
     };
@@ -137,11 +194,19 @@ pub fn gprStoreSpilled(
         .spill => |off| {
             const stage = abi.spill_stage_gprs[stage_idx];
             const abs_off = spill_base_off + off;
-            if (abs_off > 32760 or (abs_off & 7) != 0) {
-                std.debug.print("arm64/gpr: SlotOverflow gprStoreSpilled.spill vreg={d} abs_off={d} (base={d}+off={d})\n", .{ vreg, abs_off, spill_base_off, off });
+            if ((abs_off & 7) != 0) {
+                std.debug.print("arm64/gpr: SlotOverflow gprStoreSpilled.spill misaligned vreg={d} abs_off={d}\n", .{ vreg, abs_off });
                 return Error.SlotOverflow;
             }
-            try writeU32(allocator, buf, inst.encStrImm(stage, 31, @intCast(abs_off)));
+            // D-289: store value occupies `stage`; materialise SP+abs_off into the
+            // OTHER spill-stage reg (free at the op boundary by design), then STR.
+            if (abs_off <= max_frame_imm_off) {
+                try writeU32(allocator, buf, inst.encStrImm(stage, 31, @intCast(abs_off)));
+            } else {
+                const addr = abi.spill_stage_gprs[1 - stage_idx];
+                try frameAddrLarge(allocator, buf, addr, abs_off);
+                try writeU32(allocator, buf, inst.encStrImm(stage, addr, 0));
+            }
         },
     }
 }

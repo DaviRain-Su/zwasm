@@ -558,9 +558,8 @@ pub fn compile(
             try gpr.writeU32(allocator, &buf, inst.encStrImm(31, 31, lo_off));
             try gpr.writeU32(allocator, &buf, inst.encStrImm(31, 31, hi_off));
         } else {
-            if (loc_off_u > 32760) return Error.UnsupportedOp;
-            const loc_off: u15 = @intCast(loc_off_u);
-            try gpr.writeU32(allocator, &buf, inst.encStrImm(31, 31, loc_off));
+            // D-289: scalar slot zero-init (STR XZR), large-off-safe via X16.
+            try gpr.frameStrGpr(allocator, &buf, 31, loc_off_u, false, 16);
         }
     }
 
@@ -579,14 +578,9 @@ pub fn compile(
             const off_u: u32 = local_base_off + layout.offsets[lidx];
             const ty = localValType(func, num_params, lidx);
             switch (ty) {
-                .i32 => {
-                    if (off_u > 16380) return Error.UnsupportedOp;
-                    try gpr.writeU32(allocator, &buf, inst.encLdrImmW(xd, 31, @intCast(off_u)));
-                },
-                .i64 => {
-                    if (off_u > 32760) return Error.UnsupportedOp;
-                    try gpr.writeU32(allocator, &buf, inst.encLdrImm(xd, 31, @intCast(off_u)));
-                },
+                // D-289: home-seed LDR, large-off-safe (self-computes into xd).
+                .i32 => try gpr.frameLdrGpr(allocator, &buf, xd, off_u, true),
+                .i64 => try gpr.frameLdrGpr(allocator, &buf, xd, off_u, false),
                 // local_homing.isHomeableType only returns true for i32/i64.
                 .f32, .f64, .v128, .ref => unreachable,
             }
@@ -961,14 +955,18 @@ pub fn compile(
                 if (local_idx >= total_locals) return Error.UnsupportedOp;
                 const ty = localValType(func, num_params, local_idx);
                 const offset_u: u32 = local_base_off + layout.offsets[local_idx];
-                const cap: u32 = switch (ty) {
-                    .i32, .f32 => 16380,
-                    .i64, .f64, .ref => 32760,
+                // D-289: i32/i64/ref use the large-off-safe frame helpers below;
+                // FP/v128 still cap (follow-on). Cast the FP/v128 offsets only on
+                // the small path so a large offset can't panic the @intCast.
+                const fp_cap: u32 = switch (ty) {
+                    .f32 => 16380,
+                    .f64 => 32760,
                     .v128 => 65520,
+                    else => 0,
                 };
-                if (offset_u > cap) return Error.UnsupportedOp;
-                const offset_w: u14 = if (ty == .i32 or ty == .f32) @intCast(offset_u) else 0;
-                const offset_x: u15 = if (ty == .i64 or ty == .f64 or ty == .ref) @intCast(offset_u) else 0;
+                if ((ty == .f32 or ty == .f64 or ty == .v128) and offset_u > fp_cap) return Error.UnsupportedOp;
+                const offset_w: u14 = if (ty == .f32) @intCast(offset_u) else 0;
+                const offset_x: u15 = if (ty == .f64) @intCast(offset_u) else 0;
                 const offset_q: u16 = if (ty == .v128) @intCast(offset_u) else 0;
                 const vreg = next_vreg;
                 next_vreg += 1;
@@ -996,14 +994,14 @@ pub fn compile(
                 switch (ty) {
                     .i32 => {
                         const rd = try gpr.gprDefSpilled(alloc, vreg, 0);
-                        try gpr.writeU32(allocator, &buf, inst.encLdrImmW(rd, 31, offset_w));
+                        try gpr.frameLdrGpr(allocator, &buf, rd, offset_u, true);
                         try gpr.gprStoreSpilled(allocator, &buf, alloc, ctx.spill_base_off, vreg, 0);
                     },
                     .i64, .ref => {
                         // D-093 (d-33): reftype shares the i64 X-form
                         // 8-byte slot per ADR-0061.
                         const rd = try gpr.gprDefSpilled(alloc, vreg, 0);
-                        try gpr.writeU32(allocator, &buf, inst.encLdrImm(rd, 31, offset_x));
+                        try gpr.frameLdrGpr(allocator, &buf, rd, offset_u, false);
                         try gpr.gprStoreSpilled(allocator, &buf, alloc, ctx.spill_base_off, vreg, 0);
                     },
                     .f32 => {
@@ -1038,14 +1036,14 @@ pub fn compile(
                 if (local_idx >= total_locals) return Error.UnsupportedOp;
                 const ty = localValType(func, num_params, local_idx);
                 const offset_u: u32 = local_base_off + layout.offsets[local_idx];
-                const cap: u32 = switch (ty) {
-                    .i32, .f32 => 16380,
-                    .i64, .f64, .ref => 32760,
-                    .v128 => 65520,
-                };
-                if (offset_u > cap) return Error.UnsupportedOp;
-                const offset_w: u14 = if (ty == .i32 or ty == .f32) @intCast(offset_u) else 0;
-                const offset_x: u15 = if (ty == .i64 or ty == .f64 or ty == .ref) @intCast(offset_u) else 0;
+                // D-289: i32/i64/ref use frameStrGpr (large-off-safe); FP/v128 cap (follow-on).
+                if ((ty == .f32 or ty == .f64 or ty == .v128) and offset_u > (switch (ty) {
+                    .f32 => @as(u32, 16380),
+                    .f64 => 32760,
+                    else => 65520,
+                })) return Error.UnsupportedOp;
+                const offset_w: u14 = if (ty == .f32) @intCast(offset_u) else 0;
+                const offset_x: u15 = if (ty == .f64) @intCast(offset_u) else 0;
                 const offset_q: u16 = if (ty == .v128) @intCast(offset_u) else 0;
                 const src = pushed_vregs.pop().?;
                 // ADR-0155 stage 1 — register-homed local: MOV the popped src
@@ -1065,11 +1063,11 @@ pub fn compile(
                 switch (ty) {
                     .i32 => {
                         const rs = try gpr.gprLoadSpilled(allocator, &buf, alloc, spill_base_off, src, 0);
-                        try gpr.writeU32(allocator, &buf, inst.encStrImmW(rs, 31, offset_w));
+                        try gpr.frameStrGpr(allocator, &buf, rs, offset_u, true, 16);
                     },
                     .i64, .ref => {
                         const rs = try gpr.gprLoadSpilled(allocator, &buf, alloc, spill_base_off, src, 0);
-                        try gpr.writeU32(allocator, &buf, inst.encStrImm(rs, 31, offset_x));
+                        try gpr.frameStrGpr(allocator, &buf, rs, offset_u, false, 16);
                     },
                     .f32 => {
                         const vs = try gpr.fpLoadSpilled(allocator, &buf, alloc, spill_base_off, src, 0);
@@ -1095,14 +1093,14 @@ pub fn compile(
                 if (local_idx >= total_locals) return Error.UnsupportedOp;
                 const ty = localValType(func, num_params, local_idx);
                 const offset_u: u32 = local_base_off + layout.offsets[local_idx];
-                const cap: u32 = switch (ty) {
-                    .i32, .f32 => 16380,
-                    .i64, .f64, .ref => 32760,
-                    .v128 => 65520,
-                };
-                if (offset_u > cap) return Error.UnsupportedOp;
-                const offset_w: u14 = if (ty == .i32 or ty == .f32) @intCast(offset_u) else 0;
-                const offset_x: u15 = if (ty == .i64 or ty == .f64 or ty == .ref) @intCast(offset_u) else 0;
+                // D-289: i32/i64/ref use frameStrGpr (large-off-safe); FP/v128 cap (follow-on).
+                if ((ty == .f32 or ty == .f64 or ty == .v128) and offset_u > (switch (ty) {
+                    .f32 => @as(u32, 16380),
+                    .f64 => 32760,
+                    else => 65520,
+                })) return Error.UnsupportedOp;
+                const offset_w: u14 = if (ty == .f32) @intCast(offset_u) else 0;
+                const offset_x: u15 = if (ty == .f64) @intCast(offset_u) else 0;
                 const offset_q: u16 = if (ty == .v128) @intCast(offset_u) else 0;
                 const src = pushed_vregs.items[pushed_vregs.items.len - 1];
                 // ADR-0155 stage 1 — register-homed local: MOV the (peeked) src
@@ -1121,11 +1119,11 @@ pub fn compile(
                 switch (ty) {
                     .i32 => {
                         const rs = try gpr.gprLoadSpilled(allocator, &buf, alloc, spill_base_off, src, 0);
-                        try gpr.writeU32(allocator, &buf, inst.encStrImmW(rs, 31, offset_w));
+                        try gpr.frameStrGpr(allocator, &buf, rs, offset_u, true, 16);
                     },
                     .i64, .ref => {
                         const rs = try gpr.gprLoadSpilled(allocator, &buf, alloc, spill_base_off, src, 0);
-                        try gpr.writeU32(allocator, &buf, inst.encStrImm(rs, 31, offset_x));
+                        try gpr.frameStrGpr(allocator, &buf, rs, offset_u, false, 16);
                     },
                     .f32 => {
                         const vs = try gpr.fpLoadSpilled(allocator, &buf, alloc, spill_base_off, src, 0);
