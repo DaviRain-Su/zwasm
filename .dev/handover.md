@@ -20,22 +20,20 @@
   trap under `--engine jit` anyway). D-283 stays open for a subprocess-based full-corpus differential (the
   in-process lane can't per-fixture-timeout the slow JIT-compiles).
 
-## NEXT — D-239: JIT/AOT validate accepts function-references modules (all-engine correctness gap)
+## NEXT — Phase-16 completion: coherence audit + pick a remaining item
 
-**Confirmed real this cycle**: `compile.zig`/`runner.zig` do NOT build the `func_type_indices` map, so the JIT
-validate path types `ref.func N` as abstract `funcref` (validator.zig:359/2416-2423 gate on a non-empty map) →
-a `(ref $t)` param rejects it → **StackTypeMismatch**; the interp builds the map (`instantiate.zig:128-143`,
-passed at `:386`) so it accepts the SAME module. Net: JIT + AOT reject valid function-references modules the
-interp runs. **Repro (red test)**: `br_on_null.0` func[4] `nonnullable-f` = `(call $nn (ref.func $f))` →
-`runner.compileWasm` errors `StackTypeMismatch` (no br_on_null needed). **Fix recipe**: in the JIT compile-path
-validate (find where `compile.zig`/`runner_validate.zig` calls the shared validator), build the func-idx→typeidx
-map (imports-first, mirror `instantiate.zig:128-143`) and pass it into the validator's `func_type_indices` arg.
-Then verify the function-references spec subset compiles under `ZWASM_SPEC_ENGINE=jit` + AOT. **CAREFUL AREA**
-(validator + compile path) — fresh context; survey `instantiate.zig:128-143` + the validator's map param first.
+The user-directed program (complete WASI + all-engine + CM) is **fulfilled except CM (post-v0.1.0)**: WASI 46/46
+(interp+JIT+AOT), all-engine validated on the realworld corpus. **D-239 was a FALSE LEAD** — already fixed
+(`faf23f0a`, 3 regression tests at `runner_test.zig:1447/1478/1500`); my prior flip misread the validator param
+name `func_type_indices` vs compile.zig's `func_typeidxs`. **Lesson**: reconcile a debt row against the actual
+code + its regression test (run it), not a single-name grep, before flipping to `now`.
 
-**After D-239**: (b) Component Model survey follow-up (post-v0.1.0). (c) D-281 socket I/O · D-255 C-API WASI io ·
-debt-repayment. (D-211 precise GcRootMap = **confirmed deferred** this cycle — conservative scan correctness-
-complete, ADR-0148/0060; only a moving collector / §12.5 AOT-GC would need it, neither adopted.)
+Two stale rows found this cycle (D-244, D-239) ⇒ ledger drift from the WASI cycles. **NEXT = run
+`audit_scaffolding`** (Phase-16 surface-audit; weight §F debt-coherence) to systematically catch stale debt /
+doc drift, then act on findings. **After**: (b) Component Model scoping ADR (A5 survey done; post-v0.1.0 but
+scoping is autonomous prep) · (c) D-281 socket I/O · D-255 C-API WASI io. D-211 = confirmed deferred
+(conservative scan correctness-complete, ADR-0148/0060). D-245 = partial-latent (arg'd `invokeAndCheck` @call is
+ReleaseSafe-unsafe but Debug-only-used; no active caller — leave).
 
 ## Step 0.7 (next resume) — verify remote logs
 

@@ -121,53 +121,6 @@ entries:
     last_reviewed: "2026-06-04"
     refs: |-
       `src/engine/codegen/shared/entry.zig` invokeAndCheckVoid (the `@call` seam) + callVoidNoArgs; `src/engine/codegen/shared/jit_abi.zig:9+` (cohort X19/X24/X28 = arm64 callee-saved); ADR-0017 sub-2d-ii (MOV-install cohort, not stack-save) + D-210; `src/cli/run.zig` runWasmJit (Debug-only test); ADR-0136; ROADMAP §11.3 / 11.3-simd-gap bundle
-  - id: "D-239"
-    layer: "code"
-    status: "now"
-    description: |-
-      JIT compile-path REJECTS function-references modules (br_on_null / br_on_non_null /
-      ref_as_non_null) — a §10-exit in-phase must-fix (ADR-0133 §4; NOT deferrable). TWO
-      gaps (this turn's ground-truth, 2026-06-03; supersedes the handover's loose "D-198"
-      attribution — D-198 is the INTERP GC rec-group subtyping debt, a different thing):
-      (A) **VALIDATOR StackTypeMismatch** — ROOT CAUSE PINNED: the shared
-      `validate/validator.zig` types `ref.func N` as the PRECISE `(ref func_type_indices[N])`
-      ONLY when its `func_type_indices` map is non-empty (ADR-0123 D4, validator.zig:359/2416-2423);
-      empty → legacy abstract `funcref`. The INTERP path BUILDS this map (func-idx→typeidx,
-      imports-first) at `instantiate.zig:128-143` and passes it (`:386`) → `ref.func $f` :
-      `(ref $t)` → passes. The JIT `compile.zig` validate path does NOT build/pass it → `ref.func`
-      = abstract funcref → not a subtype of a `(ref $t)` param → StackTypeMismatch. Repro:
-      br_on_null.0 func[4] `nonnullable-f` = `(call $nn (ref.func $f))` (no br_on_null even) fails.
-      FIX: in `compile.zig`, build `func_type_indices` (mirror instantiate.zig:128-143:
-      imported funcs' typeidx ++ defined funcs' typeidx) and thread it into the function-validate
-      call (find the `validator`/`rv.validateFunction...` invocation; it currently passes `&.{}`/omits).
-      (B) **EMIT UnsupportedOp** — the arm64/x86_64 op handler FILES exist
-      (`codegen/{arm64,x86_64}/ops/wasm_3_0/{br_on_null,br_on_non_null,ref_as_non_null}.zig`) but are
-      NOT wired into the per-arch emit dispatch (`codegen/arm64/emit.zig` switch has no entry → br_on_null.1
-      hits `arm64/emit: failing op br_on_null`). FIX: add the 3 dispatch cases (verify the handler files
-      are REAL, not inert stubs, per lesson `2026-06-02-instruction-wasm3-stubs-are-inert-metadata-anchors`).
-      Note A is the primary blocker (4 of 5 fr-rejects + downstream); B only matters once A lets modules
-      reach emit. Sibling rejects likely sharing root A: ref_is_null ElemSegmentTypeMismatch +
-      ref_null InvalidGlobalInitExpr (const-expr ref typing) + the gc i31.6 — verify after A.
-      Distinguishing probe done: func_type_indices is the shared-validator knob; interp populates, JIT doesn't.
-      **PARTIAL (RESOLVED 2026-06-03, `faf23f0a`)**: both named gaps fixed — (A) `compile.zig` now passes the
-      already-built `func_typeidxs` to `validateFunctionAndCollectSelectTypesWithMemory` (new param); (B) the 3
-      ops wired into BOTH arm64 + x86_64 emit dispatch (x86_64 cross-compiled). function-references JIT dir
-      8/0/31 → 20/0/19 (+12), global 796/1 → 808/1, no regression, +1 regression test. Resolved 5 of 8 fr
-      rejects. **REMAINING 3 (distinct mechanisms, this row tracks them)**: (1) `br_on_null.1` UnsupportedOp —
-      the emit handler is first-cut "forward-block targets only; function-return + loop targets → UnsupportedOp"
-      (br_on_null.zig docstring); needs the loop/return-target emit path. (2) `ref_is_null.0`
-      ElemSegmentTypeMismatch — NOT a ref.func issue; an elem-segment reftype validation gap on the JIT compile
-      path. (3) ✅ `ref_null.0` DONE (`195856a1`): `rv.validateGlobalInitExpr` 0xD0 arm now reads the heaptype
-      as s33 (non-negative = concrete typeidx → concrete ref); function-references 20/0/19 → 23/0/16, global
-      808/1 → 811/1. ✅ `br_on_null.1` DONE (`be5a1a32`): arm64 br_on_null rerouted through the shared
-      `op_control.branchOnReg` (function-return/loop/block; null-flag in a reserved scratch). Residual 1 left
-      (`ref_is_null.0` = typed-ref table runtime → **D-240**, blocked). x86_64 br_on_null function-return parity
-      still first-cut (arch-parity, D-238 bucket). Other §10 rejects: tail-call return_call_indirect (D-210),
-      gc i31.6 (D-240 class), UnsupportedEntrySignature ×7.
-    first_raised: "2026-06-03"
-    last_reviewed: "2026-06-05"
-    refs: |-
-      `src/validate/validator.zig:359` (func_type_indices field) / `:2416-2423` (ref.func precise typing) / `:597`; `src/runtime/instance/instantiate.zig:128-143` (interp builds the map) + `:386` (passes it); `src/engine/compile.zig` (JIT validate call — must build+pass); `src/engine/codegen/arm64/emit.zig` (dispatch switch — add 3 cases) + `codegen/arm64/ops/wasm_3_0/{br_on_null,br_on_non_null,ref_as_non_null}.zig`; ADR-0123 D4; ADR-0133 §4 (in-phase must-fix); test/spec/wasm-3.0-assert/function-references/raw/br_on_null.wast
   - id: "D-238"
     layer: "code"
     status: "blocked-by"
