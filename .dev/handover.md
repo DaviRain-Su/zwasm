@@ -3,45 +3,25 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Active bundle
-
-- **Bundle-ID**: D-292-A-codegen-widening (A1..A3)
-- **Cycles-remaining**: ~1 (A3 oob_memory)
-- **Continuity-memo**: per-kind JIT trap codes — 5=unreachable (A1 ✅), 7=div_by_zero + 8=int_overflow
-  (A2 ✅), 6=oob_memory (A3 ←). Mechanism: dedicated per-kind trap stub writing a distinct `trap_kind`,
-  fed by a per-kind fixup channel. arm64 = `EmitCindStub` (opcode-aware: patches B or B.cond) called per
-  channel in emit.zig; x86_64 = `emitTrapExitStub(ctx, kind)` helper + a per-channel block in `emitEndInter`.
-  A3 must DEMUX `bounds_fixups` (now oob-only on x86_64; oob+throw on arm64) — every scalar+SIMD load/store
-  appends it (`op_mem*`, all `op_simd*` load/store). Give oob its own channel → stub code 6; LEAVE arm64
-  `throw` in the generic bounds stub (it's an EH concept, workstream C, not a memory trap). Extend `jitTrapCode(6)`.
-- **Exit-condition**: `jitTrapCode(6)` → oob_memory + an execution test asserts an oob load/store records
-  code 6 on the real JIT path (mirror the A1/A2 `runVoidExportWasi` tests), both arches green.
-
 ## Active program — ADR-0164: trap / crash / exception diagnostics & UX (D-292)
 
 JIT/AOT printed a bare `Trap` (no kind) where v1 + v2-interp give per-kind messages — a v1-parity
 regression (surfaced by D-291). Audit-first, spans engines; four workstreams **A→B→C→D**, then D-291:
 
-- **A — surface the trap KIND + message on ALL engines.**
-  - ✅ **CLI surface DONE this checkpoint (`b6da8604`).** Wired `JitRuntime.trap_kind` through the JIT
-    (`runVoidExportWasi`) + AOT (`runEntryWasi`) run paths → new `trap_surface.jitTrapCode` map → CLI prints
-    a per-kind message. Precise codes (2 oob_table / 3 indirect_call_mismatch / 4 stack_overflow) print the
-    interp-parity kind+msg; the generic bucket (0/1) honestly says "kind not yet distinguished". **Also fixed a
-    double-message bug**: a genuine trap now maps to **exit 1 (a code, NOT a re-raised `error.Trap`)** on JIT/AOT,
-    matching interp — previously it surfaced the kind AND re-raised, so `main.zig`'s `renderFallback` printed a
-    SECOND `Trap` line. `renderFallback` is now reserved for non-trap errors (compile/validate/load). Verified:
-    `zwasm run --engine jit|interp` + AOT `.cwasm` each print exactly ONE `zwasm:` line, exit 1.
-  - ✅ **A1 DONE (`6fcbabbd`): `unreachable` → code 5** on BOTH arches (was arch-divergent generic 1/0).
-  - ✅ **A2 DONE (`687d1a73`): div-by-zero → 7, div_s overflow → 8.** Demuxed `bounds_fixups` → divzero/
-    overflow channels (both arches). Also fixed a latent x86_64 misreport (div_s overflow had ridden the
-    div-by-zero channel → would have surfaced div_by_zero; now int_overflow). CLI prints precise kinds.
-  - **← LEAD (A3): `oob_memory`(6).** The last common kind. Demux the load/store bounds-check sites out of
-    `bounds_fixups` into an oob channel → stub code 6. Sites: `x86_64/op_mem*` + all `op_simd*` load/store
-    (many — they pass `&bounds_fixups` positionally) and arm64 equivalents; keep arm64 `throw` generic.
-    Step 0 survey the load/store bounds-check append sites on both arches first.
-- **B — crash-vs-trap distinction.** Internal SIGSEGV/@panic = INTERNAL ERROR, not `Trap`; ideal zero
+- ✅ **A — surface the trap KIND + message on ALL engines. DONE.**
+  - CLI surface (`b6da8604`): JIT/AOT run paths thread `trap_kind` → `trap_surface.jitTrapCode` → per-kind CLI
+    message; single-message interp-parity (double-`Trap` bug fixed, genuine trap = exit 1 not re-raised).
+  - **Codegen widening DONE for the common 4** (per-kind stub + per-kind fixup channel demuxed from
+    `bounds_fixups`; arm64 `EmitCindStub` / x86_64 `emitTrapExitStub`): A1 `6fcbabbd` unreachable=5 ·
+    A2 `687d1a73` div_by_zero=7 + div_s overflow=8 (fixed a latent x86_64 overflow→div-by-zero misreport) ·
+    A3 `63e8c6eb` oob_memory=6 (memory load/store + bulk + v128). All UNIFIED across arm64+x86_64.
+  - The OTHER still-generic kinds (oob_table / invalid_conversion / trunc int_overflow / null_reference /
+    cast_failure / array_oob — `bounds_fixups` is a multi-kind catch-all) are **D-293** (kinded-fixup refactor),
+    deferred behind B/C/D. Trap-kind execution tests live in `src/engine/runner_trap_test.zig` (new this turn).
+- **← LEAD (B): crash-vs-trap distinction.** Internal SIGSEGV/@panic = INTERNAL ERROR, not `Trap`; ideal zero
   host-crash; **restrict the `[stack_probe]` diag to genuine stack-overflow** (it currently prints on EVERY
-  JIT trap as stub context — the noise seen on `unreachable`).
+  JIT trap as stub context — the noise seen on `unreachable`; `src/platform/stack_limit.zig`). Step 0 survey
+  where `[stack_probe]` fires + how a genuine SIGSEGV/@panic surfaces today vs a clean wasm trap.
 - **C — exception(EH)-vs-trap distinction.**
 - **D — audit vs wasmtime / wasmer / WasmEdge / v1** (messages, backtrace, exit codes) → gap list.
 - **then D-291** (ed25519 JIT trap) — once A's widening surfaces the KIND, debug_jit_auto PC→op + shrink to a
@@ -64,16 +44,17 @@ audit-gap list closed-or-deferred.
   thoroughly complete + 3-host green (`deb97903`); ADR-0163 bench+docs program ALL DONE. Tag/publish/cutover are
   manual, user-only — there is no release gate.
 - Debt ledger: 0 `now`. Last full 3-host green = `635bd734` (Mac + ubuntu `701cbe60` + windows `OK`).
-  Mac green through A2 `687d1a73` (this turn: A1+A2). ubuntu/windows kicks fire at turn-end push.
+  Mac green through A3 `63e8c6eb`. **A1+A2 verified 3-host GREEN** (ubuntu `OK` + windows `OK` at dca1b7a1 —
+  D-279 heisenbug did NOT fire; trap-stub work clean on all hosts). A3 kicks fire at this turn's push.
 
 ## Step 0.7 (next resume) — verify remote logs
 
-- **ubuntu**: `tail -3 /tmp/ubuntu.log` — expect GREEN on the A1+ commits. RED on a codegen-real failure →
-  auto-revert (D3); prior cycle's `unreachable` arch-divergence (x86_64 0 vs arm64 1) is the exact bug A1
-  fixes by unifying to 5, so a trap-kind RED would be a real regression to investigate, not a flake.
-- **windows**: RED with the sha256-shootout non-deterministic signature = the standing **D-279** Win64
-  heisenbug (NOT trap work) — `track_heisenbug.sh win64-testall segv`, KEEP commits (D7), non-blocking.
-  Real new Win64 bug (reproduces on re-run, codegen/ABI touch) → debt row + fix. See D-279 for the lineage.
+- **ubuntu**: `tail -3 /tmp/ubuntu.log` — expect GREEN on A3 (`63e8c6eb`). RED on a codegen-real failure →
+  auto-revert (D3); a trap-kind mismatch would be a real regression (the per-kind stubs), not a flake.
+- **windows**: GREEN expected (A1+A2 were clean). RED with the sha256-shootout non-deterministic signature =
+  the standing **D-279** Win64 heisenbug — `track_heisenbug.sh win64-testall segv`, KEEP commits (D7),
+  non-blocking. Real new Win64 bug (reproduces on re-run, codegen/ABI touch) → debt row + fix.
+- Windows cadence: record green via `should_gate_windows.sh --record` once A3's windows kick is verified.
 
 ## Key refs
 
