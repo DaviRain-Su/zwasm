@@ -67,20 +67,19 @@ audit-gap list closed-or-deferred.
 ## Active bundle
 
 - **Bundle-ID**: D-292-B-core-internal-fault-handler (ADR-0166)
-- **Cycles-remaining**: ~2
-- **Continuity-memo**: ✅ **cycle I DONE** (`c395cf64`): `signal.zig` POSIX handler implemented +
-  production-installed from `main.zig` (first stmt). sigaction SEGV/BUS/ILL/FPE (sigaltstack + SA.SIGINFO|ONSTACK)
-  → async-signal-safe raw `write(2)` + `std.c._exit(70)`, NO recovery. Fork-based unit test (child installs +
-  null-derefs → parent asserts WIFEXITED && exit==70) green on Mac; Windows+Linux cross-compile clean (fork tail
-  comptime-prunes); clean traps still exit 1 (unaffected). ADR-0070 amended (prod write/_exit sites).
-- **Exit-condition**: Windows path emits the same diagnostic + a distinct exit on an unhandled fault; 3-host green.
-  (NOTE: the `--__selftest-crash` end-to-end affordance from the original plan is OPTIONAL — the fork unit test
-  already provides the observable; add it only if a real-binary integration check is wanted.)
-- **Next step (cycle II)**: Windows `SetUnhandledExceptionFilter` (or a diagnostic arm of `windows_traphandler`)
-  in `signal.zig`'s currently-no-op Windows branch → same "internal error" message + `ExitProcess(70)`; verify via
-  the existing fork test's Windows analog OR a Win-gated check. Then cycle III = 3-host verify + bundle close.
+- **Cycles-remaining**: ~1 (just 3-host verify left)
+- **Continuity-memo**: ✅ **cycle I** (`c395cf64`) POSIX sigaction handler (SEGV/BUS/ILL/FPE → raw write +
+  `_exit(70)`, NO recovery), production-installed from `main.zig`; fork unit test green Mac+**ubuntu**. ✅ **cycle
+  II** (`8c076db2`) Windows VEH (`RtlAddVectoredExceptionHandler`, kernel32 GetStdHandle/WriteFile/ExitProcess
+  per MSDN — not libc) → same msg + `ExitProcess(70)`; + a hidden `--__selftest-crash` flag (main.zig) + a
+  `test-internal-fault` build step (`zwasm --__selftest-crash`, `expectExitCode(70)`) wired into **test-all** →
+  the only behavioural test of the Windows VEH. Mac exit-70 confirmed; Win+Linux cross-compile clean; libc OK.
+- **Exit-condition**: the `test-internal-fault` step passes on all 3 hosts (esp. the Windows VEH behaviourally).
+- **Next step (cycle III = close)**: verify `test-internal-fault` GREEN on ubuntu + windows (Step 0.7 of the
+  cycle-II kick). ⚠️ windows is D-279-noisy — grep specifically for `test-internal-fault`/`zwasm` exit-70, not
+  the heisenbug. If green 3-host → `check_bundle_active.sh --close` + retrospective + retarget LEAD.
 
-## ← LEAD: D-292 B-core impl cycle II — Windows fault handler (see Active bundle)
+## ← LEAD: D-292 B-core cycle III — 3-host verify the test-internal-fault step, then close (see bundle)
 
 ## Queue (time-consuming first, per user directive)
 
@@ -94,19 +93,20 @@ audit-gap list closed-or-deferred.
 - **Phase 16 (完成形) — open-ended; the loop CONTINUES, no release (ADR-0156).** v0.1.0-scope program is
   thoroughly complete + 3-host green (`deb97903`); ADR-0163 bench+docs program ALL DONE. Tag/publish/cutover are
   manual, user-only — there is no release gate.
-- Debt ledger: 0 `now`. **D-293 substantially complete** (partial). **D-292 B-core cycle I DONE** (`c395cf64`:
-  POSIX internal-fault handler, production-active, fork-tested, Win+Linux cross-compile clean). slice-4d ubuntu
-  GREEN (`OK 85dfb166`); slice-4d windows = D-279 heisenbug (`fail @6cdabe93`, kept). cycle I kicked this turn.
+- Debt ledger: 0 `now`. **D-293 substantially complete** (partial). **D-292 B-core cycles I+II DONE** (`c395cf64`
+  POSIX + `8c076db2` Windows VEH + `--__selftest-crash`/`test-internal-fault` end-to-end test). cycle I ubuntu
+  GREEN (`OK b1c83e5c`); cycle I windows = D-279 heisenbug, now **3 failed steps** (escalating — investigation
+  flag). cycle II kicked this turn (verifies the Windows VEH behaviourally). D-291 diag gated.
 
 ## Step 0.7 (next resume) — verify remote logs
 
-- **ubuntu**: ✅ GREEN at `85dfb166`. B-core cycle I `c395cf64` (signal.zig — POSIX) kicked this turn — verify
-  `/tmp/ubuntu.log` `OK` (the fork test must pass on x86_64 Linux; signal behaviour is per-OS).
-- **windows**: ⚠️ D-279 `spec-simd.exe` exit 3 on **4 CONSECUTIVE runs** (slice-2/3/4b/4d, none touched simd) —
-  looks reproducible NOT flaky; weigh a real D-279 investigation (re-run the SAME win commit twice to confirm
-  determinism). Last win-recorded = `6cdabe93`. B-core cycle I is POSIX-only (Windows handler = cycle II).
-- **Gate note**: `run_remote_windows.sh` aborts before printing `OK` on failure → `OK` line = real green;
-  `Build Summary: N failed` (no `OK`) = RED. Read the Build Summary, not just the wrapper exit.
+- **ubuntu**: ✅ cycle I GREEN at `b1c83e5c` (`OK`) — POSIX fork test passes on x86_64 Linux. cycle II `8c076db2`
+  kicked this turn — verify `/tmp/ubuntu.log` `OK` (incl. the new `test-internal-fault` step → exit 70).
+- **windows**: ⚠️ D-279 now **5 CONSECUTIVE runs** + **ESCALATED to 3 failed steps** (was 1; spec-simd/
+  wasm-2-0-assert, none touched simd; ubuntu+Mac green) — reproducible NOT flaky; **real D-279 investigation
+  warranted** (re-run SAME win commit twice for determinism). cycle II `8c076db2` kicked — grep `test-internal-
+  fault`/exit-70 SPECIFICALLY (the Windows VEH's only behavioural check), past the D-279 noise.
+- **Gate note**: `run_remote_windows.sh` `OK` line = real green; `Build Summary: N failed` (no `OK`) = RED.
 
 ## Key refs
 
