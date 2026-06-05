@@ -11,22 +11,24 @@
   perf no-deficiency (D-265 closed). The 2026-06-05 bucket-3 plateau is now **superseded** by a new user-directed
   program (below).
 
-## NEW USER-DIRECTED PROGRAM (2026-06-05) — release-readiness: benchmarks + official docs (ADR-0163)
+## USER-DIRECTED PROGRAM (2026-06-05) — release-readiness: benchmarks + official docs (ADR-0163)
 
 Charter + scope + the ADR-0156 boundary (this PREPARES release artifacts; it does NOT tag/publish — release stays
 user-only): **[`ADR-0163`](decisions/0163_release_readiness_bench_and_docs_program.md)**. Five workstreams; run as
-ordinary Phase-16 work (survey-first; bundle multi-cycle pieces). Suggested order **B→A→C→D→E** (D/E doc-only,
-can parallelise). **Start a fresh `/continue` here.**
+ordinary Phase-16 work (survey-first; bundle multi-cycle pieces). Order **B→A→C→D→E** (D/E doc-only, parallel-OK).
 
-- **A — Benchmark suite expansion (v1-level + more).** v1's `~/Documents/MyProducts/zwasm/bench/` is the breadth
-  baseline (`compare_runtimes.sh`, `runtime_comparison.yaml`, `simd_comparison.yaml`, `shootout-src/`, `tinygo/`,
-  `run_wasm.mjs`=Node/V8). v2 today = `bench/` (history.yaml + sightglass + per-op SIMD vs wasmtime/wazero/wasmer +
-  aot_coldstart). Add: realworld WASI workloads (now JIT/AOT-runnable, NOT just interp), all-engine matrix
-  (interp/JIT/AOT), startup + peak-memory. Reuse `scripts/run_bench.sh` (`--compare=all` exists). **Step 0**: diff
-  v1 bench/ vs v2 bench/, list the gaps.
-- **B — Multi-runtime provisioning (nix-sanctioned).** Pin wasmtime / wasmer / wazero / wasm3 (opt: wasmedge,
-  Node-V8) in **`flake.nix`** as a `.#bench` dev-shell (model: the `.#gen` toolchain shell). Mirror v1's
-  `compare_runtimes.sh` / `runtime_comparison.yaml` shape. **User explicitly OK'd installing into nix.**
+- **B — Multi-runtime provisioning. ✅ DONE (`310314bb`).** `flake.nix` gained `devShells.bench` pinning
+  wasmtime/wazero/wasmer/wasmedge (Mac-host-only; test hosts never build it). `run_bench.sh --compare` learned
+  `wasmedge` (`wasmedge WASM`, WASI _start; interpreter by default). **wasm3 deliberately excluded** (nixpkgs marks
+  0.5.0 insecure — 8 CVEs, unmaintained; not in v1's set → no parity lost). End-to-end verified: `--bench=tinygo/fib
+  --compare=all --quick` → all 5 runtimes (zwasm 5.31 / wasmtime 6.87 / wazero 5.92 / wasmer 11.48 / wasmedge 13.47
+  ms — startup-dominated tiny workload). node/bun still deferred (need JS WASI wrapper → A).
+- **A — Benchmark suite expansion (v1-level + more). ← NEXT.** v1's `~/Documents/MyProducts/zwasm/bench/` is the
+  breadth baseline (`compare_runtimes.sh`, `runtime_comparison.yaml`, `simd_comparison.yaml`, `shootout-src/`,
+  `tinygo/`, `run_wasm.mjs`=Node/V8). v2 today = `bench/` (history.yaml + sightglass + per-op SIMD + aot_coldstart).
+  Add: realworld WASI workloads (now JIT/AOT-runnable, NOT just interp), all-engine matrix (interp/JIT/AOT), startup
+  + peak-memory, optionally node/bun (build the JS WASI wrapper, v1's `run_wasm.mjs`). Reuse `scripts/run_bench.sh`
+  (`--compare=all` now incl. wasmedge). **Step 0**: diff v1 bench/ vs v2 bench/, list the gaps.
 - **C — Official benchmark docs.** Public-quality `docs/benchmarks.md` (or `docs/reference/benchmarks.md`):
   methodology, host matrix, results vs other runtimes + vs v1, reproduction, caveats (startup-confound). Link from
   README.
@@ -41,10 +43,10 @@ FALSE since D-244; re-profile WITH realworld WASI workloads (JIT+AOT now run the
 
 ## Step 0.7 (next resume) — verify remote logs
 
-`tail -3 /tmp/ubuntu.log` = `OK (HEAD=8b19faad)`; `/tmp/win.log` = `OK`. The post-bucket-3 docs commits
-(`25c4146d` sockets-finding, `deb97903` bucket-3, ADR-0163 + this handover) are **docs-only — no code delta since
-the 3-host-green `8b19faad`**, so no remote re-kick was needed. A fresh `/continue` resumes on the ADR-0163
-program (workstream B or A), not a remote-verify.
+Last 3-host green = `8b19faad`. The B commits (`20de319d` bench shell, `310314bb` run_bench wasmedge) touch only
+`flake.nix` (NEW `devShells.bench` — `default` untouched, so test hosts build the same shell) + `scripts/run_bench.sh`
+(a Mac-host bench script, not run by `test-all`) → **no `src/` delta since `8b19faad`**, so no remote re-kick this
+turn. A fresh `/continue` resumes on **workstream A** (survey: diff v1 vs v2 bench/), not a remote-verify.
 
 ## Deferred / open (unchanged by this program)
 
