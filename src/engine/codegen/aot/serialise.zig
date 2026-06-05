@@ -94,6 +94,10 @@ pub const Input = struct {
     /// Canonical typeidx per defined function (parallel to `bytes_per_func`),
     /// written into each `CwasmFuncMeta.canon_typeidx`. Empty → all 0.
     canon_typeidx_per_func: []const u32 = &.{},
+    /// Imports metadata (v0.4, D-251 AOT-WASI): `(module, name, kind)` per
+    /// declared import in wasm-space order. Lets a standalone `.cwasm`
+    /// rebuild `host_dispatch_base` (WASI syscall fn-ptrs). Empty for none.
+    imports: []const format.CwasmImport = &.{},
 };
 
 /// Produce a `.cwasm` v0.2 byte stream. Caller owns the
@@ -137,6 +141,12 @@ pub fn produceCwasm(allocator: Allocator, input: Input) Error![]u8 {
     var elem_size: u32 = if (input.has_table) 4 else 0;
     for (input.elem) |seg| elem_size += 8 + @as(u32, @intCast(seg.funcidxs.len)) * 4;
 
+    // Imports section (v0.4): 4-byte count then one variable-length entry
+    // each. The count is always written so the loader has a fixed place to
+    // read n_imports_total even when there are none.
+    var imports_size: u32 = 4;
+    for (input.imports) |imp| imports_size += @intCast(format.importEntrySize(imp.module.len, imp.name.len));
+
     // Code section: concatenate per-func bytes with 4-byte
     // alignment between funcs (loader mmap()s with
     // PROT_EXEC; arm64 prefers 4-byte-aligned function
@@ -158,7 +168,8 @@ pub fn produceCwasm(allocator: Allocator, input: Input) Error![]u8 {
     const globals_offset: u32 = exports_offset + exports_size;
     const memory_init_offset: u32 = globals_offset + globals_size;
     const elem_offset: u32 = memory_init_offset + memory_init_size;
-    const code_offset: u32 = elem_offset + elem_size;
+    const imports_offset: u32 = elem_offset + elem_size;
+    const code_offset: u32 = imports_offset + imports_size;
     const total_size: u32 = code_offset + code_size;
 
     var out = try allocator.alloc(u8, total_size);
@@ -192,6 +203,8 @@ pub fn produceCwasm(allocator: Allocator, input: Input) Error![]u8 {
         .table0_size = if (input.has_table) input.table0_size else 0,
         .elem_offset = elem_offset,
         .elem_size = elem_size,
+        .imports_offset = imports_offset,
+        .imports_size = imports_size,
     };
     try format.writeHeader(out[0..format.header_size], header);
 
@@ -272,7 +285,16 @@ pub fn produceCwasm(allocator: Allocator, input: Input) Error![]u8 {
         }
     }
 
-    // 9. Code section.
+    // 9. Imports section (v0.4): [n_imports_total: u32] then variable-length
+    // entries. Always writes the count; standalone-run rebuilds host dispatch.
+    std.mem.writeInt(u32, out[imports_offset..][0..4], @intCast(input.imports.len), .little);
+    var imp_cursor: u32 = imports_offset + 4;
+    for (input.imports) |imp| {
+        const written = try format.writeImportEntry(out[imp_cursor .. imports_offset + imports_size], imp);
+        imp_cursor += @intCast(written);
+    }
+
+    // 10. Code section.
     for (input.bytes_per_func, 0..) |b, i| {
         const off = code_offset + per_func_offsets[i];
         @memcpy(out[off..][0..b.len], b);

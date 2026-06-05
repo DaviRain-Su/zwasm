@@ -44,6 +44,17 @@ pub const Export = struct {
     func_idx: u32, // wasm-space (imports included)
 };
 
+/// One import reconstructed from the v0.4 imports-metadata section
+/// (D-251 AOT-WASI): module + field name (allocator-owned dups, since the
+/// source `.cwasm` buffer may be freed after `load`) + the import kind
+/// byte (`@intFromEnum(sections.ImportKind)`). The standalone runner
+/// replays these to rebuild `host_dispatch_base`.
+pub const ImportMeta = struct {
+    module: []u8,
+    name: []u8,
+    kind: u8,
+};
+
 /// One active data segment reconstructed from the memory_init section
 /// (v0.3 cycle-1b): destination byte offset + init bytes (allocator-owned
 /// dup, since the source `.cwasm` buffer may be freed after `load`).
@@ -95,6 +106,11 @@ pub const LoadedModule = struct {
     /// Imported-function count; `entry`/`resolveEntry` index defined
     /// funcs (wasm idx - n_imports).
     n_imports: u32,
+    /// Imports metadata (v0.4 §D-251): `(module, name, kind)` per declared
+    /// import in wasm-space order. The standalone WASI runner replays these
+    /// to populate `host_dispatch_base`. Empty for a v0.4 image with no
+    /// imports. Allocator-owned (module/name independently allocated).
+    imports: []ImportMeta,
     allocator: Allocator,
 
     pub fn deinit(self: *LoadedModule) void {
@@ -107,6 +123,11 @@ pub const LoadedModule = struct {
         self.allocator.free(self.funcptr_base);
         self.allocator.free(self.typeidx_base);
         self.allocator.free(self.func_offsets);
+        for (self.imports) |imp| {
+            self.allocator.free(imp.module);
+            self.allocator.free(imp.name);
+        }
+        self.allocator.free(self.imports);
         jit_mem.free(self.block);
     }
 
@@ -188,6 +209,18 @@ pub fn load(allocator: Allocator, bytes: []const u8) Error!LoadedModule {
         allocator.free(mem_data);
     }
 
+    // Imports section (v0.4 §D-251): dup module/name into allocator-owned
+    // memory so they outlive `bytes`.
+    if (@as(u64, h.imports_offset) + h.imports_size > bytes.len) return Error.TruncatedImage;
+    const imports = try parseImports(allocator, bytes, h);
+    errdefer {
+        for (imports) |imp| {
+            allocator.free(imp.module);
+            allocator.free(imp.name);
+        }
+        allocator.free(imports);
+    }
+
     // Allocate the executable block, copy the code section in (W^X:
     // writable while copying/patching, executable before any entry call).
     var block = try jit_mem.alloc(h.code_size);
@@ -238,8 +271,39 @@ pub fn load(allocator: Allocator, bytes: []const u8) Error!LoadedModule {
         .funcptr_base = table.funcptr_base,
         .typeidx_base = table.typeidx_base,
         .n_imports = h.n_imports,
+        .imports = imports,
         .allocator = allocator,
     };
+}
+
+/// Parse the v0.4 imports-metadata section ([n_imports_total: u32] then
+/// variable-length `(module, name, kind)` entries), duping each name into
+/// allocator-owned memory. An `imports_size` < 4 (e.g. a pre-v0.4-shaped
+/// image, though those are version-rejected) yields zero imports.
+fn parseImports(allocator: Allocator, bytes: []const u8, h: format.CwasmHeader) Error![]ImportMeta {
+    if (h.imports_size < 4) return allocator.alloc(ImportMeta, 0);
+    const section = bytes[h.imports_offset..][0..h.imports_size];
+    const n_imports = std.mem.readInt(u32, section[0..4], .little);
+
+    var list = try allocator.alloc(ImportMeta, n_imports);
+    errdefer allocator.free(list);
+    var filled: usize = 0;
+    errdefer for (list[0..filled]) |imp| {
+        allocator.free(imp.module);
+        allocator.free(imp.name);
+    };
+
+    var cursor: usize = 4;
+    for (0..n_imports) |i| {
+        const parsed = try format.parseImportEntry(section[cursor..]);
+        const module = try allocator.dupe(u8, parsed.imp.module);
+        errdefer allocator.free(module);
+        const name = try allocator.dupe(u8, parsed.imp.name);
+        list[i] = .{ .module = module, .name = name, .kind = parsed.imp.kind };
+        filled = i + 1;
+        cursor += parsed.consumed;
+    }
+    return list;
 }
 
 /// Table-0 reconstruction (v0.3 cycle-2a). Allocates `funcptr_base`
@@ -613,6 +677,44 @@ test "load: exports section resolves entry by name, falls back, then executes (v
     const idx = mod.resolveEntry(null).?;
     const f = mod.entry(idx, *const fn () callconv(.c) i32);
     try testing.expectEqual(@as(i32, 7), f());
+}
+
+test "load: v0.4 imports-metadata round-trips module/name/kind (D-251)" {
+    // No execution — the imports section is arch-independent metadata, so
+    // this exercises produce→load→mod.imports on every host (incl. Win64).
+    const arch_tag: u32 = switch (builtin.cpu.arch) {
+        .aarch64 => format.arch_arm64,
+        .x86_64 => format.arch_x86_64,
+        else => return,
+    };
+    const stub: []const u8 = &[_]u8{ 0xC0, 0x03, 0x5F, 0xD6 };
+    const cwasm = try serialise.produceCwasm(testing.allocator, .{
+        .arch = arch_tag,
+        .bytes_per_func = &.{stub},
+        .n_slots_per_func = &.{0},
+        .sig_idx_per_func = &.{0},
+        .relocs = &.{},
+        .func_idx_for_reloc = &.{},
+        .types_serialised = &.{},
+        .n_imports = 2,
+        .n_types = 0,
+        .imports = &.{
+            .{ .module = "wasi_snapshot_preview1", .name = "fd_write", .kind = 0x00 },
+            .{ .module = "env", .name = "memory", .kind = 0x02 },
+        },
+    });
+    defer testing.allocator.free(cwasm);
+
+    var mod = try load(testing.allocator, cwasm);
+    defer mod.deinit();
+
+    try testing.expectEqual(@as(usize, 2), mod.imports.len);
+    try testing.expectEqualStrings("wasi_snapshot_preview1", mod.imports[0].module);
+    try testing.expectEqualStrings("fd_write", mod.imports[0].name);
+    try testing.expectEqual(@as(u8, 0x00), mod.imports[0].kind);
+    try testing.expectEqualStrings("env", mod.imports[1].module);
+    try testing.expectEqualStrings("memory", mod.imports[1].name);
+    try testing.expectEqual(@as(u8, 0x02), mod.imports[1].kind);
 }
 
 test "load: _start takes precedence over a non-entry export for the default request" {
