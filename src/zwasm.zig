@@ -116,7 +116,8 @@ pub const platform = struct {
     pub const jit_mem = @import("platform/jit_mem.zig");
     pub const windows_traphandler = @import("platform/windows_traphandler.zig");
     pub const stack_limit = @import("platform/stack_limit.zig");
-    // signal / fs / time are placeholders per ADR-0023 §3 P-H.
+    pub const signal = @import("platform/signal.zig"); // ADR-0166 internal-fault handler
+    // fs / time are placeholders per ADR-0023 §3 P-H.
 };
 
 // Zone 1
@@ -309,6 +310,7 @@ test {
     _ = @import("platform/jit_mem.zig");
     _ = @import("platform/windows_traphandler.zig");
     _ = @import("platform/stack_limit.zig");
+    _ = @import("platform/signal.zig");
     _ = @import("engine/codegen/shared/linker.zig");
     _ = @import("engine/codegen/shared/entry.zig");
     _ = @import("engine/codegen/shared/entry_buffer_write.zig");

@@ -46,6 +46,12 @@ const diagnostic = zwasm.diagnostic;
 const dbg = zwasm.support.dbg;
 
 pub fn main(init: std.process.Init) !void {
+    // ADR-0166 (D-292 B-core): install the diagnostic-only internal-fault
+    // handler FIRST, so any later internal SIGSEGV/crash surfaces a distinct
+    // "internal error" + exit 70 instead of a silent signal-death. v2 has no
+    // signal-based wasm traps, so any fatal signal here is a zwasm bug.
+    zwasm.platform.signal.installInternalFaultHandler();
+
     const io = init.io;
     const gpa = init.gpa;
 
