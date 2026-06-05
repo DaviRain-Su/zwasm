@@ -231,6 +231,11 @@ pub fn random_get(rt: *JitRuntime, buf_ptr: i32, buf_len: i32) callconv(.c) i32 
 /// d-2 stub returns 0/0 (no args). Real argv plumbing lands in
 /// d-3 alongside a `WasiContext` JitRuntime tail-extension.
 pub fn args_sizes_get(rt: *JitRuntime, argc_ptr: i32, argv_buf_size_ptr: i32) callconv(.c) i32 {
+    if (rt.wasi_host) |hp| {
+        const host: *wasi_host_mod.Host = @ptrCast(@alignCast(hp));
+        const mem = rt.vm_base[0..@intCast(rt.mem_limit)];
+        return @intCast(@intFromEnum(wasi_proc.argsSizesGet(host, mem, @bitCast(argc_ptr), @bitCast(argv_buf_size_ptr))));
+    }
     if (argc_ptr < 0 or argv_buf_size_ptr < 0) return @intFromEnum(Errno.inval);
     const argc_off: u64 = @intCast(argc_ptr);
     const argv_off: u64 = @intCast(argv_buf_size_ptr);
@@ -245,15 +250,23 @@ pub fn args_sizes_get(rt: *JitRuntime, argc_ptr: i32, argv_buf_size_ptr: i32) ca
 /// `args_get(argv_ptrs, argv_buf) -> errno` — d-2 stub no-op
 /// (paired with args_sizes_get returning 0).
 pub fn args_get(rt: *JitRuntime, argv_ptrs: i32, argv_buf: i32) callconv(.c) i32 {
-    _ = rt;
-    _ = argv_ptrs;
-    _ = argv_buf;
+    if (rt.wasi_host) |hp| {
+        const host: *wasi_host_mod.Host = @ptrCast(@alignCast(hp));
+        const mem = rt.vm_base[0..@intCast(rt.mem_limit)];
+        return @intCast(@intFromEnum(wasi_proc.argsGet(host, mem, @bitCast(argv_ptrs), @bitCast(argv_buf))));
+    }
+    // Compute-only fallback: no argv → success no-op.
     return @intFromEnum(Errno.success);
 }
 
 /// `environ_sizes_get(envc_ptr, envv_buf_size_ptr) -> errno` —
 /// d-2 stub returns 0/0 (no environ).
 pub fn environ_sizes_get(rt: *JitRuntime, envc_ptr: i32, envv_buf_size_ptr: i32) callconv(.c) i32 {
+    if (rt.wasi_host) |hp| {
+        const host: *wasi_host_mod.Host = @ptrCast(@alignCast(hp));
+        const mem = rt.vm_base[0..@intCast(rt.mem_limit)];
+        return @intCast(@intFromEnum(wasi_proc.environSizesGet(host, mem, @bitCast(envc_ptr), @bitCast(envv_buf_size_ptr))));
+    }
     if (envc_ptr < 0 or envv_buf_size_ptr < 0) return @intFromEnum(Errno.inval);
     const c_off: u64 = @intCast(envc_ptr);
     const v_off: u64 = @intCast(envv_buf_size_ptr);
@@ -267,9 +280,12 @@ pub fn environ_sizes_get(rt: *JitRuntime, envc_ptr: i32, envv_buf_size_ptr: i32)
 
 /// `environ_get(envv_ptrs, envv_buf) -> errno` — d-2 no-op.
 pub fn environ_get(rt: *JitRuntime, envv_ptrs: i32, envv_buf: i32) callconv(.c) i32 {
-    _ = rt;
-    _ = envv_ptrs;
-    _ = envv_buf;
+    if (rt.wasi_host) |hp| {
+        const host: *wasi_host_mod.Host = @ptrCast(@alignCast(hp));
+        const mem = rt.vm_base[0..@intCast(rt.mem_limit)];
+        return @intCast(@intFromEnum(wasi_proc.environGet(host, mem, @bitCast(envv_ptrs), @bitCast(envv_buf))));
+    }
+    // Compute-only fallback: no environ → success no-op.
     return @intFromEnum(Errno.success);
 }
 
