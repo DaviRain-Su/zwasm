@@ -81,6 +81,39 @@ pub fn clockTimeGet(
 }
 
 // ============================================================
+// clock_res_get
+// ============================================================
+
+/// `clock_res_get(clock_id, *resolution_out) → errno`. Writes the
+/// host clock's granularity in nanoseconds. Same clock-id mapping as
+/// `clock_time_get`. `Clock.resolution` (Zig 0.16) surfaces
+/// `ClockUnavailable` for a clock the host lacks → `notsup`; an
+/// unexpected OS failure → `io`. Requires `host.io` (else `nosys`).
+pub fn clockResGet(
+    host: *Host,
+    mem: []u8,
+    clock_id: u32,
+    resolution_ptr: u32,
+) p1.Errno {
+    const io = host.io orelse return .nosys;
+    const clock: std.Io.Clock = switch (clock_id) {
+        0 => .real,
+        1 => .awake,
+        2 => .cpu_process,
+        3 => .cpu_thread,
+        else => return .inval,
+    };
+    const dur = clock.resolution(io) catch |err| switch (err) {
+        error.ClockUnavailable => return .notsup,
+        error.Unexpected => return .io,
+    };
+    const ns_i = dur.toNanoseconds();
+    if (ns_i < 0) return .inval;
+    const ns_u: u64 = @intCast(@min(ns_i, std.math.maxInt(u64)));
+    return writeU64LE(mem, resolution_ptr, ns_u);
+}
+
+// ============================================================
 // random_get
 // ============================================================
 
@@ -178,6 +211,40 @@ test "clockTimeGet: missing host.io returns nosys" {
     var mem: [16]u8 = @splat(0);
     const e = clockTimeGet(&h, &mem, 0, 0, 0);
     try testing.expectEqual(p1.Errno.nosys, e);
+}
+
+test "clockResGet: realtime writes a positive resolution u64" {
+    var h = try Host.init(testing.allocator);
+    defer h.deinit();
+    h.io = testing.io;
+    var mem: [16]u8 = @splat(0);
+    const e = clockResGet(&h, &mem, 0, 0);
+    try testing.expectEqual(p1.Errno.success, e);
+    const ns = std.mem.readInt(u64, mem[0..8], .little);
+    try testing.expect(ns > 0 and ns <= std.time.ns_per_s);
+}
+
+test "clockResGet: unknown clock_id returns inval" {
+    var h = try Host.init(testing.allocator);
+    defer h.deinit();
+    h.io = testing.io;
+    var mem: [16]u8 = @splat(0);
+    try testing.expectEqual(p1.Errno.inval, clockResGet(&h, &mem, 99, 0));
+}
+
+test "clockResGet: out-of-bounds ptr returns fault" {
+    var h = try Host.init(testing.allocator);
+    defer h.deinit();
+    h.io = testing.io;
+    var mem: [4]u8 = @splat(0);
+    try testing.expectEqual(p1.Errno.fault, clockResGet(&h, &mem, 0, 0));
+}
+
+test "clockResGet: missing host.io returns nosys" {
+    var h = try Host.init(testing.allocator);
+    defer h.deinit();
+    var mem: [16]u8 = @splat(0);
+    try testing.expectEqual(p1.Errno.nosys, clockResGet(&h, &mem, 0, 0));
 }
 
 test "randomGet: fills 32 bytes with at least one non-zero byte" {

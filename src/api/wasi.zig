@@ -180,6 +180,12 @@ fn thunkClockTimeGet(rt: *runtime.Runtime, ctx: *anyopaque) anyerror!void {
     const clock_id = rt.popOperand().u32;
     return pushErrno(rt, wasi_clocks.clockTimeGet(host, rt.memory, clock_id, precision, time_ptr));
 }
+fn thunkClockResGet(rt: *runtime.Runtime, ctx: *anyopaque) anyerror!void {
+    const host: *wasi_host.Host = @ptrCast(@alignCast(ctx));
+    const resolution_ptr = rt.popOperand().u32;
+    const clock_id = rt.popOperand().u32;
+    return pushErrno(rt, wasi_clocks.clockResGet(host, rt.memory, clock_id, resolution_ptr));
+}
 fn thunkRandomGet(rt: *runtime.Runtime, ctx: *anyopaque) anyerror!void {
     const host: *wasi_host.Host = @ptrCast(@alignCast(ctx));
     const buf_len = rt.popOperand().u32;
@@ -290,6 +296,7 @@ pub fn lookupWasiThunk(name: []const u8) ?HostThunkFn {
     if (std.mem.eql(u8, name, "environ_get")) return thunkEnvironGet;
     if (std.mem.eql(u8, name, "environ_sizes_get")) return thunkEnvironSizesGet;
     if (std.mem.eql(u8, name, "clock_time_get")) return thunkClockTimeGet;
+    if (std.mem.eql(u8, name, "clock_res_get")) return thunkClockResGet;
     if (std.mem.eql(u8, name, "random_get")) return thunkRandomGet;
     if (std.mem.eql(u8, name, "poll_oneoff")) return thunkPollOneoff;
     if (std.mem.eql(u8, name, "fd_read")) return thunkFdRead;
@@ -365,14 +372,14 @@ test "lookupWasiThunk: every supported WASI 0.1 import resolves" {
         "fd_write",            "proc_exit",
         "args_get",            "args_sizes_get",
         "environ_get",         "environ_sizes_get",
-        "clock_time_get",      "random_get",
-        "poll_oneoff",         "fd_read",
-        "fd_close",            "fd_seek",
-        "fd_tell",             "fd_fdstat_get",
-        "fd_fdstat_set_flags", "path_open",
-        "fd_prestat_get",      "fd_prestat_dir_name",
-        "sched_yield",         "fd_filestat_get",
-        "path_unlink_file",
+        "clock_time_get",      "clock_res_get",
+        "random_get",          "poll_oneoff",
+        "fd_read",             "fd_close",
+        "fd_seek",             "fd_tell",
+        "fd_fdstat_get",       "fd_fdstat_set_flags",
+        "path_open",           "fd_prestat_get",
+        "fd_prestat_dir_name", "sched_yield",
+        "fd_filestat_get",     "path_unlink_file",
     };
     inline for (names) |n| {
         try testing.expect(lookupWasiThunk(n) != null);
