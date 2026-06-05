@@ -238,7 +238,12 @@ pub const JitRuntime = extern struct {
     /// Always-on (no build-flag gate); cost is 8 bytes ARM64 / 7
     /// bytes x86_64 per function prologue.
     jit_executed_flag: u32 = 0,
-    _pad4: u32 = 0,
+    /// ADR-0164 B / D-291 — gated diagnostic scratch #2 (former `_pad4`). When
+    /// `-Dtrace-stackprobe` is set, the arm64 `i32.load offset=16777416` (the
+    /// ed25519 funcptr load) stores its loaded VALUE here so entry.zig can print
+    /// it alongside the cind index — localising load-side vs preserve-side
+    /// corruption. Default builds emit no write (comptime-gated) → stays a zero slot.
+    trap_aux2: u32 = 0,
     /// §9.9 / 9.9-m-1b (per ADR-0056, amending ADR-0017): base
     /// pointer to `Runtime.func_entities: []FuncEntity`. Each
     /// entry is a `FuncEntity` struct (size = `@sizeOf(FuncEntity)`,
@@ -946,6 +951,8 @@ pub const stack_limit_off: u12 = @offsetOf(JitRuntime, "stack_limit");
 pub const trap_stub_entry_count_off: u12 = @offsetOf(JitRuntime, "trap_stub_entry_count");
 /// ADR-0164 B / D-291 — gated cind-index diagnostic scratch (see `trap_aux`).
 pub const trap_aux_off: u12 = @offsetOf(JitRuntime, "trap_aux");
+/// ADR-0164 B / D-291 — gated load-value diagnostic scratch (see `trap_aux2`).
+pub const trap_aux2_off: u12 = @offsetOf(JitRuntime, "trap_aux2");
 /// Phase 10.E IT-6 cycle 3c — EH dispatcher integration. Trampoline
 /// reads ptr+count via `[X19/R15 + off]` to materialize
 /// `ExceptionTable` + `CodeMap` slices for `dispatchThrow`.

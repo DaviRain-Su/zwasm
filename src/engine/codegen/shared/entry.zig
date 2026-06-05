@@ -231,9 +231,10 @@ inline fn invokeAndCheck(
     // (default false; ADR-0164 B / D-292) — a D-279 Win64 investigation primitive.
     if (comptime build_options.trace_stackprobe) {
         if (rt.trap_kind == 4) std.debug.print("[d-165] kind=4 cumulative_trap_stub_entry_count={d}\n", .{rt.trap_stub_entry_count});
-        // D-291 — call_indirect bounds trap: the offending table index captured
-        // by the cind-bounds stub (table_size is module-static, e.g. ed25519 = 2).
-        if (rt.trap_kind == 2) std.debug.print("[d-291] kind=2 oob_table cind_index={d}\n", .{rt.trap_aux});
+        // D-291 — call_indirect bounds trap: cind index (trap_aux) + the last
+        // funcptr-load value (trap_aux2). cind_index != last_funcptr_load ⇒
+        // corruption between load and cind consume; equal ⇒ the load reads wrong.
+        if (rt.trap_kind == 2) std.debug.print("[d-291] kind=2 oob_table cind_index={d} last_funcptr_load={d}\n", .{ rt.trap_aux, rt.trap_aux2 });
     }
     return Error.Trap;
 }
@@ -307,8 +308,8 @@ inline fn invokeAndCheckVoid(
     }
     if (rt.trap_flag != 0) {
         if (comptime build_options.trace_stackprobe) {
-            // D-291 — capture the offending call_indirect table index (kind=2).
-            if (rt.trap_kind == 2) std.debug.print("[d-291] kind=2 oob_table cind_index={d}\n", .{rt.trap_aux});
+            // D-291 — cind index (trap_aux) + last funcptr-load value (trap_aux2).
+            if (rt.trap_kind == 2) std.debug.print("[d-291] kind=2 oob_table cind_index={d} last_funcptr_load={d}\n", .{ rt.trap_aux, rt.trap_aux2 });
         }
         return Error.Trap;
     }
