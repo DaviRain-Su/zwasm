@@ -3,34 +3,33 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## ACTIVE (2026-06-05, user→autonomous) — ADR-0163 bench program done; arm64 JIT completeness gaps queued
+## CLEAN-SESSION ENTRY (prepared 2026-06-05; loop deliberately NOT re-armed)
 
-User-directed bench program (directives 1-4) all DONE: **D-285** memory.copy byte-loop FIXED both backends
-(`4e6d17fc`/`838de5a1`; memmove jit 254→39ms, 3-host green, findings `.dev/findings/d285_*`); **ReleaseFast**
-methodology fix (`b8fe1f74`); **docs refreshed** with definitive 3-host numbers (`bd0581e6`/`7d9dfbe0`); **bench
-breadth** +6 shootout fixtures (`f8a0f43f`, crypto/parse/PRNG/dispatch). base64 re-attributed (optimizer gap,
-not a bug). Breadth EXPOSED 4 real zwasm gaps — now the active queue, each mechanism CONFIRMED this turn with a
-ready fix plan in its debt row:
-- **D-289 GPR PATHS FIXED + VERIFIED (`340eaf5e`)**: arm64 large frame-offset addressing — `frameAddrLarge`
-  + `frameLdrGpr`/`frameStrGpr` applied to body local.get/set/tee (i32/i64/ref) + prologue scalar/home-seed +
-  gpr.zig spills. 2 new fixtures green (`many_locals` local off~40k→305419896; `many_locals_spill` spill
-  off>32760→210) + 83 edge + full test + **ubuntu green** (`OK 701cbe60`), no regression. x86_64-clean (disp32).
-  **Remaining D-289**: FP/v128 + param-marshal + stack-args large arms still cap (follow-on, no fixture yet).
-- **D-291 CHARACTERIZED (`256a4333`)**: ed25519 JIT fault is a **controlled JIT trap, NOT a SIGSEGV** (lldb
-  caught no signal; clean `Trap`+exit 1) and **NOT stack** (margin ~16 MB) — both earlier guesses corrected.
-  Ruled out: stack, SIGSEGV, basic-op (spec-green), D-289 GPR paths (fixtures verify). Left: a pre-existing
-  miscompile in an op/interaction at scale, newly exposed. NEXT: read trap-code (D-165 infra → KIND), then
-  debug_jit_auto PC→op + shrink repro. Not gated (ed25519 excluded).
-- **D-288 mechanism CONFIRMED (`3b128e97`)**: interp recursion cap = `frame.zig max_frame_stack=256` (fixed
-  inline `frame_buf:[256]Frame`). NOT a trivial bump — Frame embeds `label_buf[128]`; fix = frame-stack
-  inline+heap-overflow redesign (mirror label_buf+label_overflow), likely an ADR. JIT side separate.
-- **NEXT** (fresh-context candidates, precisely scoped in debt): **D-291** (surface trap-code KIND → debug_jit_auto
-  → op; cheap first step) · **D-288** (frame-stack redesign, ADR-likely) · **D-284** (entry-resolution unify) ·
-  **D-287** (control-stack cap ADR) · **D-290** (wabt→wasm-tools, user-directed) · D-289 FP arms + D-286
-  (low-signal/speculative — measure-first defer). Deep/design ones want fresh context.
-- 3-host: **D-289 GPR fix now FULLY GREEN on all 3 hosts** — Mac native + ubuntu `OK 701cbe60` + windows
-  `OK` (cadence recorded @635bd734). The earlier `zwasm-zig-host-hello` line was mid-stream verbose, not a
-  failure. So the new full-3-host-green baseline = `635bd734` (supersedes D-285 `838de5a1`). Last 2 turns = debt only.
+User stopped the loop to prep a clean session + added a new theme. **Lead with the time-consuming/substantive
+items, NOT easy wins** (explicit directive). Each item's full mechanism + fix plan lives in its **debt row**
+(source of truth); this is just the routing. A fresh `/continue` resumes here — pick the lead unless a better
+judgment, then run the per-task TDD loop.
+
+1. **ADR-0164 / D-292 — trap/crash/exception diagnostics & UX (NEW, user-directed, FRONT).** JIT prints bare
+   `Trap` (no kind) where v1 + v2-interp give per-kind messages — v1-parity regression (surfaced by D-291).
+   Audit-first (spans engines): A) surface trap KIND on all engines (wire JIT trap-code→`Trap` kind→`surfaceTrap`)
+   B) crash-vs-trap (internal fault = INTERNAL ERROR not `Trap`; zero-host-crash; scope the `[stack_probe]` diag
+   to real stack-overflow) C) exception(EH)-vs-trap D) audit vs wasmtime/wasmer/WasmEdge/v1. **Workstream A
+   first directly UNBLOCKS D-291.**
+2. **D-291** (ed25519 JIT trap root-cause) — easy once A surfaces the KIND; then debug_jit_auto PC→op + shrink.
+3. **D-288** (interp frame-stack inline+overflow redesign; ackermann 1021-deep traps at the 256 cap; ADR-likely).
+4. **D-287** (validator control-stack cap 1024 rejects valid deep nesting — raise + ADR; product-envelope call).
+5. Moderate: **D-284** (interp/jit/aot entry-resolution unify) · **D-290** (wabt→wasm-tools, user-directed hygiene).
+6. Defer (low-signal / measure-first): **D-289 FP/param/stack large arms** · **D-286** (fill/init byte-loop).
+
+## Done this session (recorded in commits + debt; here for context)
+
+ADR-0163 bench program (user directives 1-4) ALL DONE: **D-285** memory.copy byte-loop fixed both backends
+(memmove jit 254→39ms; `.dev/findings/d285_*`), ReleaseFast methodology fix, docs refreshed with definitive
+3-host numbers, **bench breadth** +6 shootout fixtures (crypto/parse/PRNG/dispatch); base64 re-attributed
+(optimizer gap, not a bug). **D-289 arm64 large-frame GPR paths fixed + VERIFIED** (2 fixtures + 83 edge + full
+test). Breadth exposed the gaps now in the queue above (D-287/288/289-FP/291) + D-284/D-286.
+**Full 3-host green baseline = `635bd734`** (Mac native + ubuntu `OK 701cbe60` + windows `OK`).
 
 ## Current state
 

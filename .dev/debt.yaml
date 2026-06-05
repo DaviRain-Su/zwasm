@@ -3,6 +3,25 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
+  - id: "D-292"
+    layer: "code"
+    status: "note"
+    description: |-
+      note (user-directed 2026-06-05; ADR-0164): trap/crash/exception diagnostics & UX are opaque +
+      inconsistent across engines. The JIT path prints a bare `Trap` (no kind) where v1 + v2-interp give
+      per-kind messages — a v1-parity regression (surfaced by D-291). Program (ADR-0164, time-consuming →
+      FRONT of the clean session): A) surface the specific trap KIND + message on ALL engines (wire the JIT
+      trap-code → `Trap` kind → interp-parity `surfaceTrap`); B) crash-vs-trap distinction (internal SIGSEGV/
+      @panic = INTERNAL ERROR not `Trap`; ideal zero host-crash; restrict the `[stack_probe]` diag to genuine
+      stack-overflow); C) exception(EH)-vs-trap distinction; D) audit vs wasmtime/wasmer/WasmEdge/v1 (messages,
+      backtrace, exit codes) → gap list. **Synergy: workstream A first directly UNBLOCKS D-291** (ed25519's
+      trap kind becomes one command away). INVESTIGATION/AUDIT FIRST (spans engines), then fix. DISCHARGE:
+      all engines emit clear per-kind trap messages + crash/trap/exception cleanly distinguished + audit-gap
+      list closed-or-deferred.
+    first_raised: "2026-06-05"
+    last_reviewed: "2026-06-05"
+    refs: |-
+      `.dev/decisions/0164_trap_crash_exception_diagnostics_ux.md`; `src/runtime/trap.zig` (Trap set); `src/cli/run.zig` (surfaceTrap + runWasmJit generic Trap); `src/cli/diag_print.zig`; `src/platform/stack_limit.zig`; `~/Documents/MyProducts/zwasm/src/cli.zig` (v1 per-kind msgs); D-291 (motivating case); D-165 (JIT trap-code infra)
   - id: "D-291"
     layer: "code"
     status: "note"
