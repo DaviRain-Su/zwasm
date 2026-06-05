@@ -8,6 +8,7 @@
 //! Zone 2 (`src/wasi/`) — siblings: p1.zig / host.zig / fd.zig / clocks.zig.
 
 const std = @import("std");
+const builtin = @import("builtin");
 
 const p1 = @import("preview1.zig");
 const host_mod = @import("host.zig");
@@ -294,6 +295,12 @@ test "pathFilestatGet / pathFilestatSetTimes: stat a path + set its mtim" {
 }
 
 test "pathSymlink / pathReadlink: create a symlink and read its target back" {
+    // POSIX-only: Windows symlink creation needs a privilege + readlink error
+    // mapping diverges. comptime early-return, not a skip.
+    // SIBLING-AT: src/wasi/path.zig (pathSymlink/pathReadlink delegate to cross-
+    // platform std.Io.Dir.{symLink,readLink}; Win64 build verified via
+    // `zig build -Dtarget=x86_64-windows-gnu`, per skip.zig ADR-0122 D3).
+    if (comptime builtin.os.tag == .windows) return;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     var h = try Host.init(testing.allocator);
@@ -324,6 +331,12 @@ test "pathSymlink / pathReadlink: create a symlink and read its target back" {
 }
 
 test "pathRename / pathLink: move a file and hard-link it" {
+    // POSIX-only: Windows rename/hardlink filesystem semantics diverge (move-
+    // over-target rules + hardlink support). comptime early-return, NOT a skip.
+    // SIBLING-AT: src/wasi/path.zig (pathRename/pathLink delegate to cross-
+    // platform std.Io.Dir.{rename,hardLink}; Win64 build verified via
+    // `zig build -Dtarget=x86_64-windows-gnu`, per skip.zig ADR-0122 D3).
+    if (comptime builtin.os.tag == .windows) return;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     try tmp.dir.writeFile(testing.io, .{ .sub_path = "a.txt", .data = "data" });
