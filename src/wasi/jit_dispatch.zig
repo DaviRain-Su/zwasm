@@ -39,6 +39,7 @@ const sections = @import("../parse/sections.zig");
 // avoiding a second 46-syscall implementation.
 const wasi_host_mod = @import("host.zig");
 const wasi_clocks = @import("clocks.zig");
+const wasi_fd = @import("fd.zig");
 
 const JitRuntime = jit_abi.JitRuntime;
 const Errno = enum(i32) {
@@ -65,6 +66,14 @@ pub fn fd_write(
     iovs_len: i32,
     nwritten_ptr: i32,
 ) callconv(.c) i32 {
+    // D-244: with a host, delegate to the shared interp handler — it gathers
+    // the ciovecs, routes to the host's real stdout/stderr (or capture buffer),
+    // and supports file fds, none of which the compute-only stub does.
+    if (rt.wasi_host) |hp| {
+        const host: *wasi_host_mod.Host = @ptrCast(@alignCast(hp));
+        const mem = rt.vm_base[0..@intCast(rt.mem_limit)];
+        return @intCast(@intFromEnum(wasi_fd.fdWrite(host, mem, @bitCast(fd), @bitCast(iovs_ptr), @bitCast(iovs_len), @bitCast(nwritten_ptr))));
+    }
     const writer_kind: enum { stdout, stderr, bad } = switch (fd) {
         1 => .stdout,
         2 => .stderr,
@@ -422,6 +431,37 @@ test "random_get: host-attached → real entropy; no host → zero-fill (D-244)"
     @memset(&memory, 0xAB);
     try testing.expectEqual(@as(i32, @intFromEnum(Errno.success)), random_get(&rt, 0, 32));
     for (memory) |b| try testing.expectEqual(@as(u8, 0), b);
+}
+
+test "fd_write: host-attached routes to the shared handler (real stdout capture) (D-244)" {
+    var memory: [64]u8 = @splat(0);
+    // ciovec at mem[16] = {buf=24, len=5}; payload "HELLO" at mem[24].
+    std.mem.writeInt(u32, memory[16..20], 24, .little);
+    std.mem.writeInt(u32, memory[20..24], 5, .little);
+    @memcpy(memory[24..29], "HELLO");
+    var capture: std.ArrayList(u8) = .empty;
+    defer capture.deinit(testing.allocator);
+    var h = try wasi_host_mod.Host.init(testing.allocator);
+    defer h.deinit();
+    h.io = testing.io;
+    h.stdout_buffer = &capture;
+    var rt: JitRuntime = .{
+        .vm_base = &memory,
+        .mem_limit = memory.len,
+        .funcptr_base = undefined,
+        .table_size = 0,
+        .typeidx_base = undefined,
+        .trap_flag = 0,
+        .globals_base = undefined,
+        .globals_count = 0,
+        .host_dispatch_base = undefined,
+        .host_dispatch_count = 0,
+        .wasi_host = &h,
+    };
+    // fd=1 stdout, 1 ciovec at 16, nwritten at 40.
+    try testing.expectEqual(@as(i32, @intFromEnum(Errno.success)), fd_write(&rt, 1, 16, 1, 40));
+    try testing.expectEqualStrings("HELLO", capture.items);
+    try testing.expectEqual(@as(u32, 5), std.mem.readInt(u32, memory[40..44], .little));
 }
 
 test "lookup: fd_read resolves" {
