@@ -59,24 +59,25 @@ audit-gap list closed-or-deferred.
   Real fix = a flat/trampolined interp (no native recursion) OR a native-stack-limit check in `invoke` — an
   interp-architecture change (ADR). Substantial → moved to the queue. (Latent: Win 1MB native limit ~128 < 256.)
 
-- ✅ **D-293 slice-1 DONE** (`15a54fdf`): oob_table (code 2) precise + UNIFIED across arm64+x86_64 for
-  table-access (get/set/fill/copy/init) + call_indirect bounds. x86_64 got a new `oobtable_fixups` channel;
-  arm64 op_table re-routed to `cind_bounds_fixups`. Test: table.get OOB → code 2. 3-host verified (ubuntu OK).
-- ✅ **D-293 slice-2 DONE** (`24a405eb`): cind signature-mismatch (code 3) precise + UNIFIED — x86_64 demuxed
-  its inline-sig `JNE` out of generic `bounds_fixups` into a new `cind_sig_fixups` channel → code 3, matching
-  arm64 (already code-3). Covers call_indirect (op_call table-0 + multi-table) + return_call_indirect
-  (op_tail_call both). Subtyping-trampoline null (497) + call_ref null (708) correctly left generic. Test:
-  ()->() funcref called as (i32)->() → code 3 (JIT+interp parity). Build + Mac test/lint green.
+- ✅ **D-293 slice-1 DONE** (`15a54fdf`, 3-host green): oob_table (code 2) precise + UNIFIED — x86_64 new
+  `oobtable_fixups` channel; arm64 op_table → `cind_bounds_fixups`. Covers table-access + call_indirect bounds.
+- ✅ **D-293 slice-2 DONE** (`24a405eb`, 3-host: ubuntu OK `2ae718d4`; windows = D-279 heisenbug, see Step 0.7):
+  cind signature-mismatch (code 3) precise + UNIFIED — x86_64 demuxed its inline-sig `JNE` into a new
+  `cind_sig_fixups` channel → code 3, matching arm64. Covers call_indirect + return_call_indirect both paths.
+- ✅ **D-293 slice-3 DONE** (`0892ee36`): trapping-trunc (i32/i64.trunc_f32/f64_s/u) — NaN
+  (x86_64 UCOMI-self `JP` / arm64 FCMP-self `B.VS`) → new `invalid_conv_fixups` channel → **code 9 =
+  invalid_conversion**; out-of-range (`JAE/JB/JBE` / `B.GE/B.LT`) → existing `overflow_fixups` → **code 8 =
+  int_overflow** (shared w/ div_s). Both arches; new jitTrapCode 9. Test: `nan i32.trunc_f32_s`→9,
+  `1e30 i32.trunc_f32_s`→8 (JIT+interp parity). Build + Mac test/lint green.
 
-## ← LEAD: D-293 slice-3 — null_reference OR invalid_conversion+trunc-overflow
+## ← LEAD: D-293 slice-4 — null_reference OR cast_failure OR array_oob
 
-Same per-kind-channel pattern as slices 1–2. Remaining still-generic kinds: **null_reference**
-(ref.as_non_null / struct/array null deref / call_ref null = op_call.zig:708 `TEST;JE`, subtyping-trampoline
-null 497 — but TrapKind has NO `null_reference` variant yet; verify which existing TrapKind null-deref maps to
-before assigning a code), **invalid_conversion + trunc int_overflow** (op_convert.zig NaN→invalid_conversion +
-range→int_overflow / arm64 bounds_check.zig float→int — note this slice spans TWO kinds per site), cast_failure
-(ref.cast/i31.get), array_oob (array.* GC). NEXT: pick one, classify both arches (mind sig-vs-bounds-style
-mislabels), route its channel, map code→jitTrapCode, execution test. (D-291/D-288/B-core = substantial-arch.)
+Same per-kind-channel pattern as slices 1–3. Remaining still-generic kinds: **null_reference** (ref.as_non_null
+/ struct/array null deref / call_ref null = op_call.zig:708 `TEST;JE`, subtyping-trampoline null 497 — ⚠️
+TrapKind has NO `null_reference` variant; FIRST verify which existing TrapKind the interp maps null-deref to,
+or whether to ADD a variant before assigning a JIT code), **cast_failure** (ref.cast / i31.get_s/u), **array_oob**
+(array.get/set/fill/copy/init/new_* GC). NEXT: pick one, classify both arches (mind sig-vs-bounds mislabels),
+route its channel, map code→jitTrapCode (next free = 10), execution test. (D-291/D-288/B-core = substantial-arch.)
 
 ## Queue (time-consuming first, per user directive)
 
@@ -90,16 +91,19 @@ mislabels), route its channel, map code→jitTrapCode, execution test. (D-291/D-
 - **Phase 16 (完成形) — open-ended; the loop CONTINUES, no release (ADR-0156).** v0.1.0-scope program is
   thoroughly complete + 3-host green (`deb97903`); ADR-0163 bench+docs program ALL DONE. Tag/publish/cutover are
   manual, user-only — there is no release gate.
-- Debt ledger: 0 `now`. **Last full 3-host CLEAN green = `196e1051`** (slice-1: Mac + ubuntu `OK` + windows
-  `OK`, all runners 0-failed — no D-279 heisenbug this run). D-291 diagnostics gated (`-Dtrace-stackprobe`).
+- Debt ledger: 0 `now`. Last full 3-host CLEAN green = `196e1051` (slice-1). slice-2 `2ae718d4`: Mac + ubuntu
+  green, windows = D-279 heisenbug only (commits kept, D7). slice-3 `0892ee36`: Mac green; ubuntu+windows
+  kicked this turn. D-291 diagnostics gated (`-Dtrace-stackprobe`).
 
 ## Step 0.7 (next resume) — verify remote logs
 
-- **ubuntu**: ✅ GREEN at slice-1 `196e1051` (`[run_remote_ubuntu] OK`) — x86_64 oob_table channel confirmed.
-  slice-2 `24a405eb` kicked this turn; `tail -1 /tmp/ubuntu.log` next resume for its verdict.
-- **windows**: ✅ CLEAN GREEN at slice-1 `196e1051` (`[run_remote_windows] OK.`, wast 1158/0 · realworld 55/55 ·
-  spec_assert non-simd 25437/0 · simd 13351/0 · wasi 2/0 — D-279 did NOT fire). Cadence recorded at `196e1051`.
-  slice-2 touched op_call/op_tail_call (ABI-risk) → re-check `should_gate_windows.sh` next turn.
+- **ubuntu**: ✅ GREEN at slice-2 `2ae718d4` (`[run_remote_ubuntu] OK`) — cind_sig code-3 channel confirmed on
+  x86_64. slice-3 `0892ee36` kicked this turn; `tail -1 /tmp/ubuntu.log` next resume for its verdict.
+- **windows**: ⚠️ slice-2 `2ae718d4` = **D-279 heisenbug** (NOT a regression): `zwasm-spec-wasm-2-0-assert.exe`
+  exit 3, Win64-ONLY while ubuntu x86_64 + Mac arm64 GREEN on identical source (slice-2's only change is x86_64
+  cind codegen, fully exercised green on ubuntu — the Win64-specific epilogue is shared+unchanged). Recorded
+  `track_heisenbug win64-testall fail @2ae718d4` (streak 0). Commits KEPT. slice-3 windows kicked this turn
+  (ABI-risk op_convert/bounds_check) — verify next resume; re-run-once only if signature DIFFERS from D-279.
 - **Gate note (retracted alarm)**: `run_remote_windows.sh` correctly has `set -euo pipefail` + aborts before
   printing `OK` on remote failure (the wrapper exited 1 here). "windows OK" IS a real green signal; absence of
   the `OK` line + a `Build Summary: N failed` = RED. Read the Build Summary, not just the wrapper exit.
