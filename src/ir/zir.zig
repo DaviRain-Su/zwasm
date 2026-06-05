@@ -26,7 +26,11 @@ const trace = @import("../diagnostic/trace.zig");
 /// (validator 1024 vs verifier 256), so a validator-accepted standard-Go
 /// function with depth in [256,1024) was wrongly rejected by the verifier
 /// (D-241, go_* realworld fixtures). Sourcing both here prevents recurrence.
-pub const max_control_stack: usize = 1024;
+/// Raised 1024 → 4096 (ADR-0165 / D-287): LLVM-lowered big C switches
+/// (shootout/switch.wasm, depth 2568) are valid wasm wasmtime accepts; the cap
+/// is bounded by the validator's host-stack `control_buf` — 4096 keeps the
+/// Validator struct ~280 KB, comfortable on Windows' 1 MB thread stack (see ADR).
+pub const max_control_stack: usize = 4096;
 
 /// ADR-0123 (Accepted 2026-05-28 cycle 90) D1 — typed-funcref
 /// representation. ValType is a tagged union over the spec's

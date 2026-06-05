@@ -177,6 +177,36 @@ test "validate: nested block with i32 result" {
     try validateFunction(i32_result_sig, &.{}, &[_]u8{ 0x02, 0x7F, 0x41, 0x01, 0x0B, 0x0B }, &.{}, &.{}, &.{}, 0, &.{}, 0);
 }
 
+// Build a body of `n` nested void blocks: [block 0x40]×n + [end]×n + function-end.
+fn nestedBlockBody(a: std.mem.Allocator, n: usize) std.mem.Allocator.Error![]u8 {
+    var body: std.ArrayList(u8) = .empty;
+    errdefer body.deinit(a);
+    var i: usize = 0;
+    while (i < n) : (i += 1) try body.appendSlice(a, &[_]u8{ 0x02, 0x40 });
+    i = 0;
+    while (i < n) : (i += 1) try body.append(a, 0x0B);
+    try body.append(a, 0x0B); // function frame end
+    return body.toOwnedSlice(a);
+}
+
+test "validate: deep control nesting within the raised cap validates (ADR-0165 / D-287)" {
+    // 2000 nested blocks exceed the OLD 1024 cap (was ControlStackOverflow,
+    // wrongly rejecting LLVM-lowered big C switches like shootout/switch.wasm,
+    // depth 2568) but are within the new 8192 cap.
+    const a = testing.allocator;
+    const body = try nestedBlockBody(a, 2000);
+    defer a.free(body);
+    try validateFunction(empty_sig, &.{}, body, &.{}, &.{}, &.{}, 0, &.{}, 0);
+}
+
+test "validate: control nesting beyond the cap still overflows (ADR-0165 boundary)" {
+    // > 8192 → ControlStackOverflow (pathological depth, not real-toolchain output).
+    const a = testing.allocator;
+    const body = try nestedBlockBody(a, 9000);
+    defer a.free(body);
+    try testing.expectError(error.ControlStackOverflow, validateFunction(empty_sig, &.{}, body, &.{}, &.{}, &.{}, 0, &.{}, 0));
+}
+
 test "validate (block): typed-ref blocktype (ref null func) via 0x63 0x70 accepted" {
     // function-references §5.3.4 + blocktype §5.4.1: `0x63 ht` =
     // `(ref null ht)`. `(block (result (ref null func)) ref.null
