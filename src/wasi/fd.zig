@@ -568,6 +568,74 @@ pub fn fdAllocate(host: *Host, fd: p1.Fd, offset: u64, len: u64) p1.Errno {
     return .success;
 }
 
+// ============================================================
+// fd_readdir  (D-278)
+// ============================================================
+
+/// Write one WASI `dirent` (24-byte header + name, no NUL) into `buf` at
+/// `*written`, truncating if the buffer runs out. Returns false when the entry
+/// could not be written in full — the WASI signal that the caller must retry
+/// with a larger buffer (bufused == buf_len).
+fn writeDirent(buf: []u8, written: *usize, d_next: u64, d_ino: u64, d_type: p1.Filetype, name: []const u8) bool {
+    var hdr: [24]u8 = @splat(0);
+    std.mem.writeInt(u64, hdr[0..8], d_next, .little);
+    std.mem.writeInt(u64, hdr[8..16], d_ino, .little);
+    std.mem.writeInt(u32, hdr[16..20], @intCast(name.len), .little);
+    hdr[20] = @intFromEnum(d_type);
+
+    const hdr_n = @min(hdr.len, buf.len - written.*);
+    @memcpy(buf[written.* .. written.* + hdr_n], hdr[0..hdr_n]);
+    written.* += hdr_n;
+    if (hdr_n < hdr.len) return false; // truncated mid-header → buffer full
+
+    const name_n = @min(name.len, buf.len - written.*);
+    @memcpy(buf[written.* .. written.* + name_n], name[0..name_n]);
+    written.* += name_n;
+    return name_n == name.len;
+}
+
+/// `fd_readdir(fd, buf, buf_len, cookie, *bufused_out) → errno` — enumerate a
+/// directory fd's entries into `buf`. `cookie` is an ordinal resume token (0 =
+/// start); each entry's `d_next` is the cookie to resume AFTER it. The host
+/// `std.Io.Dir` iterator has no seekdir, so cookie is treated as an index and
+/// the iteration restarts each call (skip `cookie` entries). Synthesises `.`
+/// and `..` first (ino 0, directory) as WASI/POSIX consumers expect.
+pub fn fdReaddir(host: *Host, mem: []u8, fd: p1.Fd, buf_ptr: u32, buf_len: u32, cookie: u64, bufused_ptr: u32) p1.Errno {
+    if (@as(usize, bufused_ptr) + 4 > mem.len) return .fault;
+    const buf = sliceMem(mem, buf_ptr, buf_len) orelse return .fault;
+    const slot = host.translateFd(fd) orelse return .badf;
+    switch (slot.kind) {
+        .dir => {},
+        .closed => return .badf,
+        .stdin, .stdout, .stderr, .file => return .notdir,
+    }
+    const io = host.io orelse return .nosys;
+    const handle = slot.host_handle orelse return .badf;
+    const dir: std.Io.Dir = .{ .handle = handle };
+
+    var written: usize = 0;
+    var idx: u64 = 0;
+
+    // Synthetic "." then "..".
+    inline for ([_][]const u8{ ".", ".." }) |dot| {
+        if (idx >= cookie and !writeDirent(buf, &written, idx + 1, 0, .directory, dot)) {
+            std.mem.writeInt(u32, mem[bufused_ptr..][0..4], @intCast(written), .little);
+            return .success;
+        }
+        idx += 1;
+    }
+
+    var it = dir.iterate();
+    while (it.next(io) catch return .io) |entry| {
+        if (idx >= cookie) {
+            if (!writeDirent(buf, &written, idx + 1, @intCast(entry.inode), kindToFiletype(entry.kind), entry.name)) break;
+        }
+        idx += 1;
+    }
+    std.mem.writeInt(u32, mem[bufused_ptr..][0..4], @intCast(written), .little);
+    return .success;
+}
+
 /// `path_open(dirfd, dirflags, path, oflags, rights_base,
 /// rights_inheriting, fdflags, *opened_fd_out) → errno` —
 /// opens a path RELATIVE to a preopen `dirfd`. Strict scope:
@@ -978,6 +1046,66 @@ test "fdPwrite / fdPread: positional round-trip at an offset (no cursor move)" {
     const file: std.Io.File = .{ .handle = slot.host_handle.?, .flags = .{ .nonblocking = false } };
     file.close(testing.io);
     slot.kind = .closed;
+}
+
+test "fdReaddir: enumerates '.', '..', real entries; cookie resumes past them" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "f1", .data = "a" });
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "f2", .data = "bb" });
+    var h = try Host.init(testing.allocator);
+    defer h.deinit();
+    h.io = testing.io;
+    const dirfd = try h.addPreopen(tmp.dir.handle, "/sandbox");
+
+    var mem: [512]u8 = @splat(0);
+    const USED = 480;
+    try testing.expectEqual(p1.Errno.success, fdReaddir(&h, &mem, dirfd, 0, 400, 0, USED));
+    const used = std.mem.readInt(u32, mem[USED..][0..4], .little);
+
+    var found = [_]bool{ false, false, false, false }; // ., .., f1, f2
+    var count: usize = 0;
+    var off: usize = 0;
+    while (off + 24 <= used) {
+        const namlen = std.mem.readInt(u32, mem[off + 16 ..][0..4], .little);
+        const dtype = mem[off + 20];
+        off += 24;
+        if (off + namlen > used) break; // truncated tail
+        const name = mem[off .. off + namlen];
+        if (std.mem.eql(u8, name, ".")) {
+            found[0] = true;
+        } else if (std.mem.eql(u8, name, "..")) {
+            found[1] = true;
+        } else if (std.mem.eql(u8, name, "f1")) {
+            found[2] = true;
+            try testing.expectEqual(@as(u8, @intFromEnum(p1.Filetype.regular_file)), dtype);
+        } else if (std.mem.eql(u8, name, "f2")) {
+            found[3] = true;
+        }
+        off += namlen;
+        count += 1;
+    }
+    try testing.expect(found[0] and found[1] and found[2] and found[3]);
+    try testing.expectEqual(@as(usize, 4), count);
+
+    // cookie=2 skips "." and ".." → only the 2 real entries remain.
+    @memset(&mem, 0);
+    try testing.expectEqual(p1.Errno.success, fdReaddir(&h, &mem, dirfd, 0, 400, 2, USED));
+    const used2 = std.mem.readInt(u32, mem[USED..][0..4], .little);
+    var c2: usize = 0;
+    var o2: usize = 0;
+    while (o2 + 24 <= used2) {
+        const nl = std.mem.readInt(u32, mem[o2 + 16 ..][0..4], .little);
+        o2 += 24;
+        if (o2 + nl > used2) break;
+        try testing.expect(!std.mem.eql(u8, mem[o2 .. o2 + nl], ".") and !std.mem.eql(u8, mem[o2 .. o2 + nl], ".."));
+        o2 += nl;
+        c2 += 1;
+    }
+    try testing.expectEqual(@as(usize, 2), c2);
+
+    try testing.expectEqual(p1.Errno.notdir, fdReaddir(&h, &mem, 1, 0, 400, 0, USED));
+    try testing.expectEqual(p1.Errno.badf, fdReaddir(&h, &mem, 999, 0, 400, 0, USED));
 }
 
 test "fdFdstatSetRights: narrows rights; re-widening is notcapable" {
