@@ -31,9 +31,14 @@ ordinary Phase-16 work (survey-first; bundle multi-cycle pieces). Order **B→A�
   trade (§1.3). **Surfaced 2 real perf bugs → debt**: **D-285** (memmove zwasm-jit 254ms SLOWER than interp 138ms
   & ~15× wasmtime; base64 ~13× — byte-loop/bulk-`memory.copy` fast-path gap; ADR-0153 rework candidate) + **D-284**
   (nbody no-`_start` harness gap). *Optional A leftover (low priority)*: node/bun V8 comparator (JS WASI wrapper).
-- **C — Official benchmark docs. ← NEXT.** Build `docs/benchmarks.md` (public-quality) FROM
-  `bench/results/all_engine_matrix.md`: methodology, host matrix, the honest findings (footprint win / startup /
-  single-pass-throughput-trade), reproduction, the startup-confound + `--quick` caveats. Link from README (D).
+- **C — Official benchmark docs. ✅ DONE (`40959da3`).** `docs/benchmarks.md` (public-quality) built from the
+  matrix: TL;DR positioning, methodology, how-to-read (startup confound), 3 result tables (sustained compute /
+  startup-bound / RSS), engine-selection guide, reproduction. Honest throughout; linked from README Documentation.
+- **D — OSS README.md. ← NEXT.** Current `README.md` already solid (status, platforms, coverage, CLI, embedding,
+  build flags, quickstart, layout, docs links). D = audit/upgrade to general-OSS standard: confirm pitch/badges,
+  feature highlights, engine table (done), WASI/proposal matrix, **bench link (done)**, embedding examples
+  verified-to-run, contributing, license. Mostly a polish/verify pass, not a rewrite — check what's already there
+  first (Step 0).
 - **C — Official benchmark docs.** Public-quality `docs/benchmarks.md` (or `docs/reference/benchmarks.md`):
   methodology, host matrix, results vs other runtimes + vs v1, reproduction, caveats (startup-confound). Link from
   README.
@@ -45,10 +50,10 @@ ordinary Phase-16 work (survey-first; bundle multi-cycle pieces). Order **B→A�
 
 ## Step 0.7 (next resume) — verify remote logs
 
-Last 3-host green = `8b19faad`. All B + A commits (`20de319d`, `310314bb`, `3195fda3`, `81d99b1a`) touch only
-`flake.nix` (NEW `devShells.bench` — `default` untouched), `scripts/run_bench.sh` (Mac-host bench script, not run
-by `test-all`), and `bench/`+`.dev/` docs/debt → **no `src/` delta since `8b19faad`**, so no remote re-kick. A
-fresh `/continue` resumes on **workstream C** (docs/benchmarks.md), not a remote-verify.
+Last 3-host green = `8b19faad`. ALL program commits so far (B: `20de319d`/`310314bb`; A: `3195fda3`/`81d99b1a`;
+C: `40959da3`) touch only `flake.nix` (NEW `devShells.bench`), `scripts/run_bench.sh` (Mac bench script, not run
+by `test-all`), and `bench/`+`docs/`+`README.md`+`.dev/` docs/debt → **no `src/` delta since `8b19faad`**, so no
+remote re-kick. A fresh `/continue` resumes on **workstream D** (README polish), not a remote-verify.
 
 ## Deferred / open
 
