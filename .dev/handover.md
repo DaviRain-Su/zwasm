@@ -101,9 +101,9 @@ audit-gap list closed-or-deferred.
 
 - **ubuntu**: ✅ GREEN at slice-4d `85dfb166` (`[run_remote_ubuntu] OK`) — cast_failure code-11 confirmed on
   x86_64. ADR-0166 (`e7eacf37`) is docs-only (no kick needed; folds into the next B-core impl kick).
-- **windows**: slice-4d `85dfb166` windows kicked this turn (≥4-commit cadence) — **verify `/tmp/win.log`**: a
-  `spec-simd`/`wasm-2-0-assert` Win64-only fail w/ ubuntu+Mac green = **D-279 heisenbug** (record + keep, D7).
-  Last windows-recorded = `85dfb166`.
+- **windows**: slice-4d = D-279 `spec-simd.exe` exit 3 (`fail @6cdabe93`, kept/D7). ⚠️ **NOW on 4 CONSECUTIVE
+  runs** (slice-2/3/4b/4d, all spec-simd, none touched simd) — looks reproducible NOT flaky; weigh a real D-279
+  investigation (re-run the SAME win commit twice to confirm determinism). Last windows-recorded = `6cdabe93`.
 - **Gate note (retracted alarm)**: `run_remote_windows.sh` correctly has `set -euo pipefail` + aborts before
   printing `OK` on remote failure (the wrapper exited 1 here). "windows OK" IS a real green signal; absence of
   the `OK` line + a `Build Summary: N failed` = RED. Read the Build Summary, not just the wrapper exit.
