@@ -39,13 +39,19 @@ items are NOT clean `now` work: **D-281** sockets = on-demand (notsock is spec-c
 demand = over-engineering); **D-255** C-API io = deliberate ADR-0143 v0.1 scope deferral (blocked-by a C-API io
 construct); **D-266** = optional confirmation (D-265 already closed). D-211 = confirmed deferred (ADR-0148/0060).
 
-**So next cycle**: the high-value AND most marginal in-scope work is now done (AOT-WASI matrix complete + docs
-accurate + scaffolding audited + debt clean + perf no-deficiency). This is approaching a genuine **bucket-3**: the
-substantive remaining lever — **v0.2.0 / Component Model / WASI 0.2** — is ROADMAP-deferred and structurally needs
-a **user scope decision** to pull in. Per ADR-0156 keep re-arming + scanning for any genuinely-new small refinement
-(NOT busywork — don't repeat the test matrix). If a cycle finds only repetition, do the bucket-3 surface (no
-re-arm): tell the user the v0.1.0 program is thoroughly complete and ask whether to open v0.2.0 (CM/WASI-0.2)
-scope. Do NOT chase D-281 (sockets, on-demand) / D-255 (ADR-0143 deferral) as `now` work.
+**Completion plateau — the v0.1.0 program is thoroughly complete** (AOT-WASI feature + validation + full syscall
+test matrix + accurate docs + audited scaffolding + clean debt + perf no-deficiency). Every ambiguous "remaining"
+item is now resolved-deferred by a *considered* check, not avoidance:
+- **D-281 sockets** — confirmed NOT a v1-parity miss (v1 ALSO stubs all 4 sockets = `pushErrno(.NOSYS)`,
+  `zwasm/src/wasi.zig:2623`), so ADR-0153 rework posture N/A; correctly on-demand-deferred.
+- **D-255 C-API io** — ADR-0143 deliberate v0.1 scope deferral (needs a C-API io construct). **D-211** confirmed
+  deferred (ADR-0148/0060). **D-266** optional (D-265 closed). **D-245** partial-latent (no caller).
+- The substantive remaining lever — **v0.2.0 / Component Model / WASI 0.2** — is ROADMAP-deferred (§3 lines
+  117/223/224) and structurally needs a **user scope decision**.
+
+**Next cycle**: per ADR-0156 keep scanning for any genuinely-new completion refinement (a real fix/finding, NOT
+repeating the test matrix). The genuine finds are now very rare. If a cycle surfaces only repetition, do the
+**bucket-3 surface** (no re-arm): tell the user v0.1.0 is thoroughly complete and ask whether to open v0.2.0.
 
 ## Step 0.7 (next resume) — verify remote logs
 

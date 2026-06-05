@@ -756,6 +756,12 @@ entries:
       gone 0.14; std.posix OK per ADR-0070, not raw libc; Win64 needs the HANDLE-aware path). DISCHARGE: a guest
       that accepts + echoes on a preopened listener works Mac+Linux. Not blocking v0.1.0 — `notsock` is spec-correct
       for the no-socket-fd model; networking is opt-in. Pairs with ADR-0161 §3 (WASI sockets / wasi-sockets).
+      ---
+      **v1-parity check (2026-06-05)**: NOT a v1-parity miss. zwasm **v1** also stubs all 4 sockets — its
+      `sock_accept/recv/send/shutdown` (`~/Documents/MyProducts/zwasm/src/wasi.zig:2623-2660`) just pop operands
+      and `pushErrno(.NOSYS)` (no real socket I/O). So v2's `notsock` is equivalent-or-better, NOT a deliberate-v2-
+      simplification parity gap → the ADR-0153 "rework a v1-parity miss" posture does NOT apply. Confirmed: this
+      stays an on-demand post-v0.1.0 completeness item, correctly deferred (not a measured deficiency).
     first_raised: "2026-06-05"
     last_reviewed: "2026-06-05"
     refs: |-
