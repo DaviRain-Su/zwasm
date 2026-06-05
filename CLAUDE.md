@@ -68,10 +68,12 @@ text or code identifiers.
   four-step + forward-ref each deferred item to its true phase, and
   proceed without stopping (no user-flip). Default posture =
   autonomous-with-ADR; surface only for bucket-2/3 genuine blocks.
-- **3-host gate**: Mac aarch64 + `ubuntunote` Linux x86_64 (SSH) +
-  `windowsmini` SSH. Per-chunk autonomous = 2-host (Mac + ubuntunote)
-  per ADR-0049 + ADR-0067. windowsmini = phase boundary. OrbStack
-  retired from per-chunk gate per ADR-0067 (D-134); scratch only.
+- **3-host gate**: Mac aarch64 (foreground) + `ubuntunote` Linux x86_64
+  (background, **always** `test-all` per ADR-0076 D6) + `windowsmini`
+  (background, **on `should_gate_windows.sh` cadence** per ADR-0076 **D7** —
+  たまに: ABI-risk diff OR ≥4 commits, heisenbug-aware, NOT per-turn / NOT
+  phase-boundary-only). windowsmini phase-boundary reconcile remains the
+  strict A13-merge gate. OrbStack retired per ADR-0067 (D-134); scratch only.
 - **Context budget**: the **1M** window is in effect (the prior 200K pin
   `CLAUDE_CODE_DISABLE_1M_CONTEXT=1` was removed 2026-05-31 — it made the
   window hit 100% fast and the squeeze, not the working set, was the felt
