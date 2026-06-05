@@ -376,18 +376,23 @@ pub fn runVoidExport(
     wasm_bytes: []const u8,
     export_name: []const u8,
 ) Error!u32 {
-    return runVoidExportWasi(allocator, wasm_bytes, export_name, null);
+    return runVoidExportWasi(allocator, wasm_bytes, export_name, null, null);
 }
 
 /// Like `runVoidExport` but attaches a WASI host (a `*wasi.host.Host`, passed
 /// opaquely) to the JIT runtime so imported WASI calls do REAL I/O instead of
 /// the compute-only stubs (D-244). The CLI `--engine jit` run path (chunk 2c)
 /// will own a Host and call through here. `wasi_host == null` → the stub path.
+/// `trap_code_out` (ADR-0164 workstream A): when non-null and the run traps,
+/// receives `JitRuntime.trap_kind` — the trap-kind code the shared trap stub
+/// recorded — so the CLI can surface a per-kind message instead of a bare
+/// `Trap`. Unchanged on a clean return; left untouched on a non-trap error.
 pub fn runVoidExportWasi(
     allocator: Allocator,
     wasm_bytes: []const u8,
     export_name: []const u8,
     wasi_host: ?*anyopaque,
+    trap_code_out: ?*u32,
 ) Error!u32 {
     const func_idx = try findExportFunc(allocator, wasm_bytes, export_name);
 
@@ -404,7 +409,12 @@ pub fn runVoidExportWasi(
     var owned = try setupRuntime(allocator, &compiled, wasm_bytes);
     defer owned.deinit(allocator);
     owned.rt.wasi_host = wasi_host;
-    try entry.callVoidNoArgs(compiled.module, func_idx, &owned.rt);
+    entry.callVoidNoArgs(compiled.module, func_idx, &owned.rt) catch |err| {
+        if (err == Error.Trap) {
+            if (trap_code_out) |p| p.* = owned.rt.trap_kind;
+        }
+        return err;
+    };
     return owned.rt.jit_executed_flag;
 }
 

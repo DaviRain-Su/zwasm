@@ -18,6 +18,7 @@
 const std = @import("std");
 
 const wasm_c_api = @import("../api/wasm.zig");
+const trap_surface = @import("../api/trap_surface.zig");
 const diagnostic = @import("../diagnostic/diagnostic.zig");
 const wasi_host = @import("../wasi/host.zig");
 const invoke_args_mod = @import("invoke_args.zig");
@@ -64,8 +65,19 @@ pub fn runWasmJit(
     // D-244 chunk 2d: `proc_exit(N)` records `host.exit_code` then unwinds via
     // the JIT trap mechanism (returns Error.Trap). Surface the guest's exit
     // code; a trap with NO exit_code is a genuine fault → propagate (exit 1).
-    _ = runner.runVoidExportWasi(alloc, bytes, entry_name, &host) catch |err| {
+    var trap_code: u32 = 0;
+    _ = runner.runVoidExportWasi(alloc, bytes, entry_name, &host, &trap_code) catch |err| {
         if (host.exit_code) |code| return @intCast(@min(code, std.math.maxInt(u8)));
+        // A genuine trap (no recorded exit_code) surfaces its kind on stderr
+        // then maps to exit 1 — interp-parity per ADR-0164 workstream A. A
+        // trap is exit≠0, NOT a Zig error: returning the code (not re-raising
+        // error.Trap) keeps the single-message parity with the interp path;
+        // main.zig's renderFallback is reserved for non-trap errors (compile/
+        // validate/load).
+        if (err == error.Trap) {
+            surfaceJitTrap(io, trap_code);
+            return 1;
+        }
         return err;
     };
     if (host.exit_code) |code| return @intCast(@min(code, std.math.maxInt(u8)));
@@ -144,8 +156,15 @@ pub fn runCwasmWasi(
     // proc_exit(N) records host.exit_code then unwinds via the JIT trap
     // mechanism (Error.Trap). Surface the guest's exit code; a trap with NO
     // exit_code is a genuine fault → propagate (the caller maps it to 1).
-    const result = aot_run.runEntryWasi(&mod, idx, &host) catch |err| {
+    var trap_code: u32 = 0;
+    const result = aot_run.runEntryWasi(&mod, idx, &host, &trap_code) catch |err| {
         if (host.exit_code) |code| return @intCast(@min(code, std.math.maxInt(u8)));
+        // Mirror runWasmJit: a genuine trap surfaces its kind then maps to
+        // exit 1 (single-message interp-parity), not a re-raised error.Trap.
+        if (err == error.Trap) {
+            surfaceJitTrap(io, trap_code);
+            return 1;
+        }
         return err;
     };
     if (host.exit_code) |code| return @intCast(@min(code, std.math.maxInt(u8)));
@@ -389,6 +408,27 @@ fn surfaceTrap(io: std.Io, trap: anytype) void {
     } else {
         // EXEMPT-FALLBACK: ADR-0016 phase 1 — surfaceTrap is best-effort trap stderr; closed-pipe failure has no recovery path.
         w.print("zwasm: trap kind={s}\n", .{@tagName(trap.kind)}) catch {};
+    }
+    // EXEMPT-FALLBACK: ADR-0016 phase 1 — final stderr flush on trap surfacing; failure here is unrecoverable.
+    w.flush() catch {};
+}
+
+/// Surface a JIT/AOT trap on stderr from the numeric trap-kind code the shared
+/// trap stub recorded (ADR-0164 workstream A). The interp path uses
+/// `surfaceTrap` over a `wasm_trap_t`; the JIT/AOT run paths bypass the C API,
+/// so they map `JitRuntime.trap_kind` here. A precise code prints the same
+/// interp-parity kind + message; the generic bucket (codes 0/1) honestly says
+/// the kind is not yet distinguished (D-292 codegen widening).
+fn surfaceJitTrap(io: std.Io, code: u32) void {
+    var stderr_buf: [256]u8 = undefined;
+    var sw = std.Io.File.stderr().writer(io, &stderr_buf);
+    const w = &sw.interface;
+    if (trap_surface.jitTrapCode(code)) |kind| {
+        // EXEMPT-FALLBACK: ADR-0016 phase 1 — best-effort trap stderr; closed-pipe failure has no recovery path.
+        w.print("zwasm: trap kind={s} msg={s}\n", .{ @tagName(kind), trap_surface.trapMessageFor(kind) }) catch {};
+    } else {
+        // EXEMPT-FALLBACK: ADR-0016 phase 1 — best-effort trap stderr; closed-pipe failure has no recovery path.
+        w.print("zwasm: wasm trap (kind not yet distinguished under jit/aot — D-292)\n", .{}) catch {};
     }
     // EXEMPT-FALLBACK: ADR-0016 phase 1 — final stderr flush on trap surfacing; failure here is unrecoverable.
     w.flush() catch {};
@@ -676,6 +716,27 @@ test "runWasmJit: --engine jit surfaces the guest proc_exit code (D-244 2d)" {
     if (builtin.os.tag == .windows) return @import("../test_support/skip.zig").phaseEnd(.win64);
     const code = try runWasmJit(testing.allocator, testing.io, &proc_exit_42_jit, null, &.{}, &.{});
     try testing.expectEqual(@as(u8, 42), code);
+}
+
+// `(module (func (export "_start") unreachable))` — a genuine trap with NO
+// recorded exit_code. The interp path treats a trap as exit≠0 (a code, NOT a
+// Zig error; see the SIMD test). The JIT path must match: surface the kind on
+// stderr then RETURN exit 1, NOT re-raise error.Trap (which would make
+// main.zig's renderFallback print a SECOND `Trap` line). Interp-parity per
+// ADR-0164 workstream A.
+const unreachable_start_jit = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03, 0x02,
+    0x01, 0x00, 0x07, 0x0a, 0x01, 0x06, 0x5f, 0x73,
+    0x74, 0x61, 0x72, 0x74, 0x00, 0x00, 0x0a, 0x05,
+    0x01, 0x03, 0x00, 0x00, 0x0b,
+};
+
+test "runWasmJit: a genuine trap maps to exit 1, not a propagated error (ADR-0164 A parity)" {
+    const builtin = @import("builtin");
+    if (builtin.os.tag == .windows) return @import("../test_support/skip.zig").phaseEnd(.win64);
+    const code = try runWasmJit(testing.allocator, testing.io, &unreachable_start_jit, null, &.{}, &.{});
+    try testing.expectEqual(@as(u8, 1), code);
 }
 
 // D-244 chunk 2d-rest: `_start` calls args_sizes_get then proc_exit(argc).

@@ -84,6 +84,23 @@ pub fn trapMessageFor(kind: TrapKind) []const u8 {
     };
 }
 
+/// Map a JIT/AOT codegen trap-kind code (the numeric value the shared trap
+/// stub records in `JitRuntime.trap_kind`) to a precise `TrapKind`, or `null`
+/// when the code is the generic bucket (0 unmarked / 1 generic) that the
+/// codegen does not yet split per-kind. ADR-0164 workstream A surfaces these;
+/// widening the generic bucket into oob_memory / unreachable / div_by_zero /
+/// int_overflow / … at the codegen trap sites is D-292. The precise codes
+/// match `arm64/emit.zig` (call_indirect stubs) + `x86_64/op_control.zig`
+/// (stack-probe stub).
+pub fn jitTrapCode(code: u32) ?TrapKind {
+    return switch (code) {
+        2 => .oob_table, // call_indirect bounds (B.HS)
+        3 => .indirect_call_mismatch, // call_indirect signature (B.NE)
+        4 => .stack_overflow, // x86_64 stack-probe stub
+        else => null, // 0 unmarked / 1 generic — kind not yet distinguished
+    };
+}
+
 pub fn mapInterpTrap(err: anyerror) TrapKind {
     return switch (err) {
         error.Unreachable => .unreachable_,
@@ -357,6 +374,17 @@ test "wasm_trap_new / message / delete: round-trip from caller-supplied message"
     defer wasm_c_api.wasm_byte_vec_delete(&out);
     try testing.expectEqual(@as(usize, 12), out.size);
     try testing.expectEqualStrings("host failure", out.data.?[0..out.size]);
+}
+
+test "jitTrapCode: precise codes map to interp-parity kinds; generic bucket is null (ADR-0164 A)" {
+    try testing.expectEqual(TrapKind.oob_table, jitTrapCode(2).?);
+    try testing.expectEqual(TrapKind.indirect_call_mismatch, jitTrapCode(3).?);
+    try testing.expectEqual(TrapKind.stack_overflow, jitTrapCode(4).?);
+    // 0 (unmarked) + 1 (generic) are not yet split per-kind by codegen (D-292).
+    try testing.expect(jitTrapCode(0) == null);
+    try testing.expect(jitTrapCode(1) == null);
+    // Precise codes reuse the interp message table — true parity.
+    try testing.expectEqualStrings("indirect call type mismatch", trapMessageFor(jitTrapCode(3).?));
 }
 
 test "wasm_trap_*: null-arg discipline" {

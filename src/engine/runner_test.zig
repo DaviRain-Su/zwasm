@@ -1918,7 +1918,27 @@ test "runVoidExportWasi: JIT _start clock real with host (no trap); 0-stub traps
     defer h.deinit();
     h.io = testing.io;
     // Host → real (nonzero) clock → eqz false → no trap.
-    _ = try runner.runVoidExportWasi(testing.allocator, &clock_start_wasm, "_start", &h);
+    _ = try runner.runVoidExportWasi(testing.allocator, &clock_start_wasm, "_start", &h, null);
     // No host → 0-stub → eqz true → unreachable trap.
-    try testing.expectError(entry.Error.Trap, runner.runVoidExportWasi(testing.allocator, &clock_start_wasm, "_start", null));
+    try testing.expectError(entry.Error.Trap, runner.runVoidExportWasi(testing.allocator, &clock_start_wasm, "_start", null, null));
+}
+
+// `(module (func (export "_start") unreachable))` — the JIT lowers `unreachable`
+// to an unconditional branch into the shared trap stub, which records a trap-kind
+// code in `JitRuntime.trap_kind` before unwinding (ADR-0164 workstream A).
+const unreachable_start_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03, 0x02,
+    0x01, 0x00, 0x07, 0x0a, 0x01, 0x06, 0x5f, 0x73,
+    0x74, 0x61, 0x72, 0x74, 0x00, 0x00, 0x0a, 0x05,
+    0x01, 0x03, 0x00, 0x00, 0x0b,
+};
+
+test "runVoidExportWasi: a JIT trap surfaces the recorded trap-kind code (ADR-0164 A)" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    var trap_code: u32 = 99; // sentinel: must be overwritten by the trap path
+    try testing.expectError(entry.Error.Trap, runner.runVoidExportWasi(testing.allocator, &unreachable_start_wasm, "_start", null, &trap_code));
+    // `unreachable` rides the shared generic trap stub (kind 1). Finer per-kind
+    // codes (oob vs div vs unreachable …) are the D-292 codegen widening.
+    try testing.expectEqual(@as(u32, 1), trap_code);
 }

@@ -94,7 +94,7 @@ const WasiWiring = struct {
 /// COMPUTE-ONLY — a `.cwasm` that imports WASI traps on the first import
 /// call (use `runEntryWasi` to attach a host).
 pub fn runEntry(loaded: *const load.LoadedModule, idx: usize) Error!u64 {
-    return runEntryInner(loaded, idx, null);
+    return runEntryInner(loaded, idx, null, null);
 }
 
 /// Like `runEntry` but attaches a WASI host (`host` = `*wasi.host.Host`)
@@ -106,7 +106,11 @@ pub fn runEntry(loaded: *const load.LoadedModule, idx: usize) Error!u64 {
 /// (`jit_dispatch.zig`), so AOT + JIT share one WASI implementation. A
 /// `proc_exit` surfaces as `Error.Trap` with the code on the host (the
 /// caller reads `host.exit_code`).
-pub fn runEntryWasi(loaded: *const load.LoadedModule, idx: usize, host: *anyopaque) Error!u64 {
+/// `trap_code_out` (ADR-0164 workstream A): mirrors `runner.runVoidExportWasi` —
+/// on a trap, receives `JitRuntime.trap_kind` so the CLI surfaces a per-kind
+/// message. `proc_exit` also unwinds via `Error.Trap`; the caller reads
+/// `host.exit_code` FIRST and only surfaces the trap-kind when none is set.
+pub fn runEntryWasi(loaded: *const load.LoadedModule, idx: usize, host: *anyopaque, trap_code_out: ?*u32) Error!u64 {
     // Size the dispatch table to the FUNCTION-import count (the wasm
     // function-index space — table/memory/global/tag imports occupy no
     // dispatch slot). populateDispatch / the JIT body index it by func idx.
@@ -128,10 +132,10 @@ pub fn runEntryWasi(loaded: *const load.LoadedModule, idx: usize, host: *anyopaq
         fi += 1;
     }
 
-    return runEntryInner(loaded, idx, .{ .host = host, .dispatch = dispatch });
+    return runEntryInner(loaded, idx, .{ .host = host, .dispatch = dispatch }, trap_code_out);
 }
 
-fn runEntryInner(loaded: *const load.LoadedModule, idx: usize, wasi: ?WasiWiring) Error!u64 {
+fn runEntryInner(loaded: *const load.LoadedModule, idx: usize, wasi: ?WasiWiring, trap_code_out: ?*u32) Error!u64 {
     var rt = minimalRuntime();
     // §12.3b: wire the reconstructed globals. `LoadedModule.globals` is
     // `[]u128` = the runtime's `[]Value` (extern union, 16 B, 16-align) bit
@@ -177,12 +181,21 @@ fn runEntryInner(loaded: *const load.LoadedModule, idx: usize, wasi: ?WasiWiring
 
     const VoidFn = *const fn (*const JitRuntime) callconv(.c) void;
     const I32Fn = *const fn (*const JitRuntime) callconv(.c) u32;
+    return runDispatch(loaded, idx, &rt, VoidFn, I32Fn) catch |err| {
+        if (err == Error.Trap) {
+            if (trap_code_out) |p| p.* = rt.trap_kind;
+        }
+        return err;
+    };
+}
+
+fn runDispatch(loaded: *const load.LoadedModule, idx: usize, rt: *JitRuntime, comptime VoidFn: type, comptime I32Fn: type) Error!u64 {
     return switch (loaded.resultKind(idx)) {
         .void_ => blk: {
-            try entry.callVoidNoArgsPtr(loaded.entry(idx, VoidFn), &rt);
+            try entry.callVoidNoArgsPtr(loaded.entry(idx, VoidFn), rt);
             break :blk 0;
         },
-        .i32_ => @as(u64, try entry.callI32NoArgsPtr(loaded.entry(idx, I32Fn), &rt)),
+        .i32_ => @as(u64, try entry.callI32NoArgsPtr(loaded.entry(idx, I32Fn), rt)),
         .i64_, .f32_, .f64_, .unsupported => Error.UnsupportedEntrySignature,
     };
 }
