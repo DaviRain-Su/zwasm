@@ -18,33 +18,32 @@
   Mac+x86_64 (ADR-0160); **§16.7** docs — README/CHANGELOG/`docs/reference/`/`docs/tutorial.md` to the settled
   surface (`12390815`, `3a5e8ba0`).
 
-## NEXT (autonomous — §16 task-list done; phase-boundary audit DONE; backlog; ADR-0156)
+## NEXT — USER-DIRECTED PROGRAM 2026-06-05 (supersedes the bucket-3 plateau): complete WASI + all-engine + CM
 
-- **Post-§16 backlog — loop in refinement/maintenance mode; no release (ADR-0156).** Cleared this session
-  (detail in ROADMAP §16 rows + ADRs + CHANGELOG): phase-boundary audit; **D-257** lesson backfill; examples/
-  fmt-gate; **D-277** zwasm.h; **D-275** `wasm_instance_new` trap_out → `StartTrapped`; **D-276 discharged by
-  PROOF** (`4accb556`, ADR-0060 force-spill); **D-274** accepted (zlinter eager fetch, dep slated for Zig-0.17
-  removal, `84f8a652`).
-  **D-262 DISCHARGED** (`4ec849c8` audit GREEN: ubuntu x86_64-RUN `test-all` = spec 25437+212 / facade 55 / realworld
-  all MATCH, `OK (HEAD=4ec849c8)`). The D6 process fix (`5471e5fb`) + the green audit close both predicates — gate
-  topology hardened, no latent x86_64 emit bug. **ZERO `now` debt rows remain.**
+The prior finalization items are DONE (C-API funcref D-269 = owned-handle `of.ref`, `01c1d0cb`, bundle D-269B
+closed; verified x86_64 `OK HEAD=2ea7c187`). A new **user-directed program** (chat 2026-06-05) is now the active
+work — **ADR-0161** (WASI completion) + **ADR-0162** (toolchain carve-out). Ordered:
 
-  **C-API funcref-from-C (D-269 DISCHARGED; bundle D-269B CLOSED).** Survey (`295bf14b`) reframed it to a
-  standard-wasm-c-api behavioral gap; path A (table-slot funcref) landed (`61b606aa`); path B (call-result
-  `of.ref`) fixed via the **owned-handle ref model** (`01c1d0cb`): `of.ref` is now an owned `wasm_ref_t*`
-  (`marshalValOut` allocates, `marshalValIn` reads `(*Ref).ref`, `wasm_val_copy/_delete`+vec deep-clone/free,
-  host-cb arg refs lent+freed). Delta: `funcref_result_call.c` RED→GREEN incl. `-Dsanitize=address` (no
-  leak/UAF), double-free-safe by null-after-free. **ZERO `now` debt rows remain again.**
-  - **Backlog (gated/don't-pre-build)**: **D-273** CLI flags (validated-defer, ADR-0159). **J.3** ~30 `blocked-by`
-    → `suggest meta_audit` (user-gated). **15.6** (only open ROADMAP `[ ]`) blocked on cw-v1 (D-264). Next cycle:
-    no clean `now` chunk — re-assess bucket-3 (the autonomous-prep-path C-API survey lever is now spent).
+- **A — 整備 (mostly DONE this session)**: rust installed (win rustc 1.96.0 / ubuntu flake `.#rust-host` `a5cf80fb`);
+  ADR-0161+0162; ROADMAP §11.1 overclaim corrected (**WASI = 21/46, NOT full**); D-278 scheduled. **Remaining 整備**:
+  A5 Component-Model 馴染みサーベイ (de-risk — read v1 CM + wasmtime + `wasm-tools` → findings doc, NO impl);
+  A1-wire (`build.zig run-rust-host` 3-host + resolve win MSVC/GNU); `toolchain_provisioning.md` update (per ADR-0162).
+- **1. D-273(1) `--invoke` args + typed result** (the only `now` row) — type-driven parse (export param types) →
+  result to stdout, exit-code = success only. Ref v1 CLI. **FIRST** (small/independent).
+- **2. D-278 WASI preview1 21→46** (interp) — sockets ×9 / fd_readdir / path_* ×7 / pread/pwrite/sync/... TDD each.
+- **3. All-engine WASI** (D-251 AOT + D-244 d-3 JIT) — WASI host on all 3 engines (today interp-only).
+- **4. Precise GC root + AOT-GC** (D-211) — first verify WHERE precise rooting is truly load-bearing; build only there.
+- **5. D-254 3-OS rust run** — after A1-wire.
+- **Post-v0.1.0**: Component Model / WASI P2 (v1-parity; A5 survey informs). WASI 0.3/async (open horizon;
+  ClojureWasmFromScratch `runtime/agent.zig` async-Zig ref).
 
-## Step 0.7 (next resume) — VERIFY this turn's test-all kick
+**Local commits to push (next /continue Step 3)**: `fdb41880` (debt directives) · `a5cf80fb` (flake rust-host) ·
+`6b54fd3e` (ADR-0161) · `0182ed00` (§11.1+D-278) · `9b276ace` (ADR-0162).
 
-The D-269B owned-handle fix (`01c1d0cb`, `src/api/{instance,vec,wasm}.zig`) → kicked the D6 `test-all`. Mac was
-green pre-push (unit + conformance + `-Dsanitize=address` + lint). Next cycle: `tail -3 /tmp/ubuntu.log` → GREEN
-`OK (HEAD=<sha>)` = the owned-handle ref marshalling passes on x86_64, proceed; FAIL = revert the turn's commits
-to the last verified HEAD (`7fcf6d4c`).
+## Step 0.7 (next resume) — no kick pending
+
+D-269B kick already verified GREEN (`OK HEAD=2ea7c187`). This session's commits since are doc/flake/ADR/debt only
+(no `src/`) → no kick. The first code chunk (D-273(1) `--invoke`) kicks the D6 `test-all` when it lands.
 **Gate**: Step-5 Mac = `bash scripts/mac_gate.sh`. windowsmini = manual-only (ADR-0156: no loop tag).
 
 ## Deferred / open debt (D-274/275/276/257 discharged this session — removed)
