@@ -18,31 +18,13 @@
   Mac+x86_64 (ADR-0160); **§16.7** docs — README/CHANGELOG/`docs/reference/`/`docs/tutorial.md` to the settled
   surface (`12390815`, `3a5e8ba0`).
 
-- **WASI preview1 46/46 DONE (`1d2cb8df`), verified Mac + x86_64-Linux (ubuntu `OK HEAD=f9a09b3e`, 25437/0).**
-  Full interp surface; D-278 discharged; sockets=notsock + real socket I/O = D-281. windows = D-282 env-flake
-  (all-runners-0-failed + configure-phase FileNotFound = green-for-correctness).
-
-## Active bundle
-
-- **Bundle-ID**: jit-wasi (D-244)
-- **Cycles-remaining**: ~1 (CLOSE next cycle after remote-green of the 37-syscall chunk)
-- **Continuity-memo**: ✅ **EXIT-CONDITION MET — `zwasm run --engine jit <prog>` does REAL WASI end-to-end** incl.
-  file ops. Prints (jithello/c_hello_wasi), exits w/ guest code (proc_exit(42)→42), sees argv (argc.wasm a b→3),
-  AND `--dir` preopens work (smoke: `--engine jit --dir . prestat.wasm`→0; fd_prestat_get(3) success). **The FULL
-  46-syscall WASI surface is JIT-wired by reusing the interp handlers (zero re-impl)**: `JitRuntime.wasi_host`
-  (`dec5e84f`) + runI64/VoidExportWasi (`d761637f`/`088c3b23`) + core I/O (`dec5e84f`/`8d1b7612`/`81b3e1d3`/
-  `20392074`) + runWasmJit owns Host w/ io+argv+preopens (`0c3e4cef`/`cd10a3b6`/`dfa614cd`) + proc_exit (`1b01061f`)
-  + args/environ (`cd10a3b6`) + **the other 37 syscalls registered (`487a38ed`, lookup now 46)** + preopens
-  (`dfa614cd`). Also fixed a pre-existing CLI bug (`f320db6f`): shared fd_write silently dropped `zwasm run` stdout.
-  **NEXT: verify the big 37-syscall chunk (`487a38ed`, subagent-generated, +422 LOC) on ubuntu+windows, then CLOSE +
-  V-retrospective.** Possible follow-up debt: enable the realworld WASI corpus under `--engine jit`
-  (`test/realworld/run_runner_jit.zig` run-stage is disabled) for end-to-end JIT-WASI differential coverage.
-  **D-251 AOT-WASI** (separate, the next program item) needs `.cwasm` v0.3 import-metadata serialization
-  (`aot/format.zig`). **DISCIPLINE: cross-compile windows-gnu; trust ubuntu for Linux-runtime divergence; Win64
-  JIT-exec tests gate `skip.phaseEnd(.win64)`; jit_dispatch unit tests run all-platform.**
-- **Exit-condition**: ✅ MET — a JIT-run WASI module does REAL I/O (clock nonzero + fd_write→real stdout + file ops
-  via preopen); lookup resolves 46/46. **ubuntu CONFIRMED green at `71cd3c85`**; windows in-flight → on green
-  (or D-282 env-flake) CLOSE this bundle (see Step 0.7 for the exact close + D-251-start steps).
+- **WASI preview1 46/46 DONE (interp, `1d2cb8df`) + ALL-ENGINE JIT DONE (D-244, bundle CLOSED `9414d9b9`).**
+  `zwasm run --engine jit <prog>` does REAL WASI end-to-end — prints, exits w/ guest code, sees argv, `--dir` file
+  ops — by reusing the interp handlers (zero re-impl): wasi_host field + run*ExportWasi + full 46-syscall JIT lookup
+  (`487a38ed`) + preopens (`dfa614cd`). **Verified 3-host green at `71cd3c85`** (Mac + ubuntu `OK` + windows `OK`).
+  D-278 discharged; sockets=notsock (real socket I/O = D-281); a pre-existing CLI stdout-drop bug fixed (`f320db6f`).
+  Follow-up debt: **D-283** (realworld corpus under `--engine jit` for differential coverage). Open env note:
+  **D-282** windowsmini configure-phase build flake (Defender/.zig-cache race; all-runners-0-failed = green).
 
 ## NEXT — USER-DIRECTED PROGRAM 2026-06-05 (supersedes the bucket-3 plateau): complete WASI + all-engine + CM
 
@@ -54,8 +36,11 @@ work — **ADR-0161** (WASI completion) + **ADR-0162** (toolchain carve-out). Or
   A5 CM survey + A1-wire 3-OS rust DONE; **D-279 Win64 SIMD heisenbug** (intermittent, monitored by D7).
 - **1. D-273(1) `--invoke NAME=ARGS` args + typed result — ✅ DONE (`34dbebbc`)** (interp; `src/cli/invoke_args.zig`).
 - **2. D-278 WASI preview1 21→46 (interp) — ✅ 46/46 COMPLETE (`1d2cb8df`), verified Mac+ubuntu, D-278 discharged.**
-- **3. All-engine WASI — 🔵 ACTIVE (see `## Active bundle` jit-wasi / D-244 JIT first, then D-251 AOT).** Make the
-  46 syscalls run under JIT/AOT, not just interp. **4. Precise GC root + AOT-GC** (D-211; verify load-bearing first).
+- **3. All-engine WASI — JIT ✅ DONE (D-244, 3-host green `71cd3c85`); 🔵 NEXT = D-251 AOT-WASI.** `.cwasm` is
+  compute-only: it doesn't serialize import metadata, so AOT-loaded code can't resolve WASI imports. Survey
+  `engine/codegen/aot/{format,load,run}.zig` → add `.cwasm` v0.3 import-metadata (module+name+kind) →
+  reconstruct `host_dispatch_base` (reuse `wasi/jit_dispatch.zig:populateDispatch`) + attach a Host in `runEntry`.
+  Then `zwasm run <file.cwasm>` does WASI. **4. Precise GC root + AOT-GC** (D-211; verify load-bearing first).
 - **Post-v0.1.0**: Component Model / WASI P2 (A5 survey informs). WASI 0.3/async (ClojureWasmFromScratch agent ref).
 
 **ADR-0076 D7 (windows cadence gate)**: the loop now HONORS `should_gate_windows.sh` (run windows たまに — ABI-risk
@@ -64,23 +49,14 @@ no auto-revert. Step 6+7: `should_gate_windows.sh` exit 0 → kick `run_remote_w
 
 ## Step 0.7 (next resume) — verify per-cadence remote logs
 
-**ubuntu CONFIRMED GREEN at `71cd3c85`** (`OK HEAD=71cd3c85`) — the FULL 46-syscall JIT registration (`487a38ed`,
-+422 LOC subagent-generated) + JIT preopens (`dfa614cd`) verified on Mac + x86_64 Linux + windows-gnu cross-compile.
-**windows test-all is IN-FLIGHT at `71cd3c85`** (re-kicked this session).
-
-**THE SINGLE NEXT ACTION for a fresh `/continue`** (Step 0.7 + bundle-close):
-1. `tail /tmp/win.log` — if `[run_remote_windows] OK.` OR (ALL runners 0-failed + only `configure phase FileNotFound`
-   = the **D-282 env-flake**, green-for-correctness) → windows is green.  If a REAL crash (`' exited with code N`/
-   `panic`/`TODO implement ... windows` + a named test) → D7-classify; a std Win64 `TODO`-panic in an op I use →
-   reroute like `20b9f860`.
-2. windows green → **CLOSE the jit-wasi (D-244) bundle**: the exit-condition is MET (verify `bash
-   scripts/check_bundle_active.sh --close`), rewrite the handover Active-bundle into a brief done-note, do the
-   V-retrospective (new debt? the `test/realworld/run_runner_jit.zig` run-stage is disabled — enabling it for
-   end-to-end JIT-WASI differential coverage is a good follow-up debt), then **start D-251 (AOT-WASI)**: survey
-   `engine/codegen/aot/{format,load,run}.zig` — `.cwasm` needs v0.3 import-metadata serialization to reconstruct
-   the host_dispatch_base (reuse `wasi/jit_dispatch.zig:populateDispatch`) + attach a Host in runEntry.
-**DISCIPLINE: cross-compile windows-gnu (catches compile gaps); Win64 runtime panics (std TODOs) only surface on
-the actual windows run — read the crash line.** **Gate**: Mac = `mac_gate.sh`; ubuntu = always (D6); windows = cadence (D7).
+**D-244 (JIT-WASI) is 3-host GREEN at `71cd3c85`** — ubuntu `OK` + windows `OK.` + Mac. Bundle CLOSED (`9414d9b9`);
+windows cadence recorded. No remote verification pending. **A fresh `/continue` starts directly on the NEXT program
+item: D-251 (AOT-WASI)** — do its Step 0 survey of `engine/codegen/aot/{format,load,run}.zig` (the `.cwasm` import-
+metadata gap), then TDD. (No Active bundle = normal ROADMAP/NEXT-program resume.) **DISCIPLINE: cross-compile
+windows-gnu (catches compile gaps); Win64 runtime panics — std `TODO implement ... windows` — only surface on the
+actual windows run; reroute the op like `20b9f860`/`f320db6f` did.** **Gate**: Mac = `mac_gate.sh`; ubuntu = always
+(D6); windows = cadence (D7); the realworld diff_runner uses capture buffers so the fd_write→real-stdout fix is
+regression-safe.
 
 ## Deferred / open debt (D-274/275/276/257 discharged this session — removed)
 

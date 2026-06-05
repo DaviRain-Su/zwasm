@@ -1021,6 +1021,25 @@ entries:
     refs: |-
       scripts/run_remote_windows.sh; CLAUDE.md (D-028 Defender note); ADR-0076 D7 (win64 gate);
       scripts/track_heisenbug.sh (win-configure-phase); /tmp/win.log
+  - id: "D-283"
+    layer: "test"
+    status: "note"
+    description: |-
+      note (D-244 JIT-WASI retrospective follow-up): the realworld WASI corpus is NOT exercised end-to-end under
+      `--engine jit`. `test/realworld/run_runner_jit.zig` compiles the fixtures via JIT (46/55 compile-pass) but its
+      RUN stage is OPT-IN (`ZWASM_JIT_RUN=1`, default-off) — so the new full-46 JIT WASI surface (D-244,
+      `wasi/jit_dispatch.zig` + `cli/run.zig runWasmJit`) is verified by per-syscall unit tests + a handful of
+      runWasmJit smoke tests, NOT by running real programs (c_hello_wasi / tinygo / rust) under the JIT and
+      byte-diffing stdout against wasmtime like the interp `diff_runner` does. DISCHARGE: run the corpus with
+      `ZWASM_JIT_RUN=1`, triage failures (some fixtures use ops the JIT can't yet compile — separate from WASI), and
+      either enable the JIT run stage by default for the runnable subset OR a JIT variant of `diff_runner` that
+      stdout-diffs `--engine jit` vs wasmtime. Confidence is currently good (3-host green + interp handlers reused)
+      but this is the missing differential net. Not blocking — D-244 is functionally complete + 3-host green.
+    first_raised: "2026-06-05"
+    last_reviewed: "2026-06-05"
+    refs: |-
+      test/realworld/run_runner_jit.zig (run-stage disabled); test/realworld/diff_runner.zig (interp analog);
+      src/wasi/jit_dispatch.zig; src/cli/run.zig (runWasmJit); D-244 (JIT-WASI, done)
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.
