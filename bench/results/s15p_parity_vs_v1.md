@@ -10,15 +10,24 @@ v1 from `~/Documents/MyProducts/zwasm` (`zig build -Doptimize=ReleaseFast`).
 Comparison: v1 `zwasm run <wasm>` (default JIT) vs v2 `zwasm run --engine=jit <wasm>`.
 hyperfine, Mac aarch64, 7–10 runs + warmup.
 
-## Methodology constraint (load-bearing)
+## Methodology constraint (load-bearing) — SUPERSEDED 2026-06-05
 
-**v2 `--engine=jit` is compute-only (ADR-0136): no WASI I/O under the JIT yet.**
-So WASI-printing fixtures (all TinyGo, + shootout that `fd_write` their result)
-**trap** under v2-jit and cannot be JIT-benched. Of the realworld corpus, only 4
-are compute-only (import `proc_exit` only, never call it for output): gimli,
-heapsort, keccak, memmove. v2's **default engine is interp** (full WASI), so
-end-users running WASI programs get interp — this JIT comparison covers the
-compute/embedding path (where the §15.2/15.3/15.4 perf folds applied).
+> **Update (ADR-0163 A, D-244):** the constraint below was true *at §15.P time*
+> (2026-06-04) but is **no longer**. D-244 gave the JIT (and AOT) the full WASI
+> command set, so WASI-printing fixtures **no longer trap** under `--engine=jit`
+> — all TinyGo / cljw / shootout fixtures are now JIT/AOT-benchable. The current
+> all-engine WASI re-profile lives in
+> [`all_engine_matrix.md`](all_engine_matrix.md). The paragraph below is retained
+> as the historical record of why this §15.P comparison was JIT-compute-only.
+
+**[Historical, pre-D-244] v2 `--engine=jit` was compute-only (ADR-0136): no WASI
+I/O under the JIT yet.** So WASI-printing fixtures (all TinyGo, + shootout that
+`fd_write` their result) **trapped** under v2-jit and could not be JIT-benched. Of
+the realworld corpus, only 4 were compute-only (import `proc_exit` only, never
+call it for output): gimli, heapsort, keccak, memmove. v2's **default engine is
+interp** (full WASI), so end-users running WASI programs got interp — this JIT
+comparison covered the compute/embedding path (where the §15.2/15.3/15.4 perf
+folds applied).
 
 ## Results — v2-jit / v1-jit (lower = v2 faster)
 
