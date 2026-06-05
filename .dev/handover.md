@@ -59,9 +59,11 @@ audit-gap list closed-or-deferred.
 
 ## Step 0.7 (next resume) — verify remote logs
 
-`b6da8604` touches `src/` (JIT/AOT run-path signatures + CLI) → **ubuntu kicked this turn** (background;
-read `tail -3 /tmp/ubuntu.log`). Windows: per `should_gate_windows.sh` cadence — check at next resume. ubuntu
-RED → revert the `b6da8604` pair (D3); GREEN → proceed to the LEAD above.
+`b6da8604` touches `src/` (JIT/AOT run-path signatures + CLI) → **both ubuntu AND windows kicked this turn**
+(background; cadence said "6 commits since last windowsmini run"). Read `tail -3 /tmp/ubuntu.log` AND
+`tail -3 /tmp/win.log`. ubuntu RED → revert the `b6da8604` pair (D3). windows RED → re-run once: reproduces =
+real Win64 bug (debt+fix), flake = `track_heisenbug.sh`. windows GREEN → `should_gate_windows.sh --record`.
+Both GREEN → proceed to the LEAD above.
 
 ## Key refs
 
