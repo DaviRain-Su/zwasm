@@ -259,7 +259,9 @@ pub const JitRuntime = extern struct {
     /// out-of-range funcidx at validate time); this field is for
     /// host-side diagnostic + future debugger hooks.
     func_entities_count: u32 = 0,
-    _pad5: u32 = 0,
+    /// ADR-0164 B / D-291 — gated store-watchpoint scratch #3 (former `_pad5`):
+    /// the VALUE written by the store whose eff addr == 16777416 (clobbering store).
+    trap_aux3: u32 = 0,
     /// §9.9 / 9.9-m-3a (per ADR-0056): parallel "data segment
     /// dropped" flag table. JIT `data.drop dataidx` emits
     /// `MOV [r15+data_dropped_ptr_off] + idx, 1` (1 byte per
@@ -267,7 +269,9 @@ pub const JitRuntime = extern struct {
     /// (m-3b) reads the same flags before computing seg_len.
     data_dropped_ptr: [*]u8 = undefined,
     data_dropped_count: u32 = 0,
-    _pad6: u32 = 0,
+    /// ADR-0164 B / D-291 — gated store-watchpoint scratch #4 (former `_pad6`):
+    /// the func_idx of the function that clobbered 16777416.
+    trap_aux4: u32 = 0,
     /// §9.9 / 9.9-m-3a (per ADR-0056): parallel "element segment
     /// dropped" flag table. JIT `elem.drop elemidx` emits a byte
     /// store to `[r15+elem_dropped_ptr_off] + idx`. table.init
@@ -953,6 +957,9 @@ pub const trap_stub_entry_count_off: u12 = @offsetOf(JitRuntime, "trap_stub_entr
 pub const trap_aux_off: u12 = @offsetOf(JitRuntime, "trap_aux");
 /// ADR-0164 B / D-291 — gated load-value diagnostic scratch (see `trap_aux2`).
 pub const trap_aux2_off: u12 = @offsetOf(JitRuntime, "trap_aux2");
+/// ADR-0164 B / D-291 — gated store-watchpoint scratch (see `trap_aux3`/`trap_aux4`).
+pub const trap_aux3_off: u12 = @offsetOf(JitRuntime, "trap_aux3");
+pub const trap_aux4_off: u12 = @offsetOf(JitRuntime, "trap_aux4");
 /// Phase 10.E IT-6 cycle 3c — EH dispatcher integration. Trampoline
 /// reads ptr+count via `[X19/R15 + off]` to materialize
 /// `ExceptionTable` + `CodeMap` slices for `dispatchThrow`.

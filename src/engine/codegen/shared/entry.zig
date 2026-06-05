@@ -234,7 +234,7 @@ inline fn invokeAndCheck(
         // D-291 — call_indirect bounds trap: cind index (trap_aux) + the last
         // funcptr-load value (trap_aux2). cind_index != last_funcptr_load ⇒
         // corruption between load and cind consume; equal ⇒ the load reads wrong.
-        if (rt.trap_kind == 2) std.debug.print("[d-291] kind=2 oob_table cind_index={d} load_wasm_addr=0x{x}\n", .{ rt.trap_aux, rt.trap_aux2 });
+        if (rt.trap_kind == 2) std.debug.print("[d-291] kind=2 oob_table cind_index={d} load_wasm_addr=0x{x} clobber_store_val={d} clobber_func_idx={d}\n", .{ rt.trap_aux, rt.trap_aux2, rt.trap_aux3, rt.trap_aux4 });
     }
     return Error.Trap;
 }
@@ -309,7 +309,7 @@ inline fn invokeAndCheckVoid(
     if (rt.trap_flag != 0) {
         if (comptime build_options.trace_stackprobe) {
             // D-291 — cind index (trap_aux) + last funcptr-load value (trap_aux2).
-            if (rt.trap_kind == 2) std.debug.print("[d-291] kind=2 oob_table cind_index={d} load_wasm_addr=0x{x}\n", .{ rt.trap_aux, rt.trap_aux2 });
+            if (rt.trap_kind == 2) std.debug.print("[d-291] kind=2 oob_table cind_index={d} load_wasm_addr=0x{x} clobber_store_val={d} clobber_func_idx={d}\n", .{ rt.trap_aux, rt.trap_aux2, rt.trap_aux3, rt.trap_aux4 });
         }
         return Error.Trap;
     }
