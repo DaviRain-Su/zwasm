@@ -67,19 +67,20 @@ audit-gap list closed-or-deferred.
 ## Active bundle
 
 - **Bundle-ID**: D-292-B-core-internal-fault-handler (ADR-0166)
-- **Cycles-remaining**: ~3
-- **Continuity-memo**: Investigation + design DONE (`e7eacf37` ADR-0166). Production installs ZERO fault
-  handlers → internal SIGSEGV = silent exit 139. Design = diagnostic-only last-resort handler, POSIX mirrors
-  the proven `spec_assert_runner_base.zig::installSigsegvHandler` pattern (sigaltstack + `std.posix.sigaction`
-  SEGV/BUS/ILL/FPE, sa_sigaction SA.SIGINFO|ONSTACK) but **print+`std.c._exit(70)`, NO siglongjmp recovery**.
-  `std.posix.sigaction`/`write` are pure-Zig (no libc trigger); `_exit` already ADR-0070-necessary (add prod site).
-- **Exit-condition**: a hidden `--__selftest-crash` flag deliberately faults → CLI prints `zwasm: internal
-  error — fatal signal N … this is a bug …` + exits **70**; a subprocess test asserts that; 3-host green.
-- **Next step (cycle I)**: implement `src/platform/signal.zig` POSIX handler + install from `src/cli/main.zig`
-  (production-only guard, NOT test runners) + the `--__selftest-crash` affordance + the subprocess test. Then
-  cycle II = Windows `SetUnhandledExceptionFilter`; cycle III = 3-host signal-behaviour verify + close.
+- **Cycles-remaining**: ~2
+- **Continuity-memo**: ✅ **cycle I DONE** (`c395cf64`): `signal.zig` POSIX handler implemented +
+  production-installed from `main.zig` (first stmt). sigaction SEGV/BUS/ILL/FPE (sigaltstack + SA.SIGINFO|ONSTACK)
+  → async-signal-safe raw `write(2)` + `std.c._exit(70)`, NO recovery. Fork-based unit test (child installs +
+  null-derefs → parent asserts WIFEXITED && exit==70) green on Mac; Windows+Linux cross-compile clean (fork tail
+  comptime-prunes); clean traps still exit 1 (unaffected). ADR-0070 amended (prod write/_exit sites).
+- **Exit-condition**: Windows path emits the same diagnostic + a distinct exit on an unhandled fault; 3-host green.
+  (NOTE: the `--__selftest-crash` end-to-end affordance from the original plan is OPTIONAL — the fork unit test
+  already provides the observable; add it only if a real-binary integration check is wanted.)
+- **Next step (cycle II)**: Windows `SetUnhandledExceptionFilter` (or a diagnostic arm of `windows_traphandler`)
+  in `signal.zig`'s currently-no-op Windows branch → same "internal error" message + `ExitProcess(70)`; verify via
+  the existing fork test's Windows analog OR a Win-gated check. Then cycle III = 3-host verify + bundle close.
 
-## ← LEAD: D-292 B-core impl cycle I (see Active bundle)
+## ← LEAD: D-292 B-core impl cycle II — Windows fault handler (see Active bundle)
 
 ## Queue (time-consuming first, per user directive)
 
@@ -93,20 +94,19 @@ audit-gap list closed-or-deferred.
 - **Phase 16 (完成形) — open-ended; the loop CONTINUES, no release (ADR-0156).** v0.1.0-scope program is
   thoroughly complete + 3-host green (`deb97903`); ADR-0163 bench+docs program ALL DONE. Tag/publish/cutover are
   manual, user-only — there is no release gate.
-- Debt ledger: 0 `now`. **D-293 substantially complete** (slices 1–4d, partial — GC trampolines/i31 low-pri
-  deferred). Now on **D-292 B-core** (ADR-0166 filed `e7eacf37`; impl bundle). slice-4d `0d13e635` ubuntu GREEN
-  (`OK 85dfb166`); windows kicked this turn. D-291 diag gated.
+- Debt ledger: 0 `now`. **D-293 substantially complete** (partial). **D-292 B-core cycle I DONE** (`c395cf64`:
+  POSIX internal-fault handler, production-active, fork-tested, Win+Linux cross-compile clean). slice-4d ubuntu
+  GREEN (`OK 85dfb166`); slice-4d windows = D-279 heisenbug (`fail @6cdabe93`, kept). cycle I kicked this turn.
 
 ## Step 0.7 (next resume) — verify remote logs
 
-- **ubuntu**: ✅ GREEN at slice-4d `85dfb166` (`[run_remote_ubuntu] OK`) — cast_failure code-11 confirmed on
-  x86_64. ADR-0166 (`e7eacf37`) is docs-only (no kick needed; folds into the next B-core impl kick).
-- **windows**: slice-4d = D-279 `spec-simd.exe` exit 3 (`fail @6cdabe93`, kept/D7). ⚠️ **NOW on 4 CONSECUTIVE
-  runs** (slice-2/3/4b/4d, all spec-simd, none touched simd) — looks reproducible NOT flaky; weigh a real D-279
-  investigation (re-run the SAME win commit twice to confirm determinism). Last windows-recorded = `6cdabe93`.
-- **Gate note (retracted alarm)**: `run_remote_windows.sh` correctly has `set -euo pipefail` + aborts before
-  printing `OK` on remote failure (the wrapper exited 1 here). "windows OK" IS a real green signal; absence of
-  the `OK` line + a `Build Summary: N failed` = RED. Read the Build Summary, not just the wrapper exit.
+- **ubuntu**: ✅ GREEN at `85dfb166`. B-core cycle I `c395cf64` (signal.zig — POSIX) kicked this turn — verify
+  `/tmp/ubuntu.log` `OK` (the fork test must pass on x86_64 Linux; signal behaviour is per-OS).
+- **windows**: ⚠️ D-279 `spec-simd.exe` exit 3 on **4 CONSECUTIVE runs** (slice-2/3/4b/4d, none touched simd) —
+  looks reproducible NOT flaky; weigh a real D-279 investigation (re-run the SAME win commit twice to confirm
+  determinism). Last win-recorded = `6cdabe93`. B-core cycle I is POSIX-only (Windows handler = cycle II).
+- **Gate note**: `run_remote_windows.sh` aborts before printing `OK` on failure → `OK` line = real green;
+  `Build Summary: N failed` (no `OK`) = RED. Read the Build Summary, not just the wrapper exit.
 
 ## Key refs
 
