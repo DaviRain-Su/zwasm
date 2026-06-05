@@ -1055,6 +1055,31 @@ entries:
       (no codegen/ABI/trampoline touched; trap catch-path inert on a successful run) and ubuntu test-all is GREEN on
       the identical source → exonerated; this is the pre-existing Win64 heisenbug surfacing, not a trap regression.
       ISOLATION (if ever in doubt): `run_remote_windows.sh --branch <ref>` at a pre-trap commit. Trap commits KEPT.
+      2026-06-06 ESCALATION (B-core cycle-I kick @b1c83e5c): now FAILING ~every recent windows run (≥5
+      consecutive `fail` records: slice-2/3/4b/4d + cycle-I), and this run had 3 FAILED steps (was 1). Combined
+      with "reproduced on 2nd kick" + "identical wrong sha256 hash both kicks", the prior "intermittent flake"
+      framing is weakening — it looks like a HIGH-RATE (near-deterministic trigger) bug, not a rare flake. The
+      investigation_discipline §2 discharge gate (≥5 SILENT) is moving AWAY, not toward — this needs a real fix,
+      not flake-tracking. NEXT formal investigation (needs the windows host free): re-run the SAME win commit ≥2×
+      to quantify the per-run failure rate, then probe the hypotheses below.
+      HYPOTHESES (investigation_discipline §1; each: predicted signature | distinguishing probe):
+      H1 Win64 RSP-16/shadow-space misalignment — the JIT call/prologue emit maintains SysV alignment but not
+         Win64's 16-byte RSP + 32-byte shadow space at helper call sites; a helper's aligned SSE (MOVAPS)
+         faults/corrupts depending on entry-time RSP parity (varies run-to-run). | SIG: crashes/wrong-results in
+         funcs calling runtime helpers; correlates with call-stack-depth parity. PROBE: gated `RSP&15` assert at
+         x86_64 JIT call sites on Win64 + log at crash.
+      H2 FP-chain-walk / RBP-sentinel (D-180/D-245 lineage) — host `@errorReturnTrace` FP-walk corrupts when the
+         JIT frame's saved RBP isn't a valid `{0,0}` sentinel under Win64 unwind. | SIG: crashes on error/trace
+         paths. PROBE: verify test_discipline §3 sentinel is installed on the Win64 JIT entry path (prod, not
+         just test wrappers).
+      H3 ⚠️ SAME ROOT as D-291? — D-291 is a non-deterministic large-frame/wide-i32 ADDRESS miscompile (a caller
+         computes a result-buffer ptr ~16MB too high; ASLR-dependent → non-deterministic). D-279's "identical
+         wrong result, sometimes" + non-determinism fits an absolute-address-dependent miscompile that Win64's
+         different address layout triggers more often. | SIG: D-279 wrong-results trace to wide-address arith,
+         same as D-291. PROBE: run the D-291 gated `-Dtrace-stackprobe` diag on a Win64 failing case; if the
+         func-17-caller large-frame address pattern appears, D-279 ⊇ D-291 (one fix closes both — high value).
+         D-291 is Mac-reproducible via the existing diag infra, so this hypothesis is partly testable WITHOUT
+         the windows host.
     first_raised: "2026-06-05"
     last_reviewed: "2026-06-06"
     refs: |-
