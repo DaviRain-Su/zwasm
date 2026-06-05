@@ -522,13 +522,14 @@ pub fn emitCallRef(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const x_funcref = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, funcref_vreg, 0);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(17, 31, x_funcref));
 
-    // Null check: CMP X17, #0 ; B.EQ trap. Reuses the call_indirect
-    // bounds trap stub (cind_bounds_fixups → trap_kind 2).
+    // Null check: CMP X17, #0 ; B.EQ trap. D-293 slice-4b — a null call_ref is
+    // null_reference (code 10), NOT oob_table; route to null_ref_fixups (was
+    // mis-routed to cind_bounds_fixups → mis-reported trap_kind 2).
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpImmX(17, 0));
     {
         const fixup_at: u32 = @intCast(ctx.buf.items.len);
         try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.eq, 0));
-        try ctx.cind_bounds_fixups.append(ctx.allocator, fixup_at);
+        try ctx.null_ref_fixups.append(ctx.allocator, fixup_at);
     }
 
     // Native entry: LDR X16, [X17, #funcentity_funcptr_offset].

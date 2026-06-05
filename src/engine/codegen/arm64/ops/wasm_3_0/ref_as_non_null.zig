@@ -27,7 +27,7 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, _: *const zir.ZirInstr) ctx_mod.Error!void {
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpImmX(xn, 0));
     const fixup_at: u32 = @intCast(ctx.buf.items.len);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.eq, 0));
-    try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+    try ctx.null_ref_fixups.append(ctx.allocator, fixup_at); // D-293 slice-4b null_reference (code 10)
     // Identity: push src back. No new result vreg; src's storage
     // (register or spill slot) holds the funcref unchanged for the
     // next consumer.

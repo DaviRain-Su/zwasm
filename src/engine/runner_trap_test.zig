@@ -176,3 +176,39 @@ test "runVoidExportWasi: JIT trapping-trunc NaN → precise invalid_conversion c
     try testing.expectEqual(@as(u32, 8), ovf_code);
     try testing.expectEqual(trap_surface.TrapKind.int_overflow, trap_surface.jitTrapCode(ovf_code).?);
 }
+
+// `(module (type $t (func)) (func (export "_start") ref.null $t call_ref $t))` —
+// call_ref on a null funcref traps (Wasm 3.0 typed func-refs §4.4.8.13).
+// D-293 slice-4b: null_reference code 10. NOTE this was a REGRESSION on arm64 —
+// the call_ref null check appended to `cind_bounds_fixups`, mis-reporting
+// oob_table (code 2); slice-4b re-routes both arches to the null_ref channel.
+const callref_null_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03, 0x02,
+    0x01, 0x00, 0x07, 0x0a, 0x01, 0x06, 0x5f, 0x73,
+    0x74, 0x61, 0x72, 0x74, 0x00, 0x00, 0x0a, 0x08,
+    0x01, 0x06, 0x00, 0xd0, 0x00, 0x14, 0x00, 0x0b,
+};
+
+// `(module (func (export "_start") ref.null func ref.as_non_null drop))` —
+// ref.as_non_null on null traps (Wasm 3.0 §3.3.8.5). D-293 slice-4b: code 10
+// (was the generic bucket — TEST/CMP self + JE/B.EQ → bounds_fixups).
+const asnonnull_null_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03, 0x02,
+    0x01, 0x00, 0x07, 0x0a, 0x01, 0x06, 0x5f, 0x73,
+    0x74, 0x61, 0x72, 0x74, 0x00, 0x00, 0x0a, 0x08,
+    0x01, 0x06, 0x00, 0xd0, 0x70, 0xd4, 0x1a, 0x0b,
+};
+
+test "runVoidExportWasi: JIT call_ref null + ref.as_non_null null → precise null_reference code 10 (D-293 slice-4b)" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    var cr: u32 = 99;
+    try testing.expectError(entry.Error.Trap, runner.runVoidExportWasi(testing.allocator, &callref_null_wasm, "_start", null, &cr));
+    try testing.expectEqual(@as(u32, 10), cr); // was 2 (oob_table) on arm64 pre-slice-4b
+    try testing.expectEqual(trap_surface.TrapKind.null_reference, trap_surface.jitTrapCode(cr).?);
+    var an: u32 = 99;
+    try testing.expectError(entry.Error.Trap, runner.runVoidExportWasi(testing.allocator, &asnonnull_null_wasm, "_start", null, &an));
+    try testing.expectEqual(@as(u32, 10), an);
+    try testing.expectEqual(trap_surface.TrapKind.null_reference, trap_surface.jitTrapCode(an).?);
+}

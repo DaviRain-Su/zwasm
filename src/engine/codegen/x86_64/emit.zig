@@ -708,6 +708,9 @@ pub fn compile(
     // D-293 slice-3 — trapping-trunc NaN (code 9 = invalid_conversion) demuxed from bounds_fixups.
     var invalid_conv_fixups: std.ArrayList(u32) = .empty;
     defer invalid_conv_fixups.deinit(allocator);
+    // D-293 slice-4b — call_ref-null + ref.as_non_null (code 10 = null_reference).
+    var null_ref_fixups: std.ArrayList(u32) = .empty;
+    defer null_ref_fixups.deinit(allocator);
     // ADR-0164 A3 / D-292 — memory oob (code 6) demuxed from bounds_fixups.
     var oob_fixups: std.ArrayList(u32) = .empty;
     defer oob_fixups.deinit(allocator);
@@ -788,6 +791,7 @@ pub fn compile(
         .divzero_fixups = &divzero_fixups,
         .overflow_fixups = &overflow_fixups,
         .invalid_conv_fixups = &invalid_conv_fixups,
+        .null_ref_fixups = &null_ref_fixups,
         .oob_fixups = &oob_fixups,
         .oobtable_fixups = &oobtable_fixups,
         .cind_sig_fixups = &cind_sig_fixups,

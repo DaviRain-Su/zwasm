@@ -118,6 +118,11 @@ pub const EmitCtx = struct {
     /// fixups, demuxed out of `bounds_fixups`. The trunc range checks reuse
     /// `overflow_fixups` (code 8). Other `bounds_fixups` kinds stay generic.
     invalid_conv_fixups: *std.ArrayList(u32),
+    /// D-293 slice-4b — call_ref-null + ref.as_non_null null-reference (B.EQ →
+    /// code 10 = null_reference) fixups, demuxed out of `bounds_fixups`. NOTE the
+    /// arm64 call_ref null check previously appended to `cind_bounds_fixups`
+    /// (mis-reporting oob_table code 2); slice-4b re-routes it here.
+    null_ref_fixups: *std.ArrayList(u32),
     /// ADR-0164 A3 / D-292 — memory load/store/bulk-memory out-of-bounds
     /// (B.HI → code 6) fixups, demuxed out of `bounds_fixups` so oob_memory
     /// reaches a dedicated trap stub. Other `bounds_fixups` kinds (oob_table /

@@ -655,7 +655,7 @@ pub fn emitCallIndirect(
 ///   (1) pop funcref vreg (stack: [args..., funcref]),
 ///   (2) marshalCallArgs,
 ///   (3) funcref ptr → reg ; `OR reg,reg ; JZ trap` (null check,
-///       reuses the shared bounds trap stub via bounds_fixups),
+///       null_reference code 10 via null_ref_fixups — D-293 slice-4b),
 ///   (4) MOV RAX, [reg + funcentity_funcptr_offset]  (native entry),
 ///   (5) MEMORY-class buffer LEA + restore runtime_ptr + shadow,
 ///   (6) CALL RAX, captureCallResult.
@@ -667,7 +667,7 @@ pub fn emitCallRefCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!voi
         ctx.alloc,
         ctx.pushed_vregs,
         ctx.next_vreg,
-        ctx.bounds_fixups,
+        ctx.null_ref_fixups,
         ctx.spill_base_off,
         ctx.outgoing_max_bytes,
         ctx.module_types,
@@ -682,7 +682,7 @@ pub fn emitCallRef(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
-    bounds_fixups: *std.ArrayList(u32),
+    null_ref_fixups: *std.ArrayList(u32),
     spill_base_off: u32,
     outgoing_max_bytes: u32,
     module_types: []const zir.FuncType,
@@ -702,12 +702,13 @@ pub fn emitCallRef(
     const funcref_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, funcref_vreg, 0);
 
     // Null check: OR funcref_r, funcref_r (sets ZF iff null, value
-    // unchanged) ; JZ trap. Reuses the shared bounds trap stub.
+    // unchanged) ; JZ trap. D-293 slice-4b — a null call_ref is null_reference
+    // (code 10), routed to the dedicated null_ref trap stub.
     try buf.appendSlice(allocator, inst.encOrRR(.q, funcref_r, funcref_r).slice());
     {
         const fixup_at: u32 = @intCast(buf.items.len);
         try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice());
-        try bounds_fixups.append(allocator, fixup_at);
+        try null_ref_fixups.append(allocator, fixup_at);
     }
 
     // Native entry: MOV RAX, [funcref_r + funcentity_funcptr_offset].

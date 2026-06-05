@@ -1472,6 +1472,15 @@ fn emitEndInter(ctx: *ctx_mod.EmitCtx) Error!void {
             inst.patchRel32(ctx.buf.items, fx_byte, 6, disp);
         }
     }
+    // D-293 slice-4b — call_ref-null + ref.as_non_null (null_reference, code 10) stub; `JE rel32` (6-byte).
+    if (ctx.null_ref_fixups.items.len > 0) {
+        const trap_byte = try emitTrapExitStub(ctx, 10);
+        for (ctx.null_ref_fixups.items) |fx_byte| {
+            const disp: i32 = @as(i32, @intCast(trap_byte)) -
+                @as(i32, @intCast(fx_byte)) - 6;
+            inst.patchRel32(ctx.buf.items, fx_byte, 6, disp);
+        }
+    }
     // ADR-0164 A3 / D-292 — memory out-of-bounds (code 6) stub; `JA rel32` (6-byte).
     if (ctx.oob_fixups.items.len > 0) {
         const trap_byte = try emitTrapExitStub(ctx, 6);

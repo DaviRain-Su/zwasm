@@ -113,6 +113,7 @@ pub fn jitTrapCode(code: u32) ?TrapKind {
         7 => .div_by_zero, // D-292 A2 — div-by-zero stub
         8 => .int_overflow, // D-292 A2 — div_s INT_MIN/-1 signed-overflow stub; D-293 slice-3 — trunc range
         9 => .invalid_conversion, // D-293 slice-3 — trapping-trunc NaN (UCOMI/FCMP self → JP/B.VS)
+        10 => .null_reference, // D-293 slice-4b — call_ref null + ref.as_non_null (TEST/CMP → JE/B.EQ)
         else => null, // 0 unmarked / 1 generic — still-shared bounds kinds (D-293)
     };
 }
