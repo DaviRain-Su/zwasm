@@ -1934,16 +1934,14 @@ const unreachable_start_wasm = [_]u8{
     0x01, 0x03, 0x00, 0x00, 0x0b,
 };
 
-test "runVoidExportWasi: a JIT trap surfaces the recorded trap-kind code (ADR-0164 A)" {
+test "runVoidExportWasi: a JIT `unreachable` surfaces the precise trap-kind code 5 (ADR-0164 A / D-292)" {
     if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
     var trap_code: u32 = 99; // sentinel: must be overwritten by the trap path
     try testing.expectError(entry.Error.Trap, runner.runVoidExportWasi(testing.allocator, &unreachable_start_wasm, "_start", null, &trap_code));
-    // `unreachable` rides the shared GENERIC trap bucket, NOT a precise per-kind
-    // code. The bucket value is arch-dependent — arm64 records 1 (generic),
-    // x86_64 records 0 (unmarked) — and BOTH map to "kind not yet distinguished"
-    // via trap_surface.jitTrapCode (precise codes are 2/3/4 only). Assert the
-    // trap path overwrote the sentinel AND landed in the generic bucket (≤ 1);
-    // splitting unreachable/oob/div/overflow into precise codes is D-292.
-    try testing.expect(trap_code != 99);
-    try testing.expect(trap_code <= 1);
+    // D-292 widening: `unreachable` now records the PRECISE code 5 on BOTH arches
+    // (was the arch-divergent generic bucket — arm64 1, x86_64 0). 5 maps to
+    // TrapKind.unreachable_ via trap_surface.jitTrapCode, reaching interp-parity.
+    const trap_surface = @import("../api/trap_surface.zig");
+    try testing.expectEqual(@as(u32, 5), trap_code);
+    try testing.expectEqual(trap_surface.TrapKind.unreachable_, trap_surface.jitTrapCode(trap_code).?);
 }

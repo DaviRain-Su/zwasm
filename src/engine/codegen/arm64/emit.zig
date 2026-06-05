@@ -655,6 +655,14 @@ pub fn compile(
     var cind_sig_fixups: std.ArrayList(u32) = .empty;
     defer cind_sig_fixups.deinit(allocator);
 
+    // ADR-0164 A / D-292 — dedicated fixup list for `unreachable`
+    // (unconditional-B placeholder). Routed to its own trap stub
+    // that writes the precise `trap_kind` code 5, so JIT/AOT reach
+    // interp-parity instead of the arch-divergent generic bucket
+    // (was arm64 1 / x86_64 0). `throw` keeps the generic stub.
+    var unreach_fixups: std.ArrayList(u32) = .empty;
+    defer unreach_fixups.deinit(allocator);
+
     // Return fixup list (§9.7 / 7.5-return-op): each `return` op
     // emits its result marshal inline and an unconditional B
     // placeholder; the byte_offset of the placeholder lives here.
@@ -1249,7 +1257,7 @@ pub fn compile(
                 // = 000101); the patcher distinguishes by opcode.
                 const fixup_at: u32 = @intCast(buf.items.len);
                 try gpr.writeU32(allocator, &buf, inst.encB(0));
-                try bounds_fixups.append(allocator, fixup_at);
+                try unreach_fixups.append(allocator, fixup_at);
                 dead_code = true;
             },
             .@"return" => {
@@ -1716,13 +1724,23 @@ pub fn compile(
                                 4,
                             );
                             const orig = std.mem.readInt(u32, b.items[fx_byte..][0..4], .little);
-                            const cond: inst.Cond = @enumFromInt(@as(u4, @intCast(orig & 0xF)));
-                            std.mem.writeInt(u32, b.items[fx_byte..][0..4], inst.encBCond(cond, disp_words), .little);
+                            // Opcode-shape dispatch (mirror of the generic stub patch):
+                            //   bits 31..26 == 0b000101 → unconditional B (`unreachable`);
+                            //   else                    → B.cond (call_indirect variants).
+                            const new_word: u32 = if ((orig >> 26) == 0b000101)
+                                inst.encB(disp_words)
+                            else blk: {
+                                const cond: inst.Cond = @enumFromInt(@as(u4, @intCast(orig & 0xF)));
+                                break :blk inst.encBCond(cond, disp_words);
+                            };
+                            std.mem.writeInt(u32, b.items[fx_byte..][0..4], new_word, .little);
                         }
                     }
                 };
                 try EmitCindStub.emit(allocator, &buf, cind_bounds_fixups.items, 2, frame_bytes);
                 try EmitCindStub.emit(allocator, &buf, cind_sig_fixups.items, 3, frame_bytes);
+                // ADR-0164 A / D-292 — `unreachable` stub, code 5 (interp-parity).
+                try EmitCindStub.emit(allocator, &buf, unreach_fixups.items, 5, frame_bytes);
                 // ADR-0105 D3 — stack-overflow trap stub. Probe fired
                 // BEFORE `SUB SP, SP, frame_bytes`, so the stub must
                 // NOT add frame_bytes back (SP is still at the post-

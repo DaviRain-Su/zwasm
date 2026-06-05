@@ -1367,6 +1367,31 @@ pub fn emitEndCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
 ///
 /// Patches each pending fixup's disp32 to the trap stub address
 /// or the const-pool entry RIP-relative offset.
+/// Emit a function-end trap-exit stub body and return its byte offset (for
+/// fixup patching). Sets `trap_flag = 1`, optionally records `trap_kind = kind`
+/// (null = generic bucket, leaves trap_kind unwritten), then runs the trap-exit
+/// epilogue: clear EAX, undo the frame `SUB RSP`, restore callee-saved homes
+/// (ADR-0155 stage 4), pop R15/RBP, RET. Shared by the bounds (generic) +
+/// `unreachable` (code 5, ADR-0164 A / D-292) stubs.
+fn emitTrapExitStub(ctx: *ctx_mod.EmitCtx, kind: ?u32) Error!u32 {
+    const stub_byte: u32 = @intCast(ctx.buf.items.len);
+    try ctx.buf.appendSlice(ctx.allocator, inst.encStoreImm32MemDisp32(abi.runtime_ptr_save_gpr, jit_abi.trap_flag_off, 1).slice());
+    if (kind) |k| {
+        try ctx.buf.appendSlice(ctx.allocator, inst.encStoreImm32MemDisp32(abi.runtime_ptr_save_gpr, jit_abi.trap_kind_off, k).slice());
+    }
+    try ctx.buf.appendSlice(ctx.allocator, inst.encXorRR(.d, .rax, .rax).slice());
+    if (ctx.frame_bytes > 0) {
+        try ctx.buf.appendSlice(ctx.allocator, rbp_disp.rspAdd(ctx.frame_bytes).slice());
+    }
+    try restoreCalleeSavedHomes(ctx.allocator, ctx.buf, ctx.alloc, ctx.func, ctx.home_save_base_disp);
+    if (ctx.uses_runtime_ptr) {
+        try ctx.buf.appendSlice(ctx.allocator, inst.encPopR(.r15).slice());
+    }
+    try ctx.buf.appendSlice(ctx.allocator, inst.encPopR(.rbp).slice());
+    try ctx.buf.appendSlice(ctx.allocator, inst.encRet().slice());
+    return stub_byte;
+}
+
 fn emitEndInter(ctx: *ctx_mod.EmitCtx) Error!void {
     try marshalReturnRegs(
         ctx.allocator,
@@ -1398,27 +1423,22 @@ fn emitEndInter(ctx: *ctx_mod.EmitCtx) Error!void {
     try ctx.buf.appendSlice(ctx.allocator, inst.encPopR(.rbp).slice());
     try ctx.buf.appendSlice(ctx.allocator, inst.encRet().slice());
 
-    if (ctx.bounds_fixups.items.len > 0 or ctx.unreach_fixups.items.len > 0) {
-        const trap_byte: u32 = @intCast(ctx.buf.items.len);
-        try ctx.buf.appendSlice(ctx.allocator, inst.encStoreImm32MemDisp32(abi.runtime_ptr_save_gpr, jit_abi.trap_flag_off, 1).slice());
-        try ctx.buf.appendSlice(ctx.allocator, inst.encXorRR(.d, .rax, .rax).slice());
-        if (ctx.frame_bytes > 0) {
-            try ctx.buf.appendSlice(ctx.allocator, rbp_disp.rspAdd(ctx.frame_bytes).slice());
-        }
-        // ADR-0155 stage 4 — bounds/unreachable trap stub fires mid-body (homes
-        // already mutated); restore them so the host's callee-saved regs survive
-        // the trap exit.
-        try restoreCalleeSavedHomes(ctx.allocator, ctx.buf, ctx.alloc, ctx.func, ctx.home_save_base_disp);
-        if (ctx.uses_runtime_ptr) {
-            try ctx.buf.appendSlice(ctx.allocator, inst.encPopR(.r15).slice());
-        }
-        try ctx.buf.appendSlice(ctx.allocator, inst.encPopR(.rbp).slice());
-        try ctx.buf.appendSlice(ctx.allocator, inst.encRet().slice());
+    // ADR-0155 stage 4 — these trap stubs fire mid-body (homes already mutated);
+    // each runs the full trap-exit epilogue so the host's callee-saved regs
+    // survive. ADR-0164 A / D-292 — `unreachable` gets a DEDICATED stub that
+    // records the precise trap_kind code 5 (was the shared generic stub, which
+    // left trap_kind unwritten = 0); `bounds_fixups` (oob/div/overflow) keeps the
+    // generic bucket until A2/A3.
+    if (ctx.bounds_fixups.items.len > 0) {
+        const trap_byte = try emitTrapExitStub(ctx, null);
         for (ctx.bounds_fixups.items) |fx_byte| {
             const disp: i32 = @as(i32, @intCast(trap_byte)) -
                 @as(i32, @intCast(fx_byte)) - 6;
             inst.patchRel32(ctx.buf.items, fx_byte, 6, disp);
         }
+    }
+    if (ctx.unreach_fixups.items.len > 0) {
+        const trap_byte = try emitTrapExitStub(ctx, 5);
         for (ctx.unreach_fixups.items) |fx_byte| {
             const disp: i32 = @as(i32, @intCast(trap_byte)) -
                 @as(i32, @intCast(fx_byte)) - 5;
