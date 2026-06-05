@@ -174,6 +174,11 @@ fn thunkEnvironGet(rt: *runtime.Runtime, ctx: *anyopaque) anyerror!void {
 }
 
 // clock / random / poll thunks
+fn thunkProcRaise(rt: *runtime.Runtime, ctx: *anyopaque) anyerror!void {
+    _ = ctx;
+    const sig = rt.popOperand().u32;
+    return pushErrno(rt, wasi_proc.procRaise(sig));
+}
 fn thunkClockTimeGet(rt: *runtime.Runtime, ctx: *anyopaque) anyerror!void {
     const host: *wasi_host.Host = @ptrCast(@alignCast(ctx));
     const time_ptr = rt.popOperand().u32;
@@ -464,6 +469,7 @@ pub fn lookupWasiThunk(name: []const u8) ?HostThunkFn {
     if (std.mem.eql(u8, name, "fd_prestat_get")) return thunkFdPrestatGet;
     if (std.mem.eql(u8, name, "fd_prestat_dir_name")) return thunkFdPrestatDirName;
     if (std.mem.eql(u8, name, "sched_yield")) return thunkSchedYield;
+    if (std.mem.eql(u8, name, "proc_raise")) return thunkProcRaise;
     if (std.mem.eql(u8, name, "fd_filestat_get")) return thunkFdFilestatGet;
     if (std.mem.eql(u8, name, "fd_filestat_set_size")) return thunkFdFilestatSetSize;
     if (std.mem.eql(u8, name, "fd_filestat_set_times")) return thunkFdFilestatSetTimes;
@@ -535,26 +541,27 @@ test "zwasm_wasi_config_set_envs: copies key/val pairs into host.envs" {
 
 test "lookupWasiThunk: every supported WASI 0.1 import resolves" {
     const names = [_][]const u8{
-        "fd_write",              "proc_exit",
-        "args_get",              "args_sizes_get",
-        "environ_get",           "environ_sizes_get",
-        "clock_time_get",        "clock_res_get",
-        "random_get",            "poll_oneoff",
-        "fd_read",               "fd_close",
-        "fd_sync",               "fd_datasync",
-        "fd_advise",             "fd_pread",
-        "fd_pwrite",             "fd_seek",
-        "fd_tell",               "fd_fdstat_get",
-        "fd_fdstat_set_flags",   "fd_fdstat_set_rights",
-        "fd_readdir",            "path_open",
-        "fd_prestat_get",        "fd_prestat_dir_name",
-        "sched_yield",           "fd_filestat_get",
-        "fd_filestat_set_size",  "fd_filestat_set_times",
-        "fd_allocate",           "path_unlink_file",
-        "path_create_directory", "path_remove_directory",
-        "path_filestat_get",     "path_filestat_set_times",
-        "path_symlink",          "path_readlink",
-        "path_rename",           "path_link",
+        "fd_write",                "proc_exit",
+        "args_get",                "args_sizes_get",
+        "environ_get",             "environ_sizes_get",
+        "clock_time_get",          "clock_res_get",
+        "random_get",              "poll_oneoff",
+        "fd_read",                 "fd_close",
+        "fd_sync",                 "fd_datasync",
+        "fd_advise",               "fd_pread",
+        "fd_pwrite",               "fd_seek",
+        "fd_tell",                 "fd_fdstat_get",
+        "fd_fdstat_set_flags",     "fd_fdstat_set_rights",
+        "fd_readdir",              "path_open",
+        "fd_prestat_get",          "fd_prestat_dir_name",
+        "sched_yield",             "proc_raise",
+        "fd_filestat_get",         "fd_filestat_set_size",
+        "fd_filestat_set_times",   "fd_allocate",
+        "path_unlink_file",        "path_create_directory",
+        "path_remove_directory",   "path_filestat_get",
+        "path_filestat_set_times", "path_symlink",
+        "path_readlink",           "path_rename",
+        "path_link",
     };
     inline for (names) |n| {
         try testing.expect(lookupWasiThunk(n) != null);

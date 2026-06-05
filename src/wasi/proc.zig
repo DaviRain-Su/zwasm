@@ -66,6 +66,18 @@ pub fn schedYield() p1.Errno {
     return .success;
 }
 
+/// `proc_raise(sig) → errno` — request delivery of signal `sig` to the guest.
+/// zwasm sandboxes the guest with NO POSIX signal-delivery path: a wasm guest
+/// has no signal handlers in this model, and raising a real host signal would
+/// hit the runtime process, not the guest — actively wrong. So this reports
+/// `notsup` (a deliberate design boundary, not an unimplemented stub): wasi-
+/// libc's `abort()` then falls through to its trap/exit path instead of
+/// silently continuing. `proc_raise` is deprecated in WASI for this reason.
+pub fn procRaise(sig: u32) p1.Errno {
+    _ = sig;
+    return .notsup;
+}
+
 // ============================================================
 // args_*
 // ============================================================
@@ -261,4 +273,9 @@ test "args_get: empty args writes nothing" {
 
 test "schedYield: no-op success (single-threaded host)" {
     try testing.expectEqual(p1.Errno.success, schedYield());
+}
+
+test "procRaise: notsup (no guest signal delivery in the sandbox)" {
+    try testing.expectEqual(p1.Errno.notsup, procRaise(6)); // SIGABRT
+    try testing.expectEqual(p1.Errno.notsup, procRaise(0));
 }
