@@ -56,12 +56,16 @@ audit-gap list closed-or-deferred.
 
 ## Step 0.7 (next resume) — verify remote logs
 
-- **ubuntu**: `tail -3 /tmp/ubuntu.log` — expect GREEN on A3 (`63e8c6eb`). RED on a codegen-real failure →
-  auto-revert (D3); a trap-kind mismatch would be a real regression (the per-kind stubs), not a flake.
-- **windows**: GREEN expected (A1+A2 were clean). RED with the sha256-shootout non-deterministic signature =
-  the standing **D-279** Win64 heisenbug — `track_heisenbug.sh win64-testall segv`, KEEP commits (D7),
-  non-blocking. Real new Win64 bug (reproduces on re-run, codegen/ABI touch) → debt row + fix.
-- Windows cadence: record green via `should_gate_windows.sh --record` once A3's windows kick is verified.
+- **ubuntu**: ✅ GREEN through B-diag `a2ac1b89` (`[run_remote_ubuntu] OK (HEAD=a2ac1b89)`). A1/A2/A3 all green
+  on x86_64 Linux. `tail -3 /tmp/ubuntu.log` next resume for the latest kick.
+- **windows**: ⚠️ test-all at `85157236` (A3) RED = the standing **D-279** Win64 heisenbug, NOT a regression.
+  Signature: `zwasm-spec-simd` (`simd_bit_shift` — A3 NEVER touched shift codegen) + `zwasm-spec-wasm-2-0-assert`
+  fail Win64-ONLY while Mac arm64 + ubuntu x86_64 are GREEN on identical source; non-deterministic (D-279 lineage
+  D-180/D-245). Tracked `win64-testall segv @ a2ac1b89` (streak 0). **Commits KEPT (D7).** Cadence recorded at
+  `a2ac1b89` (windows = "checked, only known heisenbug" — NOT clean-green; do not treat as green-verified).
+- **Gate note (retracted alarm)**: `run_remote_windows.sh` correctly has `set -euo pipefail` + aborts before
+  printing `OK` on remote failure (the wrapper exited 1 here). "windows OK" IS a real green signal; absence of
+  the `OK` line + a `Build Summary: N failed` = RED. Read the Build Summary, not just the wrapper exit.
 
 ## Key refs
 
