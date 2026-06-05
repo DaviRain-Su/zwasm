@@ -23,12 +23,15 @@ ordinary Phase-16 work (survey-first; bundle multi-cycle pieces). Order **B→A�
   0.5.0 insecure — 8 CVEs, unmaintained; not in v1's set → no parity lost). End-to-end verified: `--bench=tinygo/fib
   --compare=all --quick` → all 5 runtimes (zwasm 5.31 / wasmtime 6.87 / wazero 5.92 / wasmer 11.48 / wasmedge 13.47
   ms — startup-dominated tiny workload). node/bun still deferred (need JS WASI wrapper → A).
-- **A — Benchmark suite expansion (v1-level + more). ← NEXT.** v1's `~/Documents/MyProducts/zwasm/bench/` is the
-  breadth baseline (`compare_runtimes.sh`, `runtime_comparison.yaml`, `simd_comparison.yaml`, `shootout-src/`,
-  `tinygo/`, `run_wasm.mjs`=Node/V8). v2 today = `bench/` (history.yaml + sightglass + per-op SIMD + aot_coldstart).
-  Add: realworld WASI workloads (now JIT/AOT-runnable, NOT just interp), all-engine matrix (interp/JIT/AOT), startup
-  + peak-memory, optionally node/bun (build the JS WASI wrapper, v1's `run_wasm.mjs`). Reuse `scripts/run_bench.sh`
-  (`--compare=all` now incl. wasmedge). **Step 0**: diff v1 bench/ vs v2 bench/, list the gaps.
+- **A — Benchmark suite expansion (v1-level + more). ← IN PROGRESS.** Done so far: **all-engine matrix**
+  (`3195fda3`) — `run_bench.sh --engines=interp,jit,aot` benches zwasm across its 3 engines (one runtime row each;
+  aot precompiles a temp .cwasm, net-zero cleanup; combinable with `--compare=all`). Verified on tinygo/fib
+  (interp 2.11 / jit 2.44 / aot 2.00 ms). **NEXT A chunks**: (1) **full-inventory re-profile** — run the engine
+  matrix × `--compare=all` over the whole `BENCHES` inventory + capture RSS, record a fresh result; this is a heavy
+  multi-min run (do foreground or timeout-bounded bg). (2) **Refresh the stale `bench/results/s15p_parity_vs_v1.md`**
+  from that data (it falsely says "jit compute-only/no WASI" — D-244 fixed it; JIT+AOT run the tinygo/cljw WASI
+  fixtures). (3) optional node/bun V8 comparator (build a JS WASI wrapper, v1's `run_wasm.mjs`). v1 breadth
+  baseline: `~/Documents/MyProducts/zwasm/bench/`.
 - **C — Official benchmark docs.** Public-quality `docs/benchmarks.md` (or `docs/reference/benchmarks.md`):
   methodology, host matrix, results vs other runtimes + vs v1, reproduction, caveats (startup-confound). Link from
   README.
@@ -43,10 +46,10 @@ FALSE since D-244; re-profile WITH realworld WASI workloads (JIT+AOT now run the
 
 ## Step 0.7 (next resume) — verify remote logs
 
-Last 3-host green = `8b19faad`. The B commits (`20de319d` bench shell, `310314bb` run_bench wasmedge) touch only
-`flake.nix` (NEW `devShells.bench` — `default` untouched, so test hosts build the same shell) + `scripts/run_bench.sh`
-(a Mac-host bench script, not run by `test-all`) → **no `src/` delta since `8b19faad`**, so no remote re-kick this
-turn. A fresh `/continue` resumes on **workstream A** (survey: diff v1 vs v2 bench/), not a remote-verify.
+Last 3-host green = `8b19faad`. All B + A commits so far (`20de319d`, `310314bb`, `3195fda3`) touch only
+`flake.nix` (NEW `devShells.bench` — `default` untouched) + `scripts/run_bench.sh` (a Mac-host bench script, not
+run by `test-all`) → **no `src/` delta since `8b19faad`**, so no remote re-kick. A fresh `/continue` resumes on
+**workstream A chunk (1)**: the full-inventory engine-matrix re-profile, not a remote-verify.
 
 ## Deferred / open (unchanged by this program)
 
