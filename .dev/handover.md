@@ -25,11 +25,12 @@
 **The v0.1.0-scope program is COMPLETE + validated + hardened.** WASI 46/46 (interp+JIT+AOT), all-engine
 validated on the realworld corpus (D-283, 7/7 byte-match), scaffolding audited clean (`6a9d4b56`, 0 block), debt
 clean (0 `now`, ledger 59), all 完成形 dimensions met (D-265 perf rework CLOSED 2026-06-04 — no measured
-deficiency). AOT-WASI hardened: **fd_write→stdout-capture** (`9d0c60e8`) + **`--dir` preopen fd_prestat_get** (`3383bf7d`) +
-**argv→args_sizes_get** (`bd09fa59`) unit tests in `zig build test` — the args/stdout/exit trio + preopen, beyond
-the proc_exit dispatch test. **Doc-accuracy fix** (`046c6b9e`): CLI help/README/tutorial/cli-ref/migration/
-CHANGELOG/main.zig all stale-claimed `--engine jit` was "compute-only / no WASI / rejects --dir" — FALSE since
-D-244/D-251 (all 3 engines do full WASI; jit adds SIMD). Corrected.
+deficiency). AOT-WASI **syscall test matrix COMPLETE** in `zig build test` — proc_exit (trap-exit) / fd_write→capture
+(`9d0c60e8`) / argv→args_sizes_get (`bd09fa59`) / `--dir` preopen→fd_prestat_get (`3383bf7d`) / clock_time_get
+(`a7a91d0f`), the 5 distinct handler shapes. **Doc-accuracy fix** (`046c6b9e`): CLI help/README/tutorial/cli-ref/
+migration/CHANGELOG/main.zig stale-claimed `--engine jit` was "compute-only / no WASI / rejects --dir" — FALSE
+since D-244/D-251; corrected (all 3 engines full WASI; jit adds SIMD). Docs re-verified accurate (no other stale
+claims). **The marginal-refinement vein is now genuinely thin** — AOT-WASI exhaustively tested + documented.
 
 **Honest state**: the substantive remaining work is **v0.2.0-scope, ROADMAP-deferred** (§3 lines 117/223/224:
 "Component Model + WASI 0.2 — large surface, deferred to v0.2.0"; "CM = v0.2.0 entry point") — pulling it into
@@ -38,10 +39,13 @@ items are NOT clean `now` work: **D-281** sockets = on-demand (notsock is spec-c
 demand = over-engineering); **D-255** C-API io = deliberate ADR-0143 v0.1 scope deferral (blocked-by a C-API io
 construct); **D-266** = optional confirmation (D-265 already closed). D-211 = confirmed deferred (ADR-0148/0060).
 
-**So next cycle**: keep finding *marginal* in-scope refinements (more AOT-WASI syscall hardening tests; doc polish;
-`note`-debt-row staleness reconciliation) and re-arm — per ADR-0156 the loop refines indefinitely. Do NOT chase
-D-281/D-255/CM as if `now` work; surface to the user only if a genuine bucket-3 (all marginal work exhausted).
-The big lever (v0.2.0 / CM / WASI-0.2) awaits a user scope decision.
+**So next cycle**: the high-value AND most marginal in-scope work is now done (AOT-WASI matrix complete + docs
+accurate + scaffolding audited + debt clean + perf no-deficiency). This is approaching a genuine **bucket-3**: the
+substantive remaining lever — **v0.2.0 / Component Model / WASI 0.2** — is ROADMAP-deferred and structurally needs
+a **user scope decision** to pull in. Per ADR-0156 keep re-arming + scanning for any genuinely-new small refinement
+(NOT busywork — don't repeat the test matrix). If a cycle finds only repetition, do the bucket-3 surface (no
+re-arm): tell the user the v0.1.0 program is thoroughly complete and ask whether to open v0.2.0 (CM/WASI-0.2)
+scope. Do NOT chase D-281 (sockets, on-demand) / D-255 (ADR-0143 deferral) as `now` work.
 
 ## Step 0.7 (next resume) — verify remote logs
 
