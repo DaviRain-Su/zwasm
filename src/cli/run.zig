@@ -693,6 +693,30 @@ const prestat_jit = [_]u8{
     0x41, 0x03, 0x41, 0x00, 0x10, 0x00, 0x10, 0x01, 0x0b,
 };
 
+test "runCwasmWasi: --dir preopen makes the AOT fd_prestat_get(3) succeed (D-251)" {
+    // Mirror the JIT prestat test on the standalone AOT path: the same
+    // `prestat_jit` _start proc_exits with fd_prestat_get(3)'s errno — 0 when
+    // fd 3 is a preopen dir, 8 (badf) without. Exercises runCwasmWasi's
+    // preopens param + the AOT fd_prestat_get syscall. Native AOT exec → Win64-deferred.
+    const builtin = @import("builtin");
+    if (builtin.os.tag == .windows) return @import("../test_support/skip.zig").phaseEnd(.win64);
+
+    const runner = @import("../engine/runner.zig");
+    const aot_produce = @import("../engine/codegen/aot/produce.zig");
+
+    var compiled = try runner.compileWasm(testing.allocator, &prestat_jit);
+    defer compiled.deinit(testing.allocator);
+    const cwasm = try aot_produce.produceFromCompiledWasm(testing.allocator, &compiled, &prestat_jit);
+    defer testing.allocator.free(cwasm);
+
+    // Preopen cwd (".") → guest fd 3 is a valid preopen → prestat_get success (0).
+    const code = try runCwasmWasi(testing.allocator, testing.io, cwasm, null, &.{}, &.{.{ .host_path = ".", .guest_path = "/sandbox" }}, null);
+    try testing.expectEqual(@as(u8, 0), code);
+    // No preopen → fd 3 is badf (8).
+    const code2 = try runCwasmWasi(testing.allocator, testing.io, cwasm, null, &.{}, &.{}, null);
+    try testing.expectEqual(@as(u8, 8), code2);
+}
+
 test "runWasmJit: --dir preopen makes the JIT's fd_prestat_get(3) succeed (D-244)" {
     const builtin = @import("builtin");
     if (builtin.os.tag == .windows) return @import("../test_support/skip.zig").phaseEnd(.win64);
