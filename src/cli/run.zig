@@ -641,6 +641,26 @@ test "runWasmJit: --engine jit attaches a WASI host → real clock, no trap (D-2
     try testing.expectEqual(@as(u8, 0), code);
 }
 
+test "runCwasmWasi: AOT clock_time_get reads a real (nonzero) host clock (D-251)" {
+    // Completes the AOT-WASI syscall test matrix (proc_exit / fd_write / args /
+    // preopen / clock — the distinct handler shapes). clock_start_wasm's _start
+    // traps if the loaded time is 0; an attached host → real nonzero clock →
+    // no trap → exit 0. Native AOT exec → Win64-deferred.
+    const builtin = @import("builtin");
+    if (builtin.os.tag == .windows) return @import("../test_support/skip.zig").phaseEnd(.win64);
+
+    const runner = @import("../engine/runner.zig");
+    const aot_produce = @import("../engine/codegen/aot/produce.zig");
+
+    var compiled = try runner.compileWasm(testing.allocator, &clock_start_wasm);
+    defer compiled.deinit(testing.allocator);
+    const cwasm = try aot_produce.produceFromCompiledWasm(testing.allocator, &compiled, &clock_start_wasm);
+    defer testing.allocator.free(cwasm);
+
+    const code = try runCwasmWasi(testing.allocator, testing.io, cwasm, null, &.{}, &.{}, null);
+    try testing.expectEqual(@as(u8, 0), code);
+}
+
 // D-244 chunk 2d: `_start` calls proc_exit(42).
 const proc_exit_42_jit = [_]u8{
     0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x60, 0x01, 0x7f, 0x00, 0x60,
