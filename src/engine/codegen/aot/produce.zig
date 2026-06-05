@@ -176,6 +176,13 @@ pub fn produceFromCompiledWasm(
         allocator.free(tbl.canon_typeidx);
     }
 
+    // Imports metadata (v0.4 §D-251): `(module, name, kind)` per declared
+    // import in wasm-space order, so a standalone `.cwasm` rebuilds
+    // `host_dispatch_base` (WASI). module/name alias `wasm_bytes` (the
+    // produceCwasm copy duplicates them); the slice itself is freed here.
+    const imports = try collectImports(allocator, wasm_bytes);
+    defer allocator.free(imports);
+
     const input: serialise.Input = .{
         .arch = arch,
         .bytes_per_func = bytes_per_func,
@@ -196,9 +203,33 @@ pub fn produceFromCompiledWasm(
         .table0_size = tbl.table0_size,
         .elem = tbl.elem,
         .canon_typeidx_per_func = tbl.canon_typeidx,
+        .imports = imports,
     };
 
     return serialise.produceCwasm(allocator, input);
+}
+
+/// Collect imports metadata (v0.4 §D-251): re-parse `wasm_bytes` for the
+/// import section and map each entry to `format.CwasmImport`
+/// `(module, name, @intFromEnum(kind))`. module/name are slices of the
+/// section body, which aliases `wasm_bytes` (borrowed by the parser) — so
+/// they outlive the local `module`/`imports` deinit and stay valid for the
+/// `produceCwasm` copy. Returns an empty slice when the module declares no
+/// imports. Caller frees the slice (not the borrowed strings).
+fn collectImports(allocator: Allocator, wasm_bytes: []const u8) Error![]format.CwasmImport {
+    var module = parser.parse(allocator, wasm_bytes) catch return Error.GlobalSectionParseFailed;
+    defer module.deinit(allocator);
+
+    const is = module.find(.import) orelse return allocator.alloc(format.CwasmImport, 0);
+    var imports = sections.decodeImports(allocator, is.body) catch return Error.GlobalSectionParseFailed;
+    defer imports.deinit();
+
+    const out = try allocator.alloc(format.CwasmImport, imports.items.len);
+    errdefer allocator.free(out);
+    for (imports.items, 0..) |imp, i| {
+        out[i] = .{ .module = imp.module, .name = imp.name, .kind = @intFromEnum(imp.kind) };
+    }
+    return out;
 }
 
 /// Evaluate each DEFINED global's init-expr into its 16-byte `Value` bits
@@ -401,4 +432,37 @@ test "produceFromCompiledWasm: tiny synthetic wasm round-trips through compileWa
     // non-zero length matching meta.code_size.
     const code_slice = out[h.code_offset..][0..meta.code_size];
     try testing.expect(code_slice.len > 0);
+}
+
+test "produceFromCompiledWasm: a WASI import round-trips into the .cwasm v0.4 imports section (D-251)" {
+    const load = @import("load.zig");
+    // (module (import "wasi_snapshot_preview1" "proc_exit" (func (param i32)))
+    //         (func (export "main") i32.const 42 call 0))
+    const wasm_bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x08, 0x02, 0x60, 0x01, 0x7F, 0x00, 0x60,
+        0x00, 0x00, 0x02, 0x24, 0x01, 0x16, 0x77, 0x61,
+        0x73, 0x69, 0x5F, 0x73, 0x6E, 0x61, 0x70, 0x73,
+        0x68, 0x6F, 0x74, 0x5F, 0x70, 0x72, 0x65, 0x76,
+        0x69, 0x65, 0x77, 0x31, 0x09, 0x70, 0x72, 0x6F,
+        0x63, 0x5F, 0x65, 0x78, 0x69, 0x74, 0x00, 0x00,
+        0x03, 0x02, 0x01, 0x01, 0x07, 0x08, 0x01, 0x04,
+        0x6D, 0x61, 0x69, 0x6E, 0x00, 0x01, 0x0A, 0x08,
+        0x01, 0x06, 0x00, 0x41, 0x2A, 0x10, 0x00, 0x0B,
+    };
+
+    var compiled = try runner.compileWasm(testing.allocator, &wasm_bytes);
+    defer compiled.deinit(testing.allocator);
+    const out = try produceFromCompiledWasm(testing.allocator, &compiled, &wasm_bytes);
+    defer testing.allocator.free(out);
+
+    const h = try format.parseHeader(out[0..format.header_size]);
+    try testing.expectEqual(@as(u32, 1), h.n_imports); // one imported func
+
+    var mod = try load.load(testing.allocator, out);
+    defer mod.deinit();
+    try testing.expectEqual(@as(usize, 1), mod.imports.len);
+    try testing.expectEqualStrings("wasi_snapshot_preview1", mod.imports[0].module);
+    try testing.expectEqualStrings("proc_exit", mod.imports[0].name);
+    try testing.expectEqual(@as(u8, @intFromEnum(sections.ImportKind.func)), mod.imports[0].kind);
 }
