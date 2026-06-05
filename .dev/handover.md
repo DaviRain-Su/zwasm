@@ -3,12 +3,17 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## CLEAN-SESSION ENTRY (prepared 2026-06-06; loop deliberately NOT re-armed)
+## Active bundle
 
-User stopped to switch accounts (rate limit). The current chunk (ADR-0164 **workstream A**, CLI surface)
-reached a clean committed checkpoint **MID-PROGRAM** — A's codegen half + workstreams B/C/D still remain.
-A fresh `/continue` resumes on the **lead** below, then runs the per-task TDD loop. Each item's full
-mechanism + fix plan lives in its **debt row** (source of truth); this is just the routing.
+- **Bundle-ID**: D-292-A-codegen-widening (A1..A3)
+- **Cycles-remaining**: ~2 (A2 div/overflow, A3 oob_memory)
+- **Continuity-memo**: per-kind JIT trap codes — 5=unreachable (DONE A1), 6=oob_memory, 7=div_by_zero,
+  8=int_overflow. Mechanism proven in A1: dedicated per-kind trap stub writing a distinct `trap_kind`,
+  fed by a per-kind fixup channel. arm64 = `EmitCindStub` (now opcode-aware: patches B or B.cond);
+  x86_64 = `emitTrapExitStub(ctx, kind)` helper. A2/A3 must DEMUX the shared `bounds_fixups` channel
+  (currently mixes oob+div+overflow on both arches) into per-kind channels. Extend `jitTrapCode`.
+- **Exit-condition**: `jitTrapCode(6/7/8)` map to oob_memory/div_by_zero/int_overflow + execution tests
+  assert each precise code on the real JIT path (mirror the A1 `runVoidExportWasi` test), both arches green.
 
 ## Active program — ADR-0164: trap / crash / exception diagnostics & UX (D-292)
 
@@ -24,15 +29,14 @@ regression (surfaced by D-291). Audit-first, spans engines; four workstreams **A
     matching interp — previously it surfaced the kind AND re-raised, so `main.zig`'s `renderFallback` printed a
     SECOND `Trap` line. `renderFallback` is now reserved for non-trap errors (compile/validate/load). Verified:
     `zwasm run --engine jit|interp` + AOT `.cwasm` each print exactly ONE `zwasm:` line, exit 1.
-  - **← LEAD (A remaining): codegen trap-code WIDENING.** JIT codegen records only generic 0/1 for
-    `unreachable` / `oob_memory` / `div_by_zero` / `int_overflow`, so JIT still prints "kind not yet
-    distinguished" for the COMMON traps (NOT full interp-parity yet — only call_indirect+stack are precise).
-    The generic bucket is also arch-INCONSISTENT (`unreachable` → trap_kind 1 on arm64, 0 on x86_64 — found via
-    ubuntu test-all RED at 4d58b315, test made arch-robust at 99b56f1c). Split the generic bucket into per-kind
-    codes at the trap SITES so JIT/AOT reach full interp-parity AND unify the codes across arm64+x86_64: trap-code
-    write sites are `arm64/emit.zig` (+ `shared/entry.zig` `[d-165]` print) and `x86_64/op_control.zig`. Extend
-    `trap_surface.jitTrapCode` to map the new codes. Add per-kind fixtures. Step 0 survey the D-165 trap-code
-    infra first (which codes exist, where written).
+  - ✅ **A1 DONE (`6fcbabbd`): `unreachable` → precise code 5** on BOTH arches (was arch-divergent generic
+    1/0). Dedicated per-kind stub + fixup channel; CLI now prints `kind=unreachable_ msg=unreachable`.
+  - **← LEAD (A2): `div_by_zero`(7) + `int_overflow`(8).** These ride the SHARED `bounds_fixups` channel
+    (div sites: `x86_64/op_alu_int.zig` TEST;JE + CMP;JE for div_s overflow — NB int_overflow currently
+    routes through the div-by-zero channel, so it'd misreport; arm64 div in `arm64/emit.zig`/gpr div path).
+    Demux into per-kind channels → per-kind stubs writing 7/8. Then **A3: `oob_memory`(6)** — the largest
+    demux (every scalar+SIMD load/store appends `bounds_fixups`). Extend `jitTrapCode`. Step 0 survey the
+    div + load/store bounds-check sites on both arches first.
 - **B — crash-vs-trap distinction.** Internal SIGSEGV/@panic = INTERNAL ERROR, not `Trap`; ideal zero
   host-crash; **restrict the `[stack_probe]` diag to genuine stack-overflow** (it currently prints on EVERY
   JIT trap as stub context — the noise seen on `unreachable`).
@@ -58,23 +62,16 @@ audit-gap list closed-or-deferred.
   thoroughly complete + 3-host green (`deb97903`); ADR-0163 bench+docs program ALL DONE. Tag/publish/cutover are
   manual, user-only — there is no release gate.
 - Debt ledger: 0 `now`. Last full 3-host green = `635bd734` (Mac + ubuntu `701cbe60` + windows `OK`).
+  Mac green through A1 `6fcbabbd` (this turn). ubuntu/windows kicks fire at turn-end push (A1 + any A2).
 
 ## Step 0.7 (next resume) — verify remote logs
 
-- **ubuntu: ✅ GREEN at `99b56f1c`** (verified this turn; `0e6a555d` on top is docs-only = no src delta).
-  The first kick caught a real arch bug (x86_64 `unreachable` → trap_kind 0, not arm64's 1) → test made
-  arch-robust at `99b56f1c`, re-kick GREEN.
-- **windows: ⚠️ RED — classified as the pre-existing D-279 Win64 heisenbug (NOT the trap work).** Both kicks
-  (`/tmp/win.log` + `/tmp/win2.log`) RED with the SAME signature: sha256 shootout wrong hash (d0e8b8f…),
-  `spec-wasm-2-0-assert`, `zig-host-hello`, a unit `test.exe`. **Heisenbug-confirmed**: the SAME
-  `sha256("Hello, SHA-256!")` PASSED in one runner yet FAILED in another within the ONE run (non-deterministic,
-  not a fixed miscompile) — the D-180/D-245/D-279 FP-walk/RSP-parity lineage. Exonerated of the trap commits:
-  the only src delta since the last windows-OK (`635bd734`) was `b6da8604`+`99b56f1c`, but those touch no
-  codegen/ABI/trampoline (catch-path inert on a successful run) and **ubuntu test-all is GREEN on the identical
-  source**. Recorded `track_heisenbug.sh win64-testall segv` (streak 0); **trap commits KEPT, NOT reverted (D7)**;
-  D-279 updated with this broader manifestation. Next resume: this is non-blocking — proceed to the LEAD; D-279
-  is the standing Win64 investigation (discharge = investigation_discipline §2). If ever in doubt, isolate with
-  `run_remote_windows.sh --branch <pre-trap-ref>`.
+- **ubuntu**: `tail -3 /tmp/ubuntu.log` — expect GREEN on the A1+ commits. RED on a codegen-real failure →
+  auto-revert (D3); prior cycle's `unreachable` arch-divergence (x86_64 0 vs arm64 1) is the exact bug A1
+  fixes by unifying to 5, so a trap-kind RED would be a real regression to investigate, not a flake.
+- **windows**: RED with the sha256-shootout non-deterministic signature = the standing **D-279** Win64
+  heisenbug (NOT trap work) — `track_heisenbug.sh win64-testall segv`, KEEP commits (D7), non-blocking.
+  Real new Win64 bug (reproduces on re-run, codegen/ABI touch) → debt row + fix. See D-279 for the lineage.
 
 ## Key refs
 
