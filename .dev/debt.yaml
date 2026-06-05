@@ -1011,11 +1011,19 @@ entries:
       either enable the JIT run stage by default for the runnable subset OR a JIT variant of `diff_runner` that
       stdout-diffs `--engine jit` vs wasmtime. Confidence is currently good (3-host green + interp handlers reused)
       but this is the missing differential net. Not blocking — D-244 is functionally complete + 3-host green.
+      ---
+      AOT update (2026-06-05, `a81a388e`+`d7e3f131`): an opt-in **AOT** differential lane landed
+      (`test-realworld-diff-aot`; `diff_runner.zig --aot`, <64KB fixture cap). Result: **AOT byte-matches wasmtime
+      on 7/7 runnable fixtures, 0 MISMATCH-AOT** — the AOT-WASI differential net now EXISTS for the small corpus.
+      REMAINING (why this stays a note): (1) the in-process lane can't per-fixture-timeout slow JIT-compiles, so
+      large libc/Go/Rust guests are SKIP-AOT-LARGE — a **subprocess-based** lane (`zwasm run <.cwasm>` per fixture,
+      like wasmtime) would cover them + isolate native exec; (2) the symmetric JIT lane (above) is still opt-in.
     first_raised: "2026-06-05"
     last_reviewed: "2026-06-05"
     refs: |-
-      test/realworld/run_runner_jit.zig (run-stage disabled); test/realworld/diff_runner.zig (interp analog);
-      src/wasi/jit_dispatch.zig; src/cli/run.zig (runWasmJit); D-244 (JIT-WASI, done)
+      test/realworld/run_runner_jit.zig (run-stage disabled); test/realworld/diff_runner.zig (interp + opt-in
+      --aot lane); build.zig (test-realworld-diff-aot); src/wasi/jit_dispatch.zig; src/cli/run.zig (runWasmJit /
+      runCwasmWasi); D-244 (JIT-WASI) / D-251 (AOT-WASI), both done
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.

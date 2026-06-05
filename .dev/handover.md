@@ -8,30 +8,29 @@
 - **Phase 16 (完成形) — open-ended; the loop CONTINUES, no release (ADR-0156).** Phases 0–15 + the §16
   surface/safety/docs task-list are DONE. **USER-DIRECTED PROGRAM (2026-06-05) = complete WASI + all-engine + CM.**
   Items 1 (`--invoke` args `34dbebbc`), 2 (WASI 46/46 interp `1d2cb8df`), **3 ALL-ENGINE WASI DONE** —
-  JIT (D-244, `71cd3c85`) + **AOT (D-251, `9750b064`, bundle CLOSED this cycle)**. `zwasm run <file.cwasm>` now
-  does REAL WASI (`.cwasm` v0.4 serialises import `(module,name,kind)` → `runEntryWasi` rebuilds
-  `host_dispatch_base` via `jit_dispatch.lookup` + attaches a WASI Host); a `proc_exit(42)` `.cwasm` exits 42,
-  **2-host green (Mac + ubuntu `OK` at `4adc4d5b`)**. Remaining program: **CM (post-v0.1.0)** + the validation
-  + GC items below.
+  JIT (D-244, `71cd3c85`) + **AOT (D-251, `9750b064`)**. `zwasm run <file.cwasm>` does REAL WASI (`.cwasm` v0.4
+  serialises import `(module,name,kind)` → `runEntryWasi` rebuilds `host_dispatch_base` via `jit_dispatch.lookup`
+  + attaches a WASI Host); D-251 **3-host green** (proc_exit(42)→42; Mac + ubuntu + windows). AOT-WASI **validated
+  on the realworld corpus** (D-283 lane: 7/7 byte-match wasmtime, 0 mismatch). Remaining program: **CM
+  (post-v0.1.0)**; otherwise Phase-16 debt/dogfooding.
 
-## Active bundle
+- **D-283-aot-realworld bundle CLOSED this cycle**: opt-in `test-realworld-diff-aot` AOT differential lane
+  (`a81a388e` + `d7e3f131`, <64KB fixture cap). **AOT byte-matches wasmtime on 7/7 runnable realworld fixtures,
+  0 `MISMATCH-AOT`** — confirms AOT-WASI output ≡ wasmtime where the engine runs (large libc/Go guests = SKIP-LARGE,
+  trap under `--engine jit` anyway). D-283 stays open for a subprocess-based full-corpus differential (the
+  in-process lane can't per-fixture-timeout the slow JIT-compiles).
 
-- **Bundle-ID**: D-283-aot-realworld (AOT-WASI realworld differential validation)
-- **Cycles-remaining**: ~1
-- **Continuity-memo**: Chunk 1 DONE (`a81a388e`) — opt-in `--aot` lane in `diff_runner.zig` (compile→`.cwasm`→
-  `runCwasmWasi` w/ new `stdout_capture` param) behind a separate `test-realworld-diff-aot` target (NOT default —
-  JIT-compiles every fixture, slow + in-process exec). Report-only. **Investigation finding**: `c_hello_wasi`
-  traps under AOT — BUT it ALSO traps under `--engine jit` (exit 1, argv-over-read stress fixture; a pre-existing
-  v2-vs-wasmtime gap, NOT AOT-specific); `c_bitwise_ops` AOT-MATCHed. So AOT mirrors JIT correctly. **NEXT**: run
-  the full `zig build test-realworld-diff-aot` (slow, launched in bg → `/tmp/d283_aot_full.log`), confirm NO genuine
-  `MISMATCH-AOT` (a fixture that AOT ran clean but bytes differ from wasmtime = real bug), tally AOT coverage vs the
-  interp lane. Then either gate the AOT lane (if clean) or debt-row the residual AOT-unsupported set.
-- **Exit-condition**: full corpus AOT-lane run completes; 0 genuine `MISMATCH-AOT`; AOT match-count documented vs
-  interp; decision (gate vs debt-row) recorded.
+## NEXT — pick a Phase-16 completion item (all-engine WASI program DONE)
 
-**After the bundle (next program items)**: (a) **D-211** precise GcRootMap + AOT-GC — **verify load-bearing FIRST**
-(conservative native-stack scan proven sufficient per ADR-0060; only schedule if a real false-retention bug/bloat
-is measured). (b) **Component Model** survey follow-up (A5 done; CM post-v0.1.0). (c) **D-281** real socket I/O.
+The user-directed program (complete WASI + all-engine + CM) is fulfilled except **CM (post-v0.1.0)**. Next,
+investigation-first, pick by concreteness:
+- **(a) D-211** precise GcRootMap + AOT-GC — **verify load-bearing FIRST**: conservative native-stack scan is
+  proven sufficient (ADR-0060), so Step 0 = look for a measured false-retention bug / heap bloat; if none, KEEP
+  deferred (document) and move to (b)/(c). Do NOT build precise roots speculatively.
+- **(b) Component Model** survey follow-up (A5 survey done; CM is post-v0.1.0 — scope/ADR work, not impl yet).
+- **(c) D-281** real socket I/O (sockets=notsock today) · **(d) D-255** C-API WASI io · debt-repayment sweep.
+- Recommended start: (a) D-211 load-bearing check (fast investigation → either schedules a real bundle or
+  confirms-deferred), then (c)/(d) debt repayment.
 
 ## Step 0.7 (next resume) — verify remote logs
 
