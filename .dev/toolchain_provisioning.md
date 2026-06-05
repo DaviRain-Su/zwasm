@@ -37,7 +37,7 @@ This is why the heavy toolchains are kept **out of `devShells.default`**
 nix develop .#gen        # Mac host only; provides the generation toolchains
 ```
 
-`flake.nix` defines two shells:
+`flake.nix` defines three shells:
 
 | Shell                 | Used by                             | Contents                                                                                      |
 |-----------------------|-------------------------------------|-----------------------------------------------------------------------------------------------|
