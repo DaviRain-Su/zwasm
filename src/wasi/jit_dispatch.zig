@@ -133,6 +133,13 @@ pub fn fd_read(
     iovs_len: i32,
     nread_ptr: i32,
 ) callconv(.c) i32 {
+    // D-244: with a host, delegate to the shared interp handler (reads from the
+    // host's real stdin / file fds; the stub only EOF-stubbed fd 0).
+    if (rt.wasi_host) |hp| {
+        const host: *wasi_host_mod.Host = @ptrCast(@alignCast(hp));
+        const mem = rt.vm_base[0..@intCast(rt.mem_limit)];
+        return @intCast(@intFromEnum(wasi_fd.fdRead(host, mem, @bitCast(fd), @bitCast(iovs_ptr), @bitCast(iovs_len), @bitCast(nread_ptr))));
+    }
     if (fd != 0) return @intFromEnum(Errno.badf);
     if (iovs_ptr < 0 or iovs_len < 0 or nread_ptr < 0) {
         return @intFromEnum(Errno.inval);
@@ -462,6 +469,34 @@ test "fd_write: host-attached routes to the shared handler (real stdout capture)
     try testing.expectEqual(@as(i32, @intFromEnum(Errno.success)), fd_write(&rt, 1, 16, 1, 40));
     try testing.expectEqualStrings("HELLO", capture.items);
     try testing.expectEqual(@as(u32, 5), std.mem.readInt(u32, memory[40..44], .little));
+}
+
+test "fd_read: host-attached reads from real stdin; no host → EOF stub (D-244)" {
+    var memory: [64]u8 = @splat(0);
+    // iovec at mem[16] = {buf=24, len=8}.
+    std.mem.writeInt(u32, memory[16..20], 24, .little);
+    std.mem.writeInt(u32, memory[20..24], 8, .little);
+    var h = try wasi_host_mod.Host.init(testing.allocator);
+    defer h.deinit();
+    h.io = testing.io;
+    h.stdin_bytes = "ab";
+    var rt: JitRuntime = .{
+        .vm_base = &memory,
+        .mem_limit = memory.len,
+        .funcptr_base = undefined,
+        .table_size = 0,
+        .typeidx_base = undefined,
+        .trap_flag = 0,
+        .globals_base = undefined,
+        .globals_count = 0,
+        .host_dispatch_base = undefined,
+        .host_dispatch_count = 0,
+        .wasi_host = &h,
+    };
+    // fd=0 stdin, 1 iovec at 16, nread at 40.
+    try testing.expectEqual(@as(i32, @intFromEnum(Errno.success)), fd_read(&rt, 0, 16, 1, 40));
+    try testing.expectEqual(@as(u32, 2), std.mem.readInt(u32, memory[40..44], .little));
+    try testing.expectEqualStrings("ab", memory[24..26]);
 }
 
 test "lookup: fd_read resolves" {
