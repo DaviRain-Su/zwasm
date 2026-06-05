@@ -3,6 +3,22 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
+## ACTIVE (2026-06-05, user-interactive) — D-285 JIT bulk-memory fix + bench fairness
+
+User stopped the loop to direct: (1) **D-285 investigate properly — DONE** (`07e6d9be`): JIT lowers
+`memory.copy` byte-at-a-time on BOTH backends (arm64 `op_memory.zig:670-680`, x86_64 `:724-734`); interp
+uses vectorizable `copyForwards` → jit(254ms) > interp(138ms) paradox. Findings:
+`.dev/findings/d285_jit_bulk_memory_byteloop.md`. Fix = word-wise loop + byte tail (both backends; phase-II
+net = spec memory_copy.wast under `ZWASM_SPEC_ENGINE=jit` + add word-boundary-overlap edge fixture). (2)
+**Bench methodology — FIXED** (`b8fe1f74`): run_bench built ReleaseSafe (unfair vs optimized comparators) →
+now ReleaseFast; `--safe` opts back; build recorded in YAML. Re-measure (ReleaseFast+non-quick) supersedes the
+prelim `--quick`/ReleaseSafe matrix. (3) **no-`_start`**: industry split — wasmtime/wazero exit 0 (=zwasm
+interp), wasmer errors (=zwasm jit); the two zwasm engines disagreeing is the bug (D-284 reconcile). (4)
+**Bench breadth < v1**: v2 missing crypto(ed25519/xchacha20/xblabla20)/GC(gc_alloc/gc_tree)/dispatch(switch/
+ratelimit)/string(minicsv) — 13 fewer active shootout fixtures; v2 wins SIMD12/sightglass5/cljw5/RSS.
+**NEXT**: implement D-285 word-wise fix (arm64 native-testable first, then x86_64+remote) → re-measure affected
+fixtures → refresh docs. Then breadth expansion (compile missing shootout via .#gen) + D-284 reconcile.
+
 ## Current state
 
 - **Phase 16 (完成形) — open-ended; the loop CONTINUES, no release (ADR-0156).** The **v0.1.0-scope program is
