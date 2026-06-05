@@ -623,78 +623,107 @@ pub fn emitMemoryCopy(ctx: *EmitCtx) Error!void {
     const fwd_at: u32 = @intCast(ctx.buf.items.len);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.ls, 0));
 
-    // ---- Backward path (dst > src; potentially overlapping). ----
-    // Pre-add n: dst_p += n, src_p += n.
+    // ---- Backward path (dst > src; potentially overlapping). Copy high→low,
+    // 8 bytes/iteration while n >= 8 (LDR/STR X), then a ≤7-byte tail. D-285:
+    // the prior byte-at-a-time loop made bulk copies slower than the
+    // interpreter's vectorized copyForwards. ----
+    // Pre-add n so X17 / X16 point one past the block end.
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddReg(17, 17, 14));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddReg(16, 16, 14));
-    // .bwd_loop:
-    //   SUB X17, X17, #1
-    //   SUB X16, X16, #1
-    //   LDRB W15, [X16]
-    //   STRB W15, [X17]
-    //   SUB  X14, X14, #1
-    //   CBNZ W14, .bwd_loop
-    // Then branch unconditionally to .end.
-    const bwd_loop_start: u32 = @intCast(ctx.buf.items.len);
+    // .bwd_word: while (n >= 8) { dst-=8; src-=8; *dst = *src; n-=8; }
+    const bwd_word_top: u32 = @intCast(ctx.buf.items.len);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpImmW(14, 8));
+    const bwd_word_exit_at: u32 = @intCast(ctx.buf.items.len);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.lo, 0)); // B.lo .bwd_tail (fixup)
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encSubImm12(17, 17, 8));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encSubImm12(16, 16, 8));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(15, 16, 0));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImm(15, 17, 0));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encSubImm12(14, 14, 8));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encB(@divExact(
+        @as(i32, @intCast(bwd_word_top)) - @as(i32, @intCast(ctx.buf.items.len)),
+        4,
+    )));
+    // .bwd_tail: patch the B.lo to here; copy ≤7 remaining bytes high→low.
+    const bwd_tail_top: u32 = @intCast(ctx.buf.items.len);
+    std.mem.writeInt(u32, ctx.buf.items[bwd_word_exit_at..][0..4], inst.encBCond(.lo, @divExact(
+        @as(i32, @intCast(bwd_tail_top)) - @as(i32, @intCast(bwd_word_exit_at)),
+        4,
+    )), .little);
+    const bwd_tail_skip_at: u32 = @intCast(ctx.buf.items.len);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCbzW(14, 0)); // CBZ W14, .bwd_done (fixup)
+    const bwd_tail_loop: u32 = @intCast(ctx.buf.items.len);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encSubImm12(17, 17, 1));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encSubImm12(16, 16, 1));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrbImm(15, 16, 0));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrbImm(15, 17, 0));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encSubImm12(14, 14, 1));
-    const bwd_back_disp_words: i32 = @divExact(
-        @as(i32, @intCast(bwd_loop_start)) - @as(i32, @intCast(ctx.buf.items.len)),
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCbnzW(14, @divExact(
+        @as(i32, @intCast(bwd_tail_loop)) - @as(i32, @intCast(ctx.buf.items.len)),
         4,
-    );
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCbnzW(14, bwd_back_disp_words));
-    // Unconditional branch to .end (forward, patched after fwd loop).
+    )));
+    // .bwd_done: unconditional branch to .end (patched after fwd path).
     const bwd_end_jmp_at: u32 = @intCast(ctx.buf.items.len);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encB(0));
+    // Patch the no-tail CBZ to skip straight to .bwd_done (the B→.end).
+    std.mem.writeInt(u32, ctx.buf.items[bwd_tail_skip_at..][0..4], inst.encCbzW(14, @divExact(
+        @as(i32, @intCast(bwd_end_jmp_at)) - @as(i32, @intCast(bwd_tail_skip_at)),
+        4,
+    )), .little);
 
-    // ---- Forward path (dst <= src; safe forward copy). ----
-    // Patch the B.LS to land here.
+    // ---- Forward path (dst <= src; safe forward copy). Patch the B.LS. ----
     const fwd_byte: u32 = @intCast(ctx.buf.items.len);
-    {
-        const disp_words: i32 = @divExact(
-            @as(i32, @intCast(fwd_byte)) - @as(i32, @intCast(fwd_at)),
-            4,
-        );
-        std.mem.writeInt(u32, ctx.buf.items[fwd_at..][0..4], inst.encBCond(.ls, disp_words), .little);
-    }
-    // .fwd_loop:
-    //   LDRB W15, [X16]
-    //   STRB W15, [X17]
-    //   ADD  X17, X17, #1
-    //   ADD  X16, X16, #1
-    //   SUB  X14, X14, #1
-    //   CBNZ W14, .fwd_loop
-    const fwd_loop_start: u32 = @intCast(ctx.buf.items.len);
+    std.mem.writeInt(u32, ctx.buf.items[fwd_at..][0..4], inst.encBCond(.ls, @divExact(
+        @as(i32, @intCast(fwd_byte)) - @as(i32, @intCast(fwd_at)),
+        4,
+    )), .little);
+    // .fwd_word: while (n >= 8) { *dst = *src; dst+=8; src+=8; n-=8; }
+    const fwd_word_top: u32 = @intCast(ctx.buf.items.len);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpImmW(14, 8));
+    const fwd_word_exit_at: u32 = @intCast(ctx.buf.items.len);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.lo, 0)); // B.lo .fwd_tail (fixup)
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(15, 16, 0));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImm(15, 17, 0));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12(17, 17, 8));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12(16, 16, 8));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encSubImm12(14, 14, 8));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encB(@divExact(
+        @as(i32, @intCast(fwd_word_top)) - @as(i32, @intCast(ctx.buf.items.len)),
+        4,
+    )));
+    // .fwd_tail: patch B.lo to here; copy ≤7 remaining bytes low→high.
+    const fwd_tail_top: u32 = @intCast(ctx.buf.items.len);
+    std.mem.writeInt(u32, ctx.buf.items[fwd_word_exit_at..][0..4], inst.encBCond(.lo, @divExact(
+        @as(i32, @intCast(fwd_tail_top)) - @as(i32, @intCast(fwd_word_exit_at)),
+        4,
+    )), .little);
+    const fwd_tail_skip_at: u32 = @intCast(ctx.buf.items.len);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCbzW(14, 0)); // CBZ W14, .end (fixup)
+    const fwd_tail_loop: u32 = @intCast(ctx.buf.items.len);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrbImm(15, 16, 0));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrbImm(15, 17, 0));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12(17, 17, 1));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12(16, 16, 1));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encSubImm12(14, 14, 1));
-    const fwd_back_disp_words: i32 = @divExact(
-        @as(i32, @intCast(fwd_loop_start)) - @as(i32, @intCast(ctx.buf.items.len)),
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCbnzW(14, @divExact(
+        @as(i32, @intCast(fwd_tail_loop)) - @as(i32, @intCast(ctx.buf.items.len)),
         4,
-    );
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCbnzW(14, fwd_back_disp_words));
+    )));
 
-    // .end: patch the n==0 skip and the bwd path's exit jump.
+    // .end: patch the n==0 skip, the bwd path's exit jump, and the fwd no-tail skip.
     const end_byte: u32 = @intCast(ctx.buf.items.len);
-    {
-        const disp_words: i19 = @intCast(@divExact(
-            @as(i32, @intCast(end_byte)) - @as(i32, @intCast(skip_zero_at)),
-            4,
-        ));
-        std.mem.writeInt(u32, ctx.buf.items[skip_zero_at..][0..4], inst.encCbzW(14, disp_words), .little);
-    }
-    {
-        const disp_words: i32 = @divExact(
-            @as(i32, @intCast(end_byte)) - @as(i32, @intCast(bwd_end_jmp_at)),
-            4,
-        );
-        std.mem.writeInt(u32, ctx.buf.items[bwd_end_jmp_at..][0..4], inst.encB(disp_words), .little);
-    }
+    std.mem.writeInt(u32, ctx.buf.items[skip_zero_at..][0..4], inst.encCbzW(14, @divExact(
+        @as(i32, @intCast(end_byte)) - @as(i32, @intCast(skip_zero_at)),
+        4,
+    )), .little);
+    std.mem.writeInt(u32, ctx.buf.items[bwd_end_jmp_at..][0..4], inst.encB(@divExact(
+        @as(i32, @intCast(end_byte)) - @as(i32, @intCast(bwd_end_jmp_at)),
+        4,
+    )), .little);
+    std.mem.writeInt(u32, ctx.buf.items[fwd_tail_skip_at..][0..4], inst.encCbzW(14, @divExact(
+        @as(i32, @intCast(end_byte)) - @as(i32, @intCast(fwd_tail_skip_at)),
+        4,
+    )), .little);
 }
 
 /// Wasm spec §4.5.3.10 (memory.init dataidx) — copy `n` bytes from
