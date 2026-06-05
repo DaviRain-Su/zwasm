@@ -364,6 +364,25 @@ fn thunkPathRemoveDirectory(rt: *runtime.Runtime, ctx: *anyopaque) anyerror!void
     const dirfd = rt.popOperand().u32;
     return pushErrno(rt, wasi_path.pathRemoveDirectory(host, rt.memory, dirfd, path_ptr, path_len));
 }
+fn thunkPathSymlink(rt: *runtime.Runtime, ctx: *anyopaque) anyerror!void {
+    const host: *wasi_host.Host = @ptrCast(@alignCast(ctx));
+    const path_len = rt.popOperand().u32;
+    const path_ptr = rt.popOperand().u32;
+    const dirfd = rt.popOperand().u32;
+    const target_len = rt.popOperand().u32;
+    const target_ptr = rt.popOperand().u32;
+    return pushErrno(rt, wasi_path.pathSymlink(host, rt.memory, target_ptr, target_len, dirfd, path_ptr, path_len));
+}
+fn thunkPathReadlink(rt: *runtime.Runtime, ctx: *anyopaque) anyerror!void {
+    const host: *wasi_host.Host = @ptrCast(@alignCast(ctx));
+    const bufused_ptr = rt.popOperand().u32;
+    const buf_len = rt.popOperand().u32;
+    const buf_ptr = rt.popOperand().u32;
+    const path_len = rt.popOperand().u32;
+    const path_ptr = rt.popOperand().u32;
+    const dirfd = rt.popOperand().u32;
+    return pushErrno(rt, wasi_path.pathReadlink(host, rt.memory, dirfd, path_ptr, path_len, buf_ptr, buf_len, bufused_ptr));
+}
 fn thunkPathFilestatGet(rt: *runtime.Runtime, ctx: *anyopaque) anyerror!void {
     const host: *wasi_host.Host = @ptrCast(@alignCast(ctx));
     const filestat_ptr = rt.popOperand().u32;
@@ -423,6 +442,8 @@ pub fn lookupWasiThunk(name: []const u8) ?HostThunkFn {
     if (std.mem.eql(u8, name, "path_remove_directory")) return thunkPathRemoveDirectory;
     if (std.mem.eql(u8, name, "path_filestat_get")) return thunkPathFilestatGet;
     if (std.mem.eql(u8, name, "path_filestat_set_times")) return thunkPathFilestatSetTimes;
+    if (std.mem.eql(u8, name, "path_symlink")) return thunkPathSymlink;
+    if (std.mem.eql(u8, name, "path_readlink")) return thunkPathReadlink;
     return null;
 }
 
@@ -498,7 +519,8 @@ test "lookupWasiThunk: every supported WASI 0.1 import resolves" {
         "fd_filestat_set_times",   "fd_allocate",
         "path_unlink_file",        "path_create_directory",
         "path_remove_directory",   "path_filestat_get",
-        "path_filestat_set_times",
+        "path_filestat_set_times", "path_symlink",
+        "path_readlink",
     };
     inline for (names) |n| {
         try testing.expect(lookupWasiThunk(n) != null);

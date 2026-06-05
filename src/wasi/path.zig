@@ -97,6 +97,43 @@ pub fn pathRemoveDirectory(host: *Host, mem: []const u8, dirfd: p1.Fd, path_ptr:
 }
 
 // ============================================================
+// path_symlink / path_readlink
+// ============================================================
+
+/// `path_symlink(target, target_len, dirfd, link_path, link_path_len) → errno`
+/// — create a symlink at `link_path` (relative to `dirfd`, escape-guarded)
+/// whose contents are `target`. The target is the symlink's literal value, NOT
+/// a path resolved against the preopen, so it is not escape-checked.
+pub fn pathSymlink(host: *Host, mem: []const u8, target_ptr: u32, target_len: u32, dirfd: p1.Fd, path_ptr: u32, path_len: u32) p1.Errno {
+    const target = sliceMemConst(mem, target_ptr, target_len) orelse return .fault;
+    var r: Resolved = undefined;
+    const e = resolve(host, mem, dirfd, path_ptr, path_len, &r);
+    if (e != .success) return e;
+    const io = host.io orelse return .nosys;
+    r.dir.symLink(io, target, r.sub, .{}) catch |err| return mapDirErr(err);
+    return .success;
+}
+
+/// `path_readlink(dirfd, path, buf, buf_len, *bufused_out) → errno` — read the
+/// symlink at `path` into the guest buffer (`std.Io.Dir.readLink`), writing the
+/// byte count to `bufused`. A non-symlink path → `inval` (NotLink).
+pub fn pathReadlink(host: *Host, mem: []u8, dirfd: p1.Fd, path_ptr: u32, path_len: u32, buf_ptr: u32, buf_len: u32, bufused_ptr: u32) p1.Errno {
+    if (@as(usize, bufused_ptr) + 4 > mem.len) return .fault;
+    const buf = blk: {
+        const end = @as(usize, buf_ptr) + @as(usize, buf_len);
+        if (end > mem.len) return .fault;
+        break :blk mem[buf_ptr..end];
+    };
+    var r: Resolved = undefined;
+    const e = resolve(host, mem, dirfd, path_ptr, path_len, &r);
+    if (e != .success) return e;
+    const io = host.io orelse return .nosys;
+    const n = r.dir.readLink(io, r.sub, buf) catch |err| return mapDirErr(err);
+    std.mem.writeInt(u32, mem[bufused_ptr..][0..4], @intCast(n), .little);
+    return .success;
+}
+
+// ============================================================
 // path_filestat_get / path_filestat_set_times
 // ============================================================
 
@@ -218,6 +255,36 @@ test "pathFilestatGet / pathFilestatSetTimes: stat a path + set its mtim" {
     try testing.expectEqual(p1.Errno.inval, pathFilestatSetTimes(&h, &mem, dirfd, 0, 0, 5, 0, 0, p1.FSTFLAGS_MTIM | p1.FSTFLAGS_MTIM_NOW));
     writeGuestPath(&mem, 0, "nope!");
     try testing.expectEqual(p1.Errno.noent, pathFilestatGet(&h, &mem, dirfd, 0, 0, 5, FS));
+}
+
+test "pathSymlink / pathReadlink: create a symlink and read its target back" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var h = try Host.init(testing.allocator);
+    defer h.deinit();
+    h.io = testing.io;
+    const dirfd = try h.addPreopen(tmp.dir.handle, "/sandbox");
+
+    var mem: [128]u8 = @splat(0);
+    writeGuestPath(&mem, 0, "target.txt"); // target (link contents) @0, len 10
+    writeGuestPath(&mem, 16, "lnk"); // link path @16, len 3
+    const sym_e = pathSymlink(&h, &mem, 0, 10, dirfd, 16, 3);
+    // A platform that denies unprivileged symlink creation (e.g. Windows
+    // without Developer Mode) returns acces — the handler is correct; skip the
+    // round-trip assertion there. Mac/Linux create + read it back fully.
+    if (sym_e == .acces) return;
+    try testing.expectEqual(p1.Errno.success, sym_e);
+
+    // readlink the symlink into buf @32, write bufused @64.
+    try testing.expectEqual(p1.Errno.success, pathReadlink(&h, &mem, dirfd, 16, 3, 32, 32, 64));
+    const n = std.mem.readInt(u32, mem[64..68], .little);
+    try testing.expectEqual(@as(u32, 10), n);
+    try testing.expectEqualStrings("target.txt", mem[32 .. 32 + n]);
+
+    // readlink on a non-symlink → inval (NotLink).
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "plain", .data = "x" });
+    writeGuestPath(&mem, 96, "plain");
+    try testing.expectEqual(p1.Errno.inval, pathReadlink(&h, &mem, dirfd, 96, 5, 32, 32, 64));
 }
 
 test "path_* resolution: escape / non-dir / out-of-bounds rejections" {
