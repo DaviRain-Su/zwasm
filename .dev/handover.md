@@ -26,23 +26,21 @@
 
 - **Bundle-ID**: jit-wasi (D-244)
 - **Cycles-remaining**: ~3
-- **Continuity-memo**: goal — route the full WASI surface through the JIT (`--engine jit`), currently 9-stub.
-  **STEP 1 DONE (`dec5e84f`)**: added trailing `JitRuntime.wasi_host: ?*anyopaque` field (codegen @offsetOf
-  unchanged; head_size 464→472 drift-guard updated) + `jit_dispatch.zig` `clock_time_get` now delegates to the
-  SHARED interp handler `wasi_clocks.clockTimeGet(host, vm_base[0..mem_limit], ...)` when `wasi_host` set (REAL
-  clock), else the 0-stub. Unit-tested both. **KEY DESIGN holds: interp handlers in `src/wasi/{fd,path,clocks,proc}`
-  are ABI-agnostic `(host, mem, ...args)` — JIT thunks reuse them, no 46-syscall re-impl.** **STEP 2 (NEXT): wire
-  the run path** — `cli/run.zig runWasmJit` / `engine/setup.zig setupRuntimeLinked` must CREATE+own a WASI Host
-  (with io/preopens; the JIT run path is currently Host-free/compute-only) + set `rt.wasi_host = &host`. Red:
-  end-to-end `--engine jit` module calling clock_time_get writes nonzero. **STEP 3**: convert the other stub
-  handlers (random_get, args/environ, fd_read, + the ~37 unwired) to thin GPR-thunks → shared handlers + register
-  in `jit_dispatch.zig:lookup` (only 9 names there now). Mechanism: `host_dispatch_base` + `populateDispatch`
-  (`setup.zig:284`) + `op_call.zig emitImportDispatch`. Risk: interp(stack-pop) vs JIT(GPR) thunk ABIs hand-synced.
-  **Also fixed this turn (`20b9f860`)**: `path_filestat_set_times` Win64 crash — `Dir.setTimestamps` is a Zig-std
-  `@panic("TODO")` on Windows → rerouted via `File.setTimestamps` (only Win64 Dir-TODO among ops used; audited).
-  **D-251 AOT-WASI** (separate, later) needs `.cwasm`
-  v0.3 import-metadata serialization (`aot/format.zig`) first. **DISCIPLINE: cross-compile windows-gnu + (for runtime
-  Linux divergence) trust ubuntu; mac_gate before push.** `src/wasi/fd.zig`=1349 LOC (WARN) — split candidate.
+- **Continuity-memo**: goal — route the full WASI surface through the JIT (`--engine jit`), was 9-stub.
+  **DONE**: STEP 1 `JitRuntime.wasi_host` field (`dec5e84f`); STEP 2a `runI64ExportWasi` proves JIT WASI does REAL
+  I/O **end-to-end** (`d761637f`: JIT-compiles a module importing clock_time_get, calls it, returns real time —
+  proven through actual JIT exec); clock_time_get + random_get now delegate to the SHARED interp handlers when
+  `rt.wasi_host` set, else stub (`dec5e84f`/`8d1b7612`, unit-tested). **KEY DESIGN holds: interp handlers
+  `(host, mem, ...args)` are reused — no 46-syscall re-impl.** **NEXT — STEP 2b (CLI run-path wiring)**: `cli/run.zig
+  runWasmJit` is Host-free/compute-only + takes no io; make it CREATE+own a WASI Host (io + args + preopens) + add
+  `runVoidExportWasi` (void analog of runI64ExportWasi, sets `owned.rt.wasi_host`) + thread io from `main.zig`, so
+  `--engine jit hello.wasm` does real WASI. Handle JIT proc_exit exit-code (currently sets trap_flag, no code) +
+  fd_write→real stdout via host. **STEP 3**: convert the rest of the 9 stubs (args/environ/fd_read) + register the
+  other ~37 syscalls in `jit_dispatch.zig:lookup` (only 9 names there). Mechanism: `host_dispatch_base` +
+  `populateDispatch` (`setup.zig:284`). Win64 JIT-exec tests gate `skip.phaseEnd(.win64)`. Risk: interp(stack) vs
+  JIT(GPR) thunk ABIs hand-synced. **D-251 AOT-WASI** (separate, later) needs `.cwasm`
+  v0.3 import-metadata serialization (`aot/format.zig`) first. **DISCIPLINE: cross-compile windows-gnu; trust ubuntu
+  for Linux-runtime divergence; read win crash lines (std Win64 TODOs only show at runtime).**
 - **Exit-condition**: a JIT-run WASI module does REAL I/O (e.g. `clock_time_get` nonzero + `fd_write` to real stdout
   + file ops via preopen) — JIT WASI handler count grows 9 → meaningful subset, green Mac + ubuntu.
 
@@ -66,14 +64,13 @@ no auto-revert. Step 6+7: `should_gate_windows.sh` exit 0 → kick `run_remote_w
 
 ## Step 0.7 (next resume) — verify per-cadence remote logs
 
-**windows RED at f9a09b3e was a REAL Win64 bug (NOT D-282 flake): `path_filestat_set_times` crashed (exit 3) —
-`std.Io.Dir.setTimestamps` is `@panic("TODO")` on Win64. FIXED `20b9f860`** (reroute via File.setTimestamps). ubuntu
-green at f9a09b3e (46/46 confirmed). This turn pushed D-244 chunk 1 (`dec5e84f`) + the Win64 fix; re-kicked both.
-**Step 0.7 next resume: `tail /tmp/ubuntu.log` (must be OK, auto-revert on FAIL) + `tail /tmp/win.log` — distinguish
-D-282 env-flake (all-runners-0-failed + configure-phase FileNotFound) from a REAL crash (a `' exited with code N`
-/ `panic` line + a named test). If win shows a `TODO implement ... windows` panic in a std op I use → reroute that
-op like `20b9f860`.** **DISCIPLINE: cross-compile windows-gnu (catches compile gaps) BUT Win64 runtime panics
-(std TODOs) only show on the actual windows run — read the crash line, don't assume env-flake.** **Gate**: Mac = `mac_gate.sh`; ubuntu = always (D6); windows = cadence (D7).
+ubuntu GREEN at `25f3d79e` (D-244 chunk 1 + the `path_filestat_set_times` Win64 fix `20b9f860`). This turn pushed
+D-244 chunk 2a (`d761637f` runI64ExportWasi end-to-end) + `random_get` real (`8d1b7612`); re-kicked both. **Step 0.7
+next resume: `tail /tmp/ubuntu.log` (must be OK, auto-revert on FAIL) + `tail /tmp/win.log` — distinguish the D-282
+env-flake (ALL runners 0-failed + only `configure phase FileNotFound`) from a REAL crash (`' exited with code N`
+/ `panic`/`TODO implement ... windows` + a named test). A std Win64 `TODO`-panic in an op I use → reroute it like
+`20b9f860`.** **DISCIPLINE: cross-compile windows-gnu (catches compile gaps); Win64 runtime panics (std TODOs)
+only surface on the actual windows run — read the crash line.** **Gate**: Mac = `mac_gate.sh`; ubuntu = always (D6); windows = cadence (D7).
 
 ## Deferred / open debt (D-274/275/276/257 discharged this session — removed)
 
