@@ -35,6 +35,15 @@
 #                                                 # adds `max_rss_kb` to each
 #                                                 # YAML entry. Requires
 #                                                 # /usr/bin/time on PATH.
+#   bash scripts/run_bench.sh --engines=interp,jit,aot
+#                                                 # (ADR-0163 A) bench zwasm
+#                                                 # across its engines — one
+#                                                 # runtime row each (zwasm-interp
+#                                                 # /zwasm-jit/zwasm-aot). aot
+#                                                 # precompiles a temp .cwasm.
+#                                                 # Combine with --compare=all for
+#                                                 # the full all-engine + multi-
+#                                                 # runtime matrix.
 #
 # Per ADR-0012 §7: recent.yaml gitignored, history.yaml committed
 # at phase boundaries only.
@@ -61,6 +70,7 @@ DIFF_REF=""
 COMPARE=""
 CAPTURE_RSS=0
 SIMD=0
+ENGINES_CSV=""
 for arg in "$@"; do
     case "$arg" in
         --quick) QUICK=1 ;;
@@ -73,6 +83,7 @@ for arg in "$@"; do
         --diff)  ;;  # next iteration provides ref via positional pickup; see below
         --compare=*) COMPARE="${arg#--compare=}" ;;
         --capture-rss) CAPTURE_RSS=1 ;;
+        --engines=*) ENGINES_CSV="${arg#--engines=}" ;;
     esac
 done
 
@@ -82,6 +93,25 @@ done
 ZWASM_RUN_FLAGS=""
 if [ "$SIMD" -eq 1 ]; then
     ZWASM_RUN_FLAGS=" --engine=jit"
+fi
+
+# ADR-0163 A — engine matrix. `--engines=interp,jit,aot` benches zwasm across
+# its engines, emitting one runtime row each (zwasm-interp / zwasm-jit /
+# zwasm-aot). aot precompiles a temp .cwasm per fixture (the timed command runs
+# the artifact — cold-start compile is a separate metric, see aot_coldstart.md).
+# Flag absent → a single `zwasm` row using ZWASM_RUN_FLAGS (interp, or jit under
+# --simd): unchanged backward-compatible default.
+ZW_RUNTIMES=()
+if [ -n "$ENGINES_CSV" ]; then
+    IFS=',' read -ra _engs <<< "$ENGINES_CSV"
+    for e in "${_engs[@]}"; do
+        case "$e" in
+            interp|jit|aot) ZW_RUNTIMES+=("zwasm-$e") ;;
+            *) echo "[run_bench] --engines: '$e' not supported (interp|jit|aot)" >&2; exit 1 ;;
+        esac
+    done
+else
+    ZW_RUNTIMES=("zwasm")
 fi
 # §9.8a / 8a.3 — `--diff <ref>` (space-separated form). The
 # `case` loop above only handles `--diff=<ref>`; pick up the
@@ -259,11 +289,11 @@ date=$(date -u +%Y-%m-%dT%H:%M:%SZ)
     echo "  benches:"
 } > "$RECENT"
 
-# §11.3 — runtime matrix. `zwasm` is always first; the --compare
-# comparators (wasmtime / wazero / wasmer / wasmedge) follow. YAML entries gain a
-# `runtime:` field iff the matrix has > 1 entry, so historical
-# single-runtime entries remain shape-compatible.
-RUNTIMES=("zwasm")
+# §11.3 / ADR-0163 A — runtime matrix. zwasm engine row(s) first (one per
+# --engines entry, else a single `zwasm`); the --compare comparators (wasmtime /
+# wazero / wasmer / wasmedge) follow. YAML entries gain a `runtime:` field iff
+# the matrix has > 1 entry, so historical single-runtime entries stay shape-compatible.
+RUNTIMES=("${ZW_RUNTIMES[@]}")
 if [ ${#COMPARATORS[@]} -gt 0 ]; then
     RUNTIMES+=("${COMPARATORS[@]}")
 fi
@@ -276,8 +306,12 @@ measure_rss_kb() {
     local wasm="$2"
     local rss_out
     rss_out=$(mktemp)
+    local aot_cwasm="$3"   # set only for rt=zwasm-aot (precompiled artifact)
     case "$rt" in
-        zwasm)    $TIME_CMD "$ZWASM" run $ZWASM_RUN_FLAGS "$wasm" 2>"$rss_out" >/dev/null || true ;;
+        zwasm)        $TIME_CMD "$ZWASM" run $ZWASM_RUN_FLAGS "$wasm" 2>"$rss_out" >/dev/null || true ;;
+        zwasm-interp) $TIME_CMD "$ZWASM" run --engine interp "$wasm" 2>"$rss_out" >/dev/null || true ;;
+        zwasm-jit)    $TIME_CMD "$ZWASM" run --engine jit "$wasm" 2>"$rss_out" >/dev/null || true ;;
+        zwasm-aot)    $TIME_CMD "$ZWASM" run "$aot_cwasm" 2>"$rss_out" >/dev/null || true ;;
         wasmtime) $TIME_CMD wasmtime run "$wasm" 2>"$rss_out" >/dev/null || true ;;
         wazero)   $TIME_CMD wazero run "$wasm" 2>"$rss_out" >/dev/null || true ;;
         wasmer)   $TIME_CMD wasmer run "$wasm" 2>"$rss_out" >/dev/null || true ;;
@@ -332,8 +366,30 @@ for entry in "${BENCHES[@]}"; do
         continue
     fi
     for runtime in "${RUNTIMES[@]}"; do
+        # zwasm-aot precompiles the fixture to a temp .cwasm (the timed command
+        # runs the artifact; AOT compile latency is a separate cold-start metric).
+        cwasm_tmp=""
+        if [ "$runtime" = "zwasm-aot" ]; then
+            cwasm_tmp="$(mktemp).cwasm"
+            if ! "$ZWASM" compile "$wasm" -o "$cwasm_tmp" 2>/dev/null; then
+                echo "    (aot compile failed; emitting null row)" >&2
+                rm -f "$cwasm_tmp"
+                cat <<EOF >> "$RECENT"
+    - name: $name
+      runtime: $runtime
+      mean_ms: null
+      stddev_ms: null
+      min_ms: null
+      max_ms: null
+EOF
+                continue
+            fi
+        fi
         case "$runtime" in
-            zwasm)    cmd="$ZWASM run$ZWASM_RUN_FLAGS $wasm" ;;
+            zwasm)        cmd="$ZWASM run$ZWASM_RUN_FLAGS $wasm" ;;
+            zwasm-interp) cmd="$ZWASM run --engine interp $wasm" ;;
+            zwasm-jit)    cmd="$ZWASM run --engine jit $wasm" ;;
+            zwasm-aot)    cmd="$ZWASM run $cwasm_tmp" ;;
             wasmtime) cmd="wasmtime run $wasm" ;;
             wazero)   cmd="wazero run $wasm" ;;
             wasmer)   cmd="wasmer run $wasm" ;;
@@ -352,7 +408,7 @@ for entry in "${BENCHES[@]}"; do
                 "$cmd" >/dev/null 2>"$err"; then
             echo "    (failed; first stderr lines:)" >&2
             head -5 "$err" | sed 's/^/      /' >&2
-            rm -f "$json" "$err"
+            rm -f "$json" "$err" "$cwasm_tmp"
             cat <<EOF >> "$RECENT"
     - name: $name
       runtime: $runtime
@@ -384,7 +440,7 @@ PY
         rm -f "$json"
         rss_line=""
         if [ "$CAPTURE_RSS" -eq 1 ]; then
-            rss_kb=$(measure_rss_kb "$runtime" "$wasm")
+            rss_kb=$(measure_rss_kb "$runtime" "$wasm" "$cwasm_tmp")
             rss_line="
       max_rss_kb: $rss_kb"
         fi
@@ -396,6 +452,7 @@ PY
       min_ms: $min
       max_ms: $max$rss_line
 EOF
+        rm -f "$cwasm_tmp"
         ran_any=1
     done
 done
