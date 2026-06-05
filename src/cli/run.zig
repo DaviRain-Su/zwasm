@@ -671,6 +671,27 @@ const argc_exit_jit = [_]u8{
     0x41, 0x00, 0x41, 0x04, 0x10, 0x00, 0x1a, 0x41, 0x00, 0x28, 0x02, 0x00, 0x10, 0x01, 0x0b,
 };
 
+test "runCwasmWasi: threads argv → AOT guest args_sizes_get sees argc (D-251)" {
+    // Mirror the JIT argv test on standalone AOT: argc_exit_jit's _start calls
+    // args_sizes_get then proc_exit(argc). Verifies runCwasmWasi's argv →
+    // host.setArgs threading reaches the AOT args_sizes_get syscall. Completes
+    // the args/stdout/exit AOT-WASI trio. Native AOT exec → Win64-deferred.
+    const builtin = @import("builtin");
+    if (builtin.os.tag == .windows) return @import("../test_support/skip.zig").phaseEnd(.win64);
+
+    const runner = @import("../engine/runner.zig");
+    const aot_produce = @import("../engine/codegen/aot/produce.zig");
+
+    var compiled = try runner.compileWasm(testing.allocator, &argc_exit_jit);
+    defer compiled.deinit(testing.allocator);
+    const cwasm = try aot_produce.produceFromCompiledWasm(testing.allocator, &compiled, &argc_exit_jit);
+    defer testing.allocator.free(cwasm);
+
+    // argv = {prog, a, b} → argc 3 → the guest proc_exits with it.
+    const code = try runCwasmWasi(testing.allocator, testing.io, cwasm, null, &.{ "prog", "a", "b" }, &.{}, null);
+    try testing.expectEqual(@as(u8, 3), code);
+}
+
 test "runWasmJit: --engine jit threads argv → guest args_sizes_get sees argc (D-244 2d)" {
     const builtin = @import("builtin");
     if (builtin.os.tag == .windows) return @import("../test_support/skip.zig").phaseEnd(.win64);
