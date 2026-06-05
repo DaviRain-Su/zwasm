@@ -47,10 +47,9 @@ audit-gap list closed-or-deferred.
 
 ## Recently completed (breadth, pivot from D-291)
 
-- ✅ **D-287 DONE** (`cf605260`, ADR-0165): `zir.max_control_stack` 1024→4096 (deeply-nested switch.wasm depth
-  2568 now validates; validator `control_buf` ~280KB safe). Forward-ref: heap control_buf to drop the cap.
-- **D-288 investigated, fix REVERTED** (queued): interp recurses NATIVELY (mvp.zig:654 invoke←callOp), `frame_buf
-  [256]` is a SEGV guard; real fix = flat/trampolined interp OR native-stack-limit check (ADR). See queue.
+- ✅ **D-287 DONE** (`cf605260`, ADR-0165): `zir.max_control_stack` 1024→4096 (deeply-nested switch.wasm now
+  validates). **D-288** (queued): interp recurses NATIVELY, `frame_buf[256]` is a SEGV guard; real fix = flat/
+  trampolined interp OR native-stack-limit check (ADR) — see queue.
 
 - ✅ **D-293 slices 1–3 DONE** (3-host green through `631e52f6`): per-kind JIT trap codegen via demuxed
   fixup-channels, UNIFIED arm64+x86_64 — slice-1 `15a54fdf` oob_table (code 2; table-access + cind bounds),
@@ -61,21 +60,26 @@ audit-gap list closed-or-deferred.
   `cast_failure`/`uncaught_exception` to `TrapKind`+`mapInterpTrap`+messages — they were in `runtime.Trap` but
   the INTERP mis-reported them as `binding_error`; an interp-parity fix); 4b `2b1fa81f` JIT null_reference (10)
   for call_ref-null + ref.as_non_null (+ fixed a latent arm64 call_ref→oob_table mis-report); 4c `8980bebe`
-  struct/array null→10 + array index OOB→oob_memory(6); 4d `0d13e635` ref.cast/ref.cast_null mismatch→
-  cast_failure(11). Each has a runner_trap_test (JIT+interp parity). **D-293 JIT trap precision SUBSTANTIALLY
-  COMPLETE** — remaining (array.len/fill/copy/init/new trampolines + i31) is lowest-freq GC-JIT w/ ambiguous
-  trampoline failure semantics; debt-rowed, NOT worth grinding (interp already precise for all of them).
+  struct/array null→10 + array index OOB→oob_memory(6); 4d `0d13e635` ref.cast mismatch→cast_failure(11). Each
+  has a runner_trap_test (JIT+interp parity). **SUBSTANTIALLY COMPLETE** — remaining GC trampolines/i31 debt-rowed
+  (lowest-freq, interp already precise).
 
-## ← LEAD: D-292 B-core — internal SIGSEGV/@panic → graceful INTERNAL ERROR (investigation-first)
+## Active bundle
 
-Pivot from D-293 (trap-KIND precision, done) to D-292 B-core (crash-vs-trap DISTINCTION). Step-0 finding (from
-the ADR-0164 program): NO signal handling anywhere (`grep` cli/+entry = empty) → an internal fault (a v2 codegen
-bug) hits the OS as raw signal 11 / exit 139, **indistinguishable from a clean wasm `Trap`**. v2 uses NO
-signal-based wasm semantics (all traps are explicit checks), so ANY such signal = an internal bug → should
-surface a DISTINCT "internal error", not masquerade as a wasm trap. NEXT (investigation-first, this is
-architectural): (1) confirm the gap (a deliberately-faulting fixture → observe exit 139 w/ no distinction);
-(2) design = a `sigaction`/vectored-exception handler → needs an **ADR-0070 amendment** (new libc symbol
-`sigaction`, per `libc_boundary.md`) + a design ADR; (3) then TDD. Do NOT rush to code — file the ADR(s) first.
+- **Bundle-ID**: D-292-B-core-internal-fault-handler (ADR-0166)
+- **Cycles-remaining**: ~3
+- **Continuity-memo**: Investigation + design DONE (`e7eacf37` ADR-0166). Production installs ZERO fault
+  handlers → internal SIGSEGV = silent exit 139. Design = diagnostic-only last-resort handler, POSIX mirrors
+  the proven `spec_assert_runner_base.zig::installSigsegvHandler` pattern (sigaltstack + `std.posix.sigaction`
+  SEGV/BUS/ILL/FPE, sa_sigaction SA.SIGINFO|ONSTACK) but **print+`std.c._exit(70)`, NO siglongjmp recovery**.
+  `std.posix.sigaction`/`write` are pure-Zig (no libc trigger); `_exit` already ADR-0070-necessary (add prod site).
+- **Exit-condition**: a hidden `--__selftest-crash` flag deliberately faults → CLI prints `zwasm: internal
+  error — fatal signal N … this is a bug …` + exits **70**; a subprocess test asserts that; 3-host green.
+- **Next step (cycle I)**: implement `src/platform/signal.zig` POSIX handler + install from `src/cli/main.zig`
+  (production-only guard, NOT test runners) + the `--__selftest-crash` affordance + the subprocess test. Then
+  cycle II = Windows `SetUnhandledExceptionFilter`; cycle III = 3-host signal-behaviour verify + close.
+
+## ← LEAD: D-292 B-core impl cycle I (see Active bundle)
 
 ## Queue (time-consuming first, per user directive)
 
@@ -89,16 +93,17 @@ architectural): (1) confirm the gap (a deliberately-faulting fixture → observe
 - **Phase 16 (完成形) — open-ended; the loop CONTINUES, no release (ADR-0156).** v0.1.0-scope program is
   thoroughly complete + 3-host green (`deb97903`); ADR-0163 bench+docs program ALL DONE. Tag/publish/cutover are
   manual, user-only — there is no release gate.
-- Debt ledger: 0 `now`. slice-4c `8980bebe`: **ubuntu GREEN** (`OK f4877ec4`). slice-4d `0d13e635`: Mac green;
-  ubuntu kicked this turn. slice-4b windows was D-279 heisenbug (recorded, kept). D-291 diag gated.
+- Debt ledger: 0 `now`. **D-293 substantially complete** (slices 1–4d, partial — GC trampolines/i31 low-pri
+  deferred). Now on **D-292 B-core** (ADR-0166 filed `e7eacf37`; impl bundle). slice-4d `0d13e635` ubuntu GREEN
+  (`OK 85dfb166`); windows kicked this turn. D-291 diag gated.
 
 ## Step 0.7 (next resume) — verify remote logs
 
-- **ubuntu**: ✅ GREEN at slice-4c `f4877ec4` (`[run_remote_ubuntu] OK`) — GC struct/array routing confirmed.
-  slice-4d `0d13e635` kicked this turn — verify `/tmp/ubuntu.log` `OK` next resume.
-- **windows**: slice-4d touched only GC op handlers (`ref_cast*`) — NOT an ABI-touching path; windows cadence
-  likely deferred (verify `should_gate_windows.sh`). If kicked, a `spec-simd`/`wasm-2-0-assert` Win64-only fail
-  w/ ubuntu+Mac green = **D-279 heisenbug** (record + keep, D7). Last windows-recorded = `877be5cf`.
+- **ubuntu**: ✅ GREEN at slice-4d `85dfb166` (`[run_remote_ubuntu] OK`) — cast_failure code-11 confirmed on
+  x86_64. ADR-0166 (`e7eacf37`) is docs-only (no kick needed; folds into the next B-core impl kick).
+- **windows**: slice-4d `85dfb166` windows kicked this turn (≥4-commit cadence) — **verify `/tmp/win.log`**: a
+  `spec-simd`/`wasm-2-0-assert` Win64-only fail w/ ubuntu+Mac green = **D-279 heisenbug** (record + keep, D7).
+  Last windows-recorded = `85dfb166`.
 - **Gate note (retracted alarm)**: `run_remote_windows.sh` correctly has `set -euo pipefail` + aborts before
   printing `OK` on remote failure (the wrapper exited 1 here). "windows OK" IS a real green signal; absence of
   the `OK` line + a `Build Summary: N failed` = RED. Read the Build Summary, not just the wrapper exit.

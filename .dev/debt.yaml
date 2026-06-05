@@ -13,7 +13,10 @@ entries:
       FRONT of the clean session): A) surface the specific trap KIND + message on ALL engines (wire the JIT
       trap-code → `Trap` kind → interp-parity `surfaceTrap`); B) crash-vs-trap distinction (internal SIGSEGV/
       @panic = INTERNAL ERROR not `Trap`; ideal zero host-crash; restrict the `[stack_probe]` diag to genuine
-      stack-overflow); C) exception(EH)-vs-trap distinction; D) audit vs wasmtime/wasmer/WasmEdge/v1 (messages,
+      stack-overflow). **B-core: ADR-0166 FILED (e7eacf37) + impl bundle ACTIVE — corrected the stale "no
+      signal handling" premise (production installs ZERO handlers; the VEH/test-runner handlers are
+      JIT-recovery/test-only); design = diagnostic-only sigaction handler → print + _exit(70). See handover
+      Active bundle.** C) exception(EH)-vs-trap distinction; D) audit vs wasmtime/wasmer/WasmEdge/v1 (messages,
       backtrace, exit codes) → gap list. **Synergy: workstream A first directly UNBLOCKS D-291** (ed25519's
       trap kind becomes one command away). INVESTIGATION/AUDIT FIRST (spans engines), then fix.
       PROGRESS (b6da8604, 2026-06-06): workstream A CLI surface done — JIT/AOT run paths thread trap_kind →
