@@ -7,11 +7,15 @@
 
 - **Bundle-ID**: D-291-ed25519-cind-miscompile
 - **Cycles-remaining**: ~2 (localize load-vs-index, then shrink to a fixture)
-- **RE-LOCALIZED → STORE-SIDE** (`6e49ecad`+`2aadd509`+`5c70edcb`, gated `-Dtrace-stackprobe` diags): ed25519
-  → `cind_index=2397 load_value=2397 load_wasm_addr=0x10000c8`. The funcptr load reads the CORRECT addr
-  (0x10000c8 = 16777416) but memory there = 2397, not the data-init **1** ⇒ load+cind INNOCENT; **a v2 STORE
-  MISCOMPILE clobbers memory[16777416]** (wasmtime keeps index ≤1). NEXT: gated **store-watchpoint** in arm64
-  op_memory store path (eff addr ip0 == 16777416 → capture value+func_idx) → find the clobbering store; minimise.
+- **ROOT-CAUSE LOCALIZED → D-289-convergent** (`6e49ecad`→`af2e1f18`, gated `-Dtrace-stackprobe` diags):
+  ed25519 → `cind_index=2397 load_wasm_addr=0x10000c8 clobber_store_val=2397 clobber_func_idx=17`. The funcptr
+  load + cind are INNOCENT (load reads the correct 0x10000c8=16777416); **func 17 (a 128-bit multiply) clobbers
+  memory[16777416]** because it's called with `local0 ≈ 16777416` — a WRONG result-buffer ptr. One of func 17's
+  733 callers computes that stack-temp address wrong. **CONVERGES WITH D-289** (arm64 large-frame-offset): the
+  temp is at a ~64KB frame offset (funcptr global ~65KB below the ~16.06MB stack top) → the caller uses the
+  D-289 `frameAddrLarge` path (or a still-capped FP/param/stack-args arm). D-291 ≈ a BUG in that large-frame
+  address computation, exposed once D-289 let ed25519 compile. NEXT: audit `gpr.frameAddrLarge`/`frameStrGpr`
+  + the D-289-REMAINING arms for a wrong offset → 16777416; or capture a func-17 caller's result-buffer address.
 - **Continuity-memo**: ed25519 JIT traps `oob_table` = inline **call_indirect** bounds (code 2). All 3 cind
   sites: index = `i32.const 0; i32.load offset=16777416` (data seg inits that addr to **1**). **6 minimal repros
   ALL pass (JIT==interp)** — ruled OUT: large-offset load, single/same-addr/exact overlapping data segs,

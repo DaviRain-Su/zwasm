@@ -96,12 +96,20 @@ entries:
       address (earlier "0x1000028" was an arithmetic slip; 16777416 = 0x1000000+200). ⇒ the load + cind are
       INNOCENT; **memory[16777416] is CLOBBERED** from its data-seg-init 1 to 2397 between instantiation and the
       trapping cind. wasmtime keeps the index ≤1, so a v2 **STORE MISCOMPILE** writes 2397 onto the C funcptr
-      global at 0x10000c8 (a computed-address store landing there, or writing the wrong value). NEXT: gated
-      STORE-WATCHPOINT — in arm64 op_memory.zig store path, when the eff addr (ip0) == 16777416, capture
-      value+func_idx → `trap_aux`/print → identify the clobbering store; then minimise. Permanent diag infra
-      (trap_aux/trap_aux2 + entry print) is committed + gated behind `-Dtrace-stackprobe`. Not gated (ed25519
-      excluded from suite + bench). Repros: regen `/tmp/d291*.wat`. DISCHARGE: clobbering store identified +
-      minimal fixture, fixed; ed25519 jit matches wasmtime.
+      global at 0x10000c8. CLOBBERER FOUND (`af2e1f18`, gated store-watchpoint trap_aux3/trap_aux4 from
+      _pad5/_pad6): `clobber_store_val=2397 clobber_func_idx=17`. Func 17 is a standard **128-bit multiply**
+      (__multi3-style): writes the product to [local0+0] (low) + [local0+8] (high), local0 = result-buffer ptr.
+      Func 17 is CORRECT — it is called with **local0 ≈ 16777416 (the funcptr global), a WRONG result buffer**.
+      The bug is in func 17's CALLER (one of 733) computing the result-buffer (a stack temp) address as
+      16777416. **CONVERGES WITH D-289** (arm64 large-frame-offset): 16777416 is ~65KB below the ~16.06MB stack
+      top (mem=257 pages), so the temp sits at a ~64KB frame offset → the caller uses the D-289 `frameAddrLarge`
+      two-ADD path (or a still-capped FP/param/stack-args arm D-289 flagged as REMAINING). D-291 is almost
+      certainly a BUG in that large-frame address computation, exposed once D-289 let ed25519 compile. NEXT:
+      audit `gpr.frameAddrLarge`/`frameStrGpr` + the D-289-REMAINING FP/param/stack-args arms for a wrong large
+      offset → 16777416; or capture a func-17 caller's computed result-buffer address to confirm. Permanent diag
+      infra (trap_aux..trap_aux4 + entry print) committed, gated `-Dtrace-stackprobe`. Repros: regen
+      `/tmp/d291*.wat`. DISCHARGE: the caller's large-frame address miscompile fixed + a minimal fixture; ed25519
+      jit matches wasmtime.
     first_raised: "2026-06-05"
     last_reviewed: "2026-06-06"
     refs: |-
