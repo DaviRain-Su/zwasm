@@ -194,8 +194,8 @@ fn walkCorpusOrCategory(
     const has_manifest = blk: {
         const probe = dir.openFile(io, "manifest_runtime.txt", .{}) catch
             dir.openFile(io, "manifest.txt", .{}) catch {
-                break :blk false;
-            };
+            break :blk false;
+        };
         var f = probe;
         f.close(io);
         break :blk true;
@@ -238,10 +238,10 @@ fn runCorpus(
     // file; the smoke fixture has only manifest.txt.
     const manifest_bytes = dir.readFileAlloc(io, "manifest_runtime.txt", gpa, .limited(1 << 16)) catch
         dir.readFileAlloc(io, "manifest.txt", gpa, .limited(1 << 16)) catch |err| {
-            try stdout.print("FAIL  {s}/manifest.txt: {s}\n", .{ name, @errorName(err) });
-            failed.* += 1;
-            return;
-        };
+        try stdout.print("FAIL  {s}/manifest.txt: {s}\n", .{ name, @errorName(err) });
+        failed.* += 1;
+        return;
+    };
     defer gpa.free(manifest_bytes);
 
     var ctx: RunnerContext = .{
@@ -449,7 +449,7 @@ fn validateAllFunctions(a: std.mem.Allocator, module: *runtime.Module) !bool {
     const validator = zwasm.validate.validator;
     const zir = zwasm.ir.zir;
 
-    const type_section = module.find(.@"type");
+    const type_section = module.find(.type);
     const import_section = module.find(.import);
     const func_section = module.find(.function);
     const code_section = module.find(.code);
@@ -976,6 +976,10 @@ fn trapKindName(k: wasm_c_api.TrapKind) []const u8 {
         .indirect_call_mismatch => "IndirectCallTypeMismatch",
         .stack_overflow => "StackOverflow",
         .out_of_memory => "OutOfMemory",
+        // D-293 slice-4a — Wasm 3.0 GC/typed-ref/EH trap kinds (runtime.Trap error names).
+        .null_reference => "NullReference",
+        .cast_failure => "CastFailure",
+        .uncaught_exception => "UncaughtException",
     };
 }
 
