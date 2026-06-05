@@ -29,6 +29,12 @@ entries:
     layer: "process"
     status: "blocked-by"
     description: |-
+      **PROGRESS 2026-06-05 (ADR-0162): resolution (a) CHOSEN by user — provision native rust on the test hosts.**
+      Rust INSTALLED: windowsmini rustc 1.96.0 (winget); ubuntunote via `flake.nix devShells.rust-host` (`a5cf80fb`).
+      The "rustc absence" barrier is dissolving. REMAINING (A1-wire, the actionable bit): `build.zig run-rust-host`
+      → 3-host (was Mac-only) + a `run_remote_*` path + resolve windowsmini MSVC-vs-GNU linking of `libzwasm.a`.
+      DISCHARGE shifts from (b) re-phrase to (a) literal 3-OS rust run. Barrier now = the build-wiring, not absence.
+      ---
       blocked-by: test-host rustc absence (by design). §13.5 `rust_host` (the 3rd
       embedding-ABI consumer, `examples/rust_host/hello.rs` over `extern "C"` +
       `libzwasm.a`) builds + runs on the Mac host only — the §13.5 exit phrasing
@@ -49,7 +55,7 @@ entries:
       two standard SDK locations). Root fix is host-side: `sudo xcodebuild
       -runFirstLaunch` / `sudo xcode-select --reset` (out of autonomous scope).
     first_raised: "2026-06-04"
-    last_reviewed: "2026-06-04"
+    last_reviewed: "2026-06-05"
     refs: |-
       `examples/rust_host/hello.rs`; `build.zig` (`run-rust-host` step + SDKROOT probe); `.dev/toolchain_provisioning.md`; ROADMAP §13.5 / §13.P; mirrors c_host §13.4 conformance
   - id: "D-245"
