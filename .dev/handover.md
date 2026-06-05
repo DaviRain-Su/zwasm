@@ -47,17 +47,10 @@ audit-gap list closed-or-deferred.
 
 ## Recently completed (breadth, pivot from D-291)
 
-- ✅ **D-287 DONE** (`cf605260`, ADR-0165): raised `zir.max_control_stack` 1024→4096 so valid deeply-nested
-  wasm (shootout/switch.wasm, LLVM big C switch, depth 2568) validates + runs (wasmtime accepted it; we
-  rejected it). Memory-bounded by the validator's host-stack `control_buf` (~280KB at 4096, safe); runtime
-  label stack is hybrid-lazy. Tests: 2000-deep validates, 9000-deep overflows. Forward-ref: heap the validator
-  control_buf to remove the cap entirely (full spec-completeness).
-
-- **D-288 investigated, naive fix REVERTED** (no commit): the interp **recurses NATIVELY** (mvp.zig:654
-  `invoke` ← `callOp:413`), ~8KB/native-frame → 8MB Mac stack ÷ ~1021. So `frame_buf[256]` is a SEGV GUARD
-  (clean-traps before the host stack overflows); raising it (tested cap=4096) made ackermann SEGV at ~1021.
-  Real fix = a flat/trampolined interp (no native recursion) OR a native-stack-limit check in `invoke` — an
-  interp-architecture change (ADR). Substantial → moved to the queue. (Latent: Win 1MB native limit ~128 < 256.)
+- ✅ **D-287 DONE** (`cf605260`, ADR-0165): `zir.max_control_stack` 1024→4096 (deeply-nested switch.wasm depth
+  2568 now validates; validator `control_buf` ~280KB safe). Forward-ref: heap control_buf to drop the cap.
+- **D-288 investigated, fix REVERTED** (queued): interp recurses NATIVELY (mvp.zig:654 invoke←callOp), `frame_buf
+  [256]` is a SEGV guard; real fix = flat/trampolined interp OR native-stack-limit check (ADR). See queue.
 
 - ✅ **D-293 slice-1 DONE** (`15a54fdf`, 3-host green): oob_table (code 2) precise + UNIFIED — x86_64 new
   `oobtable_fixups` channel; arm64 op_table → `cind_bounds_fixups`. Covers table-access + call_indirect bounds.
@@ -70,14 +63,21 @@ audit-gap list closed-or-deferred.
   int_overflow** (shared w/ div_s). Both arches; new jitTrapCode 9. Test: `nan i32.trunc_f32_s`→9,
   `1e30 i32.trunc_f32_s`→8 (JIT+interp parity). Build + Mac test/lint green.
 
-## ← LEAD: D-293 slice-4 — null_reference OR cast_failure OR array_oob
+- ✅ **D-293 slice-4a DONE** (`ebb87e33`): completed the trap SURFACE — added `null_reference`(11) /
+  `cast_failure`(12) / `uncaught_exception`(13) to `TrapKind` + `trapMessageFor` + `mapInterpTrap`. These
+  `runtime.Trap` conditions existed but were absent from the surface, so the **INTERP** mis-reported them as
+  `binding_error` ("host invocation error") — a real interp-parity bug. Observable: interp `ref.as_non_null` on
+  null now prints `kind=null_reference msg=null reference`. Unit test in trap_surface. Mac test/lint green.
 
-Same per-kind-channel pattern as slices 1–3. Remaining still-generic kinds: **null_reference** (ref.as_non_null
-/ struct/array null deref / call_ref null = op_call.zig:708 `TEST;JE`, subtyping-trampoline null 497 — ⚠️
-TrapKind has NO `null_reference` variant; FIRST verify which existing TrapKind the interp maps null-deref to,
-or whether to ADD a variant before assigning a JIT code), **cast_failure** (ref.cast / i31.get_s/u), **array_oob**
-(array.get/set/fill/copy/init/new_* GC). NEXT: pick one, classify both arches (mind sig-vs-bounds mislabels),
-route its channel, map code→jitTrapCode (next free = 10), execution test. (D-291/D-288/B-core = substantial-arch.)
+## ← LEAD: D-293 slice-4b — JIT codegen null_reference (code 10), then cast_failure (11) / array_oob
+
+slice-4a fixed the surface + interp; slice-4b+ add JIT codegen precision via the per-kind-channel pattern
+(slices 1–3 template). **Broad GC sweep** (NEEDS a Step 0 survey): null-trap sites span ~15 wasm_3_0 op files
+PER ARCH — call_ref null (op_call.zig:708 `OR;JZ` x86_64 / arm64), ref.as_non_null, struct_get/set,
+array_get/set/fill/copy/init/len, i31_get — and interleave THREE kinds (null_reference=code 10 / cast_failure
+(ref.cast)=code 11 / array_oob (array bounds)=array_oob TrapKind, next code). NEXT: survey + classify each
+GC op's trap(s) both arches (null-deref vs array-bounds vs cast), build per-kind channels, map codes 10/11+,
+execution tests. (D-291/D-288/B-core remain substantial-arch.)
 
 ## Queue (time-consuming first, per user directive)
 
@@ -91,19 +91,17 @@ route its channel, map code→jitTrapCode (next free = 10), execution test. (D-2
 - **Phase 16 (完成形) — open-ended; the loop CONTINUES, no release (ADR-0156).** v0.1.0-scope program is
   thoroughly complete + 3-host green (`deb97903`); ADR-0163 bench+docs program ALL DONE. Tag/publish/cutover are
   manual, user-only — there is no release gate.
-- Debt ledger: 0 `now`. Last full 3-host CLEAN green = `196e1051` (slice-1). slice-2 `2ae718d4`: Mac + ubuntu
-  green, windows = D-279 heisenbug only (commits kept, D7). slice-3 `0892ee36`: Mac green; ubuntu+windows
-  kicked this turn. D-291 diagnostics gated (`-Dtrace-stackprobe`).
+- Debt ledger: 0 `now`. slice-3 `0892ee36`: Mac + **ubuntu GREEN** (`OK 631e52f6`); windows kicked, verdict
+  pending. slice-4a `ebb87e33`: Mac green, api/-only (no codegen → no windows kick). D-291 diag gated.
 
 ## Step 0.7 (next resume) — verify remote logs
 
-- **ubuntu**: ✅ GREEN at slice-2 `2ae718d4` (`[run_remote_ubuntu] OK`) — cind_sig code-3 channel confirmed on
-  x86_64. slice-3 `0892ee36` kicked this turn; `tail -1 /tmp/ubuntu.log` next resume for its verdict.
-- **windows**: ⚠️ slice-2 `2ae718d4` = **D-279 heisenbug** (NOT a regression): `zwasm-spec-wasm-2-0-assert.exe`
-  exit 3, Win64-ONLY while ubuntu x86_64 + Mac arm64 GREEN on identical source (slice-2's only change is x86_64
-  cind codegen, fully exercised green on ubuntu — the Win64-specific epilogue is shared+unchanged). Recorded
-  `track_heisenbug win64-testall fail @2ae718d4` (streak 0). Commits KEPT. slice-3 windows kicked this turn
-  (ABI-risk op_convert/bounds_check) — verify next resume; re-run-once only if signature DIFFERS from D-279.
+- **ubuntu**: ✅ GREEN at slice-3 `631e52f6` (`[run_remote_ubuntu] OK`) — invalid_conversion(9)+overflow(8)
+  channels confirmed on x86_64. slice-4a was api/-only (not kicked separately; folds into next codegen kick).
+- **windows**: ⏳ slice-3 `631e52f6` kicked last turn (ABI-risk op_convert/bounds_check) — **verify
+  `/tmp/win.log` THIS resume**. If `zwasm-spec-wasm-2-0-assert`/`simd` Win64-only fail with ubuntu+Mac green =
+  the **D-279 heisenbug** (record `track_heisenbug win64-testall fail` + keep commits, D7). Re-run-once ONLY if
+  the signature DIFFERS from D-279 (would implicate slice-3 trunc codegen). Cadence recorded at `631e52f6`.
 - **Gate note (retracted alarm)**: `run_remote_windows.sh` correctly has `set -euo pipefail` + aborts before
   printing `OK` on remote failure (the wrapper exited 1 here). "windows OK" IS a real green signal; absence of
   the `OK` line + a `Build Summary: N failed` = RED. Read the Build Summary, not just the wrapper exit.
