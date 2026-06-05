@@ -920,7 +920,14 @@ pub fn build(b: *std.Build) void {
     rustc_cmd.addPrefixedDirectoryArg("-Lnative=", c_api_lib.getEmittedBinDirectory());
     rustc_cmd.addArg("-lstatic=zwasm");
     rustc_cmd.addArg("-o");
-    const rust_host_bin = rustc_cmd.addOutputFileArg("zwasm-rust-host-hello");
+    // rustc names the bin-crate output `<name>.exe` on Windows; the run-step's
+    // expected output path must match or zig's cache check FileNotFounds it
+    // (the windows-gnu rust_host link succeeds, only the suffix differed).
+    const rust_host_exe = if (target.result.os.tag == .windows)
+        "zwasm-rust-host-hello.exe"
+    else
+        "zwasm-rust-host-hello";
+    const rust_host_bin = rustc_cmd.addOutputFileArg(rust_host_exe);
 
     const run_rust_host = std.Build.Step.Run.create(b, "run zwasm-rust-host-hello");
     run_rust_host.addFileArg(rust_host_bin);

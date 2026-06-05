@@ -216,7 +216,43 @@ emit-heavy turns (where coverage matters most) are slow enough for the
 test-all to finish. Safety (uniform x86_64-RUN coverage, no eyeballed-scope
 foot-gun) beats background machine time. **win64-RUN stays phase-boundary**
 (windowsmini; ADR-0049/0067) — D6 closes the x86_64-RUN half; the win64
-half remains a known, accepted phase-boundary gate.
+half remains a known, accepted phase-boundary gate. **[Superseded by D7 —
+win64 now joins the per-turn background gate.]**
+
+### D7 — Win64 (windowsmini) joins the per-turn background gate, heisenbug-aware (2026-06-05 amend; user-directed)
+
+D6 closed the x86_64-RUN half but left **win64-RUN at phase-boundary only**
+(ADR-0049/0067 + the windowsmini-skip policy). 2026-06-05 that gap bit exactly as
+D-260/D-262 did for x86_64: a manual windows `test-all` — run only because we were
+3-host-checking the WASI-program wiring — surfaced a **Win64-only SIMD JIT crash**
+(`simd_bit_shift`, exit 3, intermittent) that had accumulated undetected, plus a
+Win64 MSVC-`link.exe` + rustc-`.exe`-suffix gap in the rust_host step. User
+directive: "win64 固有バグは回さないと積もる — 根本的に対処".
+
+**Decision: windowsmini joins the per-turn BACKGROUND gate, symmetric with ubuntu
+(D6).** Step 6+7 kicks BOTH `run_remote_ubuntu.sh test-all` AND
+`run_remote_windows.sh test-all` in background against the turn's HEAD; Step 0.7
+verifies BOTH next cycle. Win64 is now exercised EVERY turn (background → hidden
+loop wall-clock), not phase-boundary-only — closing the accumulation gap.
+
+**Heisenbug-aware verification (the Win64-specific half).** Win64 is heisenbug-prone
+(FP-walk / X29-sentinel / RSP-parity lineage). Unlike ubuntu (auto-revert on red,
+D3), a **windows red is NOT auto-reverted**: re-run the failing exe ONCE.
+- **Reproduces (deterministic)** → real Win64 divergence: file a debt row + fix;
+  revert the turn only if a same-turn Win64-emit change is clearly the cause.
+- **Passes on re-run (intermittent)** → heisenbug flake: `track_heisenbug.sh <name>
+  segv` + proceed; do NOT revert (an intermittent crash ≠ a deterministic RED).
+So windows is a regularly-exercised MONITORING gate: deterministic reds act, flakes
+are tracked (investigation_discipline.md §2 discharge protocol).
+
+**Amends** ADR-0049/0067 (windowsmini was phase-boundary-deferred) + the
+windowsmini-skip policy: windows is no longer phase-boundary-only — it is a per-turn
+background monitoring gate. The phase-boundary windows reconcile remains the *strict*
+(deterministic, A13-merge) gate; D7 adds the early-warning cadence.
+
+**Cost**: windowsmini runs every turn (idle otherwise); background → no loop wall-
+clock; a wider deferral window (windows slower than ubuntu) absorbed by the
+"OK-line-absent = still running, re-check" tolerance.
 
 ## Alternatives considered
 
@@ -309,3 +345,4 @@ exactly the wall-clock penalty of this block.
 | 2026-05-20 | `c1e16f7d` | D4 amend — pre-commit / pre-push hook slim-down (`gate_commit.sh --fast`; pre-push drops gate re-run).|
 | 2026-05-30 | `b39689e1` | D5 amend — in-turn chunk chaining + per-turn ubuntu batch (widens D3 one-chunk→one-turn) + gate-once + bigger-chunk default (user throughput directive). |
 | 2026-06-05 | `<backfill>` | D6 amend — background ubuntu gate unconditionally `test-all` (classifier drives Mac foreground only); closes D-262 x86_64-RUN coverage gap (justification removed by D5-b's no-wait ubuntu). |
+| 2026-06-05 | `<backfill>` | D7 amend — windowsmini joins the per-turn background gate (heisenbug-aware: re-run-to-classify, no auto-revert); closes the win64 accumulation gap (D-260/D-262 analog for Win64), user-directed. |

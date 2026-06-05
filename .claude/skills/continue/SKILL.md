@@ -164,9 +164,12 @@ Outline (full details in [`RESUME.md`](RESUME.md)):
    if exists) ([`RESUME.md`](RESUME.md#step-05b)).
 5c. **Step 0.6 — Hard-gate prep awareness** (within 3 rows of a
    registered hard gate) ([`RESUME.md`](RESUME.md#step-06)).
-5d. **Step 0.7 — Prior-cycle ubuntu verification (ADR-0076 D3)** —
-   `tail -3 /tmp/ubuntu.log` mechanically. Revert prior commit pair
-   on FAIL; first-resume + non-code-gap exceptions apply.
+5d. **Step 0.7 — Prior-cycle remote verification (ADR-0076 D3+D7)** —
+   `tail -3 /tmp/ubuntu.log` AND `tail -3 /tmp/win.log` mechanically.
+   **ubuntu** FAIL → revert prior commit pair (D3; first-resume + non-code-gap
+   exceptions apply). **windows** FAIL (D7) → do NOT auto-revert: re-run the
+   failing exe once → reproduces = real Win64 bug (debt row + fix); flake =
+   `bash scripts/track_heisenbug.sh <name> segv` + proceed.
    ([`RESUME.md`](RESUME.md#step-07)).
 6. `zig build test` (Phase 0+); `test-spec` from Phase 1; differential
    from Phase 7. Output >200 lines → subagent.
@@ -300,15 +303,17 @@ hard-gate / bucket-3 / user touchpoint, or a deliberate flush.
 6. **Single push (ADR-0076 D2)**. `git pull --rebase --autostash origin zwasm-from-scratch && git push origin zwasm-from-scratch`.
    One push lands ALL the turn's commit pairs (rebase integrates the
    bench-CI bot commits once).
-7. **ubuntu kick (background; ADR-0076 D3+D5-b+D6)**. ONE kick against
-   the turn's final HEAD, **always `test-all`** (ADR-0076 D6 — the
-   background gate does not scope-adapt; narrow `test` saved zero loop
-   wall-clock once D5-b stopped waiting on it, but skipped the
-   spec/edge x86_64-RUN runners → the D-260 foot-gun).
-   `bash scripts/run_remote_ubuntu.sh test-all > /tmp/ubuntu.log 2>&1`
-   with `run_in_background: true`. Do NOT wait; Step 0.7 next cycle
-   verifies (red turn → revert all the turn's commits to the last
-   ubuntu-verified HEAD).
+7. **Remote kicks (background; ADR-0076 D3+D5-b+D6+D7)**. Kick BOTH
+   remotes against the turn's final HEAD, **always `test-all`** (D6 — the
+   background gate does not scope-adapt; narrow `test` skipped the spec/edge
+   RUN runners → the D-260 foot-gun). `run_in_background: true`, do NOT wait:
+   - `bash scripts/run_remote_ubuntu.sh test-all > /tmp/ubuntu.log 2>&1` (x86_64).
+   - `bash scripts/run_remote_windows.sh test-all > /tmp/win.log 2>&1` (**Win64;
+     ADR-0076 D7** — windowsmini is now a per-turn background MONITORING gate, NOT
+     phase-boundary-only; closes the win64 accumulation gap, the D-260/D-262 analog).
+   Step 0.7 next cycle verifies BOTH. ubuntu red → auto-revert (D3). **windows red →
+   NOT auto-revert** (heisenbug-prone): re-run once → reproduces = real bug (debt+fix);
+   flake = `track_heisenbug.sh` + proceed (D7).
 8. **Re-arm**: `ScheduleWakeup(delaySeconds=60, prompt="/continue")`.
    Literal `60` = harness floor (`[60, 3600]` clamp). The tool
    description's "default 1200–1800s" does NOT apply — see

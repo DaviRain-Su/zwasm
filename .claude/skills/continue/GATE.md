@@ -48,10 +48,13 @@ verify; predates this rule, unaffected).
    Step 6+7 (ADR-0076 D2), against just-pushed HEAD. Verification of
    prior cycle's ubuntu happens at NEXT cycle's Resume Step 0.7
    (ADR-0076 D3).
-3. **windowsmini deferred per ADR-0049** — autonomous chunks must NOT
-   fire `run_remote_windows.sh test-all`, regardless of
-   `should_gate_windows.sh`'s output. windowsmini runs once at Phase
-   boundary as "Windows reconciliation". **OrbStack retired** from
+3. **windowsmini is a per-turn BACKGROUND monitoring gate (ADR-0076 D7)** —
+   kicked alongside ubuntu in Step 6+7 (`run_remote_windows.sh test-all`),
+   verified at next-cycle Step 0.7. **Win64 red is NOT auto-reverted** (heisenbug-
+   prone): re-run once → reproduces = real bug; flake = `track_heisenbug.sh` +
+   proceed. (Supersedes the old ADR-0049 "phase-boundary-only" stance — that left
+   Win64 bugs to accumulate; D7 closes it, the D-260/D-262 analog. The phase-boundary
+   windows reconcile remains the *strict* A13-merge gate.) **OrbStack retired** from
    per-chunk gate per ADR-0067 (D-134 Rosetta race; ubuntunote
    replaces it).
 4. **ubuntunote's stdout+stderr redirects to `/tmp/ubuntu.log`**. Log
