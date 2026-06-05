@@ -57,27 +57,30 @@ audit-gap list closed-or-deferred.
   slice-2 `24a405eb` indirect_call_mismatch (code 3; cind/tail sig), slice-3 `0892ee36` trapping-trunc (NaN→9
   invalid_conversion + range→8 int_overflow). Each has a runner_trap_test asserting the precise code.
 
-- ✅ **D-293 slice-4a DONE** (`ebb87e33`): completed the trap SURFACE — added `null_reference`(11) /
-  `cast_failure`(12) / `uncaught_exception`(13) to `TrapKind` + `trapMessageFor` + `mapInterpTrap`. These
-  `runtime.Trap` conditions existed but were absent from the surface, so the **INTERP** mis-reported them as
-  `binding_error` ("host invocation error") — a real interp-parity bug. Observable: interp `ref.as_non_null` on
-  null now prints `kind=null_reference msg=null reference`. Unit test in trap_surface. Mac test/lint green.
+- ✅ **D-293 slice-4a DONE** (`ebb87e33`): completed the trap SURFACE — `null_reference`(11)/`cast_failure`(12)/
+  `uncaught_exception`(13) were in `runtime.Trap` but absent from `TrapKind`+`mapInterpTrap`, so the INTERP
+  mis-reported them as `binding_error`. Added variants + spec messages + arms (interp parity fix).
 
 - ✅ **D-293 slice-4b DONE** (`2b1fa81f`): JIT null_reference (code 10) for call_ref-null + ref.as_non_null,
   both arches (new `null_ref_fixups` channel). **Also fixed a latent arm64 mis-classification**: call_ref null
   reused `cind_bounds_fixups` → reported `oob_table` (code 2) for a null call_ref (interp said null_reference).
   Tests: call_ref null → 10 (was 2 on arm64), ref.as_non_null null → 10. Mac test/lint green.
 
-## ← LEAD: D-293 slice-4c — null_reference (struct/array null) + cast_failure (11) + array_oob
+- ✅ **D-293 slice-4c DONE** (`8980bebe`): the 4 core GC accessors (struct.get/set, array.get/set) — null-deref
+  → null_reference (code 10), array index OOB → oob_memory (code 6, the interp raises OutOfBoundsLoad/Store for
+  array bounds so it shares the memory-oob kind, no new TrapKind). Both arches, 12 sites, EXISTING channels
+  (pure routing). Tests: struct.get null → 10, array.get OOB → 6 (JIT+interp parity).
 
-slice-4b did the typed-ref null traps; slice-4c is the **GC struct/array sweep** (NEEDS a Step 0 survey). Three
-interleaved kinds across ~13 wasm_3_0 op files/arch: **null_reference** (code 10, channel EXISTS) for
-struct_get/set + array_get/set/fill/copy/len null-deref; **cast_failure** (ref.cast/ref.cast_null → new code 11,
-TrapKind.cast_failure exists from slice-4a); **array_oob** (array.get/set/fill/copy/init index bounds — maps to
-`oob_table`? NO, needs its own; check the runtime Trap → likely OutOfBounds*). NEXT: survey each GC op's
-trap(s) both arches, classify (null vs bounds vs cast), route channels, map codes, tests. ⚠️ widening TrapKind
-again (e.g. an array_oob variant) → update `wast_runtime_runner.zig:trapKindName` + `zig build
-test-runtime-runner-smoke` (lesson `2026-06-06-trapkind-variant-breaks-test-all-only-runner-switch`).
+## ← LEAD: D-293 slice-4d — cast_failure (code 11), THEN weigh a pivot to B-core
+
+slice-4d: ref.cast / ref.cast_null subtype-mismatch → **cast_failure (new JIT code 11)**; `TrapKind.cast_failure`
+exists (slice-4a, so NO wast_runner switch change), 2 sites/arch (both call `jitGcRefCast` → `TEST RAX; JE`).
+Build a `cast_fail_fixups` channel (slice-1 pattern) + jitTrapCode `11 => .cast_failure` + test. **After 4d,
+D-293 JIT precision is substantially complete** — remaining (array.len/fill/copy/init/new trampolines, i31
+non-i31 check) is LOWEST-freq GC-JIT w/ ambiguous trampoline failure semantics (needs investigation, not
+mechanical routing). **STRONGLY weigh pivoting to D-292 B-core** (internal SIGSEGV/@panic → graceful INTERNAL
+ERROR; currently exit 139 is indistinguishable from a clean wasm Trap — a real robustness gap; needs ADR-0070
+amend) over grinding the remaining low-value GC trampolines.
 
 ## Queue (time-consuming first, per user directive)
 
@@ -91,17 +94,16 @@ test-runtime-runner-smoke` (lesson `2026-06-06-trapkind-variant-breaks-test-all-
 - **Phase 16 (完成形) — open-ended; the loop CONTINUES, no release (ADR-0156).** v0.1.0-scope program is
   thoroughly complete + 3-host green (`deb97903`); ADR-0163 bench+docs program ALL DONE. Tag/publish/cutover are
   manual, user-only — there is no release gate.
-- Debt ledger: 0 `now`. ubuntu build-break (slice-4a TrapKind switch) FIXED `9aec280c`, **ubuntu GREEN through
-  `ec7be1b9`** (`OK`). slice-4b `2b1fa81f`: Mac green; ubuntu+windows kicked this turn. D-291 diag gated.
+- Debt ledger: 0 `now`. slice-4b `2b1fa81f`: **ubuntu GREEN** (`OK 877be5cf`); windows kicked. slice-4c
+  `8980bebe`: Mac green; ubuntu+windows kicked this turn. ec7be1b9 was full 3-host green. D-291 diag gated.
 
 ## Step 0.7 (next resume) — verify remote logs
 
-- **ubuntu**: ✅ GREEN at `ec7be1b9` (`[run_remote_ubuntu] OK`) — test-all builds (the fix worked) + all green.
-  slice-4b `2b1fa81f` kicked this turn; verify `/tmp/ubuntu.log` `OK` next resume.
-- **windows**: slice-4a-fix `ec7be1b9` windows kicked last turn (cadence) — **verify `/tmp/win.log`**: build
-  must succeed (the runner-switch fix applies to Win64 too); a `zwasm-spec-simd`/`wasm-2-0-assert` Win64-only
-  fail w/ ubuntu+Mac green = the **D-279 heisenbug** (`track_heisenbug win64-testall fail` + keep, D7). slice-4b
-  also kicked this turn (ABI-risk op_call/ref_as_non_null).
+- **ubuntu**: ✅ GREEN at slice-4b `877be5cf` (`[run_remote_ubuntu] OK`). slice-4c `8980bebe` kicked this turn
+  — verify `/tmp/ubuntu.log` `OK` next resume.
+- **windows**: slice-4b `877be5cf` windows kicked last turn (op_call ABI-risk) — **verify `/tmp/win.log`**: a
+  `zwasm-spec-simd`/`wasm-2-0-assert` Win64-only fail w/ ubuntu+Mac green = the **D-279 heisenbug**
+  (`track_heisenbug win64-testall fail` + keep, D7). slice-4c also kicked this turn (GC codegen, ABI-touching).
 - **Gate note (retracted alarm)**: `run_remote_windows.sh` correctly has `set -euo pipefail` + aborts before
   printing `OK` on remote failure (the wrapper exited 1 here). "windows OK" IS a real green signal; absence of
   the `OK` line + a `Build Summary: N failed` = RED. Read the Build Summary, not just the wrapper exit.
