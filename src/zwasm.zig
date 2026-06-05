@@ -238,6 +238,7 @@ pub const api = struct {
 };
 pub const cli = struct {
     pub const run = @import("cli/run.zig");
+    pub const invoke_args = @import("cli/invoke_args.zig");
     pub const compile = @import("cli/compile.zig");
     pub const dispatch = @import("cli/dispatch.zig");
     pub const diag_print = @import("cli/diag_print.zig");
@@ -354,6 +355,7 @@ test {
     _ = @import("wasi/clocks.zig");
     _ = @import("wasi/jit_dispatch.zig");
     _ = @import("cli/run.zig");
+    _ = @import("cli/invoke_args.zig");
 }
 
 // ============================================================

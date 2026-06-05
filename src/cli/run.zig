@@ -20,6 +20,7 @@ const std = @import("std");
 const wasm_c_api = @import("../api/wasm.zig");
 const diagnostic = @import("../diagnostic/diagnostic.zig");
 const wasi_host = @import("../wasi/host.zig");
+const invoke_args_mod = @import("invoke_args.zig");
 
 pub fn runWasm(
     alloc: std.mem.Allocator,
@@ -102,7 +103,7 @@ pub fn runWasmCaptured(
     stdout_capture: ?*std.ArrayList(u8),
     invoke_name: ?[]const u8,
 ) !u8 {
-    return runWasmCapturedOpts(alloc, io, bytes, argv, stdout_capture, invoke_name, &.{});
+    return runWasmCapturedOpts(alloc, io, bytes, argv, stdout_capture, invoke_name, &.{}, null);
 }
 
 /// One host→guest directory mapping for a WASI preopen (`--dir`, D-243).
@@ -120,8 +121,8 @@ pub fn runWasmCapturedOpts(
     stdout_capture: ?*std.ArrayList(u8),
     invoke_name: ?[]const u8,
     preopens: []const PreopenDir,
+    invoke_args: ?[]const u8,
 ) !u8 {
-    _ = alloc; // engine + store own their own c_allocator paths
 
     // Per ADR-0016 phase 1: clear any stale diagnostic from a
     // previous call before populating a fresh one on failure.
@@ -235,10 +236,26 @@ pub fn runWasmCapturedOpts(
         return error.NoFuncExport;
     };
 
-    const args: wasm_c_api.ValVec = .{ .size = 0, .data = null };
-    var results: wasm_c_api.ValVec = .{ .size = 0, .data = null };
-    const trap = wasm_c_api.wasm_func_call(entry_fn, &args, &results);
-    if (trap == null) return 0;
+    // Marshal `--invoke NAME=ARGS` arguments against the entry's signature
+    // and collect its typed results (D-273(1)). A value-returning export now
+    // runs (the results vec is sized to the result arity); the formatted
+    // results print on the same channel as guest stdout — wasmtime semantics.
+    var result_text: std.ArrayList(u8) = .empty;
+    defer result_text.deinit(alloc);
+    const trap = invoke_args_mod.invokeFormatted(alloc, entry_fn, invoke_args, &result_text) catch |err| {
+        const msg = switch (err) {
+            error.ArgCountMismatch => "--invoke: argument count does not match the export's parameters",
+            error.UnsupportedArgType => "--invoke: unsupported argument type (CLI args are i32/i64/f32/f64 only)",
+            error.InvalidArgValue => "--invoke: could not parse an argument for the export's parameter type",
+            else => "--invoke: argument marshalling failed",
+        };
+        diagnostic.setDiag(.execute, .binding_error, .unknown, "{s}", .{msg});
+        return err;
+    };
+    if (trap == null) {
+        try writeResultText(io, stdout_capture, alloc, result_text.items);
+        return 0;
+    }
     defer wasm_c_api.wasm_trap_delete(trap);
 
     // Trap path. If `proc_exit` was the cause, the host carries
@@ -262,6 +279,23 @@ pub fn runWasmCapturedOpts(
         }
     }
     return 1;
+}
+
+/// Emit the formatted `--invoke` result text on the guest-stdout channel:
+/// the capture buffer when one is wired (tests / realworld differ), else the
+/// process stdout. Empty text (void / zero-result export) is a no-op, so the
+/// existing `_start`/`main` exit-code paths print nothing extra.
+fn writeResultText(io: std.Io, capture: ?*std.ArrayList(u8), alloc: std.mem.Allocator, text: []const u8) !void {
+    if (text.len == 0) return;
+    if (capture) |buf| {
+        try buf.appendSlice(alloc, text);
+        return;
+    }
+    var ob: [256]u8 = undefined;
+    var sw = std.Io.File.stdout().writer(io, &ob);
+    const w = &sw.interface;
+    try w.writeAll(text);
+    try w.flush();
 }
 
 /// Best-effort stderr surface of a non-exit trap. If the underlying
@@ -345,6 +379,29 @@ test "runWasmCaptured: --invoke 'main' on proc_exit_42 fixture returns exit code
     // by name returns the same exit code as the default `main` fallback.
     const code = try runWasmCaptured(testing.allocator, testing.io, &proc_exit_42_wasm, &.{}, null, "main");
     try testing.expectEqual(@as(u8, 42), code);
+}
+
+// `(func (export "add") (param i32 i32) (result i32) local.get 0 local.get 1 i32.add)`
+const add_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x07, 0x01, 0x60,
+    0x02, 0x7f, 0x7f, 0x01, 0x7f, 0x03, 0x02, 0x01, 0x00, 0x07, 0x07, 0x01,
+    0x03, 0x61, 0x64, 0x64, 0x00, 0x00, 0x0a, 0x09, 0x01, 0x07, 0x00, 0x20,
+    0x00, 0x20, 0x01, 0x6a, 0x0b,
+};
+
+test "runWasmCapturedOpts: --invoke add=2,3 marshals args and prints the typed result (D-273(1))" {
+    var capture: std.ArrayList(u8) = .empty;
+    defer capture.deinit(testing.allocator);
+    const code = try runWasmCapturedOpts(testing.allocator, testing.io, &add_wasm, &.{}, &capture, "add", &.{}, "2,3");
+    try testing.expectEqual(@as(u8, 0), code);
+    try testing.expectEqualStrings("5\n", capture.items);
+}
+
+test "runWasmCapturedOpts: --invoke add with a bad arg count is a loud binding_error" {
+    const result = runWasmCapturedOpts(testing.allocator, testing.io, &add_wasm, &.{}, null, "add", &.{}, "2");
+    try testing.expectError(error.ArgCountMismatch, result);
+    const diag = diagnostic.lastDiagnostic().?;
+    try testing.expectEqual(diagnostic.Kind.binding_error, diag.kind);
 }
 
 test "runWasmCaptured: --invoke <bogus> on proc_exit_42 fixture returns NoFuncExport" {

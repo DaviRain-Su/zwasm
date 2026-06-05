@@ -95,6 +95,11 @@ pub fn main(init: std.process.Init) !void {
             // flag must precede the path so the trailing argv (= WASI
             // guest argv) is unambiguous.
             var invoke_name: ?[]const u8 = null;
+            // D-273(1) — `--invoke NAME=ARGS`: the `=ARGS` tail (comma-
+            // separated, parsed by the export's param types) is split off the
+            // single token so the trailing WASI argv stays unambiguous. Null =
+            // the zero-arg entry form (`--invoke NAME`).
+            var invoke_args: ?[]const u8 = null;
             // ADR-0136 — `--engine=jit` routes the run through the JIT
             // executor (compute-only). Default = interp (the C-API path).
             var engine_jit = false;
@@ -103,10 +108,16 @@ pub fn main(init: std.process.Init) !void {
             var next_arg = arg_it.next();
             while (next_arg) |a| {
                 if (std.mem.eql(u8, a, "--invoke")) {
-                    invoke_name = arg_it.next() orelse {
-                        try printlnErr(io, "usage: zwasm run --invoke <name> <path.wasm> [args...]");
+                    const spec = arg_it.next() orelse {
+                        try printlnErr(io, "usage: zwasm run --invoke <name>[=arg1,arg2,...] <path.wasm> [args...]");
                         std.process.exit(2);
                     };
+                    if (std.mem.findScalar(u8, spec, '=')) |eq| {
+                        invoke_name = spec[0..eq];
+                        invoke_args = spec[eq + 1 ..];
+                    } else {
+                        invoke_name = spec;
+                    }
                     next_arg = arg_it.next();
                 } else if (std.mem.eql(u8, a, "--engine") or std.mem.startsWith(u8, a, "--engine=")) {
                     // Accept both `--engine jit` and `--engine=jit`.
@@ -160,6 +171,14 @@ pub fn main(init: std.process.Init) !void {
             // §12.1 — a pre-compiled AOT artefact (CWAS magic) loads +
             // runs directly, no parse/compile. Compute-only (no WASI /
             // --dir); the entry resolves via the serialised export table.
+            // D-273(1) — typed arg-passing + result printing is wired on the
+            // interp path only; the JIT/AOT entry runners are zero-arg
+            // compute-only. Reject `=ARGS` there rather than silently dropping.
+            if (invoke_args != null and (engine_jit or (bytes.len >= 4 and std.mem.eql(u8, bytes[0..4], "CWAS")))) {
+                try printlnErr(io, "zwasm run: --invoke NAME=ARGS arg-passing requires the interp engine (JIT/.cwasm entry is zero-arg compute-only)");
+                std.process.exit(2);
+            }
+
             if (bytes.len >= 4 and std.mem.eql(u8, bytes[0..4], "CWAS")) {
                 const code = cli_run.runCwasm(gpa, bytes, invoke_name) catch |err| {
                     var buf: [256]u8 = undefined;
@@ -189,7 +208,7 @@ pub fn main(init: std.process.Init) !void {
             const code = (if (engine_jit)
                 cli_run.runWasmJit(gpa, bytes, invoke_name)
             else
-                cli_run.runWasmCapturedOpts(gpa, io, bytes, argv_list.items, null, invoke_name, preopen_list.items)) catch |err| {
+                cli_run.runWasmCapturedOpts(gpa, io, bytes, argv_list.items, null, invoke_name, preopen_list.items, invoke_args)) catch |err| {
                 // Per ADR-0016 phase 1: prefer the structured
                 // diagnostic when one was set; fall back to the
                 // legacy `@errorName` form for unwired sites.

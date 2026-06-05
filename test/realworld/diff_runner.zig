@@ -160,7 +160,7 @@ pub fn main(init: std.process.Init) !void {
         const v2_result = if (needs_preopen)
             cli_run.runWasmCapturedOpts(gpa, io, bytes, &v2_argv, &v2_stdout, null, &.{
                 .{ .host_path = preopen_scratch, .guest_path = "." },
-            })
+            }, null)
         else
             cli_run.runWasmCaptured(gpa, io, bytes, &v2_argv, &v2_stdout, null);
         const v2_exit: u8 = v2_result catch |err| {
