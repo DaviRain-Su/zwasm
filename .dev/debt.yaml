@@ -20,8 +20,10 @@ entries:
       trap_surface.jitTrapCode → CLI per-kind message; single-message interp-parity (double-`Trap` bug fixed,
       genuine trap = exit 1 not re-raised error.Trap). REMAINING A: codegen widening — JIT records only generic
       0/1 for unreachable/oob_memory/div_by_zero/int_overflow (only call_indirect+stack precise), so JIT still
-      prints "kind not yet distinguished" for the common traps. Split the generic bucket at the trap sites
-      (arm64/emit.zig + x86_64/op_control.zig) for full parity. Then B (scope [stack_probe]) / C / D.
+      prints "kind not yet distinguished" for the common traps. The generic bucket is also arch-INCONSISTENT
+      (unreachable → trap_kind 1 on arm64 vs 0 on x86_64; found via ubuntu test-all 4d58b315, fixed test
+      99b56f1c). Split the generic bucket at the trap sites (arm64/emit.zig + x86_64/op_control.zig) for full
+      parity AND unify the per-kind codes across arm64+x86_64. Then B (scope [stack_probe]) / C / D.
       DISCHARGE: all engines emit clear per-kind trap messages + crash/trap/exception cleanly distinguished +
       audit-gap list closed-or-deferred.
     first_raised: "2026-06-05"

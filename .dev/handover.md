@@ -27,7 +27,9 @@ regression (surfaced by D-291). Audit-first, spans engines; four workstreams **A
   - **← LEAD (A remaining): codegen trap-code WIDENING.** JIT codegen records only generic 0/1 for
     `unreachable` / `oob_memory` / `div_by_zero` / `int_overflow`, so JIT still prints "kind not yet
     distinguished" for the COMMON traps (NOT full interp-parity yet — only call_indirect+stack are precise).
-    Split the generic bucket into per-kind codes at the trap SITES so JIT/AOT reach full interp-parity: trap-code
+    The generic bucket is also arch-INCONSISTENT (`unreachable` → trap_kind 1 on arm64, 0 on x86_64 — found via
+    ubuntu test-all RED at 4d58b315, test made arch-robust at 99b56f1c). Split the generic bucket into per-kind
+    codes at the trap SITES so JIT/AOT reach full interp-parity AND unify the codes across arm64+x86_64: trap-code
     write sites are `arm64/emit.zig` (+ `shared/entry.zig` `[d-165]` print) and `x86_64/op_control.zig`. Extend
     `trap_surface.jitTrapCode` to map the new codes. Add per-kind fixtures. Step 0 survey the D-165 trap-code
     infra first (which codes exist, where written).
