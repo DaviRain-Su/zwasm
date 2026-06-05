@@ -72,14 +72,23 @@ entries:
       note (ADR-0163 A breadth, 2026-06-05): zwasm's wasm call stack traps too shallow. `shootout/
       ackermann.wasm` (M=3,N=7 → ackermann(3,7)=1021-deep recursion) traps `stack_overflow / call stack
       exhausted` on zwasm; the source comment asserts "1021 fits in wasm call stack" and wasmtime runs it.
-      So zwasm's recursion/operand-stack ceiling is below a normal runtime's — a robustness gap for deeply
-      recursive (but valid, terminating) programs. INVESTIGATE: find zwasm's call/value-stack size + whether
-      it's a fixed cap or host-stack-bound; compare to wasmtime's default. DISCHARGE: ackermann(3,7) runs on
-      zwasm (interp + jit) OR an ADR documents the cap + rationale.
+      So zwasm's recursion ceiling is below a normal runtime's — a robustness gap for deeply recursive (but
+      valid, terminating) programs. MECHANISM CONFIRMED (2026-06-05): the INTERP cap is `frame.zig
+      max_frame_stack = 256` — `runtime.zig` holds a FIXED inline `frame_buf: [256]Frame`, `pushFrame` traps
+      `CallStackExhausted` at 256 (runtime.zig:443). 256 is very low (any moderately recursive algo exceeds
+      it). NOT a trivial bump: each `Frame` embeds an inline `label_buf:[128]Label` (frame.zig:104), so
+      `frame_buf` is already large — raising 256 bloats the Runtime struct ~linearly (risk: if Runtime is
+      stack-allocated, a multi-MB struct self-overflows). The JIT side is SEPARATE (native stack + the
+      stack_limit probe, ~8 MB; ed25519's JIT fault is D-291, a memory SIGSEGV not depth). FIX (interp):
+      give the frame stack an inline + heap-overflow design mirroring the EXISTING label stack
+      (`label_buf[128]` + `label_overflow = alloc.alloc(...)`, frame.zig:104-116) — inline [256] + lazy heap
+      spill for deeper; OR move `label_buf` off-Frame (always-heap) so frame_buf can grow cheaply. This is a
+      call-stack memory-model change → likely an ADR (touches a runtime limit). DISCHARGE: ackermann(3,7)
+      runs on interp (+ a deep-recursion fixture) OR an ADR documents the cap + rationale.
     first_raised: "2026-06-05"
     last_reviewed: "2026-06-05"
     refs: |-
-      `bench/runners/wasm/shootout/ackermann.wasm` (repro); `src/runtime/` (call/value stack sizing); ADR-0163 A
+      `bench/runners/wasm/shootout/ackermann.wasm` (repro); `src/runtime/frame.zig:24` (max_frame_stack=256) +`:104-116` (label inline+overflow design to mirror); `src/runtime/runtime.zig:354,443` (frame_buf + pushFrame cap); ADR-0163 A; D-291 (JIT-side, distinct)
   - id: "D-287"
     layer: "code"
     status: "note"
