@@ -1148,7 +1148,10 @@ test "fdRenumber: moves an fd onto another; source becomes badf" {
 }
 
 test "fdReaddir: enumerates '.', '..', real entries; cookie resumes past them" {
-    var tmp = std.testing.tmpDir(.{});
+    // `.iterate = true` — Linux `Dir.iterate()` (getdents) requires the dir fd
+    // to be opened iterably or it panics BADF (macOS is lenient). Production
+    // preopens open with `.iterate = true` (cli/run.zig); mirror that here.
+    var tmp = std.testing.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
     try tmp.dir.writeFile(testing.io, .{ .sub_path = "f1", .data = "a" });
     try tmp.dir.writeFile(testing.io, .{ .sub_path = "f2", .data = "bb" });
