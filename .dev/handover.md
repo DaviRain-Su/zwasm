@@ -33,18 +33,24 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
   `emitPrefixFD` @lower.zig:601) AND the validator's prefix switch (`validator.zig:~1125`); watch that the
   ZirOp count / per-op file registration stays consistent; the EXACT-alignment check + shared-mem gate are the
   two subtle correctness points. First proof = `atomic.fence` runs end-to-end.
-- **First milestone (current chunk)**: `atomic.fence` (0xFE 0x03) END-TO-END — 0 operands, no memory: proves
-  the whole 0xFE pipeline (parse→validate→lower→interp→JIT no-op) with a `.wasm` fixture. THEN per-op:
-  i32.atomic.load → store → rmw add/sub/and/or/xor/xchg → cmpxchg → i64 variants → wait/notify (established
-  per-op chunk pattern, bundle several/turn).
+- **DONE @9971b708**: `atomic.fence` (0xFE 0x03) END-TO-END — the 0xFE prefix pipeline is now live in BOTH
+  validator (`dispatchPrefixFE`) + lower (`emitPrefixFE`); interp shares `nopOp`; arm64+x86_64 emit transparent
+  0→0 no-op; liveness stackEffect 0→0; `test/edge_cases/p17/atomics/fence` green (=42); build.zig wires p17 edge
+  dir; emit_test_local unsupported-probe retargeted fence→rmw.cmpxchg.
+- **NEXT (current chunk)**: `i32.atomic.load` (0xFE 0x10, memarg align==2). FIRST memory atomic — needs: (a)
+  shared-mem gate open in `parse/sections.zig:903` + `MemoryInstance.is_shared`; (b) EXACT natural-alignment
+  check (align==size, stricter than `readMemargCheckAlign`'s ≤); (c) validator pop addr→push i32 + lower memarg
+  payload + interp/JIT seq-cst aligned load. THEN store → rmw add/sub/and/or/xor/xchg → cmpxchg → i64 variants →
+  notify/wait (established per-op chunk pattern, bundle several/turn).
 - **Exit-condition**: a `test/edge_cases/p17/atomics/*` (or spec atomics manifest) green 3-host with the full
   load/store/rmw/cmpxchg set + fence; wait/notify minimal-single-thread; shared-mem parse+validate.
 - **Cycles-remaining**: ~many (large feature). No tag (ADR-0156).
 
 ## Current state
 
-- **Phase 17 (v0.2 feature line) IN-PROGRESS** (ADR-0168, user-unblocked). Phase 16 (完成形) DONE; v0.1 surface
-  audited+documented+exampled, memory-safety swept SOUND, dogfooding DONE (cw v1). No release/tag ever (ADR-0156).
+- **Phase 17 (v0.2 feature line) IN-PROGRESS** (ADR-0168, user-unblocked); 17.1-atomics bundle ACTIVE, fence
+  milestone DONE @9971b708. Phase 16 (完成形) DONE; v0.1 surface audited+documented+exampled, memory-safety swept
+  SOUND, dogfooding DONE (cw v1). No release/tag ever (ADR-0156).
 - Debt ledger: **65 entries, 0 `now`** (D-264 dogfooding discharged). Remaining = `.dev/remaining_sweep.md`
   (Bucket A prune / B actionable-low / C deferred / D externally-blocked) — sweep between features, never idle.
 - **D-279** Win64 SIMD heisenbug: H3 stack-overflow diagnostic deployed; re-kick windows as work lands to keep
@@ -78,16 +84,14 @@ next-diagnostic (re-add EXCEPTION_STACK_OVERFLOW to the VEH filter with a `[d-27
 D-279. NOT auto-reverted (D7; ubuntu 8 MB green every time, facade exonerated).
 
 **D-279 H3 diagnostic LANDED + Win64-VALIDATED** (`b86ac7fc`): `EXCEPTION_STACK_OVERFLOW` VEH arm → minimal
-`[d-279-veh] STACK-OVERFLOW` WriteFile (diagnostic-only, ADR-0105 D4 stands). Windows run @`660bb771` was GREEN
-(D-279 did NOT reproduce — intermittent; streak silent 1) so the H3 diag is build-validated + deployed but
-UNFIRED. A FUTURE Win64 D-279 crash now self-identifies: prints `[d-279-veh] STACK-OVERFLOW` → H3 CONFIRMED
-(extend the stack-limit guard to the overflowing path); exit-3 recurs WITHOUT it → H3 refuted (re-open
-enumeration). This is the pending external signal.
-**HIGH-VALUE AUTONOMOUS WORK IS COMPLETE.** Surface (C/Zig/CLI) audited+documented+exampled; memory-safety all
-areas swept SOUND; D-279 maximally instrumented; debt swept; proposal_watch current (2026-04-30); audit-overstatement
-lesson captured (`fd0a1914`). Remaining is genuinely user-gated (v0.2 features, dogfooding) or external-signal-gated
-(D-279 next-crash). NOT padding low-ROI items (exotic D-209, 4th audit). The loop now mostly verifies gates + awaits
-a Win64 crash signal or user direction on v0.2 priorities.
+`[d-279-veh] STACK-OVERFLOW` WriteFile (diagnostic-only, ADR-0105 D4 stands), build-validated + deployed but
+UNFIRED (streak silent 2). A FUTURE Win64 D-279 crash self-identifies: `[d-279-veh] STACK-OVERFLOW` → H3
+CONFIRMED (extend the stack-limit guard to the overflowing path); exit-3 WITHOUT it → H3 refuted (re-open
+enumeration). Pending external signal — the loop keeps re-kicking windows per batch so a repro is always hunted.
+
+完成形 v0.1 surface (C/Zig/CLI) audited+documented+exampled; memory-safety all areas SOUND; debt swept;
+proposal_watch current (2026-04-30); audit-overstatement lesson `fd0a1914`. Forward track now = **v0.2 features**
+(atomics bundle ACTIVE) + remaining_sweep between features (NEVER-IDLE above).
 
 **Blocked / parked**: 31 blocked-by (call_ref §10.R / Phase-11 D-177 WASI-config / D-178 standalone Global-Memory /
 future proposals). **D-290** = 3 proposal-laden distillers, direction-gated (wasm-tools↔wabt output divergence;
@@ -97,12 +101,11 @@ wabt stays). **D-264** ClojureWasm dogfooding gated. `.dev/proposal_watch.md` = 
 
 - **ubuntu**: re-kicked each turn (D6 always). Verify `[run_remote_ubuntu] OK` in `/tmp/ubuntu.log`. Last GREEN
   @`660bb771`. Red → auto-revert (D3).
-- **windows**: a **D-279 reproduction hunt is IN FLIGHT @`9d4523b8`** (kicked 2026-06-07; `/tmp/win.log`) — at
-  resume, FIRST `grep -aE '\[run_remote_windows\] (OK|FAILED)|d-279-veh' /tmp/win.log`. If the run finished:
-  GREEN/OK → D-279 silent again (`track_heisenbug.sh win64-testall silent`); **`[d-279-veh] STACK-OVERFLOW`
-  present = H3 CONFIRMED** (extend the stack-limit guard to the overflowing path); a SIMD exit-3 crash WITHOUT
-  that line = D-279 still un-mechanism'd (`track_heisenbug.sh win64-testall segv`, re-open H-enumeration). NOT
-  auto-revert (D7). Last recorded GREEN @`660bb771`. Don't poll-wait; verify when it lands.
+- **windows**: D-279 hunt @`9d4523b8` FINISHED — all test stages green (simd 13351/0), **no `d-279-veh`/STACK-
+  OVERFLOW line, no SIMD exit-3** → D-279 silent (streak **2**, recorded). Wrapper's final `OK.` echo absent (SSH
+  teardown after the last realworld stage; substance green, not a `Build Summary: N failed` RED). Batch state =
+  **9/12 commits, abi_risk=0 → gate-deferred**; re-kick windows when the batch fires (≥12, or ≥6 if ABI-touched).
+  A future Win64 SIMD crash now self-identifies via H3 (`[d-279-veh] STACK-OVERFLOW`). NOT auto-revert (D7).
 - **Gate note**: `[run_remote_windows] OK` = real green; `Build Summary: N failed` (no OK) = RED. EXPECTED
   non-failures: `zig-host-hello` exit-42 + `--__selftest-crash` exit-70 "failed command"; the sha256 `verify:
   FAIL` line is the known fixture-wrong-constant FALSE lead (zwasm hashes correctly).
