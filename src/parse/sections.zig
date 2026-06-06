@@ -876,6 +876,12 @@ pub const MemoryEntry = struct {
     /// behaves identically to an unshared memory; the flag is carried so
     /// `memory.atomic.wait*` can trap on non-shared memories.
     shared: bool = false,
+    /// Wasm custom-page-sizes proposal (ADR-0168 v0.2) — limits-flag bit
+    /// 0x08. log2 of the memory's page size; only 0 (= 1 byte) or 16
+    /// (= 64 KiB, the default) are valid. `min`/`max` + memory.size/grow
+    /// + bounds are all in units of this page size. Defaults to 16 when
+    /// the 0x08 flag is absent (the standard 64 KiB page).
+    page_size_log2: u8 = 16,
 
     pub const IdxType = enum(u1) { i32 = 0, i64 = 1 };
 };
@@ -893,8 +899,9 @@ pub const Memories = struct {
 /// - bit 0 (0x01): has_max
 /// - bit 1 (0x02): shared (NOT supported in v0.1.0; rejected)
 /// - bit 2 (0x04): memory64 (i64 idx_type)
-/// - bit 3 (0x08): has_page_size (custom-page-size proposal;
-///   not supported)
+/// - bit 3 (0x08): has_page_size (custom-page-sizes proposal, ADR-0168
+///   v0.2) — a trailing uleb128 `page_size_log2` follows the limits;
+///   valid values are 0 (= 1 byte) or 16 (= 64 KiB).
 /// Accepted flag values: `0x00` / `0x01` (i32) always; `0x04` /
 /// `0x05` (i64) only when `comptime build_options.wasm_level >=
 /// .v3_0` — else `Error.Memory64Unsupported` per ADR-0111 D1.
@@ -905,12 +912,13 @@ fn readMemLimits(body: []const u8, pos: *usize) Error!MemoryEntry {
     const has_max = (flag & 0x01) != 0;
     const is_shared = (flag & 0x02) != 0;
     const is_i64 = (flag & 0x04) != 0;
+    const has_page_size = (flag & 0x08) != 0;
     // Wasm threads (ADR-0168): bit 0x02 = shared. A shared memory MUST
     // declare a maximum (spec §5.4.4 limits validation), so flag 0x02
-    // (shared without max) is malformed. Accept bits {0,1,2}; reject any
-    // other bit (custom-page-size 0x08 still unsupported).
+    // (shared without max) is malformed. Accept bits {0,1,2,3}; reject
+    // any higher bit.
     if (is_shared and !has_max) return Error.BadValType;
-    if ((flag & ~@as(u8, 0x07)) != 0) return Error.BadValType;
+    if ((flag & ~@as(u8, 0x0F)) != 0) return Error.BadValType;
     if (is_i64) {
         if (comptime @intFromEnum(build_options.wasm_level) < @intFromEnum(@TypeOf(build_options.wasm_level).v3_0)) {
             return Error.Memory64Unsupported;
@@ -918,8 +926,16 @@ fn readMemLimits(body: []const u8, pos: *usize) Error!MemoryEntry {
     }
     const min = try leb128.readUleb128(u64, body, pos);
     const max: ?u64 = if (has_max) try leb128.readUleb128(u64, body, pos) else null;
+    // Custom-page-sizes (ADR-0168 v0.2): the page_size_log2 trails the
+    // limits. Only 0 (1 byte) and 16 (64 KiB) are valid per the proposal.
+    var page_size_log2: u8 = 16;
+    if (has_page_size) {
+        const ps = try leb128.readUleb128(u32, body, pos);
+        if (ps != 0 and ps != 16) return Error.BadValType;
+        page_size_log2 = @intCast(ps);
+    }
     const idx_type: MemoryEntry.IdxType = if (is_i64) .i64 else .i32;
-    return .{ .idx_type = idx_type, .min = min, .max = max, .shared = is_shared };
+    return .{ .idx_type = idx_type, .min = min, .max = max, .shared = is_shared, .page_size_log2 = page_size_log2 };
 }
 
 /// Decode the body of a memory section (`SectionId.memory`):
@@ -1727,7 +1743,38 @@ test "decodeMemory: rejects shared without max (spec §5.4.4)" {
 }
 
 test "decodeMemory: rejects reserved flag bits" {
-    const body = [_]u8{ 0x01, 0x08, 0x01 };
+    // 0x08 is now has_page_size (ADR-0168 v0.2); 0x10 is the next reserved bit.
+    const body = [_]u8{ 0x01, 0x10, 0x01 };
+    try testing.expectError(Error.BadValType, decodeMemory(testing.allocator, &body));
+}
+
+test "decodeMemory: custom-page-size — page_size_log2 0 (1 byte) and 16 (default) (ADR-0168 v0.2)" {
+    // flag 0x09 = has_page_size + has_max; min 1, max 1, page_size_log2 0.
+    {
+        const body = [_]u8{ 0x01, 0x09, 0x01, 0x01, 0x00 };
+        var mems = try decodeMemory(testing.allocator, &body);
+        defer mems.deinit();
+        try testing.expectEqual(@as(u8, 0), mems.items[0].page_size_log2);
+    }
+    // page_size_log2 16 (explicit default).
+    {
+        const body = [_]u8{ 0x01, 0x09, 0x01, 0x01, 0x10 };
+        var mems = try decodeMemory(testing.allocator, &body);
+        defer mems.deinit();
+        try testing.expectEqual(@as(u8, 16), mems.items[0].page_size_log2);
+    }
+    // Default (no 0x08 flag) → page_size_log2 = 16.
+    {
+        const body = [_]u8{ 0x01, 0x00, 0x01 };
+        var mems = try decodeMemory(testing.allocator, &body);
+        defer mems.deinit();
+        try testing.expectEqual(@as(u8, 16), mems.items[0].page_size_log2);
+    }
+}
+
+test "decodeMemory: custom-page-size rejects invalid page_size_log2 (only 0 or 16)" {
+    // flag 0x09, page_size_log2 = 1 (invalid; only 0 and 16 allowed).
+    const body = [_]u8{ 0x01, 0x09, 0x01, 0x01, 0x01 };
     try testing.expectError(Error.BadValType, decodeMemory(testing.allocator, &body));
 }
 

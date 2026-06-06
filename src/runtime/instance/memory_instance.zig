@@ -29,4 +29,8 @@ pub const MemoryInstance = struct {
     /// `memory.atomic.wait*` can trap on a non-shared memory. No runtime
     /// behaviour difference on the single-threaded substrate.
     shared: bool = false,
+    /// Wasm custom-page-sizes (ADR-0168 v0.2) — log2 of this memory's
+    /// page size (0 = 1 byte, 16 = 64 KiB default). `memory.size`/`grow`
+    /// report/operate in units of `1 << page_size_log2` bytes.
+    page_size_log2: u8 = 16,
 };
