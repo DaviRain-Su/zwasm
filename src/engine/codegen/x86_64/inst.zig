@@ -275,7 +275,6 @@ pub const encJccRel8 = inst_branch.encJccRel8;
 pub const encJmpReg = inst_branch.encJmpReg;
 pub const encJmpRel32 = inst_branch.encJmpRel32;
 pub const encJccRel32 = inst_branch.encJccRel32;
-pub const encTestDlImm8 = inst_branch.encTestDlImm8;
 pub const patchRel32 = inst_branch.patchRel32;
 pub const encRet = inst_branch.encRet;
 pub const encNop = inst_branch.encNop;

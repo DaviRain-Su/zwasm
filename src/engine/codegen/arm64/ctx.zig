@@ -141,11 +141,6 @@ pub const EmitCtx = struct {
     /// reaches a dedicated trap stub. Other `bounds_fixups` kinds (oob_table /
     /// conversion / ref-null / cast / array-oob) stay generic (D-293).
     oob_fixups: *std.ArrayList(u32),
-    /// Wasm threads (ADR-0168) — atomic unaligned-access (B.NE on the
-    /// `TST ea,#(size-1)` → code 14 = unaligned_atomic) fixups. Emitted
-    /// only for `*.atomic.*` memory ops; reaches a dedicated trap stub
-    /// recording `trap_kind = 14` so the message is "unaligned atomic".
-    unaligned_fixups: *std.ArrayList(u32),
     /// `return` / `br <function-depth>` placeholders; patched at
     /// function-final `end` to share the regular epilogue path.
     return_fixups: *std.ArrayList(u32),

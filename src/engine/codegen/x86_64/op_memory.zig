@@ -73,7 +73,6 @@ pub fn emitMemOp(
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
     oob_fixups: *std.ArrayList(u32),
-    unaligned_fixups: *std.ArrayList(u32),
     spill_base_off: u32,
     op: zir.ZirOp,
     offset: u32,
@@ -158,25 +157,6 @@ pub fn emitMemOp(
         } else {
             try buf.appendSlice(allocator, inst.encMovImm64Q(.rcx, @as(u64, offset)).slice());
             try buf.appendSlice(allocator, inst.encAddRR(.q, .rdx, .rcx).slice());
-        }
-    }
-    // Wasm threads (ADR-0168): atomic natural-alignment trap on the
-    // RUNTIME ea (in RDX here), emitted BEFORE the bounds check (spec
-    // exec step 8 < 14a). access_size is a power of two so `@ctz` =
-    // log2 = the low-bit count; byte ops (size 1 → 0) are always
-    // aligned. TEST DL,#mask (RDX still holds ea; RCX not yet clobbered).
-    const is_atomic = switch (op) {
-        .@"i32.atomic.load" => true,
-        else => false,
-    };
-    if (is_atomic) {
-        const align_bits: u3 = @intCast(@ctz(@as(u8, @bitCast(access_size))));
-        if (align_bits > 0) {
-            const mask: u8 = (@as(u8, 1) << align_bits) - 1;
-            try buf.appendSlice(allocator, inst.encTestDlImm8(mask).slice());
-            const al_fixup: u32 = @intCast(buf.items.len);
-            try buf.appendSlice(allocator, inst.encJccRel32(.ne, 0).slice()); // misaligned
-            try unaligned_fixups.append(allocator, al_fixup);
         }
     }
     try buf.appendSlice(allocator, inst.encLeaR64BaseDisp8(.rcx, .rdx, access_size).slice());
@@ -279,7 +259,6 @@ pub fn emitI32Load(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
         ctx.pushed_vregs,
         ctx.next_vreg,
         ctx.oob_fixups,
-        ctx.unaligned_fixups,
         ctx.spill_base_off,
         ins.op,
         @as(u32, @intCast(ins.payload)),
