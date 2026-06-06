@@ -19,10 +19,17 @@ entries:
       identical to the working oob code-6 stub). Yet at runtime `trap_flag=0, result=0` (JNE not taken / stub not
       run) on BOTH native ubuntu x86_64 AND Rosetta. So either the EXECUTED JIT page ≠ `buf` (linker/page-copy or
       W^X stale-page, cf. lesson mac-aarch64-thread-rx-mode-survives-alloc — x86_64 variant?), OR the
-      trap-stub-from-mid-body pattern has an x86_64-specific issue invisible to byte inspection. NEXT: lldb on the
-      Rosetta binary — disassemble the executed page + single-step the JNE to compare with `buf`. Then re-land B2
-      (cherry-pick arm64 which worked + fix x86_64). Discharge: misaligned `i32.atomic.load` traps UnalignedAtomic
-      on all 3 hosts.
+      trap-stub-from-mid-body pattern has an x86_64-specific issue invisible to byte inspection. **2026-06-07
+      page-dump finding** (probe in `entry.invokeAndCheck` reading bytes at the entry fn ptr, Rosetta): the
+      EXECUTED invoked-entry page ≠ the `buf` dumped in `x86_64/emit.zig compile()`. The invoked entry begins with
+      the **ADR-0105 stack-limit prologue** (`PUSH RBP; PUSH R15; MOV RBP,RSP; MOV R15,RDI; CMP RSP,[R15+0xe0];
+      JBE stack_stub`) absent from the compile-buf dump (which had only `PUSH RBP; MOV RBP,RSP`) — so the
+      body+stubs I patch are wrapped/re-laid-out by an entry/link layer before execution (a separate page DID show
+      `TEST DL,3 (f6 c2 03)` at byte 18, matching buf). A uniform prepend preserves relative JNE→stub, AND oob/div
+      traps survive the same wrapping, so the differentiator is still unknown. NEXT: lldb breakpoint on the INVOKED
+      entry (not the body page), single-step to the `TEST DL,#3` + `JNE`, observe ZF + the actual JNE target vs the
+      stub. Then re-land B2 (cherry-pick arm64 which worked + fix x86_64). Discharge: misaligned `i32.atomic.load`
+      traps UnalignedAtomic on all 3 hosts.
     first_raised: "2026-06-07"
     last_reviewed: "2026-06-07"
     refs: |-
