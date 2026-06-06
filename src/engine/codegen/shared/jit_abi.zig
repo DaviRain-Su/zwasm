@@ -302,7 +302,11 @@ pub const JitRuntime = extern struct {
     /// destination slices.
     tables_ptr: [*]const TableSlice = undefined,
     tables_count: u32 = 0,
-    _pad9: u32 = 0,
+    /// ADR-0164 B / D-291 — gated __stack_pointer-corruptor scratch (former `_pad9`):
+    /// the func_idx of a `global.set 0` (global.set __stack_pointer) whose value
+    /// EXCEEDS the initial max 0x1000000 (illegal — sp only decrements) → the func
+    /// that over-restores __stack_pointer. Last-wins.
+    trap_aux7: u32 = 0,
     /// §9.9 / 9.9-m-2c-init (per ADR-0058 amendment): per-element-
     /// segment slice descriptor array. JIT `table.init elemidx
     /// tableidx` indexes this with stride `elem_slice_size` to read
@@ -970,6 +974,8 @@ pub const trap_aux4_off: u12 = @offsetOf(JitRuntime, "trap_aux4");
 pub const trap_aux5_off: u12 = @offsetOf(JitRuntime, "trap_aux5");
 /// ADR-0164 B / D-291 — gated arg0-value scratch (see `trap_aux6`).
 pub const trap_aux6_off: u12 = @offsetOf(JitRuntime, "trap_aux6");
+/// ADR-0164 B / D-291 — gated __stack_pointer-corruptor scratch (see `trap_aux7`).
+pub const trap_aux7_off: u12 = @offsetOf(JitRuntime, "trap_aux7");
 /// Phase 10.E IT-6 cycle 3c — EH dispatcher integration. Trampoline
 /// reads ptr+count via `[X19/R15 + off]` to materialize
 /// `ExceptionTable` + `CodeMap` slices for `dispatchThrow`.

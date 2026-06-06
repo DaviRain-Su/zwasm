@@ -217,22 +217,29 @@ entries:
       reuses param slots via local.tee), then `i64.store offset=8` using that early-held ptr as base. The
       held result-ptr (0xffc3b0) is corrupted to **__stack_pointer_init + 0xC8 = 16777416** across the heavy
       computation = a context-dependent REGALLOC/SPILL miscompile of the long-lived `local.get 0` operand.
-      P1 CONFIRMED 2026-06-06 (code-read, no build): `spillHomedCallerSaved` (op_call.zig:93) only does
-      `STR home_reg,[SP,slot]` — it READS home regs, never WRITES X1; the call tail (X8 LEA, X0=rt restore, BL)
-      also doesn't touch X1. So X1 (correct arg0) is preserved marshal→BL→func17-entry ⇒ func 17 receives a
-      CORRECT result-ptr and corrupts it INTERNALLY (rules out P2 call-tail clobber). MINIMAL REPRO BUILT
-      (/tmp/m3b.wat: just $multi3 = func 17's exact body + a `run` that calls it with result_ptr=8 AND =0xffc3b0,
-      same operands, compares the two stored words, `unreachable` on mismatch). RESULT: JIT exit 0 (CLEAN) with
-      BOTH small AND large (0xffc3b0, ed25519's exact value) buffers + arbitrary operands (0x123456789 etc.) —
-      so a large param0 ALONE does NOT trigger it. ⇒ the corruption is OPERAND-DEPENDENT or needs the CLOBBERING
-      call's exact param0+operands (the captured last-call17 ≠ the clobbering call17). NEXT: extend the
-      store-watchpoint (op_memory.zig, gated addr==16777416) to ALSO capture func 17's operands p1..p4 + the
-      received param0 (trap_aux slots) → plug those EXACT values into /tmp/m3b.wat to get a self-contained repro;
-      then bisect which i64.mul/shr/and step diverges param0's held value. (Caution: minimal-repro clean for
-      arbitrary inputs hints the trigger may be a data-dependent spill-slot alias, not a pure-codegen bug.)
-      Permanent diag infra (trap_aux..trap_aux6 + entry print) gated `-Dtrace-stackprobe`. Repro: build
-      `-Dtrace-stackprobe=true` + `zwasm run --engine jit bench/runners/wasm/shootout/ed25519.wasm` (grep [d-291]);
-      minimal harness /tmp/m3b.wat. DISCHARGE: the func-17 miscompile fixed + a minimal fixture; ed25519 jit matches wasmtime.
+      ⚠️ "P1 / func-17-internal" was REFUTED + ROOT-CAUSED 2026-06-06 to a __STACK_POINTER corruption chain.
+      The earlier exact-`==16777416` gate MISSED the real buffer (it's 0x10000c0; only buffer+8 = 0x10000c8 =
+      16777416). A robust `>= 0x1000000` (data-region) gate on `call 17` arg0 (op_call.zig, trap_aux5/6) fired:
+      **highbuf_caller=7, highbuf_arg0=0x10000c0** (= __stack_pointer_init + 0xC0, in DATA). So func 7 passes
+      func 17 a DATA-region result buffer; func 17 faithfully stores the hi word to [0x10000c0+8]=0x10000c8 =
+      the funcptr global → clobber. func 17 is INNOCENT (the minimal /tmp/m3b.wat repro is clean — it stores
+      correctly for any buffer/operands; the absolute-value + small-vs-large self-check both pass). func 7 does
+      `global.get 0; i32.const 400; i32.sub; local.tee 3; global.set 0` then passes local3/+144/+208/+272 to
+      func 17 — i.e. func 7 read __stack_pointer ALREADY > 16MB. ROOT (first-wins sp-overset watchpoint on
+      `global.set 0` value > 0x1000000, op_globals.zig trap_aux7): **sp_overset_func=11**. func 11 is the FIRST
+      to set __stack_pointer above its 0x1000000 init-max (sp only ever decrements). func 11 epilogue =
+      `local.get 2; i32.const 480; i32.add; global.set 0` (restore sp = local2+480 = sp_entry); its prologue
+      `sp-480`. So func 11's RESTORE over-sets sp > 16MB — either local2 (saved sp) is corrupted across func
+      11's internal calls (`call 14` etc. — a homed-local spill bug) OR the `local2 + 480` i32.add is
+      miscompiled (large-base address add, D-289 lineage). CHAIN: func 11 over-restores sp → propagates → func
+      7 reads corrupt sp, computes data-region buffers → func 17 clobbers the funcptr global → cind oob_table.
+      NEXT: capture func 11's epilogue — local2 value (global.get/local.get 2) vs the restored sp value
+      (trap_aux8/9) → distinguish local2-corruption-across-calls vs add-miscompile; then minimal repro of func
+      11's frame-restore pattern (`global.get;sub;set; <calls>; local.get;add;set`).
+      Permanent diag infra (trap_aux..trap_aux7 + entry print: clobber_func_idx/highbuf_caller/highbuf_arg0/
+      sp_overset_func) gated `-Dtrace-stackprobe`. Repro: build `-Dtrace-stackprobe=true` +
+      `zwasm run --engine jit bench/runners/wasm/shootout/ed25519.wasm` (grep [d-291]).
+      DISCHARGE: the func-11 __stack_pointer-restore miscompile fixed + a minimal fixture; ed25519 jit matches wasmtime.
     first_raised: "2026-06-05"
     last_reviewed: "2026-06-06"
     refs: |-

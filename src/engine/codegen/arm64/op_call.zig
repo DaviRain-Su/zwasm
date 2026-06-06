@@ -179,9 +179,15 @@ pub fn emitCall(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     // arg0 (result-buffer ptr, X1) == 16777416 → record THIS func_idx → trap_aux5.
     if (comptime build_options.trace_stackprobe) {
         if (ins.payload == 17) {
-            // UNCONDITIONAL last-call17 capture (diagnostic): trap_aux5 = caller
-            // func_idx, trap_aux6 = X1 (the actual arg0 / result-buffer ptr). Last
-            // call17 before the trap wins → shows the real arg0 the JIT passes.
+            // GATED capture: any `call 17` whose wasm arg0 (X1, result-buffer ptr)
+            // is in the DATA region (>= 0x1000000 = 16MB) → record caller func_idx
+            // (trap_aux5) + the value (trap_aux6). A robust re-test of P1: if func 17
+            // is EVER passed a high (>16MB) buffer, a caller produced it (==-exact
+            // gate missed near-16777416 values like the offset-8 store base).
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovzImm16(16, 0));
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovkImm16(16, 256, 1)); // X16 = 0x1000000
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegX(1, 16));
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.lo, 5)); // skip the 4-word capture if X1 < 0x1000000
             try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovzImm16(17, @intCast(ctx.func.func_idx & 0xFFFF)));
             try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovkImm16(17, @intCast((ctx.func.func_idx >> 16) & 0xFFFF), 1));
             try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(17, abi.runtime_ptr_save_gpr, jit_abi.trap_aux5_off));
