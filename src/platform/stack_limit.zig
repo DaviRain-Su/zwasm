@@ -57,6 +57,21 @@ pub const STACK_GUARD_HEADROOM: usize = if (builtin.os.tag == .windows)
 else
     16 * 1024;
 
+/// Interpreter native-recursion headroom (D-288 / ADR-0167). The
+/// interp recurses on the host stack per wasm call (`mvp.invoke`,
+/// ~8 KiB/frame) and checks `@frameAddress()` against
+/// `computeStackLimit(INTERP_STACK_HEADROOM)` at each `invoke` to trap
+/// `CallStackExhausted` BEFORE a SEGV. Unlike the JIT probe — which
+/// rides Windows' guard-page/SEH machinery and so reserves the full
+/// 1 MiB SEH-unwind window — the interp check is an EXPLICIT compare
+/// (no guard page, no SEH), so it needs only enough margin to cover
+/// the native growth BETWEEN two consecutive `invoke` checks (a few
+/// frames: invoke + dispatch loop + the call handler). 128 KiB is
+/// platform-independent and comfortably exceeds that; on large stacks
+/// (Mac/Linux 8 MiB) the `frame_buf[256]` guard fires first anyway, so
+/// this binds only on the small (~1 MiB) Windows stack.
+pub const INTERP_STACK_HEADROOM: usize = 128 * 1024;
+
 /// Sentinel returned when the per-platform query fails OR the
 /// platform isn't supported. The JIT prologue treats `0` as
 /// "always pass" (SP > 0 always), gracefully disabling the probe.

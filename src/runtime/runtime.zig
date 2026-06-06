@@ -33,6 +33,7 @@ const trap_mod = @import("trap.zig");
 const frame_mod = @import("frame.zig");
 const memory_instance_mod = @import("instance/memory_instance.zig");
 const heap_mod = @import("../feature/gc/heap.zig");
+const stack_limit_mod = @import("../platform/stack_limit.zig");
 pub const MemoryInstance = memory_instance_mod.MemoryInstance;
 
 const Allocator = std.mem.Allocator;
@@ -354,6 +355,13 @@ pub const Runtime = struct {
     frame_buf: [max_frame_stack]Frame = undefined,
     frame_len: u32 = 0,
 
+    /// D-288 / ADR-0167: cached native-stack low limit for the interp's
+    /// deep-recursion guard. `null` until lazily computed on the first
+    /// `checkNativeStackLimit` (captures the RUNNING thread's stack);
+    /// `0` once computed means the platform query is unsupported →
+    /// the check is skipped and `frame_buf[256]` is the only guard.
+    native_stack_limit: ?usize = null,
+
     /// Optional per-instruction trace hook (Phase 6 / §9.6 / 6.A
     /// per ADR-0013). When non-null, `dispatch.step` invokes
     /// `trace_cb(trace_ctx, event)` after each handler call.
@@ -443,6 +451,23 @@ pub const Runtime = struct {
         if (self.frame_len == max_frame_stack) return Trap.CallStackExhausted;
         self.frame_buf[self.frame_len] = frame;
         self.frame_len += 1;
+    }
+
+    /// D-288 / ADR-0167: trap `CallStackExhausted` at the real per-OS
+    /// native stack limit BEFORE the host stack SEGVs. The interp
+    /// recurses natively per wasm call; on the small (~1 MiB) Windows
+    /// stack the real ceiling sits BELOW the `frame_buf[256]` guard, so
+    /// without this 128–256-deep recursion crashes instead of trapping.
+    /// `sp` is the caller's `@frameAddress()`. The limit is computed
+    /// lazily once on the running thread; a `0` (unsupported-platform)
+    /// limit disables the check, leaving `frame_buf[256]` as the guard.
+    pub fn checkNativeStackLimit(self: *Runtime, sp: usize) Trap!void {
+        const limit = self.native_stack_limit orelse blk: {
+            const l = stack_limit_mod.computeStackLimit(stack_limit_mod.INTERP_STACK_HEADROOM);
+            self.native_stack_limit = l;
+            break :blk l;
+        };
+        if (limit != 0 and sp <= limit) return Trap.CallStackExhausted;
     }
 
     pub fn popFrame(self: *Runtime) Frame {
@@ -636,6 +661,24 @@ test "Runtime: frame-stack overflow trips CallStackExhausted" {
         Trap.CallStackExhausted,
         r.pushFrame(.{ .sig = sig, .locals = &.{}, .operand_base = 0, .pc = 0 }),
     );
+}
+
+test "Runtime: native stack-limit check traps CallStackExhausted below the limit (D-288)" {
+    var r = Runtime.init(testing.allocator);
+    defer r.deinit();
+
+    // Force a known limit (bypass the lazy per-thread computation).
+    r.native_stack_limit = 0x4000;
+    // SP at/below the limit → trap (deep recursion would SEGV here).
+    try testing.expectError(Trap.CallStackExhausted, r.checkNativeStackLimit(0x100));
+    try testing.expectError(Trap.CallStackExhausted, r.checkNativeStackLimit(0x4000));
+    // SP comfortably above the limit → pass.
+    try r.checkNativeStackLimit(0x8000);
+
+    // A `0` (unsupported-platform) limit disables the check entirely —
+    // even sp==0 passes, leaving frame_buf[256] as the sole guard.
+    r.native_stack_limit = 0;
+    try r.checkNativeStackLimit(0);
 }
 
 test "Runtime: per-frame label stack spills past the inline cap and popFrame frees it (D-242)" {

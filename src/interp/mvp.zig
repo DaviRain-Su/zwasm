@@ -652,6 +652,11 @@ inline fn sigEq(a: zir.FuncType, b: zir.FuncType) bool {
 /// `c_api/instance.zig` can dispatch source-instance bodies on
 /// the source instance's runtime.
 pub fn invoke(rt: *Runtime, table: *const DispatchTable, callee: *const zir.ZirFunc) anyerror!void {
+    // D-288 / ADR-0167: each wasm call recurses on the host stack here
+    // (~8 KiB/frame). Trap CallStackExhausted at the real per-OS native
+    // limit BEFORE a SEGV (the binding guard on the small Windows stack,
+    // where ~128 < the frame_buf[256] cap).
+    try rt.checkNativeStackLimit(@frameAddress());
     const params_len = callee.sig.params.len;
     const total = params_len + callee.locals.len;
     const locals = try rt.alloc.alloc(runtime.Value, total);
