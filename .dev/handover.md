@@ -39,18 +39,18 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
   Needs a reliable native-x86_64 + lldb env to crack (Mac/Rosetta can't). Error-path-only (well-formed programs
   never unalign atomics; threads spec-suite not yet wired → gate green). Interp traps correctly; the central
   `emitMemOp` JIT align-trap is the single D-299 fix that covers ALL atomic ops once cracked.
-- **ALL atomics INTERP DONE**: rmw binops @96231c18 (42 ops, `rmwHandler` factory) + cmpxchg @78aa7dd2 (7 ops,
-  `cmpxchgHandler`, spec wraps exp+rep to N). validate `opAtomicRmw`/`opAtomicCmpxchg` + lower + liveness (2→1 /
-  3→1) + interp tests. The whole 0x10-0x4e set is interp-complete (loads+stores+rmw+cmpxchg). NO JIT for rmw/
-  cmpxchg yet (loads+stores HAVE JIT).
-- **NEXT = rmw + cmpxchg JIT emit** (the remaining JIT). NEW shape: load old + alu/compare + store + push old.
-  Survey recipe captured (Step 0 done): reuse emitMemOp ea+bounds prologue (arm64 ea in ip0/X16, base X28;
-  x86_64 ea in RDX, base RAX); **subtle: ea must survive load→alu→store, so DON'T stage the result/old through
-  ip0/X16** — use a distinct scratch (arm64 X9-X13; x86_64 R10/R11). New `emitAtomicRmw`/`emitAtomicCmpxchg` per
-  arch (op_memory.zig) + legacy-switch dispatch + edge fixtures. ALU encoders: arm64 encAddReg/encSubReg/
-  encAndReg/encOrrReg/encEorReg (3-op); x86_64 encAddRR/encSubRR/encAndRR/encOrRR/encXorRR (2-op, .b/.w/.d/.q).
-  cmpxchg = load+CMP+conditional-store. **x86_64 can't be RUN-verified locally (D-299 harness) → rely on ubuntu
-  3-host gate** (revert-on-red like the B2 cycle). Reuse `Trap.UnalignedAtomic`. D-299 JIT-align-trap deferred.
+- **ALL atomics INTERP DONE** (0x10-0x4e): loads+stores+rmw(@96231c18)+cmpxchg(@78aa7dd2). **Shared-memory parse
+  gate OPEN @b54059fc** (limits 0x02; shared needs max; MemoryEntry/MemoryInstance.shared threaded; edge
+  shared_mem=42). loads+stores have JIT; rmw/cmpxchg do NOT yet.
+- **NEXT = rmw + cmpxchg JIT emit** (the remaining JIT). **DECISION: use the CALLOUT approach** (not inline) —
+  add `atomic_rmw_fn`/`atomic_cmpxchg_fn` fn-ptr slots to JitRuntime (mirror `memory_grow_fn` @jit_abi.zig:323 +
+  its arm64 emit @emit.zig:1376 = `LDR X16,[X19,#off]; BLR X16`), with Zig helpers doing the load-modify-store /
+  compare-exchange (correct-by-construction, reuses interp logic, even gets the alignment trap RIGHT — sidesteps
+  D-299 for rmw). Post-BLR: check `trap_flag` → branch to trap stub for immediate abort (helper sets it on
+  oob/unaligned). Rationale: lower x86_64-miscompile risk than inline register-juggling (can't RUN-verify x86_64
+  locally per D-299) + matches established callout pattern; perf-inline-later is a measured debt (perf-measure-
+  first). THEN notify/wait (0x00-0x02 — now unblocked by the shared-mem gate; wait→trap-on-non-shared, notify→0).
+  3-host gate RUN-verifies x86_64 (revert-on-red like B2).
 - **Exit-condition**: a `test/edge_cases/p17/atomics/*` (or spec atomics manifest) green 3-host with the full
   load/store/rmw/cmpxchg set + fence; wait/notify minimal-single-thread; shared-mem parse+validate.
 - **Cycles-remaining**: ~many (large feature). No tag (ADR-0156).
