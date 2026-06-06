@@ -1098,6 +1098,19 @@ entries:
       investigation_discipline §2 discharge gate (≥5 SILENT) is moving AWAY, not toward — this needs a real fix,
       not flake-tracking. NEXT formal investigation (needs the windows host free): re-run the SAME win commit ≥2×
       to quantify the per-run failure rate, then probe the hypotheses below.
+      2026-06-06 OBSERVABILITY GAP (D-294 windows kick @ba111ee5): the gate reported `[run_remote_windows] OK`
+      (realworld_run_runner 55/55, all gating runners passed) YET the sha256 heisenbug STILL fired — a JIT
+      exec-runner ran a self-verifying fixture that printed `verify: FAIL (expected 3d61375c…, got d0e8b8f…)`
+      for "Hello, SHA-256!" while the SAME input PASSED in another runner (`4/4 passed`). It slipped past as
+      green because that exec-runner is EXIT-CODE-ONLY (the C fixture prints verify:FAIL but exits 0); the
+      INTERP realworld_runner stdout-matches its golden and is correct (interp computes sha256 right). ⇒ KEY:
+      "silent"/green tracker entries are UNRELIABLE for D-279 — a gate-green run can hide a JIT sha256 miscompute
+      nobody read the log for, so the §2 silent-streak discharge is unsound here until the JIT exec path
+      stdout-gates. CONCRETE OBSERVABILITY FIX (Mac-doable, high value, NOT on a heisenbug path): make the JIT
+      realworld/wasi exec-runner compare stdout against the SAME goldens the interp realworld_runner already
+      passes (or make the sha256 fixture exit non-zero on verify-fail) so a JIT sha256 miscompute reliably flips
+      RED. This converts D-279 from "hidden, hard to quantify" to "reliably caught" — prerequisite to rate-
+      quantification + the H1/H2/H3 probes. (This run recorded `fail` not `silent`: the bug demonstrably fired.)
       HYPOTHESES (investigation_discipline §1; each: predicted signature | distinguishing probe):
       H1 Win64 RSP-16/shadow-space misalignment — the JIT call/prologue emit maintains SysV alignment but not
          Win64's 16-byte RSP + 32-byte shadow space at helper call sites; a helper's aligned SSE (MOVAPS)

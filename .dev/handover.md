@@ -64,18 +64,20 @@ audit-gap list closed-or-deferred.
     →unreachable(5) mis-report. **D** (`4bdaec59`): trap-UX audit vs wasmtime/wasmer/v1 — clean, ADR-0159-aligned;
     one bug found → **D-294** (JIT call_indirect null-elem → mislabels indirect_call_mismatch; fix = code 13).
 
-## ← LEAD: fresh-context work — D-294 (bounded JIT fix) / D-291 / D-279
+## ← LEAD: D-279 observability fix (Mac-doable) → then D-291/D-279 shared-root probe
 
-ADR-0164 trap-diagnostics is COMPLETE. **D-294 INLINE PATHS FIXED** (`4fa16b29`): JIT call_indirect /
-return_call_indirect on a null table elem now reports uninitialized_elem (code 13), not the mislabel
-indirect_call_mismatch — clean `CMP/CMN typeidx, maxInt; JE/B.EQ` before the sig CMP (null slot's typeidx is the
-no-func sentinel), new uninit_elem channel both arches, table-0 + multi-table. JIT+interp verified, local
-test+test-spec green; 3-host pending (ubuntu test-all kicked). D-294 → `partial`: residuals are POLISH only —
-(1) subtyping resolve-trampoline path still collapses null→funcptr=0 (needs a trampoline sentinel, rare case),
-(2) call_indirect OOB-index message "out of bounds table access" vs spec "undefined element" (cosmetic).
-Remaining hot work, all **FRESH context**: **D-291** (ed25519 JIT large-frame address miscompile, paused —
-"fresh-context session"); **D-279** (Win64 heisenbug, non-deterministic — H3: possible shared root w/ D-291,
-partly Mac-testable). Also queued: D-288, D-284, D-290.
+ADR-0164 trap-diagnostics COMPLETE. **D-294 is 3-HOST GREEN** (`4fa16b29`: Mac local + ubuntu test-all OK +
+windows test-all `[run_remote_windows] OK`) — JIT call_indirect/return_call_indirect null elem now reports
+uninitialized_elem (code 13). D-294 → `partial`; residuals are POLISH (subtyping-trampoline null; OOB-index msg).
+**NEXT (Mac-doable, high value): D-279 OBSERVABILITY FIX.** The ba111ee5 windows gate was OK *yet the sha256
+heisenbug fired* — a JIT exec-runner ran a self-verifying fixture that printed `verify: FAIL` (sha256 miscompute)
+but exited 0, so the exit-code-only runner passed it; the interp realworld_runner stdout-matches + is correct.
+⇒ gate-green ≠ D-279-absent; the §2 silent-streak discharge is UNSOUND for D-279 until the JIT exec path
+stdout-gates. FIX = make the JIT realworld/wasi exec-runner compare stdout vs the SAME goldens interp already
+passes (or sha256 fixture exit non-zero) → D-279 sha256 miscompute reliably flips RED. See the D-279 debt row
+"OBSERVABILITY GAP" note. THEN the deep root-cause: **D-291** (ed25519 large-frame addr miscompile, Mac-repro
+via `-Dtrace-stackprobe` diag) — H3 says D-279 ⊇ D-291 (sha256's heavy 32-bit arith ↔ wide-i32 miscompile);
+one fix may close both. Queued: D-288, D-284, D-290.
 
 ## Queue (time-consuming first, per user directive)
 
@@ -89,20 +91,21 @@ partly Mac-testable). Also queued: D-288, D-284, D-290.
 - **Phase 16 (完成形) — open-ended; the loop CONTINUES, no release (ADR-0156).** v0.1.0-scope program is
   thoroughly complete + 3-host green (`deb97903`); ADR-0163 bench+docs program ALL DONE. Tag/publish/cutover are
   manual, user-only — there is no release gate.
-- Debt ledger: **0 `now`** (D-294 inline fix landed `4fa16b29` → `partial`, residuals are polish). **ADR-0164
-  trap-crash-exception-diagnostics COMPLETE** (D-293 + D-292 A/B-core/C/D all done). B-core 3-host green
-  @`400c7006`; C ubuntu-green @`0b68bdf7`. Next (all fresh-context): D-291 / D-279. Phase 16.
+- Debt ledger: **0 `now`** (D-294 → `partial`, 3-host green @`4fa16b29`/`ba111ee5`, residuals polish). **ADR-0164
+  trap-crash-exception-diagnostics COMPLETE** (D-293 + D-292 A/B-core/C/D all done). Next: D-279 observability
+  fix → D-291. Phase 16.
 
 ## Step 0.7 (next resume) — verify remote logs
 
-- **ubuntu**: kicked at **D-294 `4fa16b29`** (test-all; x86_64 — exercises the new code-13 null check via
-  runner_trap_test + emit_test_int byte-exact). Next resume: verify `/tmp/ubuntu.log` `OK`; RED → revert the
-  D-294 pair (D3). Prior cycle (`0b68bdf7`) was GREEN.
-- **windows**: ✅ **GREEN at the D-292 C kick** (`[run_remote_windows] OK`) — full test-all clean, B-core
-  `test-internal-fault` exit-70 holds, D-279 did NOT fire. **D-279 is NON-deterministic** (classic heisenbug,
-  not "escalating reproducible" — my earlier read was wrong); **silent streak = 2** (≥5 over ≥3 SHAs discharges
-  per §2). Formal D-279 = H3 (D-291 shared-root, partly Mac-testable) when fresh.
-- **Gate note**: `run_remote_windows.sh` `OK` line = real green; `Build Summary: N failed` (no `OK`) = RED.
+- **ubuntu**: ✅ **GREEN @`ba111ee5`** (`[run_remote_ubuntu] OK`) — spec_assert 25437/0, simd 13351/0, realworld
+  55/0; D-294 code-13 null check confirmed on x86_64 Linux. No action.
+- **windows**: ✅ gate **GREEN @`ba111ee5`** (`[run_remote_windows] OK`, realworld_run_runner 55/55) — D-294
+  3-host green. **BUT D-279 FIRED hidden**: a JIT exec-runner's sha256 self-verify printed `verify: FAIL`
+  (miscompute d0e8b8f…, same input PASSED elsewhere) yet exited 0 → exit-code-only runner missed it. Recorded
+  `track_heisenbug win64-testall fail` (streak reset 2→0; gate-green ≠ D-279-absent — see LEAD + D-279 row
+  "OBSERVABILITY GAP"). cadence `--record`ed @ba111ee5.
+- **Gate note**: `run_remote_windows.sh` `OK` line = real green; `Build Summary: N failed` (no `OK`) = RED. But
+  for D-279, grep the win log for `verify: FAIL` — the gate's OK can HIDE a JIT sha256 miscompute.
 
 ## Key refs
 
