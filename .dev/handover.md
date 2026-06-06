@@ -42,6 +42,14 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
 - **ALL atomics INTERP DONE** (0x10-0x4e): loads+stores+rmw(@96231c18)+cmpxchg(@78aa7dd2). **Shared-memory parse
   gate OPEN @b54059fc** (limits 0x02; shared needs max; MemoryEntry/MemoryInstance.shared threaded; edge
   shared_mem=42). loads+stores have JIT; rmw/cmpxchg do NOT yet.
+- **load/store JIT x86_64 now CORRECT @fbdefda9** (Win64 gate caught 2 x86_64-only bugs; cracked via Rosetta
+  hexdump-diff): (1) `emitMemOp` is_store/access_size/is_fp store-groups were missing the 7 atomic-store tags
+  (store-JIT partial-apply gap) → `i32.atomic.store` hit `access_size else=>unreachable` compile-panic; (2)
+  `usage.usesRuntimePtr` missed ALL atomic load/store → an atomics-only fn got the uses_runtime_ptr=false 4-byte
+  prologue (no MOV R15) → load/store read garbage vm_base, returned 0 (D-180-class; arm64 immune, X19 always set).
+  `i32_atomic_store.wasm` (atomic store+load, no plain memop) is the regression fixture. Add rmw/cmpxchg to
+  usesRuntimePtr when their JIT lands. `check_uses_runtime_ptr.sh` did NOT catch the memop gap (only trap-stub
+  drift) — detection-script gap noted, not blocking.
 - **NEXT = rmw + cmpxchg JIT emit** (the remaining JIT). **DECISION: use the CALLOUT approach** (not inline) —
   add `atomic_rmw_fn`/`atomic_cmpxchg_fn` fn-ptr slots to JitRuntime (mirror `memory_grow_fn` @jit_abi.zig:323 +
   its arm64 emit @emit.zig:1376 = `LDR X16,[X19,#off]; BLR X16`), with Zig helpers doing the load-modify-store /
@@ -65,35 +73,20 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
 - **D-279** Win64 SIMD heisenbug: H3 stack-overflow diagnostic deployed; re-kick windows as work lands to keep
   hunting the reproduction (user: never leave it idle). Mac-side investigation walled (needs the Win64 signal).
 
-## ← LEAD: 完成形 surface work COMPLETE; entering maintenance/depth (2026-06-06 session)
+## 完成形 v0.1 surface COMPLETE (history — 2026-06-06)
 
-**All three surface audits DONE** (user-steered direction): CLI→**D-295** (~85% + intentionally lean; declines
-per ADR-0159 ≠ gaps; `--env` shipped). C-API→**ZERO gaps** (D-296; `capi_surface_gap.sh` 293/293; Phase-13
-conformance verified+exceeded). Zig-API→**COMPLETE** (D-296): closed gap#1 (`Module.imports/exports`) + ALL
-implementable residuals this session — `Memory.grow` (`f163e882`, shared `Runtime.growMemory`, test-spec 9/0),
-`Memory.sliceAt` (`e5f34ff8`), `Engine.linker()` (`994a5aef`), `Linker.defineInstance` (`dba99bb8`, all 4 export
-kinds). Surface reviewed CLEAN (subagent, no HIGH/MED), `docs/zig_api_design.md` synced (`e120cc15`), example
-introspection demo (`40553679`).
+All three surface audits DONE: CLI→**D-295** (~85% + intentionally lean, declines per ADR-0159 ≠ gaps). C-API→
+**ZERO gaps** (D-296; 293/293). Zig-API→**COMPLETE** (D-296; `Module.imports/exports` + `Memory.grow/sliceAt` +
+`Engine.linker()` + `Linker.defineInstance`; `docs/zig_api_design.md` synced). Memory-safety ALL areas swept
+**SOUND** (D-297 cross-module aliasing; WASI fd lifecycle; 3 audit "CRITICAL" labels dissolved under verification
+→ discipline: always adversarially verify audit criticals; lesson `fd0a1914`). Forward track now = **v0.2
+features** (atomics bundle ACTIVE) + remaining_sweep between features (NEVER-IDLE above).
 
-**Memory-safety (完成形 dimension) — ALL major manual-memory areas now swept SOUND**: facade additions reviewed
-clean; **cross-module aliasing** (**D-297**) SOUND (zombie-parking; disproved a table-UAF; documented the
-Linker-outlives-Instances contract `477a9004`); **WASI fd lifecycle** swept this turn → SOUND (no double-close /
-UAF / realloc-bug; stdio correct; Host correctly BORROWS preopen handles; `path_open` unimplemented so no owned
-fds; the CLI preopen fds are an intentional documented process-lifetime choice run.zig:62, not a leak). The
-audit's "fd-leak REAL BUG" was the **3rd overstated finding this session** to dissolve under verification.
-**Discipline: always adversarially verify audit "CRITICAL" labels** (table-UAF, fd-leak, Linker-#6 all overstated).
-
-**D-279 (Win64 SIMD-JIT heisenbug — one open RED-class issue)**: leading hypo **H3 = Win64 1 MB stack overflow**
-(vs Mac/Linux 8 MB; deep SIMD path fits 8 MB, overflows 1 MB → Win64-only, intermittent, no-message, not-VEH —
-the `[d-279-veh]` diag never fired + no 0xC0000005). H3 diagnostic LANDED+validated @`b86ac7fc`
-(`EXCEPTION_STACK_OVERFLOW` VEH arm → `[d-279-veh] STACK-OVERFLOW` WriteFile, diagnostic-only, ADR-0105 D4
-stands) but UNFIRED (silent streak 3). A FUTURE crash self-identifies: `[d-279-veh] STACK-OVERFLOW` → H3
-CONFIRMED (extend the stack-limit guard to the overflowing path); exit-3 WITHOUT it → H3 refuted (re-open
-enumeration). Pending external signal — the loop keeps re-kicking windows per batch so a repro is always hunted.
-
-完成形 v0.1 surface (C/Zig/CLI) audited+documented+exampled; memory-safety all areas SOUND; debt swept;
-proposal_watch current (2026-04-30); audit-overstatement lesson `fd0a1914`. Forward track now = **v0.2 features**
-(atomics bundle ACTIVE) + remaining_sweep between features (NEVER-IDLE above).
+**D-279 (Win64 SIMD-JIT heisenbug — one open RED-class)**: leading hypo **H3 = Win64 1 MB stack overflow** (vs
+Mac/Linux 8 MB). H3 diagnostic LANDED+validated @`b86ac7fc` (`EXCEPTION_STACK_OVERFLOW` VEH → `[d-279-veh]
+STACK-OVERFLOW` WriteFile, diagnostic-only) but UNFIRED. Future crash self-IDs: `[d-279-veh] STACK-OVERFLOW` → H3
+CONFIRMED (extend stack-limit guard to that path); exit-3 WITHOUT it → H3 refuted (re-open). Loop re-kicks windows
+per batch so a repro is always hunted.
 
 **Blocked / parked**: 31 blocked-by (call_ref §10.R / D-177 WASI-config / D-178 Global-Memory / future proposals).
 **D-290** = 3 distillers direction-gated (wasm-tools↔wabt divergence; wabt stays). **D-264** dogfooding gated.
@@ -105,10 +98,12 @@ proposal_watch current (2026-04-30); audit-overstatement lesson `fd0a1914`. Forw
   build test` doesn't compile it). FORWARD-FIXED @`5202d0b0` (lesson `trapkind-variant-breaks-test-all-only-
   runner-switch` — should've run `zig build test-runtime-runner-smoke` pre-push; verified 5/0). Verify GREEN this
   resume @ new HEAD. Red → auto-revert (D3).
-- **windows**: @`487e4bbd` run finished **clean GREEN** (`OK.` present, simd 13351/0, no veh, no exit-3) →
-  D-279 silent **streak 3** (toward discharge-5); batch recorded @`92c8fb3b`. No kick pending — re-kicks when the
-  next batch fires (≥6 ABI-touch / ≥12 else since 92c8fb3b). Future crash self-IDs via `[d-279-veh]
-  STACK-OVERFLOW` (H3 CONFIRMED) vs SIMD exit-3 w/o it (segv, re-open). NOT auto-revert (D7). Don't poll-wait.
+- **windows**: batch kicked @`6944105f` came back **RED** — but it was the **p17 atomic-store COMPILE crash**
+  (exit-3, `op_memory.zig:144 else=>unreachable`), a real x86_64 bug NOT D-279 (per D7: investigated → real →
+  FIXED @`fbdefda9`). **D-279 itself stayed silent** in that same run (simd_assert_runner 13351/0, no veh, no
+  exit-3 from SIMD) → silent streak holds. **Re-kick windows this turn** to confirm the atomics fix is green on
+  Win64 (the gate's value: it caught a bug Mac+ubuntu's `zig build test`-only path could miss until edge-RUN).
+  Future SIMD crash self-IDs via `[d-279-veh] STACK-OVERFLOW` (H3) vs exit-3 w/o it (re-open). NOT auto-revert (D7).
 - **Gate note**: `OK` = green; `Build Summary: N failed` (no OK) = RED. EXPECTED non-failures: `zig-host-hello`
   exit-42, `--__selftest-crash` exit-70, sha256 `verify: FAIL` (fixture-wrong-constant FALSE lead).
 
