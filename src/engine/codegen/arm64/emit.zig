@@ -1370,7 +1370,11 @@ pub fn compile(
                     return Error.SlotOverflow;
                 }
                 const wd = try gpr.gprDefSpilled(alloc, result, 0);
-                try gpr.writeU32(allocator, &buf, inst.encLsrImmW(wd, 27, 16));
+                // Custom-page-sizes (ADR-0168 v0.2): pages = mem_limit >>
+                // page_size_log2 (default 16). Variable shift reads the rt
+                // field (W16 scratch) so a 1-byte page reports the byte count.
+                try gpr.writeU32(allocator, &buf, inst.encLdrImmW(16, abi.runtime_ptr_save_gpr, jit_abi.mem0_page_size_log2_off));
+                try gpr.writeU32(allocator, &buf, inst.encLsrvRegW(wd, 27, 16));
                 try gpr.gprStoreSpilled(allocator, &buf, alloc, spill_base_off, result, 0);
                 try pushed_vregs.append(allocator, result);
             },

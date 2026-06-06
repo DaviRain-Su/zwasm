@@ -169,7 +169,9 @@ pub const MemGrowCtx = struct {
 /// site (D-215 Part B) — success values (old page count) fit i32 here.
 pub fn jitMemoryGrow(rt: *entry.JitRuntime, delta_pages: u32) callconv(.c) i32 {
     const ctx: *MemGrowCtx = @ptrCast(@alignCast(rt.host_state orelse return -1));
-    const page: u64 = 65536;
+    // Custom-page-sizes (ADR-0168 v0.2): page = 1 << memory0's page_size_log2
+    // (default 64 KiB). ctx.max_pages is in these same page units.
+    const page: u64 = @as(u64, 1) << @intCast(rt.mem0_page_size_log2);
     const old_len = ctx.memory.len;
     const old_pages = old_len / page;
     const new_pages = old_pages + @as(u64, delta_pages);
@@ -249,6 +251,9 @@ pub fn setupRuntimeLinked(
     // ADR-0168 — memory0 shared flag, surfaced to the JIT rt so the
     // `memory.atomic.wait*` callout can trap on a non-shared memory.
     var mem_shared: bool = false;
+    // ADR-0168 v0.2 — memory0 page_size_log2 (custom-page-sizes), surfaced
+    // to the JIT rt for memory.size's variable shift + jitMemoryGrow.
+    var mem_page_size_log2: u32 = 16;
 
     var temp_arena = std.heap.ArenaAllocator.init(allocator);
     defer temp_arena.deinit();
@@ -400,13 +405,16 @@ pub fn setupRuntimeLinked(
             }
             memory = try allocator.alloc(u8, @intCast(total_bytes));
             @memset(memory, 0);
-            // D-215 — grow ceiling: declared max, else the spec page
-            // limit (2^16 for mem32 [4 GiB], 2^48 for mem64).
-            mem_max_pages = mem0.max orelse if (mem0.idx_type == .i64)
-                (@as(u64, 1) << 48)
-            else
-                65536;
+            // D-215 — grow ceiling: declared max, else the spec page limit.
+            // Custom-page-sizes (ADR-0168 v0.2): the page cap = byte_cap /
+            // page_size (i32 byte_cap 2^32 → 2^16 pages at 64 KiB, 2^32 at
+            // 1 byte; i64 byte_cap 2^64). u128 avoids the i64 overflow.
+            mem_max_pages = mem0.max orelse blk: {
+                const byte_cap: u128 = if (mem0.idx_type == .i64) (@as(u128, 1) << 64) else (@as(u128, 1) << 32);
+                break :blk @intCast(@min(byte_cap / page_size, @as(u128, std.math.maxInt(u64))));
+            };
             mem_shared = mem0.shared;
+            mem_page_size_log2 = mem0.page_size_log2;
         }
     }
 
@@ -984,6 +992,7 @@ pub fn setupRuntimeLinked(
             .vm_base = if (memory.len > 0) memory.ptr else @ptrFromInt(@as(usize, 0x1000)),
             .mem_limit = memory.len,
             .mem0_shared = if (mem_shared) 1 else 0,
+            .mem0_page_size_log2 = mem_page_size_log2,
             .host_state = mem_ctx,
             .memory_grow_fn = jitMemoryGrow,
             .funcptr_base = funcptrs_buf.ptr,

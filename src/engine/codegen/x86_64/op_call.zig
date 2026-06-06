@@ -1175,7 +1175,11 @@ pub fn emitMemorySizeCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!
     if (result_v >= ctx.alloc.slots.len) return Error.SlotOverflow;
     const dst_r = try gpr.gprDefSpilled(ctx.alloc, result_v, 0);
     try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromMemDisp32(dst_r, abi.runtime_ptr_save_gpr, jit_abi.mem_limit_off).slice());
-    try ctx.buf.appendSlice(ctx.allocator, inst.encShrRImm8(.q, dst_r, 16).slice());
+    // Custom-page-sizes (ADR-0168 v0.2): pages = mem_limit >> page_size_log2
+    // (default 16). Variable shift via CL (RCX is non-allocatable, so this
+    // scratch use is safe); a 1-byte page → shift 0 → byte count.
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovR32FromMemDisp32(.rcx, abi.runtime_ptr_save_gpr, @intCast(jit_abi.mem0_page_size_log2_off)).slice());
+    try ctx.buf.appendSlice(ctx.allocator, inst.encShiftRCl(.q, .shr, dst_r).slice());
     try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_v, 0);
     try ctx.pushed_vregs.append(ctx.allocator, result_v);
 }

@@ -497,6 +497,14 @@ pub const JitRuntime = extern struct {
     /// surfaced from the MemoryInstance so the wait callout can trap on a
     /// non-shared memory (the JIT rt has no MemoryInstance). TRAILING.
     mem0_shared: u32 = 0,
+    /// Wasm custom-page-sizes (ADR-0168 v0.2) — memory0's page_size_log2
+    /// (0 = 1 byte, 16 = 64 KiB default). The JIT memory.size emit reads
+    /// this as a variable shift (`mem_limit >> log2` = page count) and
+    /// jitMemoryGrow uses `1 << log2` as the page size (the JIT rt has no
+    /// MemoryInstance). TRAILING. memory.size is a rare op, so the field
+    /// load + variable shift is negligible vs threading a compile-time
+    /// constant through compileOne.
+    mem0_page_size_log2: u32 = 16,
 };
 
 /// Default `memory_grow_fn` — unconditionally refuses growth by
@@ -1212,6 +1220,9 @@ pub const atomic_notify_fn_off: u12 = @offsetOf(JitRuntime, "atomic_notify_fn");
 /// ADR-0168 — base of `atomic_wait_fns[2]`; entry k at
 /// `atomic_wait_fns_off + k*8` (k = width_log2 - 2). X-form pointers.
 pub const atomic_wait_fns_off: u12 = @offsetOf(JitRuntime, "atomic_wait_fns");
+/// ADR-0168 v0.2 — memory0's page_size_log2; W-form (u32). The JIT
+/// memory.size emit reads it as a variable shift amount.
+pub const mem0_page_size_log2_off: u12 = @offsetOf(JitRuntime, "mem0_page_size_log2");
 /// ADR-0105 D1 / D2 — stack-probe threshold field offset. X-form
 /// (8-byte usize); prologue emits `LDR Xn, [vmctx, #stack_limit_off]`.
 pub const stack_limit_off: u12 = @offsetOf(JitRuntime, "stack_limit");
@@ -1363,6 +1374,8 @@ comptime {
     if (atomic_notify_fn_off > 32760) @compileError("atomic_notify_fn_off exceeds X-form imm12 budget");
     if ((atomic_wait_fns_off & 7) != 0) @compileError("atomic_wait_fns_off not 8-aligned");
     if (atomic_wait_fns_off + 8 > 32760) @compileError("atomic_wait_fns_off exceeds X-form imm12 budget");
+    if ((mem0_page_size_log2_off & 3) != 0) @compileError("mem0_page_size_log2_off not 4-aligned");
+    if (mem0_page_size_log2_off > 16380) @compileError("mem0_page_size_log2_off exceeds W-form imm12 budget");
     // ADR-0105 D1: stack_limit is X-form (usize); imm12 scales by 8.
     if ((stack_limit_off & 7) != 0) @compileError("stack_limit_off not 8-aligned");
     if (stack_limit_off > 32760) @compileError("stack_limit_off exceeds X-form imm12 budget");

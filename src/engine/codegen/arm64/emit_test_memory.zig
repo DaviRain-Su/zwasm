@@ -232,7 +232,7 @@ test "compile: f32.load + f64.load dispatch to S/D-form LDR" {
     }
 }
 
-test "compile: memory.size emits LSR W_dest, W27, #16" {
+test "compile: memory.size emits LDR page_size_log2 + LSRV W_dest, W27 (custom-page-sizes, ADR-0168 v0.2)" {
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i32} };
     var f = ZirFunc.init(0, sig, &.{});
     defer f.deinit(testing.allocator);
@@ -246,8 +246,9 @@ test "compile: memory.size emits LSR W_dest, W27, #16" {
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32, &.{}, false);
     defer deinit(testing.allocator, out);
     const body0 = prologue.body_start_offset(false);
-    // LSR at body+0.
-    try testing.expectEqual(@as(u32, inst.encLsrImmW(9, 27, 16)), std.mem.readInt(u32, out.bytes[body0..][0..4], .little));
+    // LDR W16, [X19, #page_size_log2_off] at body+0; LSRV W_dest, W27, W16 at body+4.
+    try testing.expectEqual(@as(u32, inst.encLdrImmW(16, abi.runtime_ptr_save_gpr, jit_abi.mem0_page_size_log2_off)), std.mem.readInt(u32, out.bytes[body0..][0..4], .little));
+    try testing.expectEqual(@as(u32, inst.encLsrvRegW(9, 27, 16)), std.mem.readInt(u32, out.bytes[body0 + 4 ..][0..4], .little));
 }
 
 test "compile: memory.grow emits BLR-via-memory_grow_fn + X28/X27 reload (ADR-0059)" {
