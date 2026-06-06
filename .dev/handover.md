@@ -28,15 +28,11 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
   (`parse/sections.zig:903` `is_shared→BadValType`) — only needed for wait/notify + spec shared fixture, NOT
   load/store/rmw (atomics need a memory but not a shared one). EXACT natural-align + runtime align-trap are the
   subtle correctness points (validator + per-arch JIT). ZirOp/per-op-file count consistency watch.
-- **DONE**: `atomic.fence` (0xFE 0x03) END-TO-END @9971b708 — 0xFE prefix pipeline live in validator
-  `dispatchPrefixFE` + lower `emitPrefixFE`; interp `nopOp`; arm64+x86_64 legacy-switch 0→0 no-op; edge fixture
-  green. `i32.atomic.load` **Chunk A** @219e7d58 — validate `opAtomicLoad`/`readMemargCheckAlignExact` (==natural
-  align, not ≤; atomics need NO shared mem per wasm-tools `check_shared_memarg`) + lower + interp (alignment-trap
-  BEFORE bounds, spec exec 8<14a) + `Trap.UnalignedAtomic`/`TrapKind.unaligned_atomic`=14 + stackEffect 1→1.
-- **ALL atomic LOADS + STORES DONE** (0x10-0x1d): loads @e1a18357 (`i32/i64.atomic.load` + narrow `_u`); stores
-  @e6c22a57 (validate/lower/interp) + @85b8f150 (JIT). validate/lower/interp-with-align-trap/JIT-plain both arches;
-  interp unit + arm64 edge fixtures green; x86_64 cross-compiles. `atomicLoadU`/`atomicStoreEa` interp helpers,
-  `opAtomicLoad`/`opAtomicStore` validators, emitMemOp load+store arms + aliases.
+- **DONE**: `atomic.fence` (0x03) @9971b708 (no-op). **ALL atomic LOADS + STORES** (0x10-0x1d) — loads @e1a18357,
+  stores @e6c22a57(non-JIT)+@85b8f150(JIT). Pattern: validate `opAtomicLoad`/`opAtomicStore` (EXACT natural align,
+  `readMemargCheckAlignExact`; atomics need NO shared mem per wasm-tools `check_shared_memarg`) + lower emitMemarg
+  + interp (`atomicLoadU`/`atomicStoreEa`, alignment-trap BEFORE bounds spec exec 8<14a, `Trap.UnalignedAtomic`/
+  `TrapKind.unaligned_atomic`=14) + JIT-plain via emitMemOp arms+aliases + liveness. Both arches; edge+unit green.
 - **D-299 (JIT misaligned-trap) = DEFERRED, ENV-CONSTRAINED**: B2's x86_64 runtime align-trap didn't fire (native
   ubuntu, reliable). My Mac/Rosetta investigation harness is UNRELIABLE (got-i32:0 vs NotImplemented for the same
   fixture across runs; load-only-atomic works fine on arm64 — so the iso NotImplemented was a harness artifact).
@@ -59,10 +55,10 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
 
 ## Current state
 
-- **Phase 17 (v0.2 feature line) IN-PROGRESS** (ADR-0168, user-unblocked); 17.1-atomics bundle ACTIVE: fence +
-  ALL atomic loads+stores DONE @85b8f150 (0x10-0x1d; JIT plain, interp traps; JIT misaligned-trap = D-299
-  deferred/env-constrained). NEXT = rmw JIT emit (0x1e-0x47) + cmpxchg. Tree green. Phase 16 (完成形) DONE; v0.1 surface audited+documented+exampled, memory-safety swept
-  SOUND, dogfooding DONE (cw v1). No release/tag ever (ADR-0156).
+- **Phase 17 (v0.2 feature line) IN-PROGRESS** (ADR-0168); 17.1-atomics bundle ACTIVE: fence + loads + stores +
+  rmw-binops-interp DONE; NEXT = rmw JIT emit + cmpxchg. JIT misaligned-trap = D-299 (deferred/env-constrained).
+  Phase 16 (完成形) DONE; v0.1 surface audited+documented+exampled, memory-safety SOUND, dogfooding DONE (cw v1).
+  No release/tag ever (ADR-0156).
 - Debt ledger: **65 entries, 0 `now`** (D-264 dogfooding discharged). Remaining = `.dev/remaining_sweep.md`
   (Bucket A prune / B actionable-low / C deferred / D externally-blocked) — sweep between features, never idle.
 - **D-279** Win64 SIMD heisenbug: H3 stack-overflow diagnostic deployed; re-kick windows as work lands to keep
