@@ -3,24 +3,32 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
-  - id: "D-298"
+  - id: "D-299"
     layer: "code"
-    status: "note"
+    status: "now"
     description: |-
-      note (memory64 + atomics alignment-trap gap, 2026-06-07 — Phase 17.1 atomics bundle, ADR-0168).
-      The atomic runtime natural-alignment trap (UnalignedAtomic) is emitted in the i32-memory JIT path
-      (`op_memory.emitMemOp`, both arches) but NOT in the memory64 path (`emitMemOpI64`). A `(memory i64 ...)`
-      module using an atomic op (e.g. i32.atomic.load) on a misaligned address therefore LOADS silently in the
-      JIT instead of trapping, while the interp traps correctly → JIT/interp divergence, memory64-only. The
-      interp path is correct (alignment check is address-type-agnostic). LOW priority: memory64 + atomics is an
-      exotic combination; the spec atomic.wast + threads testsuite use i32 (and shared) memory. Discharge: add
-      the `is_atomic` TST/TEST + cond-branch → unaligned_fixups to `emitMemOpI64` on both arches (mirror the
-      emitMemOp B2 work), or fold the two mem emitters' alignment-trap prologue into a shared helper.
+      now (JIT atomic alignment-trap — x86_64 runtime bug, B2 REVERTED @fc37ca49; 2026-06-07, Phase 17.1, ADR-0168).
+      i32.atomic.load LOADS correctly on both arches (B1 @38d25379, KEPT). The runtime natural-alignment trap
+      (UnalignedAtomic on a misaligned effective address) was added in B2 (@fff9daae) and WORKED on arm64
+      (`encTstLowBitsW` TST + B.NE → EmitCindStub code 14) but FAILED on x86_64 — the misaligned fixture loaded
+      0 instead of trapping. REVERTED to restore the 3-host gate (ubuntu test-all RED @9277b785). The interp
+      already traps correctly (Chunk A @219e7d58, KEPT) → JIT/interp DIVERGE on misaligned atomics (both arches
+      now, JIT side absent). NARROWED DIAGNOSIS (Rosetta x86_64-macos reproduces locally — `zig build
+      test-edge-cases -Dtarget=x86_64-macos`): the emitted bytes are PROVABLY CORRECT at end-of-compile —
+      `MOV EDX,EBX(=ea); TEST DL,#3 (f6 c2 03); JNE rel32=50 → stub@77`; stub@77 = `41 c7 87` (MOV [R15+trap_flag_off],1,
+      identical to the working oob code-6 stub). Yet at runtime `trap_flag=0, result=0` (JNE not taken / stub not
+      run) on BOTH native ubuntu x86_64 AND Rosetta. So either the EXECUTED JIT page ≠ `buf` (linker/page-copy or
+      W^X stale-page, cf. lesson mac-aarch64-thread-rx-mode-survives-alloc — x86_64 variant?), OR the
+      trap-stub-from-mid-body pattern has an x86_64-specific issue invisible to byte inspection. NEXT: lldb on the
+      Rosetta binary — disassemble the executed page + single-step the JNE to compare with `buf`. Then re-land B2
+      (cherry-pick arm64 which worked + fix x86_64). Discharge: misaligned `i32.atomic.load` traps UnalignedAtomic
+      on all 3 hosts.
     first_raised: "2026-06-07"
     last_reviewed: "2026-06-07"
     refs: |-
-      src/engine/codegen/arm64/op_memory.zig (emitMemOp has is_atomic trap; emitMemOpI64 does not)
-      src/engine/codegen/x86_64/op_memory.zig (same)
+      git show fff9daae (reverted B2 — arm64 worked, x86_64 buggy); fc37ca49 (the revert)
+      src/engine/codegen/x86_64/op_memory.zig emitMemOp (where the TEST DL+JNE went)
+      src/engine/codegen/shared/entry.zig invokeAndCheck (trap_flag poll)
   - id: "D-294"
     layer: "code"
     status: "partial"

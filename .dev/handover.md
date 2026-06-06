@@ -33,16 +33,17 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
   green. `i32.atomic.load` **Chunk A** @219e7d58 — validate `opAtomicLoad`/`readMemargCheckAlignExact` (==natural
   align, not ≤; atomics need NO shared mem per wasm-tools `check_shared_memarg`) + lower + interp (alignment-trap
   BEFORE bounds, spec exec 8<14a) + `Trap.UnalignedAtomic`/`TrapKind.unaligned_atomic`=14 + stackEffect 1→1.
-- **`i32.atomic.load` FULLY DONE** (B1 @38d25379 load + B2 @fff9daae runtime align-trap, both arches). The 0xFE
-  infra is now ALL in place: prefix dispatch (validate+lower), memarg, exact-static-align validate, interp+JIT
-  load, runtime alignment-trap stub (arm64 `encTstLowBitsW`+EmitCindStub code 14 / x86_64 `encTestDlImm8`+JNE→
-  emitTrapExitStub 14), `Trap.UnalignedAtomic`. memory64-path align-trap deferred = **D-298** (exotic).
-- **NEXT = atomic load/store VARIANTS batch** (now established-pattern — reuse emitMemOp + is_atomic + the
-  align-trap): `i32.atomic.store` (0x17), `i64.atomic.load` (0x11), `i32/i64.atomic.load8_u/16_u/32_u`,
-  `i32/i64.atomic.store8/16/32`. Per op: add to validate dispatchPrefixFE (opAtomicLoad/Store + natural align
-  per width), lower emitPrefixFE memarg, interp handler (mirror i32AtomicLoad/Store + align-trap), JIT — add the
-  tag to `is_atomic` + access_size + load/store-enc switches (both arches) + legacy-switch dispatch + edge
-  fixtures. Bundle several/turn. PRE-PUSH `zig build test-runtime-runner-smoke`. THEN rmw set → cmpxchg → notify/wait.
+- **`i32.atomic.load` LOAD done** (B1 @38d25379, both arches: validate/lower/interp/JIT). Interp ALSO traps
+  misaligned (Chunk A `Trap.UnalignedAtomic`). **B2 (JIT runtime align-trap) REVERTED @fc37ca49** — arm64 worked
+  but x86_64 didn't trap (ubuntu RED). → **D-299** (now): bytes proven correct end-of-compile yet runtime
+  trap_flag=0 on native+Rosetta x86_64. **Rosetta reproduces locally** (`zig build test-edge-cases
+  -Dtarget=x86_64-macos`) — no ubuntu round-trip needed.
+- **NEXT = D-299 investigation FIRST**: lldb on the Rosetta x86_64 binary — disasm the EXECUTED JIT page +
+  single-step the JNE (TEST DL,#3 @ byte18 → JNE@21 → stub@77) to find why it's not taken despite correct `buf`
+  bytes (suspect: page≠buf / W^X stale-page, or trap-stub-from-mid-body x86_64 quirk). Then re-land B2 (cherry-
+  pick the arm64 half that worked + fix x86_64). THEN atomic load/store variants batch (store 0x17, i64.load
+  0x11, load8/16/32_u, store8/16/32 — established-pattern via emitMemOp+is_atomic once the trap is sound).
+  PRE-PUSH `zig build test-runtime-runner-smoke`.
 - **Exit-condition**: a `test/edge_cases/p17/atomics/*` (or spec atomics manifest) green 3-host with the full
   load/store/rmw/cmpxchg set + fence; wait/notify minimal-single-thread; shared-mem parse+validate.
 - **Cycles-remaining**: ~many (large feature). No tag (ADR-0156).
@@ -50,7 +51,7 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
 ## Current state
 
 - **Phase 17 (v0.2 feature line) IN-PROGRESS** (ADR-0168, user-unblocked); 17.1-atomics bundle ACTIVE: fence +
-  i32.atomic.load FULLY DONE @fff9daae (all layers + runtime align-trap); NEXT = atomic load/store variants batch. Phase 16 (完成形) DONE; v0.1 surface audited+documented+exampled, memory-safety swept
+  i32.atomic.load LOAD done @38d25379; JIT align-trap B2 REVERTED @fc37ca49 (x86_64 bug = D-299); NEXT = D-299 fix. Phase 16 (完成形) DONE; v0.1 surface audited+documented+exampled, memory-safety swept
   SOUND, dogfooding DONE (cw v1). No release/tag ever (ADR-0156).
 - Debt ledger: **65 entries, 0 `now`** (D-264 dogfooding discharged). Remaining = `.dev/remaining_sweep.md`
   (Bucket A prune / B actionable-low / C deferred / D externally-blocked) — sweep between features, never idle.
