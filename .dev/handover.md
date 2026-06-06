@@ -33,18 +33,22 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
   green. `i32.atomic.load` **Chunk A** @219e7d58 — validate `opAtomicLoad`/`readMemargCheckAlignExact` (==natural
   align, not ≤; atomics need NO shared mem per wasm-tools `check_shared_memarg`) + lower + interp (alignment-trap
   BEFORE bounds, spec exec 8<14a) + `Trap.UnalignedAtomic`/`TrapKind.unaligned_atomic`=14 + stackEffect 1→1.
-- **Loads DONE**: `i32.atomic.load` @38d25379 + `i64.atomic.load` @3f36a5e6 (validate/lower/interp-with-align-trap/
-  JIT-plain-load, both arches; interp unit + arm64 edge fixtures green, x86_64 cross-compiles).
+- **ALL atomic LOADS DONE** @e1a18357: `i32/i64.atomic.load` + narrow `i32/i64.atomic.load{8,16,32}_u`
+  (0x10-0x16; validate/lower/interp-with-align-trap/JIT-plain-load, both arches; interp unit + arm64 edge fixtures
+  green; x86_64 cross-compiles; all UNSIGNED).
 - **D-299 (JIT misaligned-trap) = DEFERRED, ENV-CONSTRAINED**: B2's x86_64 runtime align-trap didn't fire (native
   ubuntu, reliable). My Mac/Rosetta investigation harness is UNRELIABLE (got-i32:0 vs NotImplemented for the same
   fixture across runs; load-only-atomic works fine on arm64 — so the iso NotImplemented was a harness artifact).
   Needs a reliable native-x86_64 + lldb env to crack (Mac/Rosetta can't). Error-path-only (well-formed programs
   never unalign atomics; threads spec-suite not yet wired → gate green). Interp traps correctly; the central
   `emitMemOp` JIT align-trap is the single D-299 fix that covers ALL atomic ops once cracked.
-- **NEXT = keep landing atomic ops** (PLAIN aligned mem ops via emitMemOp; interp align-trap; JIT-trap = D-299):
-  narrow loads `i32/i64.atomic.load8_u/16_u/32_u` (0x12-0x16, natural align per width, zero-extend) → then stores
-  `i32/i64.atomic.store*` (0x17-0x1e, pop val+addr) → rmw → cmpxchg. Established-pattern, mirror i64.atomic.load;
-  bundle several/turn. `.expect` for >i32-max values = SIGNED i32 (runner @intCasts to i32 — D-299-turn gotcha).
+- **NEXT = atomic STORES** `i32/i64.atomic.store{,8,16,32}` (0x17-0x1e, pop val+addr, no result). Mirror
+  `i32.store` + the atomic alignment trap (interp; JIT-trap = D-299): validate `opAtomicStore` (EXACT align,
+  popExpect val then addr — opStore@validator already exists, add exact-align variant); lower emitMemarg; interp
+  store handlers w/ alignment trap (mirror atomicLoadU but store, no zero-extend); liveness 2→0; JIT emitMemOp
+  is_store path (add the tags to access_size + STR/MOV-store arms + dispatch both arches). THEN rmw → cmpxchg →
+  notify/wait. `.expect` >i32-max = SIGNED i32 (runner @intCasts). PRE-PUSH `zig build test-runtime-runner-smoke`
+  if any new trap variant (none expected — reuse UnalignedAtomic).
 - **Exit-condition**: a `test/edge_cases/p17/atomics/*` (or spec atomics manifest) green 3-host with the full
   load/store/rmw/cmpxchg set + fence; wait/notify minimal-single-thread; shared-mem parse+validate.
 - **Cycles-remaining**: ~many (large feature). No tag (ADR-0156).
@@ -52,8 +56,8 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
 ## Current state
 
 - **Phase 17 (v0.2 feature line) IN-PROGRESS** (ADR-0168, user-unblocked); 17.1-atomics bundle ACTIVE: fence +
-  i32+i64.atomic.load DONE @3f36a5e6 (JIT plain load; interp traps; JIT misaligned-trap = D-299 deferred/env-
-  constrained). NEXT = narrow loads → stores → rmw. Tree green. Phase 16 (完成形) DONE; v0.1 surface audited+documented+exampled, memory-safety swept
+  ALL atomic loads DONE @e1a18357 (i32/i64 + narrow _u; JIT plain load, interp traps; JIT misaligned-trap = D-299
+  deferred/env-constrained). NEXT = atomic stores (0x17-0x1e). Tree green. Phase 16 (完成形) DONE; v0.1 surface audited+documented+exampled, memory-safety swept
   SOUND, dogfooding DONE (cw v1). No release/tag ever (ADR-0156).
 - Debt ledger: **65 entries, 0 `now`** (D-264 dogfooding discharged). Remaining = `.dev/remaining_sweep.md`
   (Bucket A prune / B actionable-low / C deferred / D externally-blocked) — sweep between features, never idle.
