@@ -564,7 +564,16 @@ entries:
     layer: "code"
     status: "note"
     description: |-
-      now: `src/validate/validator.zig` (3204 LOC) sits at its raised cap=3300 (ADR-0099 Revision 2026-05-30). Its file-scope MODULE-LEVEL validation helpers — `validateTypeSection` / `validateGlobalInits` / `constExprResultType` / `funcTypeImportCompatible` / `gcValTypeSubtype` family (≳500 LOC) — do NOT touch the Validator instance's private type/control stacks, so they form a genuinely separable P1 sub-language (UNLIKE the GC opcode handlers, which DO consume the shared stacks → "intrinsically singular"). Discharge: when the file NEXT presses the cap, EXTRACT these file-scope helpers to a `validate/` sibling (e.g. `module_validate.zig`) instead of raising the cap again. They're file-scope (not Validator methods), so moving them + qualified-ref updates should avoid N2 pub-leak. | **validator.zig cap stopgap=3300; extraction is the real fix at next cap-press** (the deliberately-tight headroom is the forcing function).
+      note (immediate cap-pressure RELIEVED 2026-06-06, `09fd0175`): the GC valtype-subtype slice — 7 pure
+      file-scope fns (`valTypeIsSubtypeFree` / `gcHeapAbstractSubtype` / `castTargetType` /
+      `gcConcreteReaches{,Canonical}` / `gcValTypeSubtype` / `gcFieldSubtype`, ~181 LOC, no Validator-state
+      deps) — was EXTRACTED to `src/validate/gc_subtype.zig` (SIBLING-PUB; callers qualified `gc_subtype.<fn>`).
+      validator.zig 3267→3086 (now 214 LOC under the cap=3300; test+lint+zone green). REMAINING candidate (NOT
+      urgent now): the pub module-level helpers (`constExprResultType` / `validateGlobalInits` /
+      `funcTypeImportCompatible` / `validateTypeSection`) are externally-called → extract those (to e.g.
+      `module_validate.zig`, updating external import paths) only if the cap presses again. Original context:
+      validator.zig sits at its raised cap=3300 (ADR-0099 Revision 2026-05-30); the GC opcode handlers DO
+      consume the shared type/control stacks → intrinsically singular, NOT extractable.
       EXTRACTION-READY ANALYSIS (2026-06-06): dependency check confirmed the GC-subtype cluster (validator.zig
       lines 2895-3077: `valTypeIsSubtypeFree`, `gcHeapAbstractSubtype`, `castTargetType`, `gcConcreteReaches`,
       `gcConcreteReachesCanonical`, `gcValTypeSubtype`, `gcFieldSubtype` — ~180 LOC, all PRIVATE `fn`) references
