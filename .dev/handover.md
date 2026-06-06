@@ -3,17 +3,6 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## D-291 — PAUSED for fresh context (standing investigation; full detail in the D-291 debt row)
-
-ed25519 JIT `oob_table` miscompile, EXHAUSTIVELY localized this session (commits `6e49ecad`→`af2e1f18`,
-gated `-Dtrace-stackprobe` diagnostics `trap_aux..trap_aux4`): func 17 (a 128-bit multiply) clobbers
-`memory[16777416]` because it is called with `local0 ≈ 16777416` — a WRONG result-buffer ptr that one of its
-733 callers computes ~16MB TOO HIGH (the addr lands in the DATA region, where a stack temp never should).
-Frame/spill helpers + data-seg + load + cind all RULED OUT. NEXT (fresh session): runtime-capture the func-17
-caller's result-buffer / SP computation (return-address → which caller → its WAT) → confirm __stack_pointer-
-global vs wide-i32-arith miscompile. Non-gating (ed25519 excluded from suite/bench). **Paused at turn ~14 of a
-long session per the debt row's "focused fresh-context session" guidance** — the diag infra makes resume cheap.
-
 ## Active program — ADR-0164: trap / crash / exception diagnostics & UX (D-292)
 
 JIT/AOT printed a bare `Trap` (no kind) where v1 + v2-interp give per-kind messages — a v1-parity
