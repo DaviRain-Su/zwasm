@@ -14,30 +14,29 @@
   spec_assert 212/0, wast 1158/0, realworld 55/55, simd 13351/0). Closes the latent Win64 deep-recursion SEGV.
 - D-291 (`23874eda`), D-287 (`cf605260`, ADR-0165), D-284 (`fbc60815`). All 3-host green.
 
-## ← LEAD: D-288 closed → B-group; D-294 reassessed (residuals are D-293-class) → next: D-286
+## ← LEAD: actionable high-value Phase-16 debt PAID DOWN (2026-06-06 session); INFLECTION
 
-**D-294 reassessed** (debt row): the load-bearing inline null-elem mislabel is FIXED (`4fa16b29`); both
-residuals are D-293-class (R2 "undefined element" needs splitting the SHARED oob_table/code-2 channel —
-op_table routes call_indirect+table.get/set/copy/fill all to code 2 — AND is conformance-neutral cosmetic; R1
-needs the subtyping-trampoline null sentinel). NOT cheap standalone fixes → fold into D-293.
+**This session shipped** (all 3-host or Mac+ubuntu green): **D-288** (interp native-stack-limit check, Win64
+SEGV fix), **D-289** (arm64 FP/v128 large-frame, practically done), **D-229** (x86_64 SysV multi-value param
+thunk, closed), **D-204** (GC-subtype extraction, validator 3267→3086), + the **ADR-0076 D8** batched-windows
+cadence (user-directed). D-291/284/287 prior.
 
-**Triage of the B-group (2026-06-06)**: D-294 residuals → D-293-class (deferred); **D-286** → perf-measure-first
-DEFER (byte loops are spec-correct; row admits no fill/init-bound bench → no measured need). The genuine
-**correctness/completeness** gaps that warrant fresh-context codegen work, in priority order:
-- **D-289 PRACTICALLY DONE** — arm64 frame-offset imm12 cap. GPR (`340eaf5e`) + FP/v128 body-local arms
-  (`7dfc5992`, ubuntu OK @27611097). Reachability analysis: the remaining param-marshal/stack-args arms are
-  CONTRIVED-ONLY (params sit at the lowest offsets → only cross the cap via a >32KB outgoing-call-args area or
-  4000+ params — degenerate, not real programs). Tracked in debt; no fixture forced.
-- **D-229 CLOSED** (`e0d73428`, ubuntu e2e green @2ecf4379; debt row deleted `2afb9cb6`) — x86_64 SysV 1-param
-  multi-value wrapper thunk; `emitX8664SysV` extracted + host-indep byte test + e2e ungated.
-- **D-204 GC-subtype slice DONE** (`09fd0175`) — extracted the 7 pure GC valtype-subtype fns to
-  `validate/gc_subtype.zig` (SIBLING-PUB); validator.zig 3267→3086 (214 under cap; test+lint+zone green).
-  Cap-pressure relieved; the pub module-level helpers remain a future "if cap presses again" candidate.
-- **D-293** — kinded-fixup refactor (splits the shared bounds_fixups/code-2 channel; subsumes D-294 R2).
-- **D-283** (realworld WASI not JIT-run e2e — but only 46/55 compile, so enabling surfaces failures).
-  NEXT: D-293 (kinded-fixup refactor) → D-283. (Easy debt is done; remaining = substantial refactors.)
-  **CADENCE (ADR-0076 D8, 2026-06-06)**: windows BATCHED (≥6 ABI-risk / ≥12 else); chain MANY chunks/turn on
-  Mac+ubuntu, NEVER poll-wait on windows.
+**B-group is now drained of actionable HIGH-value work** (triage 2026-06-06):
+- **D-293** — already SUBSTANTIALLY COMPLETE (slices 1-4d done; all common + GC null/bounds/cast trap kinds
+  precise both arches; interp surface complete). Remainder = array.len/fill/copy/new trampolines + i31 check:
+  ambiguous failure semantics, JIT-only, **NO user-facing gap (interp precise)** → row says "leave unless a
+  GC-on-JIT program needs it". NOT a next item.
+- **D-294** residuals (D-293-class cosmetic, conformance-neutral) · **D-286** (perf-measure-first DEFER, no
+  bench) · **D-289** param/stack arms (degenerate-only) — all correctly deferred, no measured need.
+- **D-283** (realworld WASI JIT e2e) would SURFACE failures (46/55 compile) = creates debt, counterproductive.
+
+**Remaining work is**: (a) **blocked-by** (31 rows — external/future); (b) **v0.2.0 features** (threads /
+wide-arith / custom page sizes / stack-switching / component model — `proposal_watch.md`); (c) **完成形 surface
+audits** (C/Zig/CLI あるべき論 vs industry-standard — open-ended); (d) **dogfooding** (D-264 blocked on
+ClojureWasm v2 consumer). (a)/(d) are gated; (b)/(c) are big + benefit from a user steer. Next autonomous
+default if unsteered: a bounded CLI/C-API 完成形 surface-audit slice.
+**CADENCE (ADR-0076 D8)**: windows BATCHED (≥6 ABI-risk / ≥12 else); chain MANY chunks/turn, never poll-wait
+on windows.
 
 **Blocked / parked**: **D-290** remainder = 3 proposal-laden distillers (wasmtime_misc / spec_2_0_assert /
 spec_simd) direction-gated — wasm-tools vs wabt TOOL-OUTPUT divergence breaks curated gates (NOT drift; debt
