@@ -439,7 +439,13 @@ entries:
     layer: "code"
     status: "note"
     description: |-
-      x86_64 SysV param-bearing multi-value wrapper thunk UNIMPLEMENTED — backend asymmetry. `emitAarch64` (`f1858416`) emits the 1-param 2-GPR-result thunk (AAPCS: LDR X1,[X2] → body slot), but the SysV path in `wrapper_thunk.emit` (src/engine/codegen/shared/wrapper_thunk.zig:173) still `if (params.len != 0) return UnsupportedOp` → NO_THUNK → `JitInstance.invokeMulti` skips param-bearing multi-value on x86_64 (the `invokeMulti 1-param 2-result` e2e test is gated `arch != .aarch64` for this reason). Win64 (`emitX8664Win64`, n_params 1/3) already does params — the SysV recipe mirrors it: SUB RSP,8; MOV [RSP],RSI (save results); MOV RSI,[RDX] (param0 → body's SysV slot); CALL body; MOV RSI,[RSP]; ADD RSP,8; MOV [RSI],RAX; MOV [RSI+8],RDX. FIX when the multi-value param ROI justifies it (currently +2 on arm64 — LOW; the bigger struct.10 cohort is single-result, already eligible). Verify: an x86_64-gated SysV byte test + the e2e test ungated. Until then x86_64 JIT-corpus multi-value-with-params stays skip (safe, no wrong answers).
+      RESOLVED 2026-06-06 (`e0d73428`): x86_64 SysV 1-param 2-GPR-result wrapper thunk implemented (arm64/Win64
+      parity). Extracted `emitX8664SysV` (public, mirrors `emitX8664Win64`); the SysV path now marshals param0
+      = args[0] (RDX) → body's SysV slot (RSI) via `MOV RSI,[RDX]` before the CALL (recipe from this row). New
+      HOST-INDEPENDENT byte test (`emitX8664SysV 1-param ... 34 bytes`) — Mac-verified the encoding; the e2e
+      `invokeMulti 1-param 2-result` test UNGATED for x86_64 (was arch!=aarch64) → ubuntu verifies the RUN.
+      Mac test=0 + lint clean. (Win64 path untouched → Win64-neutral; pending ubuntu e2e confirm, then delete.)
+      ORIGINAL: x86_64 SysV param-bearing multi-value wrapper thunk UNIMPLEMENTED — backend asymmetry. `emitAarch64` (`f1858416`) emits the 1-param 2-GPR-result thunk (AAPCS: LDR X1,[X2] → body slot), but the SysV path in `wrapper_thunk.emit` (src/engine/codegen/shared/wrapper_thunk.zig:173) still `if (params.len != 0) return UnsupportedOp` → NO_THUNK → `JitInstance.invokeMulti` skips param-bearing multi-value on x86_64 (the `invokeMulti 1-param 2-result` e2e test is gated `arch != .aarch64` for this reason). Win64 (`emitX8664Win64`, n_params 1/3) already does params — the SysV recipe mirrors it: SUB RSP,8; MOV [RSP],RSI (save results); MOV RSI,[RDX] (param0 → body's SysV slot); CALL body; MOV RSI,[RSP]; ADD RSP,8; MOV [RSI],RAX; MOV [RSI+8],RDX. Verify: an x86_64-gated SysV byte test + the e2e test ungated.
     first_raised: "2026-06-02"
     last_reviewed: "2026-06-03"
     refs: |-

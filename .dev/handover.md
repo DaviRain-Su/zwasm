@@ -28,11 +28,14 @@ DEFER (byte loops are spec-correct; row admits no fill/init-bound bench → no m
   (`7dfc5992`, ubuntu OK @27611097). Reachability analysis: the remaining param-marshal/stack-args arms are
   CONTRIVED-ONLY (params sit at the lowest offsets → only cross the cap via a >32KB outgoing-call-args area or
   4000+ params — degenerate, not real programs). Tracked in debt; no fixture forced.
-- **D-229** — x86_64 SysV param-bearing multi-value wrapper thunk UNIMPLEMENTED (arm64 has it `f1858416`):
-  backend asymmetry; a real completeness/parity gap.
+- **D-229 DONE (pending ubuntu e2e)** — x86_64 SysV 1-param multi-value wrapper thunk (`e0d73428`): extracted
+  `emitX8664SysV`, marshals param0 (`MOV RSI,[RDX]`); host-indep byte test Mac-verified + e2e ungated for
+  x86_64 (ubuntu confirms RUN). Win64-neutral. Delete the debt row once ubuntu green.
 - **D-293** — kinded-fixup refactor (splits the shared bounds_fixups/code-2 channel; subsumes D-294 R2).
 - **D-283** (realworld WASI not JIT-run e2e — but only 46/55 compile, so enabling surfaces failures) ·
-  **D-204** (validator.zig at cap=3300 split review). NEXT: D-229 (x86_64 multi-value param thunk parity).
+  **D-204** (validator.zig at cap=3300 split review). NEXT: D-293 (kinded-fixup refactor) or D-283/D-204.
+  **CADENCE (ADR-0076 D8, 2026-06-06)**: windows BATCHED (≥6 ABI-risk / ≥12 else); chain MANY chunks/turn on
+  Mac+ubuntu, NEVER poll-wait on windows.
 
 **Blocked / parked**: **D-290** remainder = 3 proposal-laden distillers (wasmtime_misc / spec_2_0_assert /
 spec_simd) direction-gated — wasm-tools vs wabt TOOL-OUTPUT divergence breaks curated gates (NOT drift; debt
