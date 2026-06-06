@@ -141,6 +141,19 @@ const impl = if (builtin.os.tag == .windows) struct {
 
     var veh_handle: ?win.PVOID = null;
 
+    /// D-279 permanent diagnostic. Emitted only when recovery is ARMED but
+    /// the VEH cannot recover (unfiltered code, or RIP outside the JIT
+    /// window) — i.e. the exact path that produces the silent Win64 exit-3
+    /// crash. The process is about to die via the default handler, so a
+    /// best-effort `std.debug.print` is safe here (no recovery to corrupt);
+    /// it converts the no-repro heisenbug into a self-identifying log line.
+    fn diagUnrecovered(comptime reason: []const u8, code: u32, rip: usize) void {
+        std.debug.print(
+            "[d-279-veh] UNRECOVERED ({s}): code=0x{x} rip=0x{x} jit=[0x{x},0x{x}) — default handler will crash (exit 3)\n",
+            .{ reason, code, rip, recovery.info.jit_code_start, recovery.info.jit_code_end },
+        );
+    }
+
     fn vehHandler(exception_info: *win.EXCEPTION_POINTERS) callconv(.winapi) c_long {
         if (!@atomicLoad(bool, &recovery.active, .acquire)) {
             return win.EXCEPTION_CONTINUE_SEARCH;
@@ -152,7 +165,15 @@ const impl = if (builtin.os.tag == .windows) struct {
             EXCEPTION_INT_DIVIDE_BY_ZERO,
             EXCEPTION_INT_OVERFLOW,
             => {},
-            else => return win.EXCEPTION_CONTINUE_SEARCH,
+            // D-279 diagnostic: recovery is ARMED (we are inside a guarded
+            // JIT execution) yet the exception code is one the recovery
+            // filter does not handle → the default handler will crash the
+            // process (Win64 exit 3). Emit the code+RIP first so the next
+            // heisenbug occurrence is self-identifying instead of silent.
+            else => {
+                diagUnrecovered("unfiltered-code", code, exception_info.ContextRecord.Rip);
+                return win.EXCEPTION_CONTINUE_SEARCH;
+            },
         }
         // ADR-0105 D4 (2026-05-23): EXCEPTION_STACK_OVERFLOW removed
         // from the filter. The JIT-prologue stack-probe (ADR-0105 D2)
@@ -162,6 +183,13 @@ const impl = if (builtin.os.tag == .windows) struct {
         // guard-page-restoration headache (`_resetstkoflw()` etc.).
         const rip = exception_info.ContextRecord.Rip;
         if (rip < recovery.info.jit_code_start or rip >= recovery.info.jit_code_end) {
+            // D-279 diagnostic: armed + a filtered exception code, but the
+            // faulting RIP is OUTSIDE the JIT code range — i.e. the fault is
+            // in non-JIT code (runtime/host/stack-walk) reached from JIT, the
+            // FP-walk/stack-walk lineage (D-180/D-245). The default handler
+            // crashes (exit 3); log RIP + the JIT window so the next crash
+            // pinpoints whether it is genuinely out-of-range vs a stale range.
+            diagUnrecovered("rip-outside-jit", code, rip);
             return win.EXCEPTION_CONTINUE_SEARCH;
         }
         // Redirect the trapping thread to the recovery label.
