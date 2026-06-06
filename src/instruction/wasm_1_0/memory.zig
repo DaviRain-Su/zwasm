@@ -108,6 +108,14 @@ pub fn register(table: *DispatchTable) void {
     table.interp[op(.@"i64.atomic.rmw8.xchg_u")] = rmwHandler(u8, true, .xchg);
     table.interp[op(.@"i64.atomic.rmw16.xchg_u")] = rmwHandler(u16, true, .xchg);
     table.interp[op(.@"i64.atomic.rmw32.xchg_u")] = rmwHandler(u32, true, .xchg);
+    // atomic cmpxchg (threads, ADR-0168) — compare-exchange.
+    table.interp[op(.@"i32.atomic.rmw.cmpxchg")] = cmpxchgHandler(u32, false);
+    table.interp[op(.@"i64.atomic.rmw.cmpxchg")] = cmpxchgHandler(u64, true);
+    table.interp[op(.@"i32.atomic.rmw8.cmpxchg_u")] = cmpxchgHandler(u8, false);
+    table.interp[op(.@"i32.atomic.rmw16.cmpxchg_u")] = cmpxchgHandler(u16, false);
+    table.interp[op(.@"i64.atomic.rmw8.cmpxchg_u")] = cmpxchgHandler(u8, true);
+    table.interp[op(.@"i64.atomic.rmw16.cmpxchg_u")] = cmpxchgHandler(u16, true);
+    table.interp[op(.@"i64.atomic.rmw32.cmpxchg_u")] = cmpxchgHandler(u32, true);
     table.interp[op(.@"i64.load")] = i64Load;
     table.interp[op(.@"f32.load")] = f32Load;
     table.interp[op(.@"f64.load")] = f64Load;
@@ -495,6 +503,33 @@ fn rmwHandler(comptime W: type, comptime res64: bool, comptime kind: RmwKind) di
     }.h;
 }
 
+/// Factory for `tNN.atomic.rmw*.cmpxchg_u` (threads, ADR-0168). Pops
+/// [addr, expected, replacement], loads `old` (width W), and per spec
+/// exec compares `old == wrap_N(expected)`; on match stores
+/// `wrap_N(replacement)`. Always pushes `old` zero-extended to the
+/// result type (regardless of match). Alignment trap BEFORE bounds.
+fn cmpxchgHandler(comptime W: type, comptime res64: bool) dispatch.InterpFn {
+    const width = @sizeOf(W);
+    return struct {
+        fn h(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
+            const rt = Runtime.fromOpaque(c);
+            const rep_raw = if (res64) rt.popOperand().u64 else @as(u64, rt.popOperand().u32);
+            const exp_raw = if (res64) rt.popOperand().u64 else @as(u64, rt.popOperand().u32);
+            const addr = rt.popOperand().u32;
+            const mem = memorySlice(rt, instr.extra);
+            const ea: u64 = @as(u64, addr) + @as(u64, instr.payload);
+            if (ea & (width - 1) != 0) return Trap.UnalignedAtomic;
+            if (ea + width > mem.len) return Trap.OutOfBoundsLoad;
+            const slot = mem[@intCast(ea)..][0..width];
+            const old = std.mem.readInt(W, slot, .little);
+            if (old == @as(W, @truncate(exp_raw))) {
+                std.mem.writeInt(W, slot, @as(W, @truncate(rep_raw)), .little);
+            }
+            if (res64) try rt.pushOperand(.{ .u64 = @as(u64, old) }) else try rt.pushOperand(.{ .u32 = @as(u32, old) });
+        }
+    }.h;
+}
+
 // --- memory.size / memory.grow ---
 
 /// True when the memory at `memidx` is declared with `(memory i64 …)`
@@ -729,6 +764,41 @@ test "atomic rmw binops: add/xchg/and + narrow + unaligned trap" {
     try rt.pushOperand(.{ .u32 = 2 });
     try rt.pushOperand(.{ .u32 = 1 });
     try testing.expectError(Trap.UnalignedAtomic, driveOne(&rt, &t, .@"i32.atomic.rmw.add", 0, 0));
+}
+
+test "atomic cmpxchg: match stores, mismatch leaves; pushes old" {
+    var t = DispatchTable.init();
+    register(&t);
+    var rt = Runtime.init(testing.allocator);
+    defer rt.deinit();
+    rt.memory = try testing.allocator.alloc(u8, 64);
+    @memset(rt.memory, 0);
+    std.mem.writeInt(u32, rt.memory[8..][0..4], 100, .little);
+
+    // MATCH: cmpxchg @8 expected=100 replacement=999 → old 100, mem becomes 999.
+    try rt.pushOperand(.{ .u32 = 8 }); // addr
+    try rt.pushOperand(.{ .u32 = 100 }); // expected
+    try rt.pushOperand(.{ .u32 = 999 }); // replacement
+    try driveOne(&rt, &t, .@"i32.atomic.rmw.cmpxchg", 0, 0);
+    try testing.expectEqual(@as(u32, 100), rt.popOperand().u32);
+    try testing.expectEqual(@as(u32, 999), std.mem.readInt(u32, rt.memory[8..][0..4], .little));
+
+    // MISMATCH: expected=5 (≠999) → old 999, mem UNCHANGED (999).
+    try rt.pushOperand(.{ .u32 = 8 });
+    try rt.pushOperand(.{ .u32 = 5 });
+    try rt.pushOperand(.{ .u32 = 7 });
+    try driveOne(&rt, &t, .@"i32.atomic.rmw.cmpxchg", 0, 0);
+    try testing.expectEqual(@as(u32, 999), rt.popOperand().u32);
+    try testing.expectEqual(@as(u32, 999), std.mem.readInt(u32, rt.memory[8..][0..4], .little));
+
+    // narrow i64.cmpxchg8_u @3: mem[3]=0xAB, expected wraps to 0xAB → match, store 0xCD.
+    rt.memory[3] = 0xAB;
+    try rt.pushOperand(.{ .u32 = 3 });
+    try rt.pushOperand(.{ .u64 = 0xFFAB }); // wrap_8 = 0xAB → match
+    try rt.pushOperand(.{ .u64 = 0xCD });
+    try driveOne(&rt, &t, .@"i64.atomic.rmw8.cmpxchg_u", 0, 0);
+    try testing.expectEqual(@as(u64, 0xAB), rt.popOperand().u64);
+    try testing.expectEqual(@as(u8, 0xCD), rt.memory[3]);
 }
 
 test "i32.load8_s sign-extends" {

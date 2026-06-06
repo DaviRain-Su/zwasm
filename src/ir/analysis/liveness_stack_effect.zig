@@ -300,6 +300,15 @@ pub fn stackEffect(op: ZirOp) ?StackEffect {
         => .{ .pops = 2, .pushes = 1 },
         // 3 → 1 select
         .select, .select_typed => .{ .pops = 3, .pushes = 1 },
+        // atomic cmpxchg (threads, ADR-0168) — 3→1 (pop addr+expected+replacement, push old).
+        .@"i32.atomic.rmw.cmpxchg",
+        .@"i64.atomic.rmw.cmpxchg",
+        .@"i32.atomic.rmw8.cmpxchg_u",
+        .@"i32.atomic.rmw16.cmpxchg_u",
+        .@"i64.atomic.rmw8.cmpxchg_u",
+        .@"i64.atomic.rmw16.cmpxchg_u",
+        .@"i64.atomic.rmw32.cmpxchg_u",
+        => .{ .pops = 3, .pushes = 1 },
         // memory loads (1 → 1; pop addr, push value)
         .@"i32.load",
         .@"i32.atomic.load", // threads (ADR-0168) — same shape as i32.load

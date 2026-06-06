@@ -1636,6 +1636,13 @@ pub const Validator = struct {
             0x45 => try self.opAtomicRmw(.i64, 0), // i64.atomic.rmw8.xchg_u
             0x46 => try self.opAtomicRmw(.i64, 1), // i64.atomic.rmw16.xchg_u
             0x47 => try self.opAtomicRmw(.i64, 2), // i64.atomic.rmw32.xchg_u
+            0x48 => try self.opAtomicCmpxchg(.i32, 2),
+            0x49 => try self.opAtomicCmpxchg(.i64, 3),
+            0x4A => try self.opAtomicCmpxchg(.i32, 0),
+            0x4B => try self.opAtomicCmpxchg(.i32, 1),
+            0x4C => try self.opAtomicCmpxchg(.i64, 0),
+            0x4D => try self.opAtomicCmpxchg(.i64, 1),
+            0x4E => try self.opAtomicCmpxchg(.i64, 2),
             else => return Error.NotImplemented,
         }
     }
@@ -2918,6 +2925,17 @@ pub const Validator = struct {
         if (self.memory_count == 0) return Error.UnknownMemory;
         try self.readMemargCheckAlignExact(natural_align_log2);
         try self.popExpect(t); // value
+        try self.popExpect(self.memAddrType()); // address
+        try self.pushType(t); // old
+    }
+
+    /// Wasm threads §valid — `tNN.atomic.rmw*.cmpxchg`: EXACT align +
+    /// memory; pop replacement (t) + expected (t) + addr, push old (t).
+    fn opAtomicCmpxchg(self: *Validator, t: ValType, natural_align_log2: u32) Error!void {
+        if (self.memory_count == 0) return Error.UnknownMemory;
+        try self.readMemargCheckAlignExact(natural_align_log2);
+        try self.popExpect(t); // replacement
+        try self.popExpect(t); // expected
         try self.popExpect(self.memAddrType()); // address
         try self.pushType(t); // old
     }
