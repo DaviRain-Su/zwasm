@@ -238,12 +238,7 @@ pub const JitRuntime = extern struct {
     /// Always-on (no build-flag gate); cost is 8 bytes ARM64 / 7
     /// bytes x86_64 per function prologue.
     jit_executed_flag: u32 = 0,
-    /// ADR-0164 B / D-291 — gated diagnostic scratch #2 (former `_pad4`). When
-    /// `-Dtrace-stackprobe` is set, the arm64 `i32.load offset=16777416` (the
-    /// ed25519 funcptr load) stores its loaded VALUE here so entry.zig can print
-    /// it alongside the cind index — localising load-side vs preserve-side
-    /// corruption. Default builds emit no write (comptime-gated) → stays a zero slot.
-    trap_aux2: u32 = 0,
+    _pad4: u32 = 0,
     /// §9.9 / 9.9-m-1b (per ADR-0056, amending ADR-0017): base
     /// pointer to `Runtime.func_entities: []FuncEntity`. Each
     /// entry is a `FuncEntity` struct (size = `@sizeOf(FuncEntity)`,
@@ -259,9 +254,7 @@ pub const JitRuntime = extern struct {
     /// out-of-range funcidx at validate time); this field is for
     /// host-side diagnostic + future debugger hooks.
     func_entities_count: u32 = 0,
-    /// ADR-0164 B / D-291 — gated store-watchpoint scratch #3 (former `_pad5`):
-    /// the VALUE written by the store whose eff addr == 16777416 (clobbering store).
-    trap_aux3: u32 = 0,
+    _pad5: u32 = 0,
     /// §9.9 / 9.9-m-3a (per ADR-0056): parallel "data segment
     /// dropped" flag table. JIT `data.drop dataidx` emits
     /// `MOV [r15+data_dropped_ptr_off] + idx, 1` (1 byte per
@@ -269,20 +262,14 @@ pub const JitRuntime = extern struct {
     /// (m-3b) reads the same flags before computing seg_len.
     data_dropped_ptr: [*]u8 = undefined,
     data_dropped_count: u32 = 0,
-    /// ADR-0164 B / D-291 — gated store-watchpoint scratch #4 (former `_pad6`):
-    /// the func_idx of the function that clobbered 16777416.
-    trap_aux4: u32 = 0,
+    _pad6: u32 = 0,
     /// §9.9 / 9.9-m-3a (per ADR-0056): parallel "element segment
     /// dropped" flag table. JIT `elem.drop elemidx` emits a byte
     /// store to `[r15+elem_dropped_ptr_off] + idx`. table.init
     /// (m-2) reads.
     elem_dropped_ptr: [*]u8 = undefined,
     elem_dropped_count: u32 = 0,
-    /// ADR-0164 B / D-291 — gated caller-capture scratch #5 (former `_pad7`):
-    /// the func_idx of the CALLER that passed result-buffer ptr == 16777416 to
-    /// func 17 (__multi3). emitCall gates `call 17` on X1 (wasm arg0) == 16777416
-    /// and stores `ctx.func.func_idx` here → names the miscompiling caller.
-    trap_aux5: u32 = 0,
+    _pad7: u32 = 0,
     /// §9.9 / 9.9-m-3b (per ADR-0056): per-data-segment slice
     /// descriptor array. Each entry is a `SegmentSlice` (16 bytes:
     /// `ptr` + `len`). JIT `memory.init dataidx` indexes this with
@@ -290,9 +277,7 @@ pub const JitRuntime = extern struct {
     /// bytes, then memcpy n bytes into linear memory at dst.
     data_segments_ptr: [*]const SegmentSlice = undefined,
     data_segments_count: u32 = 0,
-    /// ADR-0164 B / D-291 — gated diagnostic scratch #6 (former `_pad8`): the
-    /// actual X1 (wasm arg0 / result-buffer ptr) value at the LAST `call 17`.
-    trap_aux6: u32 = 0,
+    _pad8: u32 = 0,
     /// §9.9 / 9.9-m-2a (per ADR-0058): per-table slice descriptor
     /// array. Each entry is a `TableSlice` (16 bytes: `refs`,
     /// `len`, `max`). JIT `table.get` / `table.set` / `table.size`
@@ -302,11 +287,7 @@ pub const JitRuntime = extern struct {
     /// destination slices.
     tables_ptr: [*]const TableSlice = undefined,
     tables_count: u32 = 0,
-    /// ADR-0164 B / D-291 — gated __stack_pointer-corruptor scratch (former `_pad9`):
-    /// the func_idx of a `global.set 0` (global.set __stack_pointer) whose value
-    /// EXCEEDS the initial max 0x1000000 (illegal — sp only decrements) → the func
-    /// that over-restores __stack_pointer. Last-wins.
-    trap_aux7: u32 = 0,
+    _pad9: u32 = 0,
     /// §9.9 / 9.9-m-2c-init (per ADR-0058 amendment): per-element-
     /// segment slice descriptor array. JIT `table.init elemidx
     /// tableidx` indexes this with stride `elem_slice_size` to read
@@ -315,9 +296,7 @@ pub const JitRuntime = extern struct {
     /// (m-3a) overrides seg.len to 0 for dropped segments.
     elem_segments_ptr: [*]const ElemSlice = undefined,
     elem_segments_count: u32 = 0,
-    /// ADR-0164 B / D-291 — gated func-11 sp_entry scratch (former `_pad10`): the
-    /// value func 11 reads via its prologue `global.get 0` (__stack_pointer at entry).
-    trap_aux8: u32 = 0,
+    _pad10: u32 = 0,
     /// §9.9 / 9.9-l-1b-d093-d8a (per ADR-0059): opaque pointer to
     /// host-managed state needed by runtime callout fn ptrs (e.g.
     /// allocator + back-reference to the canonical backing buffer
@@ -353,9 +332,7 @@ pub const JitRuntime = extern struct {
     /// emit only LDRs through this when `ins.extra > 0`).
     tables_jit_ci_ptr: [*]const TableJitCallInfo = undefined,
     tables_jit_ci_count: u32 = 0,
-    /// ADR-0164 B / D-291 — gated bad-restored-sp scratch (former `_pad11`): the
-    /// value of the FIRST `global.set 0` that exceeds 0x1000000 (the over-restore).
-    trap_aux9: u32 = 0,
+    _pad11: u32 = 0,
     /// §9.9 / 9.9-l-1b-d093-d48 (D-122 / D-125): `table.grow tableidx`
     /// callout. Args: `(rt: *JitRuntime, tableidx: u32, init: u64,
     /// delta: u32)` → previous entry count on success (widened to
@@ -389,12 +366,7 @@ pub const JitRuntime = extern struct {
     /// "probe never fired" (count=0) from "probe fired but unwind
     /// stalled" (count>0 with trap_flag possibly 1).
     trap_stub_entry_count: u32 = 0,
-    /// ADR-0164 B / D-291 — gated diagnostic scratch. When `-Dtrace-stackprobe`
-    /// is set, the arm64 call_indirect bounds-check trap stub (kind=2) stores the
-    /// offending table INDEX here before clobbering W17; `entry.zig` prints it.
-    /// Default builds emit no write (comptime-gated) → this stays the former
-    /// `_pad12` zero slot; offset 236 unchanged.
-    trap_aux: u32 = 0,
+    _pad12: u32 = 0,
     /// Phase 10.E IT-6 cycle 3c (ADR-0114 D5 + ADR-0119) —
     /// per-Instance JIT exception table view consumed by
     /// `shared/zwasm_throw.dispatchThrow` after the per-arch
@@ -967,23 +939,6 @@ pub const stack_limit_off: u12 = @offsetOf(JitRuntime, "stack_limit");
 /// x86_64 trap stub emits `INC DWORD PTR [R15 + this]` as its
 /// first instruction; arm64 unchanged.
 pub const trap_stub_entry_count_off: u12 = @offsetOf(JitRuntime, "trap_stub_entry_count");
-/// ADR-0164 B / D-291 — gated cind-index diagnostic scratch (see `trap_aux`).
-pub const trap_aux_off: u12 = @offsetOf(JitRuntime, "trap_aux");
-/// ADR-0164 B / D-291 — gated load-value diagnostic scratch (see `trap_aux2`).
-pub const trap_aux2_off: u12 = @offsetOf(JitRuntime, "trap_aux2");
-/// ADR-0164 B / D-291 — gated store-watchpoint scratch (see `trap_aux3`/`trap_aux4`).
-pub const trap_aux3_off: u12 = @offsetOf(JitRuntime, "trap_aux3");
-pub const trap_aux4_off: u12 = @offsetOf(JitRuntime, "trap_aux4");
-/// ADR-0164 B / D-291 — gated caller-capture scratch (see `trap_aux5`).
-pub const trap_aux5_off: u12 = @offsetOf(JitRuntime, "trap_aux5");
-/// ADR-0164 B / D-291 — gated arg0-value scratch (see `trap_aux6`).
-pub const trap_aux6_off: u12 = @offsetOf(JitRuntime, "trap_aux6");
-/// ADR-0164 B / D-291 — gated __stack_pointer-corruptor scratch (see `trap_aux7`).
-pub const trap_aux7_off: u12 = @offsetOf(JitRuntime, "trap_aux7");
-/// ADR-0164 B / D-291 — gated func-11 sp_entry scratch (see `trap_aux8`).
-pub const trap_aux8_off: u12 = @offsetOf(JitRuntime, "trap_aux8");
-/// ADR-0164 B / D-291 — gated bad-restored-sp scratch (see `trap_aux9`).
-pub const trap_aux9_off: u12 = @offsetOf(JitRuntime, "trap_aux9");
 /// Phase 10.E IT-6 cycle 3c — EH dispatcher integration. Trampoline
 /// reads ptr+count via `[X19/R15 + off]` to materialize
 /// `ExceptionTable` + `CodeMap` slices for `dispatchThrow`.

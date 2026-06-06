@@ -38,7 +38,6 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
-const build_options = @import("build_options");
 
 const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
@@ -172,27 +171,6 @@ pub fn emitCall(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const callee_sig: FuncType = ctx.func_sigs[ins.payload];
 
     try marshalCallArgs(ctx, callee_sig);
-
-    // ADR-0164 B / D-291 — gated caller-capture (RIGHT after marshal, X1=arg0 fresh
-    // before any spill/rt-restore could clobber it): `call 17` (__multi3) with wasm
-    // arg0 (result-buffer ptr, X1) == 16777416 → record THIS func_idx → trap_aux5.
-    if (comptime build_options.trace_stackprobe) {
-        if (ins.payload == 17) {
-            // GATED capture: any `call 17` whose wasm arg0 (X1, result-buffer ptr)
-            // is in the DATA region (>= 0x1000000 = 16MB) → record caller func_idx
-            // (trap_aux5) + the value (trap_aux6). A robust re-test of P1: if func 17
-            // is EVER passed a high (>16MB) buffer, a caller produced it (==-exact
-            // gate missed near-16777416 values like the offset-8 store base).
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovzImm16(16, 0));
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovkImm16(16, 256, 1)); // X16 = 0x1000000
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegX(1, 16));
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.lo, 5)); // skip the 4-word capture if X1 < 0x1000000
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovzImm16(17, @intCast(ctx.func.func_idx & 0xFFFF)));
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovkImm16(17, @intCast((ctx.func.func_idx >> 16) & 0xFFFF), 1));
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(17, abi.runtime_ptr_save_gpr, jit_abi.trap_aux5_off));
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(1, abi.runtime_ptr_save_gpr, jit_abi.trap_aux6_off));
-        }
-    }
 
     // ADR-0017 2026-05-18 amend / ADR-0069 §Phase 2 chunk (b)-e-2:
     // when callee returns MEMORY-class (struct > 16 B per AAPCS64

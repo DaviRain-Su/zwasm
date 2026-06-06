@@ -228,23 +228,6 @@ pub fn emitMemOp(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
             else => unreachable,
         };
         try gpr.writeU32(ctx.allocator, ctx.buf, word);
-        // ADR-0164 B / D-291 — gated store-WATCHPOINT: when this store's effective
-        // wasm address (ip0=X16) == 16777416 (0x10000c8, the clobbered ed25519
-        // funcptr global), record the stored value → trap_aux and this function's
-        // func_idx → trap_aux2. The LAST such store before the oob_table cind trap
-        // is the clobbering store; entry.zig prints both. X17(ip1) is dead after
-        // the store (scratch, re-derived per op) so it is free here. comptime-gated.
-        if (comptime build_options.trace_stackprobe) {
-            // X17 = 16777416 = (256<<16)|200.
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovzImm16(17, 200));
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovkImm16(17, 256, 1));
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegX(16, 17));
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.ne, 5)); // skip the 4-word capture
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(wv, abi.runtime_ptr_save_gpr, jit_abi.trap_aux3_off));
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovzImm16(17, @intCast(ctx.func.func_idx & 0xFFFF)));
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovkImm16(17, @intCast((ctx.func.func_idx >> 16) & 0xFFFF), 1));
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(17, abi.runtime_ptr_save_gpr, jit_abi.trap_aux4_off));
-        }
     } else {
         const result = ctx.next_vreg.*;
         ctx.next_vreg.* += 1;
@@ -276,16 +259,6 @@ pub fn emitMemOp(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
             else => unreachable,
         };
         try gpr.writeU32(ctx.allocator, ctx.buf, word);
-        // ADR-0164 B / D-291 — gated: capture the EFFECTIVE wasm address (ip0 = idx
-        // + offset, in X16) of the ed25519 funcptr load into trap_aux2. ==16777416
-        // ⇒ memory clobbered (store miscompile); != ⇒ the load index operand is
-        // corrupted in context. comptime-gated; the i64-idx path never matches
-        // `i32.load` so this is inert there. (Loaded VALUE already == cind index.)
-        if (comptime build_options.trace_stackprobe) {
-            if (offset_imm == 16777416 and ins.op == .@"i32.load") {
-                try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(ip0, abi.runtime_ptr_save_gpr, jit_abi.trap_aux2_off));
-            }
-        }
         if (is_fp_value) {
             try gpr.fpStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result, 0);
         } else {
@@ -426,23 +399,6 @@ fn emitMemOpI64(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
             else => unreachable,
         };
         try gpr.writeU32(ctx.allocator, ctx.buf, word);
-        // ADR-0164 B / D-291 — gated store-WATCHPOINT: when this store's effective
-        // wasm address (ip0=X16) == 16777416 (0x10000c8, the clobbered ed25519
-        // funcptr global), record the stored value → trap_aux and this function's
-        // func_idx → trap_aux2. The LAST such store before the oob_table cind trap
-        // is the clobbering store; entry.zig prints both. X17(ip1) is dead after
-        // the store (scratch, re-derived per op) so it is free here. comptime-gated.
-        if (comptime build_options.trace_stackprobe) {
-            // X17 = 16777416 = (256<<16)|200.
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovzImm16(17, 200));
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovkImm16(17, 256, 1));
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegX(16, 17));
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.ne, 5)); // skip the 4-word capture
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(wv, abi.runtime_ptr_save_gpr, jit_abi.trap_aux3_off));
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovzImm16(17, @intCast(ctx.func.func_idx & 0xFFFF)));
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovkImm16(17, @intCast((ctx.func.func_idx >> 16) & 0xFFFF), 1));
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(17, abi.runtime_ptr_save_gpr, jit_abi.trap_aux4_off));
-        }
     } else {
         const result = ctx.next_vreg.*;
         ctx.next_vreg.* += 1;
@@ -472,16 +428,6 @@ fn emitMemOpI64(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
             else => unreachable,
         };
         try gpr.writeU32(ctx.allocator, ctx.buf, word);
-        // ADR-0164 B / D-291 — gated: capture the EFFECTIVE wasm address (ip0 = idx
-        // + offset, in X16) of the ed25519 funcptr load into trap_aux2. ==16777416
-        // ⇒ memory clobbered (store miscompile); != ⇒ the load index operand is
-        // corrupted in context. comptime-gated; the i64-idx path never matches
-        // `i32.load` so this is inert there. (Loaded VALUE already == cind index.)
-        if (comptime build_options.trace_stackprobe) {
-            if (offset_imm == 16777416 and ins.op == .@"i32.load") {
-                try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(ip0, abi.runtime_ptr_save_gpr, jit_abi.trap_aux2_off));
-            }
-        }
         if (is_fp_value) {
             try gpr.fpStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result, 0);
         } else {

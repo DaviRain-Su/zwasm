@@ -231,10 +231,6 @@ inline fn invokeAndCheck(
     // (default false; ADR-0164 B / D-292) — a D-279 Win64 investigation primitive.
     if (comptime build_options.trace_stackprobe) {
         if (rt.trap_kind == 4) std.debug.print("[d-165] kind=4 cumulative_trap_stub_entry_count={d}\n", .{rt.trap_stub_entry_count});
-        // D-291 — call_indirect bounds trap: cind index (trap_aux) + the last
-        // funcptr-load value (trap_aux2). cind_index != last_funcptr_load ⇒
-        // corruption between load and cind consume; equal ⇒ the load reads wrong.
-        if (rt.trap_kind == 2) std.debug.print("[d-291] kind=2 oob_table cind_index={d} load_wasm_addr=0x{x} clobber_store_val={d} clobber_func_idx={d} highbuf_caller={d} highbuf_arg0=0x{x} sp_overset_func={d} f11_sp_entry=0x{x} bad_restored_sp=0x{x}\n", .{ rt.trap_aux, rt.trap_aux2, rt.trap_aux3, rt.trap_aux4, rt.trap_aux5, rt.trap_aux6, rt.trap_aux7, rt.trap_aux8, rt.trap_aux9 });
     }
     return Error.Trap;
 }
@@ -307,10 +303,6 @@ inline fn invokeAndCheckVoid(
         @call(.never_inline, jitTrampolineVoid, .{ f, rt, args });
     }
     if (rt.trap_flag != 0) {
-        if (comptime build_options.trace_stackprobe) {
-            // D-291 — cind index (trap_aux) + last funcptr-load value (trap_aux2).
-            if (rt.trap_kind == 2) std.debug.print("[d-291] kind=2 oob_table cind_index={d} load_wasm_addr=0x{x} clobber_store_val={d} clobber_func_idx={d} highbuf_caller={d} highbuf_arg0=0x{x} sp_overset_func={d} f11_sp_entry=0x{x} bad_restored_sp=0x{x}\n", .{ rt.trap_aux, rt.trap_aux2, rt.trap_aux3, rt.trap_aux4, rt.trap_aux5, rt.trap_aux6, rt.trap_aux7, rt.trap_aux8, rt.trap_aux9 });
-        }
         return Error.Trap;
     }
 }

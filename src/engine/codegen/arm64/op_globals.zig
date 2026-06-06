@@ -22,7 +22,6 @@
 //! Zone 2 (`src/engine/codegen/arm64/`).
 
 const std = @import("std");
-const build_options = @import("build_options");
 
 const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
@@ -30,7 +29,6 @@ const inst_neon = @import("inst_neon.zig");
 const ctx_mod = @import("ctx.zig");
 const gpr = @import("gpr.zig");
 const abi = @import("abi.zig");
-const jit_abi = @import("../shared/jit_abi.zig");
 
 const ZirInstr = zir.ZirInstr;
 const EmitCtx = ctx_mod.EmitCtx;
@@ -99,15 +97,6 @@ fn emitI32GlobalGet(ctx: *EmitCtx, idx: u32, byte_off: u32) Error!void {
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImmW(wd, abi.globals_base_save_gpr, @intCast(byte_off)));
     try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result, 0);
     try ctx.pushed_vregs.append(ctx.allocator, result);
-
-    // ADR-0164 B / D-291 — func-11 sp_entry capture: record what func 11 reads via
-    // `global.get 0` (__stack_pointer at entry) → trap_aux8 (last-wins; func 11 is
-    // non-recursive so this pairs with its over-set epilogue). wd holds the value.
-    if (comptime build_options.trace_stackprobe) {
-        if (idx == 0 and ctx.func.func_idx == 11) {
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(wd, abi.runtime_ptr_save_gpr, jit_abi.trap_aux8_off));
-        }
-    }
 }
 
 fn emitI32GlobalSet(ctx: *EmitCtx, idx: u32, byte_off: u32) Error!void {
@@ -121,26 +110,6 @@ fn emitI32GlobalSet(ctx: *EmitCtx, idx: u32, byte_off: u32) Error!void {
     const ws = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_v, 0);
 
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(ws, abi.globals_base_save_gpr, @intCast(byte_off)));
-
-    // ADR-0164 B / D-291 — __stack_pointer (global 0) corruptor watchpoint: if this
-    // `global.set 0` writes a value EXCEEDING the initial max 0x1000000 (illegal — sp
-    // only decrements), record THIS func_idx → trap_aux7. ws still holds the value.
-    if (comptime build_options.trace_stackprobe) {
-        if (idx == 0) {
-            // FIRST-WINS: name the ROOT func that first sets sp > 0x1000000 (not the
-            // last propagator). Skip if value <= 0x1000000 OR trap_aux7 already set.
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovzImm16(16, 0));
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovkImm16(16, 256, 1)); // X16 = 0x1000000
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegX(ws, 16));
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.ls, 7)); // skip 6 words if ws <= 0x1000000
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImmW(17, abi.runtime_ptr_save_gpr, jit_abi.trap_aux7_off));
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCbnzW(17, 5)); // already recorded → skip 4 words (first-wins)
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovzImm16(17, @intCast(ctx.func.func_idx & 0xFFFF)));
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovkImm16(17, @intCast((ctx.func.func_idx >> 16) & 0xFFFF), 1));
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(17, abi.runtime_ptr_save_gpr, jit_abi.trap_aux7_off));
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(ws, abi.runtime_ptr_save_gpr, jit_abi.trap_aux9_off)); // the bad restored sp value
-        }
-    }
 }
 
 /// i64 global.get — X-form `LDR Xd, [X23, #byte_off]`. The X-form
