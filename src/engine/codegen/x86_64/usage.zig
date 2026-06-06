@@ -8,6 +8,7 @@
 //! only; no upward dependencies.
 
 const zir = @import("../../../ir/zir.zig");
+const jit_abi = @import("../shared/jit_abi.zig");
 
 const ZirOp = zir.ZirOp;
 const ZirFunc = zir.ZirFunc;
@@ -55,6 +56,9 @@ const ZirFunc = zir.ZirFunc;
 /// looks fine until the runtime trap path executes).
 pub fn usesRuntimePtr(func: *const ZirFunc) bool {
     for (func.instrs.items) |ins| {
+        // Atomic rmw (ADR-0168): callout through `[R15+atomic_rmw_fn_off]`
+        // + passes rt in arg0 → needs R15. D-180 class.
+        if (jit_abi.isAtomicRmw(ins.op)) return true;
         switch (ins.op) {
             // Memory family (scalar + v128).
             .@"i32.load",

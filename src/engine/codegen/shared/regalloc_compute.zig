@@ -13,6 +13,7 @@ const zir = @import("../../../ir/zir.zig");
 const regalloc = @import("regalloc.zig");
 const shape_tags_mod = @import("regalloc_shape_tags.zig");
 const local_homing = @import("../../../ir/analysis/local_homing.zig");
+const jit_abi = @import("jit_abi.zig");
 
 const Allocator = std.mem.Allocator;
 const ZirFunc = zir.ZirFunc;
@@ -126,6 +127,17 @@ pub fn computeWith(
     var call_pc_len: u32 = 0;
     var call_pc_overflow = false;
     for (func.instrs.items, 0..) |ins, pc| {
+        // Atomic rmw (ADR-0168): callout through atomic_rmw_fn; both
+        // operands (addr+val) consumed into arg regs BEFORE the CALL
+        // (strict crossing, like array.fill), but vregs spanning it must
+        // force-spill (BLR/CALL clobbers caller-saved). Mirror memory.grow.
+        if (jit_abi.isAtomicRmw(ins.op)) {
+            if (call_pc_len < call_pc_buf.len) {
+                call_pc_buf[call_pc_len] = .{ .pc = @intCast(pc), .inclusive = false };
+                call_pc_len += 1;
+            } else call_pc_overflow = true;
+            continue;
+        }
         const inclusive: ?bool = switch (ins.op) {
             .call, .@"memory.grow" => false,
             // D-235: a subtyping module's call_indirect inserts a

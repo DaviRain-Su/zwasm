@@ -34,6 +34,7 @@ const inst = @import("inst.zig");
 const abi = @import("abi.zig");
 const gpr = @import("gpr.zig");
 const jit_abi = @import("../shared/jit_abi.zig");
+const op_call = @import("op_call.zig");
 const trace = @import("../../../diagnostic/trace.zig");
 const types = @import("types.zig");
 
@@ -959,4 +960,59 @@ pub fn emitMemoryInit(
         const word: [6]u8 = inst.encJccRel32(.e, disp).slice()[0..6].*;
         @memcpy(buf.items[skip_zero_at..][0..6], &word);
     }
+}
+
+/// Wasm threads (ADR-0168) `tNN.atomic.rmw*` — callout through
+/// `JitRuntime.atomic_rmw_fn`. C-ABI args: arg0 = rt (R15 alias),
+/// arg1 = ea (addr + offset), arg2 = operand (full 64-bit; the helper
+/// truncates to width), arg3 = opcode. Returns the OLD value in RAX;
+/// on unaligned/oob the helper sets trap_flag (epilogue raises). The
+/// marshal is conflict-free: the regalloc pool can't overlap arg_gprs
+/// (SysV §3.2.3 / Win64 invariant, compile-asserted in abi.zig), so the
+/// operand/addr vregs never collide with the arg regs. R11 (caller-
+/// saved, non-arg both ABIs) stages the offset. vm_base/mem_limit are
+/// re-read from [R15+off] on every memory op, so no post-call reload.
+pub fn emitAtomicRmw(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
+    const m = jit_abi.rmwMapOf(ins.op) orelse return Error.UnsupportedOp;
+    if (ctx.pushed_vregs.items.len < 2) return Error.AllocationMissing;
+    const operand_v = ctx.pushed_vregs.pop().?;
+    const addr_v = ctx.pushed_vregs.pop().?;
+    const ag = abi.current.arg_gprs;
+    const arg1 = ag[1]; // ea
+    const arg2 = ag[2]; // operand
+    const arg3 = ag[3]; // opcode
+    // operand → arg2 (full 64-bit; helper truncates). Stage 0.
+    const op_src = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, operand_v, 0);
+    if (op_src != arg2) try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.q, arg2, op_src).slice());
+    // ea → arg1 = addr (32-bit MOV zero-extends) + offset. Stage 1.
+    const addr_src = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, addr_v, 1);
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.d, arg1, addr_src).slice());
+    const offset_imm = ins.payload;
+    if (offset_imm != 0) {
+        // R11 free here (addr already copied to arg1); non-arg scratch.
+        try ctx.buf.appendSlice(ctx.allocator, inst.encMovImm64Q(.r11, @as(u64, offset_imm)).slice());
+        try ctx.buf.appendSlice(ctx.allocator, inst.encAddRR(.q, arg1, .r11).slice());
+    }
+    // arg3 = opcode (imm32).
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovImm32W(arg3, m.code).slice());
+    // arg0 = rt.
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.q, abi.current.entry_arg0_gpr, abi.runtime_ptr_save_gpr).slice());
+    // RAX = atomic_rmw_fn; CALL through it (Win64 shadow-space gated).
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.atomic_rmw_fn_off).slice());
+    try op_call.emitShadowAlloc(ctx.allocator, ctx.buf, ctx.outgoing_max_bytes);
+    try ctx.buf.appendSlice(ctx.allocator, inst.encCallReg(.rax).slice());
+    try op_call.emitShadowFree(ctx.allocator, ctx.buf, ctx.outgoing_max_bytes);
+    // Capture old value (RAX for i64, EAX zero-ext for i32) → result vreg.
+    const result_v = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (result_v >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    const dst_r = try gpr.gprDefSpilled(ctx.alloc, result_v, 0);
+    if (m.res64) {
+        if (dst_r != abi.return_gpr) try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.q, dst_r, abi.return_gpr).slice());
+    } else {
+        // i32: 32-bit MOV zero-extends bits 63:32 (canonical i32 form).
+        try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.d, dst_r, abi.return_gpr).slice());
+    }
+    try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_v, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, result_v);
 }

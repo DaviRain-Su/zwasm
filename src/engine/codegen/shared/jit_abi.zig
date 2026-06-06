@@ -22,6 +22,7 @@
 //! in Zone 3 (cli/, c_api/).
 
 const std = @import("std");
+const zir = @import("../../../ir/zir.zig");
 const Value = @import("../../../runtime/value.zig").Value;
 const FuncEntity = @import("../../../runtime/instance/func.zig").FuncEntity;
 const exception_table = @import("exception_table.zig");
@@ -463,6 +464,20 @@ pub const JitRuntime = extern struct {
     /// C-ABI WASI thunks in `wasi/jit_dispatch.zig`, never by the JIT body, so
     /// this trailing field leaves every codegen `@offsetOf` unchanged.
     wasi_host: ?*anyopaque = null,
+    /// Wasm threads/atomics (ADR-0168) — `tNN.atomic.rmw*` callout.
+    /// Args `(rt, ea, operand, opcode)`; returns the OLD value
+    /// zero-extended to u64. `opcode = (kind << 8) | width_bytes`
+    /// (kind: add=0 sub=1 and=2 or=3 xor=4 xchg=5; width ∈ {1,2,4,8}).
+    /// Operates directly on `rt.vm_base` / `rt.mem_limit` — no host
+    /// state — so the default IS the production impl (no setup-time
+    /// install needed, unlike memory.grow). On an unaligned ea or an
+    /// out-of-bounds access it sets `trap_flag` + `trap_kind` and
+    /// returns 0; the JIT epilogue raises the trap (the returned 0 is
+    /// discarded). The Zig-side alignment check fires reliably on every
+    /// arch — this is why rmw sidesteps the inline-emit D-299 gap.
+    /// TRAILING field (like `wasi_host`): keeps every codegen `@offsetOf`
+    /// unchanged; only consulted via `[R15+atomic_rmw_fn_off]`.
+    atomic_rmw_fn: *const fn (rt: *JitRuntime, ea: u64, operand: u64, opcode: u32) callconv(.c) u64 = defaultAtomicRmw,
 };
 
 /// Default `memory_grow_fn` — unconditionally refuses growth by
@@ -487,6 +502,114 @@ pub fn defaultTableGrowReject(rt: *JitRuntime, tableidx: u32, init: u64, delta: 
     _ = init;
     _ = delta;
     return -1;
+}
+
+/// Production `atomic_rmw_fn` (ADR-0168). Reads `old` at `rt.vm_base +
+/// ea`, applies the rmw op, writes back, returns `old` zero-extended.
+/// Alignment trap BEFORE bounds (spec exec step 8 precedes 14a). Width
+/// + kind decoded from `opcode`. Result-width (i32 vs i64) is the JIT's
+/// concern at the capture site (it reads W0 vs X0); the old value is
+/// ≤ `width` bytes and already zero-extended, so either capture width
+/// is correct.
+pub fn defaultAtomicRmw(rt: *JitRuntime, ea: u64, operand: u64, opcode: u32) callconv(.c) u64 {
+    const width: u64 = opcode & 0xff;
+    const kind: u32 = opcode >> 8;
+    if (ea & (width - 1) != 0) {
+        rt.trap_flag = 1;
+        rt.trap_kind = 14; // unaligned_atomic
+        return 0;
+    }
+    if (ea + width > rt.mem_limit) {
+        rt.trap_flag = 1;
+        rt.trap_kind = 6; // oob_memory
+        return 0;
+    }
+    const ptr = rt.vm_base + ea;
+    return switch (width) {
+        1 => rmwAt(u8, ptr, operand, kind),
+        2 => rmwAt(u16, ptr, operand, kind),
+        4 => rmwAt(u32, ptr, operand, kind),
+        8 => rmwAt(u64, ptr, operand, kind),
+        else => unreachable,
+    };
+}
+
+fn rmwAt(comptime W: type, ptr: [*]u8, operand: u64, kind: u32) u64 {
+    const slot = ptr[0..@sizeOf(W)];
+    const old = std.mem.readInt(W, slot, .little);
+    const val: W = @truncate(operand);
+    const new: W = switch (kind) {
+        0 => old +% val,
+        1 => old -% val,
+        2 => old & val,
+        3 => old | val,
+        4 => old ^ val,
+        5 => val,
+        else => unreachable,
+    };
+    std.mem.writeInt(W, slot, new, .little);
+    return @as(u64, old);
+}
+
+/// rmw opcode metadata: `code = (kind << 8) | width_bytes` (kind add=0
+/// sub=1 and=2 or=3 xor=4 xchg=5; width ∈ {1,2,4,8}). `res64` selects
+/// the i64 result-capture width at the emit site. The `code` encoding
+/// MUST match `defaultAtomicRmw`'s decode above (single source of truth
+/// for the rmw callout ABI). `null` = not an atomic rmw op.
+pub const RmwMap = struct { code: u32, res64: bool };
+
+pub fn rmwMapOf(op: zir.ZirOp) ?RmwMap {
+    return switch (op) {
+        .@"i32.atomic.rmw.add" => .{ .code = (0 << 8) | 4, .res64 = false },
+        .@"i32.atomic.rmw.sub" => .{ .code = (1 << 8) | 4, .res64 = false },
+        .@"i32.atomic.rmw.and" => .{ .code = (2 << 8) | 4, .res64 = false },
+        .@"i32.atomic.rmw.or" => .{ .code = (3 << 8) | 4, .res64 = false },
+        .@"i32.atomic.rmw.xor" => .{ .code = (4 << 8) | 4, .res64 = false },
+        .@"i32.atomic.rmw.xchg" => .{ .code = (5 << 8) | 4, .res64 = false },
+        .@"i64.atomic.rmw.add" => .{ .code = (0 << 8) | 8, .res64 = true },
+        .@"i64.atomic.rmw.sub" => .{ .code = (1 << 8) | 8, .res64 = true },
+        .@"i64.atomic.rmw.and" => .{ .code = (2 << 8) | 8, .res64 = true },
+        .@"i64.atomic.rmw.or" => .{ .code = (3 << 8) | 8, .res64 = true },
+        .@"i64.atomic.rmw.xor" => .{ .code = (4 << 8) | 8, .res64 = true },
+        .@"i64.atomic.rmw.xchg" => .{ .code = (5 << 8) | 8, .res64 = true },
+        .@"i32.atomic.rmw8.add_u" => .{ .code = (0 << 8) | 1, .res64 = false },
+        .@"i32.atomic.rmw8.sub_u" => .{ .code = (1 << 8) | 1, .res64 = false },
+        .@"i32.atomic.rmw8.and_u" => .{ .code = (2 << 8) | 1, .res64 = false },
+        .@"i32.atomic.rmw8.or_u" => .{ .code = (3 << 8) | 1, .res64 = false },
+        .@"i32.atomic.rmw8.xor_u" => .{ .code = (4 << 8) | 1, .res64 = false },
+        .@"i32.atomic.rmw8.xchg_u" => .{ .code = (5 << 8) | 1, .res64 = false },
+        .@"i32.atomic.rmw16.add_u" => .{ .code = (0 << 8) | 2, .res64 = false },
+        .@"i32.atomic.rmw16.sub_u" => .{ .code = (1 << 8) | 2, .res64 = false },
+        .@"i32.atomic.rmw16.and_u" => .{ .code = (2 << 8) | 2, .res64 = false },
+        .@"i32.atomic.rmw16.or_u" => .{ .code = (3 << 8) | 2, .res64 = false },
+        .@"i32.atomic.rmw16.xor_u" => .{ .code = (4 << 8) | 2, .res64 = false },
+        .@"i32.atomic.rmw16.xchg_u" => .{ .code = (5 << 8) | 2, .res64 = false },
+        .@"i64.atomic.rmw8.add_u" => .{ .code = (0 << 8) | 1, .res64 = true },
+        .@"i64.atomic.rmw8.sub_u" => .{ .code = (1 << 8) | 1, .res64 = true },
+        .@"i64.atomic.rmw8.and_u" => .{ .code = (2 << 8) | 1, .res64 = true },
+        .@"i64.atomic.rmw8.or_u" => .{ .code = (3 << 8) | 1, .res64 = true },
+        .@"i64.atomic.rmw8.xor_u" => .{ .code = (4 << 8) | 1, .res64 = true },
+        .@"i64.atomic.rmw8.xchg_u" => .{ .code = (5 << 8) | 1, .res64 = true },
+        .@"i64.atomic.rmw16.add_u" => .{ .code = (0 << 8) | 2, .res64 = true },
+        .@"i64.atomic.rmw16.sub_u" => .{ .code = (1 << 8) | 2, .res64 = true },
+        .@"i64.atomic.rmw16.and_u" => .{ .code = (2 << 8) | 2, .res64 = true },
+        .@"i64.atomic.rmw16.or_u" => .{ .code = (3 << 8) | 2, .res64 = true },
+        .@"i64.atomic.rmw16.xor_u" => .{ .code = (4 << 8) | 2, .res64 = true },
+        .@"i64.atomic.rmw16.xchg_u" => .{ .code = (5 << 8) | 2, .res64 = true },
+        .@"i64.atomic.rmw32.add_u" => .{ .code = (0 << 8) | 4, .res64 = true },
+        .@"i64.atomic.rmw32.sub_u" => .{ .code = (1 << 8) | 4, .res64 = true },
+        .@"i64.atomic.rmw32.and_u" => .{ .code = (2 << 8) | 4, .res64 = true },
+        .@"i64.atomic.rmw32.or_u" => .{ .code = (3 << 8) | 4, .res64 = true },
+        .@"i64.atomic.rmw32.xor_u" => .{ .code = (4 << 8) | 4, .res64 = true },
+        .@"i64.atomic.rmw32.xchg_u" => .{ .code = (5 << 8) | 4, .res64 = true },
+        else => null,
+    };
+}
+
+/// True for any `tNN.atomic.rmw*` op (the callout family). Used by the
+/// regalloc call-clobber + uses-runtime-ptr classifiers.
+pub fn isAtomicRmw(op: zir.ZirOp) bool {
+    return rmwMapOf(op) != null;
 }
 
 /// 10.G GC-on-JIT struct allocation trampoline (ADR-0128 §2). The
@@ -932,6 +1055,8 @@ pub const memory_grow_fn_off: u12 = @offsetOf(JitRuntime, "memory_grow_fn");
 pub const tables_jit_ci_ptr_off: u12 = @offsetOf(JitRuntime, "tables_jit_ci_ptr");
 pub const tables_jit_ci_count_off: u12 = @offsetOf(JitRuntime, "tables_jit_ci_count");
 pub const table_grow_fn_off: u12 = @offsetOf(JitRuntime, "table_grow_fn");
+/// ADR-0168 — `atomic_rmw_fn` slot; X-form (8-byte fn pointer).
+pub const atomic_rmw_fn_off: u12 = @offsetOf(JitRuntime, "atomic_rmw_fn");
 /// ADR-0105 D1 / D2 — stack-probe threshold field offset. X-form
 /// (8-byte usize); prologue emits `LDR Xn, [vmctx, #stack_limit_off]`.
 pub const stack_limit_off: u12 = @offsetOf(JitRuntime, "stack_limit");
@@ -1072,6 +1197,9 @@ comptime {
     // §9.9 / 9.9-l-1b-d093-d48 (D-122 / D-125): table_grow_fn is X-form pointer.
     if ((table_grow_fn_off & 7) != 0) @compileError("table_grow_fn_off not 8-aligned");
     if (table_grow_fn_off > 32760) @compileError("table_grow_fn_off exceeds X-form imm12 budget");
+    // ADR-0168: atomic_rmw_fn is X-form pointer.
+    if ((atomic_rmw_fn_off & 7) != 0) @compileError("atomic_rmw_fn_off not 8-aligned");
+    if (atomic_rmw_fn_off > 32760) @compileError("atomic_rmw_fn_off exceeds X-form imm12 budget");
     // ADR-0105 D1: stack_limit is X-form (usize); imm12 scales by 8.
     if ((stack_limit_off & 7) != 0) @compileError("stack_limit_off not 8-aligned");
     if (stack_limit_off > 32760) @compileError("stack_limit_off exceeds X-form imm12 budget");
@@ -1124,7 +1252,8 @@ test "JitRuntime: total size = 464 bytes (post-10.E tag_ids tail)" {
     // 10.E (ADR-0134 D3) appends tag_ids_ptr + count + pad
     // (+16 bytes = 8 B ptr + 2 × 4 B) → 448 + 16 = 464.
     // D-244 (JIT-WASI) appends `wasi_host` (+8 B opaque ptr) → 464 + 8 = 472.
-    try testing.expectEqual(@as(u32, 472), head_size);
+    // ADR-0168 appends `atomic_rmw_fn` (+8 B fn ptr, trailing) → 472 + 8 = 480.
+    try testing.expectEqual(@as(u32, 480), head_size);
 }
 
 test "jitGcAlloc: allocates struct{i32} via the *JitRuntime bridge (10.G A-2a)" {
