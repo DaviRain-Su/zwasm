@@ -20,7 +20,23 @@ entries:
       the call_indirect OOB-INDEX trap prints `out of bounds table access` (oob_table) but the spec canonical
       text is "undefined element" (wasmtime/wasmer prefix it) — table.get OOB = "out of bounds table access" but
       call_indirect OOB-index = "undefined element"; consider a distinct message (cheap, one constant). Low
-      urgency (both still trap correctly); fix on a fresh-context codegen cycle.
+      urgency (both still trap correctly).
+      ✅ INVESTIGATION DONE (2026-06-06, DE-RISKED): NOT the risky funcptr-reorder first feared. A null table
+      element has `typeidx_base[idx] = maxInt(u32) = 0xFFFFFFFF` (compile_init.zig:118,171 + setup.zig:593 pre-seed
+      the typeidxs buffer to the "no-func sentinel"), DISTINCT from any real canonical id. Confirmed empirically:
+      JIT call_indirect (type 0) through a null elem reports indirect_call_mismatch, NOT a crash (the sentinel
+      reliably mismatches; canonicalTypeidx(type0)=0 ≠ 0xFFFFFFFF). So it is PURELY a label bug, no crash. FIX =
+      a CLEAN INSERTION (no reorder, no register juggling): right after the typeidx load (already in EAX/W-reg for
+      the sig check), before the existing sig CMP, add `CMP typeidx, 0xFFFFFFFF ; JE → uninitialized_elem (code
+      13)`. Sites = the cind-SIG sites (where typeidx is loaded): x86_64 op_call.zig table-0 + multi-table
+      (~544/595); arm64 op_call.zig (309/412/461-ish); op_tail_call both arches (return_call_indirect). New
+      uninitialized_elem channel (mirror cind_sig) → EmitCindStub/emitTrapExitStub code 13; jitTrapCode 13 =>
+      uninitialized_elem (TrapKind exists; wast_runner arm exists). Test: call_indirect null → 13 (was 3). ~8
+      mechanical CMP-insertions — a clean fresh-context chunk, fully de-risked. ARM64 ENCODER NOTE: arm64 can't
+      `CMP Wn, #0xFFFFFFFF` (imm12 too small); use `CMN Wn, #1` (= add Wn+1, sets Z iff Wn==0xFFFFFFFF in 32-bit)
+      then B.EQ → may need a new `encCmnImmW` encoder if absent. x86_64 is trivial (`encCmpRImm32(EAX, 0xFFFFFFFF)`
+      already exists). Insert the maxInt-check BEFORE the existing expected-CMP at each cind-sig site (the typeidx
+      is already loaded for it).
     first_raised: "2026-06-06"
     last_reviewed: "2026-06-06"
     refs: |-

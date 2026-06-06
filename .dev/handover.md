@@ -67,11 +67,14 @@ audit-gap list closed-or-deferred.
 ## ← LEAD: fresh-context work — D-294 (bounded JIT fix) / D-291 / D-279
 
 ADR-0164 trap-diagnostics is COMPLETE. Remaining are all best on **FRESH context** (this session is extremely
-deep): **D-294** (JIT call_indirect null-elem → uninitialized_element, code 13 — bounded codegen, the grooved
-per-kind-channel pattern in op_call.zig both arches + a null check before the sig check); **D-291** (ed25519 JIT
-large-frame address miscompile, paused — "fresh-context session"); **D-279** (Win64 heisenbug, non-deterministic
-— H3: possible shared root w/ D-291, partly Mac-testable). Correctness-first ordering: D-294 (quick) → D-291 ⊇?
-D-279. Also queued: D-288 (interp recursion redesign), D-284, D-290.
+deep): **D-294 — NOW FULLY DE-RISKED (investigation done, exact recipe in the debt row)**: a null table elem has
+`typeidx_base[idx] = maxInt(u32)` (the "no-func sentinel", compile_init.zig:118/171), DISTINCT from any canonical
+id → the fix is a CLEAN INSERTION (no funcptr reorder), just `CMP typeidx, 0xFFFFFFFF; JE → uninitialized_elem
+(code 13)` before the existing sig-CMP at each cind-sig site (the typeidx is already loaded), new channel mirroring
+cind_sig, ~8 mechanical sites; arm64 needs `CMN Wn,#1` (imm32 too big for CMP). Confirmed it's a pure LABEL bug
+(no crash — sentinel reliably mismatches). **D-291** (ed25519 JIT large-frame address miscompile, paused —
+"fresh-context session"); **D-279** (Win64 heisenbug, non-deterministic — H3: possible shared root w/ D-291,
+partly Mac-testable). Ordering: D-294 (quick mechanical) → D-291 ⊇? D-279. Also queued: D-288, D-284, D-290.
 
 ## Queue (time-consuming first, per user directive)
 
