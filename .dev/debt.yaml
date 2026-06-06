@@ -233,13 +233,23 @@ entries:
       11's internal calls (`call 14` etc. — a homed-local spill bug) OR the `local2 + 480` i32.add is
       miscompiled (large-base address add, D-289 lineage). CHAIN: func 11 over-restores sp → propagates → func
       7 reads corrupt sp, computes data-region buffers → func 17 clobbers the funcptr global → cind oob_table.
-      NEXT: capture func 11's epilogue — local2 value (global.get/local.get 2) vs the restored sp value
-      (trap_aux8/9) → distinguish local2-corruption-across-calls vs add-miscompile; then minimal repro of func
-      11's frame-restore pattern (`global.get;sub;set; <calls>; local.get;add;set`).
-      Permanent diag infra (trap_aux..trap_aux7 + entry print: clobber_func_idx/highbuf_caller/highbuf_arg0/
-      sp_overset_func) gated `-Dtrace-stackprobe`. Repro: build `-Dtrace-stackprobe=true` +
-      `zwasm run --engine jit bench/runners/wasm/shootout/ed25519.wasm` (grep [d-291]).
-      DISCHARGE: the func-11 __stack_pointer-restore miscompile fixed + a minimal fixture; ed25519 jit matches wasmtime.
+      MECHANISM CONFIRMED 2026-06-06 (trap_aux8/9 captures): **func 11's saved-SP local (local2) is corrupted
+      to GARBAGE across its body.** func 11 reads a VALID sp_entry (f11_sp_entry=0xffd830, <16MB) but its
+      epilogue sets sp = **bad_restored_sp=0xffffffb0 = -80 (garbage)** = local2 + 480 ⇒ local2 = -560 (0xfffffdd0)
+      at the epilogue, when it should be sp_entry-480 ≈ 0xffd650. So local2 (the frame base / saved SP, held
+      across func 11's `call 14` + `call 17` invocations) is clobbered → epilogue over-restores __stack_pointer
+      to garbage. func 11 has 21 i64 locals + calls = high reg/spill pressure. This is the canonical "long-lived
+      local corrupted across a call" bug — likely the ADR-0155 homed-caller-saved spill/reload (local2's home
+      reg not preserved across the BL, or a spill-slot collision among the 21 locals). NEXT: (1) confirm via a
+      gated capture of local2 IMMEDIATELY before vs after func 11's `call 14`/`call 17` (which call corrupts it);
+      (2) inspect func 11's regalloc — is local2 register-homed in a caller-saved reg that spillHomedCallerSaved
+      fails to spill/reload, or spill-slot-aliased? (3) minimal repro: a func with a global-backed frame-base
+      local that survives a call, +many locals to force the same regalloc pressure. Likely fix in
+      `homedCallerSavedSpillReload` (op_call.zig) or the spill-slot allocator (regalloc_compute.zig).
+      Permanent diag infra (trap_aux..trap_aux9 + entry print: clobber_func_idx/highbuf_caller/highbuf_arg0/
+      sp_overset_func/f11_sp_entry/bad_restored_sp) gated `-Dtrace-stackprobe`. Repro: build `-Dtrace-stackprobe=true`
+      + `zwasm run --engine jit bench/runners/wasm/shootout/ed25519.wasm` (grep [d-291]).
+      DISCHARGE: func 11's saved-SP-local corruption fixed + a minimal fixture; ed25519 jit matches wasmtime.
     first_raised: "2026-06-05"
     last_reviewed: "2026-06-06"
     refs: |-

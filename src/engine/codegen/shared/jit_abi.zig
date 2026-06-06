@@ -315,7 +315,9 @@ pub const JitRuntime = extern struct {
     /// (m-3a) overrides seg.len to 0 for dropped segments.
     elem_segments_ptr: [*]const ElemSlice = undefined,
     elem_segments_count: u32 = 0,
-    _pad10: u32 = 0,
+    /// ADR-0164 B / D-291 — gated func-11 sp_entry scratch (former `_pad10`): the
+    /// value func 11 reads via its prologue `global.get 0` (__stack_pointer at entry).
+    trap_aux8: u32 = 0,
     /// §9.9 / 9.9-l-1b-d093-d8a (per ADR-0059): opaque pointer to
     /// host-managed state needed by runtime callout fn ptrs (e.g.
     /// allocator + back-reference to the canonical backing buffer
@@ -351,7 +353,9 @@ pub const JitRuntime = extern struct {
     /// emit only LDRs through this when `ins.extra > 0`).
     tables_jit_ci_ptr: [*]const TableJitCallInfo = undefined,
     tables_jit_ci_count: u32 = 0,
-    _pad11: u32 = 0,
+    /// ADR-0164 B / D-291 — gated bad-restored-sp scratch (former `_pad11`): the
+    /// value of the FIRST `global.set 0` that exceeds 0x1000000 (the over-restore).
+    trap_aux9: u32 = 0,
     /// §9.9 / 9.9-l-1b-d093-d48 (D-122 / D-125): `table.grow tableidx`
     /// callout. Args: `(rt: *JitRuntime, tableidx: u32, init: u64,
     /// delta: u32)` → previous entry count on success (widened to
@@ -976,6 +980,10 @@ pub const trap_aux5_off: u12 = @offsetOf(JitRuntime, "trap_aux5");
 pub const trap_aux6_off: u12 = @offsetOf(JitRuntime, "trap_aux6");
 /// ADR-0164 B / D-291 — gated __stack_pointer-corruptor scratch (see `trap_aux7`).
 pub const trap_aux7_off: u12 = @offsetOf(JitRuntime, "trap_aux7");
+/// ADR-0164 B / D-291 — gated func-11 sp_entry scratch (see `trap_aux8`).
+pub const trap_aux8_off: u12 = @offsetOf(JitRuntime, "trap_aux8");
+/// ADR-0164 B / D-291 — gated bad-restored-sp scratch (see `trap_aux9`).
+pub const trap_aux9_off: u12 = @offsetOf(JitRuntime, "trap_aux9");
 /// Phase 10.E IT-6 cycle 3c — EH dispatcher integration. Trampoline
 /// reads ptr+count via `[X19/R15 + off]` to materialize
 /// `ExceptionTable` + `CodeMap` slices for `dispatchThrow`.
