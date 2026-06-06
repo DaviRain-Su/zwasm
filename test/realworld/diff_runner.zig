@@ -183,7 +183,7 @@ pub fn main(init: std.process.Init) !void {
         const v2_result = if (needs_preopen)
             cli_run.runWasmCapturedOpts(gpa, io, bytes, &v2_argv, &v2_stdout, null, &.{
                 .{ .host_path = preopen_scratch, .guest_path = "." },
-            }, null)
+            }, &.{}, &.{}, null)
         else
             cli_run.runWasmCaptured(gpa, io, bytes, &v2_argv, &v2_stdout, null);
         const v2_exit: u8 = v2_result catch |err| {
@@ -328,7 +328,7 @@ fn aotCompare(
         &.{.{ .host_path = preopen_scratch, .guest_path = "." }}
     else
         &.{};
-    const aot_exit: u8 = cli_run.runCwasmWasi(gpa, io, cwasm, null, argv, preopens, &aot_stdout) catch |err| {
+    const aot_exit: u8 = cli_run.runCwasmWasi(gpa, io, cwasm, null, argv, preopens, &.{}, &.{}, &aot_stdout) catch |err| {
         try out.print("  SKIP-AOT-RUN  {s}: {s}\n", .{ name, @errorName(err) });
         return .skip;
     };

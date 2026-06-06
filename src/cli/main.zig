@@ -123,6 +123,12 @@ pub fn main(init: std.process.Init) !void {
             var engine_jit = false;
             var preopen_list: std.ArrayList(cli_run.PreopenDir) = .empty;
             defer preopen_list.deinit(gpa);
+            // D-295 P0 — `--env KEY=VAL`: WASI environ injected into the guest
+            // via the host's setEnvs (parallel keys/vals slices).
+            var env_keys: std.ArrayList([]const u8) = .empty;
+            defer env_keys.deinit(gpa);
+            var env_vals: std.ArrayList([]const u8) = .empty;
+            defer env_vals.deinit(gpa);
             var next_arg = arg_it.next();
             while (next_arg) |a| {
                 if (std.mem.eql(u8, a, "--invoke")) {
@@ -168,10 +174,26 @@ pub fn main(init: std.process.Init) !void {
                     const guest_path = if (colon) |c| spec[c + 1 ..] else spec;
                     try preopen_list.append(gpa, .{ .host_path = host_path, .guest_path = guest_path });
                     next_arg = arg_it.next();
+                } else if (std.mem.eql(u8, a, "--env")) {
+                    // `--env KEY=VAL` — inject a WASI environment variable. A
+                    // bare `--env KEY` (no '=') sets an empty value, matching
+                    // wasmtime's permissive parse.
+                    const spec = arg_it.next() orelse {
+                        try printlnErr(io, "usage: zwasm run --env KEY=VAL <path.wasm> [args...]");
+                        std.process.exit(2);
+                    };
+                    if (std.mem.findScalar(u8, spec, '=')) |eq| {
+                        try env_keys.append(gpa, spec[0..eq]);
+                        try env_vals.append(gpa, spec[eq + 1 ..]);
+                    } else {
+                        try env_keys.append(gpa, spec);
+                        try env_vals.append(gpa, spec[spec.len..]);
+                    }
+                    next_arg = arg_it.next();
                 } else break;
             }
             const path_arg = next_arg orelse {
-                try printlnErr(io, "usage: zwasm run [--invoke <name>] [--engine <interp|jit>] [--dir <host>[:<guest>]] <path.wasm> [args...]");
+                try printlnErr(io, "usage: zwasm run [--invoke <name>] [--engine <interp|jit>] [--dir <host>[:<guest>]] [--env KEY=VAL] <path.wasm> [args...]");
                 std.process.exit(2);
             };
             const path = try gpa.dupe(u8, path_arg);
@@ -209,7 +231,7 @@ pub fn main(init: std.process.Init) !void {
             // `--dir` preopens are threaded into a host, so a WASI-importing
             // `.cwasm` prints / exits / sees args like the `.wasm` path.
             if (bytes.len >= 4 and std.mem.eql(u8, bytes[0..4], "CWAS")) {
-                const code = cli_run.runCwasmWasi(gpa, io, bytes, invoke_name, argv_list.items, preopen_list.items, null) catch |err| {
+                const code = cli_run.runCwasmWasi(gpa, io, bytes, invoke_name, argv_list.items, preopen_list.items, env_keys.items, env_vals.items, null) catch |err| {
                     var buf: [256]u8 = undefined;
                     const msg = std.fmt.bufPrint(&buf, "zwasm run: cannot run '{s}': {s}", .{ path, @errorName(err) }) catch "zwasm run: .cwasm run failed";
                     try printlnErr(io, msg);
@@ -220,9 +242,9 @@ pub fn main(init: std.process.Init) !void {
 
             // D-244 — `--engine=jit` now does real WASI (incl. `--dir` preopens).
             const code = (if (engine_jit)
-                cli_run.runWasmJit(gpa, io, bytes, invoke_name, argv_list.items, preopen_list.items)
+                cli_run.runWasmJit(gpa, io, bytes, invoke_name, argv_list.items, preopen_list.items, env_keys.items, env_vals.items)
             else
-                cli_run.runWasmCapturedOpts(gpa, io, bytes, argv_list.items, null, invoke_name, preopen_list.items, invoke_args)) catch |err| {
+                cli_run.runWasmCapturedOpts(gpa, io, bytes, argv_list.items, null, invoke_name, preopen_list.items, env_keys.items, env_vals.items, invoke_args)) catch |err| {
                 // Per ADR-0016 phase 1: prefer the structured
                 // diagnostic when one was set; fall back to the
                 // legacy `@errorName` form for unwired sites.

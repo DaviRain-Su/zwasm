@@ -96,7 +96,33 @@ pub fn main(init: std.process.Init) !void {
         const stdout_capture_ptr: ?*std.ArrayList(u8) = if (expected_stdout_opt != null) &stdout_capture else null;
 
         const wasi_argv: [1][]const u8 = .{entry.name};
-        const actual = cli_run.runWasmCaptured(gpa, io, wasm_bytes, &wasi_argv, stdout_capture_ptr, null) catch |err| {
+
+        // Optional `.env` sidecar (KEY=VAL lines) exercises the CLI `--env`
+        // path: parse it + thread env_keys/vals through runWasmCapturedOpts →
+        // host.setEnvs → environ_get (D-295 P0).
+        const env_name = try std.fmt.allocPrint(gpa, "{s}.env", .{entry.name[0..stem_len]});
+        defer gpa.free(env_name);
+        const env_bytes_opt: ?[]u8 = dir.readFileAlloc(io, env_name, gpa, .limited(16 * 1024)) catch null;
+        defer if (env_bytes_opt) |e| gpa.free(e);
+        var env_keys: std.ArrayList([]const u8) = .empty;
+        defer env_keys.deinit(gpa);
+        var env_vals: std.ArrayList([]const u8) = .empty;
+        defer env_vals.deinit(gpa);
+        if (env_bytes_opt) |eb| {
+            var lines = std.mem.tokenizeScalar(u8, eb, '\n');
+            while (lines.next()) |line| {
+                const t = std.mem.trim(u8, line, " \r\t");
+                if (t.len == 0) continue;
+                const eq = std.mem.findScalar(u8, t, '=') orelse continue;
+                try env_keys.append(gpa, t[0..eq]);
+                try env_vals.append(gpa, t[eq + 1 ..]);
+            }
+        }
+
+        const actual = (if (env_keys.items.len > 0)
+            cli_run.runWasmCapturedOpts(gpa, io, wasm_bytes, &wasi_argv, stdout_capture_ptr, null, &.{}, env_keys.items, env_vals.items, null)
+        else
+            cli_run.runWasmCaptured(gpa, io, wasm_bytes, &wasi_argv, stdout_capture_ptr, null)) catch |err| {
             try stdout.print("FAIL  {s}: runtime error {s}\n", .{ entry.name, @errorName(err) });
             failed += 1;
             continue;
