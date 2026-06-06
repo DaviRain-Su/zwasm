@@ -43,6 +43,11 @@ pub const version = "0.0.0-pre";
 
 pub const Engine = @import("zwasm/engine.zig").Engine;
 pub const Module = @import("zwasm/module.zig").Module;
+pub const ExternKind = @import("zwasm/module.zig").ExternKind;
+pub const ImportItem = @import("zwasm/module.zig").ImportItem;
+pub const ExportItem = @import("zwasm/module.zig").ExportItem;
+pub const ModuleImports = @import("zwasm/module.zig").ModuleImports;
+pub const ModuleExports = @import("zwasm/module.zig").ModuleExports;
 pub const Instance = @import("zwasm/instance.zig").Instance;
 pub const Trap = @import("zwasm/instance.zig").Trap;
 pub const TypedFunc = @import("zwasm/typed_func.zig").TypedFunc;
