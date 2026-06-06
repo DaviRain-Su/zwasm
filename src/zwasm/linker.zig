@@ -6,6 +6,16 @@
 //! type-checks it against the importing module's declared
 //! signature at instantiate time (per Wasm spec §3.4.10), and
 //! installs a `runtime.HostCall` slot.
+//!
+//! LIFETIME CONTRACT (Zig has no borrow checker — enforced by
+//! convention, like wasmtime's `Store` ownership): a `Linker` MUST
+//! outlive every `Instance` it instantiates that imports a host or
+//! cross-module function. The importer's runtime holds a raw pointer
+//! into the Linker-owned `CallCtx` (`ctx_storage`); calling such an
+//! import after `Linker.deinit` is use-after-free. Likewise, a
+//! cross-module `source_inst` MUST outlive every importer (its live
+//! runtime / memory / global / table storage is aliased, not copied).
+//! Both are caller obligations with no runtime guard.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
@@ -163,6 +173,12 @@ pub const Linker = struct {
         return .{ .engine = engine };
     }
 
+    /// Frees the Linker's import registry + the cross-module/host
+    /// `CallCtx` allocations. INVARIANT: every `Instance` instantiated
+    /// through this Linker that imports a host or cross-module function
+    /// MUST already be deinit'd — their runtimes hold raw pointers into
+    /// the `ctx_storage` freed here (see the file-header lifetime
+    /// contract). Deinit the Linker LAST.
     pub fn deinit(self: *Linker) void {
         for (self.ctx_storage.items) |e| e.destroy_fn(self.engine.alloc, e.ptr);
         self.ctx_storage.deinit(self.engine.alloc);
