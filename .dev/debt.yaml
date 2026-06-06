@@ -216,14 +216,23 @@ entries:
       pushes `local.get 0` (result ptr) at the VERY START, then ~40 i64 ops of 128-bit-multiply (spill-heavy,
       reuses param slots via local.tee), then `i64.store offset=8` using that early-held ptr as base. The
       held result-ptr (0xffc3b0) is corrupted to **__stack_pointer_init + 0xC8 = 16777416** across the heavy
-      computation = a context-dependent REGALLOC/SPILL miscompile of the long-lived `local.get 0` operand. NEXT:
-      distinguish (P1) func-17-internal spill corruption vs (P2) call-tail X1 clobber — gated capture of func
-      17's RECEIVED X1 at its prologue (gated func_idx==17, ==16777416 → flag). If received==16777416 → P2
-      (spillHomedCallerSaved/rt-restore clobbers X1, unlikely — it uses X16/X17 scratch); else P1 → trace the
-      early `local.get 0` spill slot through func 17's body (the value diverges to sp_init+0xC8 mid-multiply).
+      computation = a context-dependent REGALLOC/SPILL miscompile of the long-lived `local.get 0` operand.
+      P1 CONFIRMED 2026-06-06 (code-read, no build): `spillHomedCallerSaved` (op_call.zig:93) only does
+      `STR home_reg,[SP,slot]` — it READS home regs, never WRITES X1; the call tail (X8 LEA, X0=rt restore, BL)
+      also doesn't touch X1. So X1 (correct arg0) is preserved marshal→BL→func17-entry ⇒ func 17 receives a
+      CORRECT result-ptr and corrupts it INTERNALLY (rules out P2 call-tail clobber). MINIMAL REPRO BUILT
+      (/tmp/m3b.wat: just $multi3 = func 17's exact body + a `run` that calls it with result_ptr=8 AND =0xffc3b0,
+      same operands, compares the two stored words, `unreachable` on mismatch). RESULT: JIT exit 0 (CLEAN) with
+      BOTH small AND large (0xffc3b0, ed25519's exact value) buffers + arbitrary operands (0x123456789 etc.) —
+      so a large param0 ALONE does NOT trigger it. ⇒ the corruption is OPERAND-DEPENDENT or needs the CLOBBERING
+      call's exact param0+operands (the captured last-call17 ≠ the clobbering call17). NEXT: extend the
+      store-watchpoint (op_memory.zig, gated addr==16777416) to ALSO capture func 17's operands p1..p4 + the
+      received param0 (trap_aux slots) → plug those EXACT values into /tmp/m3b.wat to get a self-contained repro;
+      then bisect which i64.mul/shr/and step diverges param0's held value. (Caution: minimal-repro clean for
+      arbitrary inputs hints the trigger may be a data-dependent spill-slot alias, not a pure-codegen bug.)
       Permanent diag infra (trap_aux..trap_aux6 + entry print) gated `-Dtrace-stackprobe`. Repro: build
-      `-Dtrace-stackprobe=true` + `zwasm run --engine jit bench/runners/wasm/shootout/ed25519.wasm`.
-      DISCHARGE: the func-17 spill/address miscompile fixed + a minimal fixture; ed25519 jit matches wasmtime.
+      `-Dtrace-stackprobe=true` + `zwasm run --engine jit bench/runners/wasm/shootout/ed25519.wasm` (grep [d-291]);
+      minimal harness /tmp/m3b.wat. DISCHARGE: the func-17 miscompile fixed + a minimal fixture; ed25519 jit matches wasmtime.
     first_raised: "2026-06-05"
     last_reviewed: "2026-06-06"
     refs: |-

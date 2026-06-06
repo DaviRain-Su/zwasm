@@ -71,16 +71,18 @@ passes a wrong result-buffer" framing is REFUTED — the gated `call 17` arg0==1
 positions); last `call 17` = caller func 8, arg0=0xffc3b0 (valid stack addr). So func 17 RECEIVES a correct
 result-buffer yet stores to 16777416 ⇒ corruption is INSIDE func 17. func 17 = __multi3: pushes `local.get 0`
 (result ptr) at the START, runs ~40 i64 ops (spill-heavy 128-bit mul), then stores via that early-held ptr —
-corrupted to __stack_pointer_init+0xC8=16777416 = a regalloc/spill miscompile of the long-lived operand. NEXT:
-gated capture of func 17's RECEIVED X1 at its prologue → distinguish P1 (func-17 internal spill) vs P2 (call-tail
-X1 clobber). Build `-Dtrace-stackprobe=true`; run `zwasm run --engine jit bench/runners/wasm/shootout/ed25519.wasm`;
-grep `[d-291]`. Full hypothesis chain in the D-291 debt row.
+corrupted to __stack_pointer_init+0xC8=16777416 = a regalloc/spill miscompile of the long-lived operand.
+**P1 CONFIRMED** (code-read: spillHomedCallerSaved never writes X1; call tail preserves it → func 17 receives a
+CORRECT arg0, corrupts internally). **Minimal repro built** (/tmp/m3b.wat = func 17 body + small-vs-large buffer
+self-check) but JIT is CLEAN for both small AND large (0xffc3b0) param0 + arbitrary operands ⇒ trigger is
+OPERAND-DEPENDENT or needs the clobbering call's exact param0+operands. NEXT: extend the store-watchpoint
+(op_memory.zig addr==16777416) to also capture func 17's operands p1..p4 + received param0 → plug EXACT values
+into /tmp/m3b.wat for a self-contained repro, then bisect which mul/shr/and step diverges. Full chain in D-291 row.
 
-**Other status**: ADR-0164 trap-diagnostics COMPLETE. **D-294 3-HOST GREEN** (`4fa16b29`/`ba111ee5`, `partial`, residuals polish).
-**D-279 sha256 lead was FALSE** (corrected): zwasm computes the correct hash (interp==jit, all hosts); the
-`c_sha256_hash.wasm` fixture has a wrong baked-in constant → golden-matched, never gates. ba111ee5 genuinely
-SILENT (tracker fail→silent, **streak 3/5**); genuine D-279 = the `simd_bit_shift` CRASH only, H3 WITHDRAWN.
-Minor: regen c_sha256_hash fixture (fold into D-290). Queued: D-288, D-284, D-290.
+**Other status**: ADR-0164 COMPLETE. **D-294 3-HOST GREEN** (`partial`, residuals polish). **D-279 sha256 lead
+FALSE** (corrected — zwasm hashes correctly; fixture has a wrong baked-in constant, golden-matched, never gates;
+tracker fail→silent, **streak 3/5**; genuine D-279 = `simd_bit_shift` CRASH only, H3 withdrawn; minor: regen
+c_sha256_hash fixture → D-290). Queued: D-288, D-284, D-290.
 
 ## Queue (time-consuming first, per user directive)
 
