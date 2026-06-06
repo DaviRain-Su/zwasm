@@ -58,6 +58,9 @@ pub const InitArgs = struct {
     cast_fail_fixups: *std.ArrayList(u32),
     uncaught_exc_fixups: *std.ArrayList(u32),
     oob_fixups: *std.ArrayList(u32),
+    /// Wasm threads (ADR-0168) — atomic unaligned-access (JNE on the
+    /// `TEST DL,#(size-1)` → code 14 = unaligned_atomic) fixups.
+    unaligned_fixups: *std.ArrayList(u32),
     oobtable_fixups: *std.ArrayList(u32),
     cind_sig_fixups: *std.ArrayList(u32),
     uninit_elem_fixups: *std.ArrayList(u32),
@@ -167,6 +170,9 @@ pub const EmitCtx = struct {
     /// reaches a dedicated trap stub recording code 6. Other `bounds_fixups`
     /// kinds (ref-null / cast / array-oob) stay generic (D-293).
     oob_fixups: *std.ArrayList(u32),
+    /// Wasm threads (ADR-0168) — atomic unaligned-access (code 14) fixups
+    /// (`JNE rel32`, 6-byte). Only `*.atomic.*` ops append here.
+    unaligned_fixups: *std.ArrayList(u32),
     /// D-293 — table-access + call_indirect-bounds out-of-bounds (oob_table, code 2)
     /// fixups (`JAE rel32`, 6-byte), demuxed from `bounds_fixups` to a dedicated
     /// stub. Unifies x86_64 with arm64 (which already produces code 2 for cind).
@@ -344,6 +350,7 @@ pub const EmitCtx = struct {
             .cast_fail_fixups = args.cast_fail_fixups,
             .uncaught_exc_fixups = args.uncaught_exc_fixups,
             .oob_fixups = args.oob_fixups,
+            .unaligned_fixups = args.unaligned_fixups,
             .oobtable_fixups = args.oobtable_fixups,
             .cind_sig_fixups = args.cind_sig_fixups,
             .uninit_elem_fixups = args.uninit_elem_fixups,

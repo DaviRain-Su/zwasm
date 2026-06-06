@@ -689,6 +689,10 @@ pub fn compile(
     var oob_fixups: std.ArrayList(u32) = .empty;
     defer oob_fixups.deinit(allocator);
 
+    // Wasm threads (ADR-0168) — atomic unaligned-access (code 14).
+    var unaligned_fixups: std.ArrayList(u32) = .empty;
+    defer unaligned_fixups.deinit(allocator);
+
     // Return fixup list (§9.7 / 7.5-return-op): each `return` op
     // emits its result marshal inline and an unconditional B
     // placeholder; the byte_offset of the placeholder lives here.
@@ -786,6 +790,7 @@ pub fn compile(
         .cast_fail_fixups = &cast_fail_fixups,
         .uncaught_exc_fixups = &uncaught_exc_fixups,
         .oob_fixups = &oob_fixups,
+        .unaligned_fixups = &unaligned_fixups,
         .return_fixups = &return_fixups,
         .call_fixups = &call_fixups,
         .simd_const_fixups = &simd_const_fixups,
@@ -1774,6 +1779,8 @@ pub fn compile(
                 // D-292 C — throw / throw_ref uncaught exception (unconditional B → code 12).
                 try EmitCindStub.emit(allocator, &buf, uncaught_exc_fixups.items, 12, frame_bytes);
                 try EmitCindStub.emit(allocator, &buf, oob_fixups.items, 6, frame_bytes);
+                // Wasm threads (ADR-0168) — atomic unaligned access (B.NE → code 14).
+                try EmitCindStub.emit(allocator, &buf, unaligned_fixups.items, 14, frame_bytes);
                 // ADR-0105 D3 — stack-overflow trap stub. Probe fired
                 // BEFORE `SUB SP, SP, frame_bytes`, so the stub must
                 // NOT add frame_bytes back (SP is still at the post-

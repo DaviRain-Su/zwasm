@@ -197,6 +197,23 @@ pub fn emitMemOp(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
             try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddReg(ip0, ip0, ip1));
         }
     }
+    // Wasm threads (ADR-0168): atomic natural-alignment trap on the
+    // RUNTIME ea, emitted BEFORE the bounds check (spec exec step 8 <
+    // 14a). access_size is a power of two so `@ctz` = log2 = the bit
+    // count to test; byte ops (size 1 → 0 bits) are always aligned.
+    const is_atomic = switch (ins.op) {
+        .@"i32.atomic.load" => true,
+        else => false,
+    };
+    if (is_atomic) {
+        const align_bits: u6 = @intCast(@ctz(access_size));
+        if (align_bits > 0) {
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encTstLowBitsW(ip0, align_bits));
+            const al_fixup: u32 = @intCast(ctx.buf.items.len);
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.ne, 0)); // misaligned
+            try ctx.unaligned_fixups.append(ctx.allocator, al_fixup);
+        }
+    }
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12(ip1, ip0, access_size));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegX(ip1, 27));
     const fixup_at: u32 = @intCast(ctx.buf.items.len);

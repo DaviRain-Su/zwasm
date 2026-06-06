@@ -161,6 +161,20 @@ pub fn encJccRel32(cc: Cond, disp: i32) EncodedInsn {
     return enc;
 }
 
+/// `TEST DL, imm8` — AND DL with imm8, set ZF/SF/PF, discard result.
+/// Used for the atomic natural-alignment check: `TEST DL,#(size-1)`
+/// sets ZF iff the low bits of the effective address (held in RDX at
+/// the check site) are zero; a following `JNE` traps unaligned_atomic.
+/// Encoding `F6 /0 ib`, ModRM mod=11 reg=000 rm=010(DL) = 0xC2. DL is
+/// REX-free (no high-byte hazard); low byte suffices for masks ≤ 7.
+pub fn encTestDlImm8(imm8: u8) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(0xF6);
+    enc.push(0xC2);
+    enc.push(imm8);
+    return enc;
+}
+
 /// In-place patch the disp32 field of a JMP/Jcc rel32 placeholder.
 /// `at` is the byte offset of the instruction's first byte
 /// (0xE9 for JMP or 0x0F for Jcc). `disp` is computed by the

@@ -531,6 +531,17 @@ pub fn encTstImm1W(rn: Xn) u32 {
     return 0x72000000 | (@as(u32, rn) << 5) | @as(u32, 31);
 }
 
+/// `TST Wn, #((1<<nbits)-1)` — test the low `nbits` of Wn (sets Z iff
+/// they are all zero). Used for the atomic natural-alignment check
+/// (nbits = log2(access_size): 1/2/3 for 2/4/8-byte). 32-bit logical
+/// immediate, N=0 (esize=32), immr=0, imms=nbits-1 encodes a run of
+/// `nbits` contiguous low ones (Arm IHI 0055 §C6.2.15 bitmask decode).
+/// `encTstImm1W` is the nbits==1 special case. Low bits suffice for
+/// alignment even when the address spans >32 bits.
+pub fn encTstLowBitsW(rn: Xn, nbits: u6) u32 {
+    return 0x72000000 | (@as(u32, nbits - 1) << 10) | (@as(u32, rn) << 5) | @as(u32, 31);
+}
+
 /// `MOVN Wd, #imm16, lsl #0` — move ~imm16 (zeroed-then-NOT
 /// the lower 16). `MOVN Wd, #0` produces 0xFFFFFFFF = -1
 /// (used by memory.grow's "failure" stub return).
