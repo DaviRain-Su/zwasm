@@ -23,30 +23,32 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
 - **Goal**: implement the Wasm wide-arithmetic proposal — `i64.add128` (0xFC 19), `i64.sub128` (0xFC 20),
   `i64.mul_wide_s` (0xFC 21), `i64.mul_wide_u` (0xFC 22). 128-bit integer math; ZirOps reserved
   `zir_ops.zig:584-588`, all of validator/lower/interp/JIT absent.
-- **Continuity-memo**: (survey done this cycle) these are the **FIRST single-instruction MULTI-RESULT ops**
-  (add128/sub128 = 4→2 [a_lo,a_hi,b_lo,b_hi]→[r_lo,r_hi]; mul_wide_{s,u} = 2→2 [a,b]→[lo,hi]). **Design pre-req**:
-  no single-instr-2-result precedent in interp-push / liveness (no `pushes=2` today) / regalloc (`next_vreg`+=1
-  assumed) / JIT capture — BUT the **call-to-multi-result-fn path (result_abi `.buffer_write`) likely already
-  produces N result vregs**; CHECK that first (engine/codegen/.../result_abi.zig + op_call capture) before
-  building new infra. 0xFC dispatch: `validator:dispatchPrefixFC` @validator.zig:2129, `lower:emitPrefixFC`
-  @lower.zig:797 (both handle 0-17, add 19-22). 1→1 template (NOT multi): trunc_sat @0xFC 4. **Missing encoders**:
-  arm64 ADDS/ADCS/SUBS/SBCS/UMULH/SMULH (inst.zig — MUL exists @655); x86_64 ADC/SBB + MUL/IMUL RDX:RAX capture
-  (inst_alu.zig — encImulRR 2-op exists @180). Interp handlers: `instruction/wasm_2_0/` per-op modules (stubs今).
-- **Plan**: chunk 1 = investigate the multi-result vreg path (call precedent) + decide infra; chunk 2 = encoders +
-  interp + validator/lower (red fixtures: add128 carry, sub128 borrow, mul_wide hi/lo); chunk 3 = JIT both arches.
-- **17.1-atomics DONE @9eb84833** (full op set fence+load/store/rmw/cmpxchg+notify/wait, interp+JIT both arches;
-  Mac+ubuntu green; **windows-confirm of 9eb84833 pending — verify next Step 0.7**, kicked @35c7ce8c). **D-299**
-  (inline load/store JIT misaligned-trap) still DEFERRED/env-constrained (rmw/cmpxchg/wait callouts get it right;
-  only the inline load/store path remains; error-path-only, gate-green).
+- **Continuity-memo**: add128/sub128 = 4→2 [a_lo,a_hi,b_lo,b_hi]→[r_lo,r_hi]; mul_wide_{s,u} = 2→2 [a,b]→[lo,hi].
+  **CHUNK-1 INVESTIGATION DONE — multi-result infra ALREADY EXISTS**: liveness opens a fresh vreg per push
+  (`liveness.zig:558` loops `while i<eff.pushes`) so `pushes=2` works; the call-to-multi-result path
+  (`captureCallResult` @arm64/op_call.zig) is the emit precedent (loops results, `next_vreg+=1` + append each). So
+  NO new regalloc/liveness infra — just validator (pushType×2) + lower + interp + JIT-emit (mirror
+  captureCallResult for the 2 result vregs) + new encoders. Interp is trivial via Zig native `u128`/`i128`
+  (assemble→`+%`/`*`→split lo/hi). 0xFC dispatch: `validator:dispatchPrefixFC` (@2129, handles 0-17) +
+  `lower:emitPrefixFC` (@797). **Missing encoders**: arm64 ADDS/ADCS/SUBS/SBCS/UMULH/SMULH (inst.zig; MUL@655);
+  x86_64 ADC/SBB + MUL/IMUL RDX:RAX (inst_alu.zig; encImulRR 2-op@180). Interp handlers: `instruction/wasm_1_0/`.
+- **Plan**: ~~chunk 1 = investigate multi-result~~ DONE (infra exists). NEXT chunk 2 = interp slice (validator
+  pushType×2 + lower + interp handlers via Zig u128/i128 + liveness stackEffect pushes=2 + interp unit tests);
+  chunk 3 = JIT both arches (encoders ADCS/SBCS/UMULH/SMULH + ADC/SBB/MUL-RDX:RAX, emit mirroring captureCallResult)
+  + edge fixtures (add128 carry, sub128 borrow, mul_wide hi:lo).
+- **17.1-atomics DONE+CONFIRMED 3-host @9eb84833** (full op set fence+load/store/rmw/cmpxchg+notify/wait, interp+
+  JIT both arches; Mac+ubuntu+windows all green — windows wasm-suites edge/wast/spec/simd/realworld 0-fail; the
+  lone win "1 failed" = **D-028** known test-runner-respond heisenbug (Defender/IPC), recorded segv streak-0, NOT
+  an atomics regression). **D-299** (inline load/store JIT misaligned-trap) still DEFERRED (callouts get it right).
 - **Exit-condition**: `test/edge_cases/p17/wide_arith/*` green 3-host — add128 (carry across lo→hi), sub128
   (borrow), mul_wide_s/u (full 128-bit product hi:lo), with the multi-result correctly pushed.
 - **Cycles-remaining**: ~3-4 (architectural: multi-result + 4 ops + new encoders). No tag (ADR-0156).
 
 ## Current state
 
-- **Phase 17 (v0.2) IN-PROGRESS** (ADR-0168); **17.1-atomics DONE @9eb84833** (full op set, interp+JIT both
-  arches, Mac+ubuntu green; windows-confirm pending Step 0.7). Now **17.2-wide-arith ACTIVE** (survey done; first
-  the multi-result design pre-req). D-299 remains deferred (inline load/store align-trap only).
+- **Phase 17 (v0.2) IN-PROGRESS** (ADR-0168); **17.1-atomics DONE+3-host-confirmed @9eb84833** (full op set,
+  interp+JIT both arches; win lone fail = D-028 known flake). Now **17.2-wide-arith ACTIVE**: chunk-1
+  investigation done (multi-result infra EXISTS); NEXT = interp slice. D-299 deferred (inline load/store only).
   Phase 16 (完成形) DONE. No release/tag ever (ADR-0156).
 - Debt ledger: **65 entries, 0 `now`** (D-264 dogfooding discharged). Remaining = `.dev/remaining_sweep.md`
   (Bucket A prune / B actionable-low / C deferred / D externally-blocked) — sweep between features, never idle.
