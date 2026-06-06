@@ -40,8 +40,11 @@ audit detail in **D-296** (note). Residual Zig-API gaps = v0.2/deferred, cross-r
 完成形-blocking.
 **Remaining (post-audit)**: (a) blocked-by 31 (external/future); (b) v0.2.0 features (proposal_watch + the
 D-296 Zig-API residuals: Memory.grow/sliceAt, Linker.defineInstance, funcref-call, full WASI config); (d)
-dogfooding (D-264 gated). No actionable HIGH-value 完成形 surface gap remains — next work = v0.2 enhancements or
-memory-safety/debt sweeps.
+dogfooding (D-264 gated). No actionable HIGH-value 完成形 surface gap remains.
+**NEXT concrete chunk** (MED, fresh TDD cycle) = `Memory.grow(delta)→prev_pages` facade (D-296 residual):
+plumb through `rt.memories[0]` (`*MemoryInstance.grow`), re-sync the `rt.memory` byte-alias after realloc
+(D-199), honor max-pages cap (return error/sentinel, NOT trap), + a max-cap boundary fixture. Alt tracks if
+deprioritized: other D-296 residuals (Memory.sliceAt, Linker.defineInstance) or a memory-safety/debt sweep.
 **CADENCE (ADR-0076 D8)**: windows BATCHED (≥6 ABI-risk / ≥12 else); chain MANY chunks/turn, never poll-wait
 on windows.
 
