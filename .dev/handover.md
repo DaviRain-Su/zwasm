@@ -32,10 +32,14 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
   (assemble→`+%`/`*`→split lo/hi). 0xFC dispatch: `validator:dispatchPrefixFC` (@2129, handles 0-17) +
   `lower:emitPrefixFC` (@797). **Missing encoders**: arm64 ADDS/ADCS/SUBS/SBCS/UMULH/SMULH (inst.zig; MUL@655);
   x86_64 ADC/SBB + MUL/IMUL RDX:RAX (inst_alu.zig; encImulRR 2-op@180). Interp handlers: `instruction/wasm_1_0/`.
-- **Plan**: ~~chunk 1 = investigate multi-result~~ DONE (infra exists). NEXT chunk 2 = interp slice (validator
-  pushType×2 + lower + interp handlers via Zig u128/i128 + liveness stackEffect pushes=2 + interp unit tests);
-  chunk 3 = JIT both arches (encoders ADCS/SBCS/UMULH/SMULH + ADC/SBB/MUL-RDX:RAX, emit mirroring captureCallResult)
-  + edge fixtures (add128 carry, sub128 borrow, mul_wide hi:lo).
+- **Plan**: ~~chunk 1 investigate~~ DONE (infra exists). ~~chunk 2 interp slice~~ **DONE @8f807c19** (validator
+  dispatchPrefixFC 19-22 + opWideAddSub128/opWideMul; lower; liveness 4→2/2→2; interp numeric_int.zig via Zig
+  u128/i128 + 4 unit tests carry/borrow/unsigned/signed). **NEXT chunk 3 = JIT both arches**: new encoders arm64
+  ADDS/ADCS/SUBS/SBCS/UMULH/SMULH (inst.zig), x86_64 ADC/SBB + MUL/IMUL RDX:RAX (inst_alu.zig); emit fns producing
+  2 result vregs (mirror `captureCallResult` `next_vreg+=1`×2 + 2 pushed_vregs.append); dispatch arms (both
+  emit.zig); NO R15 needed (pure arith, not in usesRuntimePtr). Edge fixtures (`test/edge_cases/p17/wide_arith/*`)
+  verify the spec operand order end-to-end. **Operand order to verify in chunk 3**: 128-bit value = (lo, hi)
+  lo-pushed-first; if wabt disagrees, fix interp+JIT together (interp arithmetic is correct; only the order axis).
 - **17.1-atomics DONE+CONFIRMED 3-host @9eb84833** (full op set fence+load/store/rmw/cmpxchg+notify/wait, interp+
   JIT both arches; Mac+ubuntu+windows all green — windows wasm-suites edge/wast/spec/simd/realworld 0-fail; the
   lone win "1 failed" = **D-028** known test-runner-respond heisenbug (Defender/IPC), recorded segv streak-0, NOT
@@ -47,8 +51,8 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
 ## Current state
 
 - **Phase 17 (v0.2) IN-PROGRESS** (ADR-0168); **17.1-atomics DONE+3-host-confirmed @9eb84833** (full op set,
-  interp+JIT both arches; win lone fail = D-028 known flake). Now **17.2-wide-arith ACTIVE**: chunk-1
-  investigation done (multi-result infra EXISTS); NEXT = interp slice. D-299 deferred (inline load/store only).
+  interp+JIT both arches; win lone fail = D-028 known flake). Now **17.2-wide-arith ACTIVE**: chunk-1 done +
+  **chunk-2 interp slice DONE @8f807c19** (4 ops, u128/i128, 4 tests); NEXT = chunk-3 JIT. D-299 deferred.
   Phase 16 (完成形) DONE. No release/tag ever (ADR-0156).
 - Debt ledger: **65 entries, 0 `now`** (D-264 dogfooding discharged). Remaining = `.dev/remaining_sweep.md`
   (Bucket A prune / B actionable-low / C deferred / D externally-blocked) — sweep between features, never idle.
