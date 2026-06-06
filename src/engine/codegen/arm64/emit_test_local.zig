@@ -113,13 +113,13 @@ test "compile: unsupported op surfaces UnsupportedOp" {
     // §9.9 / 9.9-l-1b-d093-d48: table.grow now lands via the
     // table_grow_fn callout (D-122/D-125), so the probe shifts to
     // a Wasm 3.0+ atomic op which the Phase 9 ZIR enum reserves
-    // but no codegen path implements yet. atomic.fence itself is now
-    // wired (Phase 17.1, ADR-0168) so the probe uses a not-yet-lowered
-    // rmw op (cmpxchg lands late in the atomics bundle).
+    // but no codegen path implements yet. fence/load/store/rmw/cmpxchg
+    // are all wired (Phase 17.1, ADR-0168); the probe uses a
+    // not-yet-implemented notify/wait op (the last atomics sub-chunk).
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{} };
     var f = ZirFunc.init(0, sig, &.{});
     defer f.deinit(testing.allocator);
-    try f.instrs.append(testing.allocator, .{ .op = .@"i64.atomic.rmw.cmpxchg" });
+    try f.instrs.append(testing.allocator, .{ .op = .@"memory.atomic.notify" });
     f.liveness = .{ .ranges = &.{} };
     const empty: regalloc.Allocation = .{ .slots = &.{}, .n_slots = 0 };
     try testing.expectError(Error.UnsupportedOp, compile(testing.allocator, &f, empty, &.{}, &.{}, 0, &.{}, &.{}, .i32, &.{}, false));

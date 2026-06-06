@@ -1149,6 +1149,16 @@ pub fn compile(
             .@"i64.atomic.rmw32.xor_u",
             .@"i64.atomic.rmw32.xchg_u",
             => try op_memory.emitAtomicRmw(&ctx, &ins),
+            // tNN.atomic.rmw*.cmpxchg* (threads, ADR-0168): callout
+            // through JitRuntime.atomic_cmpxchg_fns[width_log2].
+            .@"i32.atomic.rmw.cmpxchg",
+            .@"i64.atomic.rmw.cmpxchg",
+            .@"i32.atomic.rmw8.cmpxchg_u",
+            .@"i32.atomic.rmw16.cmpxchg_u",
+            .@"i64.atomic.rmw8.cmpxchg_u",
+            .@"i64.atomic.rmw16.cmpxchg_u",
+            .@"i64.atomic.rmw32.cmpxchg_u",
+            => try op_memory.emitAtomicCmpxchg(&ctx, &ins),
             .@"i32.load8_s" => try op_memory.emitI32Load8S(&ctx, &ins),
             .@"i32.load8_u" => try op_memory.emitI32Load8U(&ctx, &ins),
             .@"i32.load16_s" => try op_memory.emitI32Load16S(&ctx, &ins),

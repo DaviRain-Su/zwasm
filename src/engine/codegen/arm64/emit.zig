@@ -1506,6 +1506,16 @@ pub fn compile(
             .@"i64.atomic.rmw32.xor_u",
             .@"i64.atomic.rmw32.xchg_u",
             => try op_memory.emitAtomicRmw(&ctx, &ins),
+            // tNN.atomic.rmw*.cmpxchg* (threads, ADR-0168): callout
+            // through JitRuntime.atomic_cmpxchg_fns[width_log2].
+            .@"i32.atomic.rmw.cmpxchg",
+            .@"i64.atomic.rmw.cmpxchg",
+            .@"i32.atomic.rmw8.cmpxchg_u",
+            .@"i32.atomic.rmw16.cmpxchg_u",
+            .@"i64.atomic.rmw8.cmpxchg_u",
+            .@"i64.atomic.rmw16.cmpxchg_u",
+            .@"i64.atomic.rmw32.cmpxchg_u",
+            => try op_memory.emitAtomicCmpxchg(&ctx, &ins),
             // §9.9 / 9.9-m-3a: data.drop / elem.drop — write 1 to
             // the dropped-flag byte at `[r15+ptr_off]+idx`. No
             // operands consumed; no result pushed. validator already

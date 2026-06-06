@@ -478,6 +478,12 @@ pub const JitRuntime = extern struct {
     /// TRAILING field (like `wasi_host`): keeps every codegen `@offsetOf`
     /// unchanged; only consulted via `[R15+atomic_rmw_fn_off]`.
     atomic_rmw_fn: *const fn (rt: *JitRuntime, ea: u64, operand: u64, opcode: u32) callconv(.c) u64 = defaultAtomicRmw,
+    /// Wasm threads/atomics (ADR-0168) — `tNN.atomic.rmw*.cmpxchg*`
+    /// callout, indexed by width_log2 (0=1 B … 3=8 B). Args `(rt, ea,
+    /// expected, replacement)`; returns OLD zero-extended. Per-width fn
+    /// pointers (not an opcode arg) keep the callout at 4 args on every
+    /// ABI. TRAILING field — keeps every codegen `@offsetOf` unchanged.
+    atomic_cmpxchg_fns: [4]*const fn (rt: *JitRuntime, ea: u64, expected: u64, replacement: u64) callconv(.c) u64 = default_atomic_cmpxchg_fns,
 };
 
 /// Default `memory_grow_fn` — unconditionally refuses growth by
@@ -610,6 +616,69 @@ pub fn rmwMapOf(op: zir.ZirOp) ?RmwMap {
 /// regalloc call-clobber + uses-runtime-ptr classifiers.
 pub fn isAtomicRmw(op: zir.ZirOp) bool {
     return rmwMapOf(op) != null;
+}
+
+/// Production `atomic_cmpxchg_fns[width_log2]` (ADR-0168). Per-width
+/// (comptime `W`) compare-exchange: load `old` at `rt.vm_base + ea`,
+/// store `replacement` iff `old == wrap_W(expected)`, ALWAYS return
+/// `old` zero-extended (spec exec). Alignment trap BEFORE bounds.
+/// cmpxchg has no kind (one operation) → per-width fn pointers keep the
+/// callout at a clean 4 args (rt, ea, expected, replacement) on every
+/// ABI — no 5th stack arg on Win64, no width packed into `ea` (which
+/// would be a single-slot-dual-meaning violation + a memory64 hazard).
+fn cmpxchgFn(comptime W: type) *const fn (rt: *JitRuntime, ea: u64, expected: u64, replacement: u64) callconv(.c) u64 {
+    return &struct {
+        fn f(rt: *JitRuntime, ea: u64, expected: u64, replacement: u64) callconv(.c) u64 {
+            const width = @sizeOf(W);
+            if (ea & (width - 1) != 0) {
+                rt.trap_flag = 1;
+                rt.trap_kind = 14; // unaligned_atomic
+                return 0;
+            }
+            if (ea + width > rt.mem_limit) {
+                rt.trap_flag = 1;
+                rt.trap_kind = 6; // oob_memory
+                return 0;
+            }
+            const slot = (rt.vm_base + ea)[0..@sizeOf(W)];
+            const old = std.mem.readInt(W, slot, .little);
+            if (old == @as(W, @truncate(expected))) {
+                std.mem.writeInt(W, slot, @as(W, @truncate(replacement)), .little);
+            }
+            return @as(u64, old);
+        }
+    }.f;
+}
+
+/// Default `atomic_cmpxchg_fns` array — indexed by width_log2
+/// (0=1 B, 1=2 B, 2=4 B, 3=8 B). Production impls (no host state).
+pub const default_atomic_cmpxchg_fns = [4]*const fn (rt: *JitRuntime, ea: u64, expected: u64, replacement: u64) callconv(.c) u64{
+    cmpxchgFn(u8),
+    cmpxchgFn(u16),
+    cmpxchgFn(u32),
+    cmpxchgFn(u64),
+};
+
+/// cmpxchg op metadata: `wlog2` indexes `atomic_cmpxchg_fns`; `res64`
+/// selects the i64 result-capture width at the emit site. `null` = not
+/// an atomic cmpxchg op.
+pub const CmpxchgMap = struct { wlog2: u2, res64: bool };
+
+pub fn cmpxchgMapOf(op: zir.ZirOp) ?CmpxchgMap {
+    return switch (op) {
+        .@"i32.atomic.rmw.cmpxchg" => .{ .wlog2 = 2, .res64 = false },
+        .@"i64.atomic.rmw.cmpxchg" => .{ .wlog2 = 3, .res64 = true },
+        .@"i32.atomic.rmw8.cmpxchg_u" => .{ .wlog2 = 0, .res64 = false },
+        .@"i32.atomic.rmw16.cmpxchg_u" => .{ .wlog2 = 1, .res64 = false },
+        .@"i64.atomic.rmw8.cmpxchg_u" => .{ .wlog2 = 0, .res64 = true },
+        .@"i64.atomic.rmw16.cmpxchg_u" => .{ .wlog2 = 1, .res64 = true },
+        .@"i64.atomic.rmw32.cmpxchg_u" => .{ .wlog2 = 2, .res64 = true },
+        else => null,
+    };
+}
+
+pub fn isAtomicCmpxchg(op: zir.ZirOp) bool {
+    return cmpxchgMapOf(op) != null;
 }
 
 /// 10.G GC-on-JIT struct allocation trampoline (ADR-0128 §2). The
@@ -1057,6 +1126,9 @@ pub const tables_jit_ci_count_off: u12 = @offsetOf(JitRuntime, "tables_jit_ci_co
 pub const table_grow_fn_off: u12 = @offsetOf(JitRuntime, "table_grow_fn");
 /// ADR-0168 — `atomic_rmw_fn` slot; X-form (8-byte fn pointer).
 pub const atomic_rmw_fn_off: u12 = @offsetOf(JitRuntime, "atomic_rmw_fn");
+/// ADR-0168 — base of the `atomic_cmpxchg_fns[4]` array; entry k at
+/// `atomic_cmpxchg_fns_off + k*8` (k = width_log2). X-form pointers.
+pub const atomic_cmpxchg_fns_off: u12 = @offsetOf(JitRuntime, "atomic_cmpxchg_fns");
 /// ADR-0105 D1 / D2 — stack-probe threshold field offset. X-form
 /// (8-byte usize); prologue emits `LDR Xn, [vmctx, #stack_limit_off]`.
 pub const stack_limit_off: u12 = @offsetOf(JitRuntime, "stack_limit");
@@ -1200,6 +1272,9 @@ comptime {
     // ADR-0168: atomic_rmw_fn is X-form pointer.
     if ((atomic_rmw_fn_off & 7) != 0) @compileError("atomic_rmw_fn_off not 8-aligned");
     if (atomic_rmw_fn_off > 32760) @compileError("atomic_rmw_fn_off exceeds X-form imm12 budget");
+    // ADR-0168: atomic_cmpxchg_fns base + last entry (k=3 → +24) X-form.
+    if ((atomic_cmpxchg_fns_off & 7) != 0) @compileError("atomic_cmpxchg_fns_off not 8-aligned");
+    if (atomic_cmpxchg_fns_off + 24 > 32760) @compileError("atomic_cmpxchg_fns_off exceeds X-form imm12 budget");
     // ADR-0105 D1: stack_limit is X-form (usize); imm12 scales by 8.
     if ((stack_limit_off & 7) != 0) @compileError("stack_limit_off not 8-aligned");
     if (stack_limit_off > 32760) @compileError("stack_limit_off exceeds X-form imm12 budget");
@@ -1253,7 +1328,8 @@ test "JitRuntime: total size = 464 bytes (post-10.E tag_ids tail)" {
     // (+16 bytes = 8 B ptr + 2 × 4 B) → 448 + 16 = 464.
     // D-244 (JIT-WASI) appends `wasi_host` (+8 B opaque ptr) → 464 + 8 = 472.
     // ADR-0168 appends `atomic_rmw_fn` (+8 B fn ptr, trailing) → 472 + 8 = 480.
-    try testing.expectEqual(@as(u32, 480), head_size);
+    // ADR-0168 appends `atomic_cmpxchg_fns[4]` (+32 B, trailing) → 480 + 32 = 512.
+    try testing.expectEqual(@as(u32, 512), head_size);
 }
 
 test "jitGcAlloc: allocates struct{i32} via the *JitRuntime bridge (10.G A-2a)" {

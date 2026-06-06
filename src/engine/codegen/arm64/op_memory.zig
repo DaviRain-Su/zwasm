@@ -959,3 +959,75 @@ pub fn emitAtomicRmw(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     }
     try ctx.pushed_vregs.append(ctx.allocator, result);
 }
+
+/// Wasm threads (ADR-0168) `tNN.atomic.rmw*.cmpxchg*` — callout through
+/// `JitRuntime.atomic_cmpxchg_fns[width_log2]`. AAPCS64 args: X0 = rt,
+/// X1 = ea, X2 = expected (full 64-bit; helper truncates), X3 =
+/// replacement. Returns OLD in X0; on unaligned/oob the helper sets
+/// trap_flag (epilogue raises). Marshal conflict-free (arg regs not
+/// allocatable). Mirror of emitAtomicRmw, but 3 operands + a per-width
+/// fn-ptr slot (no opcode arg).
+pub fn emitAtomicCmpxchg(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
+    const m = jit_abi.cmpxchgMapOf(ins.op) orelse return Error.UnsupportedOp;
+    if (ctx.pushed_vregs.items.len < 3) return Error.AllocationMissing;
+    const repl_v = ctx.pushed_vregs.pop().?;
+    const exp_v = ctx.pushed_vregs.pop().?;
+    const addr_v = ctx.pushed_vregs.pop().?;
+    const ip0 = abi.ip_gprs[0];
+    const ip1 = abi.ip_gprs[1];
+    // X3 = replacement (full 64-bit). Stage 0.
+    const r_repl = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, repl_v, 0);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(3, 31, r_repl));
+    // X2 = expected (full 64-bit). Stage 1.
+    const r_exp = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, exp_v, 1);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(2, 31, r_exp));
+    // ea into ip0 = addr (zero-ext u32) + offset. Stage 0 reused (repl
+    // already in X3).
+    const r_addr = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, addr_v, 0);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(ip0, 31, r_addr));
+    const offset_imm = ins.payload;
+    if (offset_imm != 0) {
+        if (offset_imm <= 0xFFFFFF) {
+            const off_high: u12 = @intCast((offset_imm >> 12) & 0xFFF);
+            const off_low: u12 = @intCast(offset_imm & 0xFFF);
+            if (off_high != 0) try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12Lsl12(ip0, ip0, off_high));
+            if (off_low != 0) try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12(ip0, ip0, off_low));
+        } else {
+            const lane0: u16 = @truncate(offset_imm & 0xFFFF);
+            const lane1: u16 = @truncate((offset_imm >> 16) & 0xFFFF);
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovzImm16(ip1, lane0));
+            if (lane1 != 0) try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovkImm16(ip1, lane1, 1));
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddReg(ip0, ip0, ip1));
+        }
+    }
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(1, 31, ip0)); // X1 = ea
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(0, 31, abi.runtime_ptr_save_gpr)); // X0 = rt
+    // LDR X16, [X19, #(cmpxchg_fns_off + wlog2*8)]; BLR X16.
+    const fn_off: u15 = @intCast(jit_abi.atomic_cmpxchg_fns_off + @as(u32, m.wlog2) * 8);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(16, abi.runtime_ptr_save_gpr, fn_off));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBLR(16));
+    // Capture old value (X0 for i64, W0 zero-ext for i32) → result vreg.
+    const result = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (result >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    switch (ctx.alloc.slot(result, .gpr)) {
+        .reg => |id| {
+            const wd = abi.slotToReg(id) orelse return Error.SlotOverflow;
+            if (m.res64) {
+                if (wd != 0) try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(wd, 31, 0));
+            } else {
+                try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(wd, 31, 0));
+            }
+        },
+        .spill => |off| {
+            const abs_off: u32 = ctx.spill_base_off + off;
+            if (abs_off > 16380) return Error.SlotOverflow;
+            if (m.res64) {
+                try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImm(0, 31, @intCast(abs_off)));
+            } else {
+                try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(0, 31, @intCast(abs_off)));
+            }
+        },
+    }
+    try ctx.pushed_vregs.append(ctx.allocator, result);
+}

@@ -127,11 +127,11 @@ pub fn computeWith(
     var call_pc_len: u32 = 0;
     var call_pc_overflow = false;
     for (func.instrs.items, 0..) |ins, pc| {
-        // Atomic rmw (ADR-0168): callout through atomic_rmw_fn; both
-        // operands (addr+val) consumed into arg regs BEFORE the CALL
-        // (strict crossing, like array.fill), but vregs spanning it must
+        // Atomic rmw / cmpxchg (ADR-0168): callout through atomic_*_fn(s);
+        // operands consumed into arg regs BEFORE the CALL (strict
+        // crossing, like array.fill), but vregs spanning it must
         // force-spill (BLR/CALL clobbers caller-saved). Mirror memory.grow.
-        if (jit_abi.isAtomicRmw(ins.op)) {
+        if (jit_abi.isAtomicRmw(ins.op) or jit_abi.isAtomicCmpxchg(ins.op)) {
             if (call_pc_len < call_pc_buf.len) {
                 call_pc_buf[call_pc_len] = .{ .pc = @intCast(pc), .inclusive = false };
                 call_pc_len += 1;
