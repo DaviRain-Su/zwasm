@@ -66,15 +66,16 @@ audit-gap list closed-or-deferred.
 
 ## ← LEAD: fresh-context work — D-294 (bounded JIT fix) / D-291 / D-279
 
-ADR-0164 trap-diagnostics is COMPLETE. Remaining are all best on **FRESH context** (this session is extremely
-deep): **D-294 — NOW FULLY DE-RISKED (investigation done, exact recipe in the debt row)**: a null table elem has
-`typeidx_base[idx] = maxInt(u32)` (the "no-func sentinel", compile_init.zig:118/171), DISTINCT from any canonical
-id → the fix is a CLEAN INSERTION (no funcptr reorder), just `CMP typeidx, 0xFFFFFFFF; JE → uninitialized_elem
-(code 13)` before the existing sig-CMP at each cind-sig site (the typeidx is already loaded), new channel mirroring
-cind_sig, ~8 mechanical sites; arm64 needs `CMN Wn,#1` (imm32 too big for CMP). Confirmed it's a pure LABEL bug
-(no crash — sentinel reliably mismatches). **D-291** (ed25519 JIT large-frame address miscompile, paused —
+ADR-0164 trap-diagnostics is COMPLETE. **D-294 INLINE PATHS FIXED** (`4fa16b29`): JIT call_indirect /
+return_call_indirect on a null table elem now reports uninitialized_elem (code 13), not the mislabel
+indirect_call_mismatch — clean `CMP/CMN typeidx, maxInt; JE/B.EQ` before the sig CMP (null slot's typeidx is the
+no-func sentinel), new uninit_elem channel both arches, table-0 + multi-table. JIT+interp verified, local
+test+test-spec green; 3-host pending (ubuntu test-all kicked). D-294 → `partial`: residuals are POLISH only —
+(1) subtyping resolve-trampoline path still collapses null→funcptr=0 (needs a trampoline sentinel, rare case),
+(2) call_indirect OOB-index message "out of bounds table access" vs spec "undefined element" (cosmetic).
+Remaining hot work, all **FRESH context**: **D-291** (ed25519 JIT large-frame address miscompile, paused —
 "fresh-context session"); **D-279** (Win64 heisenbug, non-deterministic — H3: possible shared root w/ D-291,
-partly Mac-testable). Ordering: D-294 (quick mechanical) → D-291 ⊇? D-279. Also queued: D-288, D-284, D-290.
+partly Mac-testable). Also queued: D-288, D-284, D-290.
 
 ## Queue (time-consuming first, per user directive)
 
@@ -88,14 +89,15 @@ partly Mac-testable). Ordering: D-294 (quick mechanical) → D-291 ⊇? D-279. A
 - **Phase 16 (完成形) — open-ended; the loop CONTINUES, no release (ADR-0156).** v0.1.0-scope program is
   thoroughly complete + 3-host green (`deb97903`); ADR-0163 bench+docs program ALL DONE. Tag/publish/cutover are
   manual, user-only — there is no release gate.
-- Debt ledger: 1 `now` (**D-294**, JIT call_indirect null-elem trap-kind mislabel, found by the D-292-D audit).
-  **ADR-0164 trap-crash-exception-diagnostics COMPLETE** (D-293 + D-292 A/B-core/C/D all done). B-core 3-host
-  green @`400c7006`; C ubuntu-green @`0b68bdf7`. Next (all fresh-context): D-294 (quick) / D-291 / D-279. Phase 16.
+- Debt ledger: **0 `now`** (D-294 inline fix landed `4fa16b29` → `partial`, residuals are polish). **ADR-0164
+  trap-crash-exception-diagnostics COMPLETE** (D-293 + D-292 A/B-core/C/D all done). B-core 3-host green
+  @`400c7006`; C ubuntu-green @`0b68bdf7`. Next (all fresh-context): D-291 / D-279. Phase 16.
 
 ## Step 0.7 (next resume) — verify remote logs
 
-- **ubuntu**: ✅ GREEN through D-292 C `0b68bdf7` (`OK`) — x86_64 uncaught-fix (code 12) confirmed. Next kick
-  verify `/tmp/ubuntu.log` `OK`.
+- **ubuntu**: kicked at **D-294 `4fa16b29`** (test-all; x86_64 — exercises the new code-13 null check via
+  runner_trap_test + emit_test_int byte-exact). Next resume: verify `/tmp/ubuntu.log` `OK`; RED → revert the
+  D-294 pair (D3). Prior cycle (`0b68bdf7`) was GREEN.
 - **windows**: ✅ **GREEN at the D-292 C kick** (`[run_remote_windows] OK`) — full test-all clean, B-core
   `test-internal-fault` exit-70 holds, D-279 did NOT fire. **D-279 is NON-deterministic** (classic heisenbug,
   not "escalating reproducible" — my earlier read was wrong); **silent streak = 2** (≥5 over ≥3 SHAs discharges

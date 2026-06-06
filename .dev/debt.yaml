@@ -5,43 +5,32 @@
 entries:
   - id: "D-294"
     layer: "code"
-    status: "now"
+    status: "partial"
     description: |-
-      now: JIT call_indirect on a NULL (uninitialized, in-bounds) table element mislabels the trap kind.
-      Surfaced by the D-292-D audit (zwasm-v2 vs wasmtime/wasmer/v1, 2026-06-06). The interp + ALL THREE
-      reference engines report `uninitialized element`; zwasm-v2 JIT reports `indirect call type mismatch`
-      (indirect_call_mismatch, code 3). It DOES trap (exit 1) — only the KIND is wrong (a diagnostic-precision
-      miss, same class as D-293, not a crash/over-accept). MECHANISM: the JIT call_indirect does bounds → sig
-      check (CMP typeidx[idx] vs canonical) → funcptr; a null element's typeidx slot fails the sig CMP → reports
-      code 3, never reaching a null check. FIX: add a null-element check (the loaded funcptr/element == 0 → trap)
-      that PRECEDES the sig check, routed to a new uninitialized_elem JIT code (TrapKind.uninitialized_elem
-      exists; next free JIT code = 13) — same per-kind-channel pattern as D-293/D-292-C, both arches
-      (op_call.zig). Also verify return_call_indirect + the subtyping-trampoline path. RELATED minor (same row):
-      the call_indirect OOB-INDEX trap prints `out of bounds table access` (oob_table) but the spec canonical
-      text is "undefined element" (wasmtime/wasmer prefix it) — table.get OOB = "out of bounds table access" but
-      call_indirect OOB-index = "undefined element"; consider a distinct message (cheap, one constant). Low
-      urgency (both still trap correctly).
-      ✅ INVESTIGATION DONE (2026-06-06, DE-RISKED): NOT the risky funcptr-reorder first feared. A null table
-      element has `typeidx_base[idx] = maxInt(u32) = 0xFFFFFFFF` (compile_init.zig:118,171 + setup.zig:593 pre-seed
-      the typeidxs buffer to the "no-func sentinel"), DISTINCT from any real canonical id. Confirmed empirically:
-      JIT call_indirect (type 0) through a null elem reports indirect_call_mismatch, NOT a crash (the sentinel
-      reliably mismatches; canonicalTypeidx(type0)=0 ≠ 0xFFFFFFFF). So it is PURELY a label bug, no crash. FIX =
-      a CLEAN INSERTION (no reorder, no register juggling): right after the typeidx load (already in EAX/W-reg for
-      the sig check), before the existing sig CMP, add `CMP typeidx, 0xFFFFFFFF ; JE → uninitialized_elem (code
-      13)`. Sites = the cind-SIG sites (where typeidx is loaded): x86_64 op_call.zig table-0 + multi-table
-      (~544/595); arm64 op_call.zig (309/412/461-ish); op_tail_call both arches (return_call_indirect). New
-      uninitialized_elem channel (mirror cind_sig) → EmitCindStub/emitTrapExitStub code 13; jitTrapCode 13 =>
-      uninitialized_elem (TrapKind exists; wast_runner arm exists). Test: call_indirect null → 13 (was 3). ~8
-      mechanical CMP-insertions — a clean fresh-context chunk, fully de-risked. ARM64 ENCODER NOTE: arm64 can't
-      `CMP Wn, #0xFFFFFFFF` (imm12 too small); use `CMN Wn, #1` (= add Wn+1, sets Z iff Wn==0xFFFFFFFF in 32-bit)
-      then B.EQ → may need a new `encCmnImmW` encoder if absent. x86_64 is trivial (`encCmpRImm32(EAX, 0xFFFFFFFF)`
-      already exists). Insert the maxInt-check BEFORE the existing expected-CMP at each cind-sig site (the typeidx
-      is already loaded for it).
+      partial: JIT call_indirect on a NULL (uninitialized, in-bounds) table element mislabelled its trap as
+      indirect_call_mismatch (code 3); interp + all 3 reference engines (wasmtime/wasmer/v1, D-292-D audit) say
+      "uninitialized element". A pure LABEL bug (always trapped, exit 1 — only the kind was wrong, D-293 class).
+      ✅ INLINE PATHS FIXED (4fa16b29, 2026-06-06): a null slot's stored typeidx is maxInt(u32) (the no-func
+      sentinel; compile_init.zig pre-seeds the typeidxs buffer), distinct from any canonical id. Clean insertion
+      at each inline cind-sig site — `CMP/CMN typeidx, 0xFFFFFFFF ; J(E/B.EQ) → uninitialized_elem (code 13)`
+      PRECEDES the sig CMP (typeidx already loaded). New uninit_elem_fixups channel mirrors cind_sig → code-13
+      stub both arches (x86_64 CMP+JE→emitTrapExitStub; arm64 CMN W16,#1 + B.EQ→EmitCindStub). Covers
+      call_indirect + return_call_indirect, table-0 + multi-table, both arches. jitTrapCode 13 =>
+      uninitialized_elem. Tests: runner_trap_test exec (null → 13) + byte-exact emit tests updated. Verified
+      JIT+interp both emit "uninitialized element". 3-host pending (ubuntu test-all kicked @4fa16b29).
+      RESIDUAL 1 (narrow): the SUBTYPING resolve-trampoline path (jitCallIndirectResolve, op_call.zig arm64 ~309
+      / x86_64 equiv) collapses OOB/sig/NULL all into funcptr=0 → a null elem under a subtyping module still
+      reports code 3. Fixing it needs the trampoline to RETURN a distinct null sentinel (not funcptr=0) so the
+      caller can branch to code 13 — a different (non-inline) mechanism. Low priority (subtyping + null elem is rare).
+      RESIDUAL 2 (cosmetic): call_indirect OOB-INDEX prints `out of bounds table access` (oob_table) but spec
+      canonical is "undefined element" (wasmtime/wasmer prefix it); table.get OOB stays "out of bounds table
+      access". A distinct message constant — cheap, one-off, still traps correctly. Both residuals = polish.
     first_raised: "2026-06-06"
     last_reviewed: "2026-06-06"
     refs: |-
-      D-292 workstream D audit. src/engine/codegen/{arm64,x86_64}/op_call.zig (call_indirect sig/null).
-      src/api/trap_surface.zig jitTrapCode (add 13 => .uninitialized_elem). Pattern: D-293 slices.
+      Fixed: 4fa16b29. src/engine/codegen/{arm64,x86_64}/{op_call,op_tail_call,ctx,emit}.zig +
+      x86_64/op_control.zig (demux) + api/trap_surface.zig (jitTrapCode 13). Tests: runner_trap_test.zig,
+      x86_64/emit_test_int.zig, arm64/emit_test_call.zig. Residual 1: jitCallIndirectResolve trampoline.
   - id: "D-292"
     layer: "code"
     status: "note"
