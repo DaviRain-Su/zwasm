@@ -1140,6 +1140,31 @@ entries:
       test/realworld/run_runner_jit.zig (run-stage disabled); test/realworld/diff_runner.zig (interp + opt-in
       --aot lane); build.zig (test-realworld-diff-aot); src/wasi/jit_dispatch.zig; src/cli/run.zig (runWasmJit /
       runCwasmWasi); D-244 (JIT-WASI) / D-251 (AOT-WASI), both done
+  - id: "D-295"
+    layer: "cli"
+    status: "note"
+    description: |-
+      note (Phase 16 完成形 CLI surface audit, 2026-06-06 — subagent vs wasmtime/wasmer): the `zwasm` CLI covers
+      ~85% of the essential runtime surface and is INTENTIONALLY lean (run + compile + --version/--help/--invoke
+      /--dir/--engine/argv all SHIPPED; validate/inspect/wat-convert deliberately declined per ADR-0159 = the
+      ecosystem's job, NOT gaps). The genuine 完成形 gaps, prioritized:
+      P0 `--env KEY=VAL` (WASI environ) — HIGH value (most real WASI programs read env); the host infra EXISTS
+      (`wasi_host.Host.setEnvs(keys, vals)` host.zig:160), just unwired at the CLI. Mirror `--dir`: accumulate
+      in main.zig, thread an `envs` param into runWasmJit / runCwasmWasi / runWasmCapturedWithPreopens
+      (run.zig), call setEnvs after setArgs. → IN PROGRESS this session.
+      P1 `--verbose`/`-v` — LOW effort / HIGH value: a flag toggling trap/diagnostic verbosity (ADR-0016 diag
+      infra exists; ZWASM_DEBUG env is internal-only). ~a few lines.
+      P2 WAT (.wat text) input acceptance — LOW effort / HIGH dev-UX value, but needs a WAT→wasm parse path
+      (wasm-tools/wabt or a minimal Zig parser); not 完成形-blocking (ecosystem converts). Possibly v0.2.
+      Lower: --mapdir alias, --fuel (D-277 deferred), trap-kind→exit-code differentiation, shell completion.
+      DISCHARGE: P0+P1 landed (P2 = decide WAT support direction). Audit method reusable for the C-API + Zig-API
+      surfaces (the other two 完成形 surface-audit targets).
+    first_raised: "2026-06-06"
+    last_reviewed: "2026-06-06"
+    refs: |-
+      src/cli/main.zig (arg parse ~120-176, --dir@159, --env wiring target); src/cli/run.zig (runWasmJit@44 /
+      runCwasmWasi@122 / runWasmCapturedWithPreopens — setArgs+addPreopen sites @56/62/149/152/253/260);
+      src/wasi/host.zig (setEnvs@160, setArgs@143, EnvEntry@61); ADR-0159 (CLI scope lock); ADR-0016 (diag).
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.
