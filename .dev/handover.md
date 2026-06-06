@@ -21,11 +21,18 @@ residuals are D-293-class (R2 "undefined element" needs splitting the SHARED oob
 op_table routes call_indirect+table.get/set/copy/fill all to code 2 — AND is conformance-neutral cosmetic; R1
 needs the subtyping-trampoline null sentinel). NOT cheap standalone fixes → fold into D-293.
 
-**Next actionable** (full debt sweep 2026-06-06): **D-286** (memory.fill/init byte-loop → word-wise, follows
-the proven D-285 memory.copy pattern — real perf-completeness value) · **D-289** (arm64 frame-offset imm12
-cap, FP/param/stack large-arm residual; GPR done) · **D-229** (x86_64 SysV param-bearing multi-value wrapper
-thunk) · **D-283** (realworld WASI corpus not JIT-run e2e) · **D-293** (kinded-fixup refactor, subsumes D-294
-residuals) · **D-204** (validator.zig at cap=3300, split review).
+**Triage of the B-group (2026-06-06)**: D-294 residuals → D-293-class (deferred); **D-286** → perf-measure-first
+DEFER (byte loops are spec-correct; row admits no fill/init-bound bench → no measured need). The genuine
+**correctness/completeness** gaps that warrant fresh-context codegen work, in priority order:
+- **D-289** — arm64 frame-offset imm12 cap: functions with a frame > the scaled-imm12 reach (16380 W / 32760 X
+  / 65520 Q) UnsupportedOp on the FP/param/stack LDR/STR paths. GPR paths already fixed+verified (`340eaf5e`,
+  `gpr.frameAddrLarge` two-ADD); residual = mirror that to the FP/param/stack arms. Real "valid program won't
+  JIT" gap.
+- **D-229** — x86_64 SysV param-bearing multi-value wrapper thunk UNIMPLEMENTED (arm64 has it `f1858416`):
+  backend asymmetry; a real completeness/parity gap.
+- **D-293** — kinded-fixup refactor (splits the shared bounds_fixups/code-2 channel; subsumes D-294 R2).
+- **D-283** (realworld WASI not JIT-run e2e — but only 46/55 compile, so enabling surfaces failures) ·
+  **D-204** (validator.zig at cap=3300 split review). NEXT: D-289.
 
 **Blocked / parked**: **D-290** remainder = 3 proposal-laden distillers (wasmtime_misc / spec_2_0_assert /
 spec_simd) direction-gated — wasm-tools vs wabt TOOL-OUTPUT divergence breaks curated gates (NOT drift; debt

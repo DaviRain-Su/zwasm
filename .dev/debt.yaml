@@ -239,6 +239,10 @@ entries:
       word-wise rewrite directly (LDR/STR X + tail); fill needs a byte→word splat (e.g. multiply the fill
       byte by 0x0101010101010101, then STR X 8/iter + byte tail). DISCHARGE: word-wise fill+init on both
       backends, green on the spec fill/init wast under ZWASM_SPEC_ENGINE=jit + edge fixtures.
+      PRIORITY 2026-06-06 (perf-measure-first defer): the byte loops are CORRECT (spec-green); this is a pure
+      perf opt and the row itself records "no current bench is fill/init-bound". Per feedback_perf_measure_first
+      (measure headroom before building speculative perf), this stays DEFERRED until a fill/init-bound workload
+      is measured. Not a correctness gap; revisit when a bench actually exercises it.
     first_raised: "2026-06-05"
     last_reviewed: "2026-06-05"
     refs: |-
