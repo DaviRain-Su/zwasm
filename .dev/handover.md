@@ -64,21 +64,22 @@ audit-gap list closed-or-deferred.
     →unreachable(5) mis-report. **D** (`4bdaec59`): trap-UX audit vs wasmtime/wasmer/v1 — clean, ADR-0159-aligned;
     one bug found → **D-294** (JIT call_indirect null-elem → mislabels indirect_call_mismatch; fix = code 13).
 
-## ← LEAD: D-291 + D-295 DONE (0 `now` debts) — next: the queue
+## ← LEAD: D-290 build.zig increment done (`b0bb147a`) — remaining D-290 = regen-reverify campaign
 
-**D-291 fully closed**: ed25519 `--engine jit` exits 0 (was oob_table trap), 3-host green; the arm64
-`homedCallerSavedSpillReload` callee-saved-home-skip fix (`23874eda`), gated diag removed (`713633d6`), and a
-**validated regression guard** (`9ab34d18` — runner_trap_test JIT-runs ed25519 via runVoidExportWasi asserting
-no trap; revert-test confirmed it catches the bug; ed25519.wasm copied to src/engine/testdata/). Lesson filed.
-**D-284 DONE** (`fbc60815`): unified the JIT CLI entry-resolution to the interp/AOT lenient chain via new
-`runner.runWasiLenient` (`_start→main→first-func-export`, else instantiate-only → exit 0; per-sig dispatch
-void/()→i32). nbody `--engine jit` now exits 0 (was 1) == interp; new test + test-spec green. Residual edge
-(noted): zero-func-export module → JIT instantiate-only (exit 0) vs interp/AOT NoFuncExport — unify in a
-follow-on if it matters. **NEXT — queue**: **D-290** (wabt→wasm-tools toolchain hygiene — swap
-wast2json→json-from-wast in regen_spec_2_0_assert.sh + regen_test_data.sh, wat2wasm→`wasm-tools parse` in
-build.zig spectest + flake.nix wabt pin; mind D-179 JSON-normalization gotchas; 3-host verify after); **D-288**
-(interp native-recursion → flat/trampolined redesign, ADR-grade, the biggest); **D-279** (Win64 spec-simd
-heisenbug, non-deterministic, streak 2/5). D-291+D-294+D-295 all done; 0 `now` debts.
+**D-290 build.zig swap** (`b0bb147a`): spectest.wat→spectest.wasm now uses `wasm-tools parse` (was `wat2wasm`).
+SAFE because it's BUILD-TIME gen (no committed-data drift) + flake.nix:56 provides wasm-tools to the remote nix
+shell (`nix develop --command`), so 3-host build is unaffected. test-spec green (9 passed). **Remaining D-290 is
+deliberately NOT a quick swap**: regen_spec_2_0_assert.sh (912 LOC bespoke wast2json-parsing + own
+normalization), regen_test_data.sh (committed `.0.wasm` bytes), regen_v1_carry_over.sh — each REGENERATES
+COMMITTED FIXTURES whose bytes/format may drift under wasm-tools, so each needs a full regenerate-and-reverify
+cycle (spec-suite + 3-host green), porting the D-179 normalization baker. That's a focused campaign, not
+tail-of-turn — queued, see debt row D-290.
+
+**Prior (still landed)**: D-291 closed (`23874eda` arm64 callee-saved-home spill fix, 3-host green, guard
+`9ab34d18`). D-284 DONE (`fbc60815`, `runner.runWasiLenient` unified JIT entry-resolution; nbody jit==interp).
+**NEXT — queue**: **D-290 regen campaign** (above); **D-288** (interp native-recursion → flat/trampolined
+redesign, ADR-grade, the biggest); **D-279** (Win64 spec-simd heisenbug, non-deterministic, streak 2/5).
+0 `now` debts.
 
 **Other status**: ADR-0164 COMPLETE. **D-294 3-HOST GREEN** (`partial`, residuals polish). **D-279 sha256 lead
 FALSE** (corrected — zwasm hashes correctly; fixture has a wrong baked-in constant, golden-matched, never gates;
@@ -102,11 +103,12 @@ c_sha256_hash fixture → D-290). Queued: D-288, D-284, D-290.
 
 ## Step 0.7 (next resume) — verify remote logs
 
-- **ubuntu**: kicked @`ca758ace` (D-291 fix is arm64-only → x86_64 unaffected, this just re-confirms the build +
-  broad x86_64 suite). Next resume: verify `/tmp/ubuntu.log` `OK`. Prior `ba111ee5`/`82630c95` were GREEN.
-- **windows**: ✅ GREEN @`7e46c054` (`[run_remote_windows] OK`); D-279 did NOT fire (tracker `silent`, streak 1).
-  Cadence DEFERRED for the D-291 fix (arm64-only, no x86_64/Win64 ABI change). The `verify: FAIL` sha256 line is
-  the known FALSE lead (fixture's wrong constant; zwasm's d0e8b8f… is correct). 
+- **ubuntu**: kicked @`b0bb147a` (D-290 build.zig wasm-tools swap — confirms wasm-tools-built spectest.wasm +
+  broad x86_64 suite on the remote nix shell). Next resume: verify `/tmp/ubuntu.log` `OK`.
+- **windows**: kicked @`b0bb147a` (cadence FIRED — build.zig is an ABI-touching path per should_gate_windows).
+  Verifies wasm-tools is in the windows nix shell + spectest builds. Next resume: verify `/tmp/win.log`
+  `[run_remote_windows] OK`. The `verify: FAIL` sha256 line is the known FALSE lead (fixture's wrong constant;
+  zwasm's d0e8b8f… is correct). windows red → NOT auto-revert (D7): re-run once → track_heisenbug if flake.
 - **Gate note**: `run_remote_windows.sh` `OK` line = real green; `Build Summary: N failed` (no `OK`) = RED.
   `zig-host-hello` exit-42 + `--__selftest-crash` exit-70 "failed command" = EXPECTED, not crashes.
 

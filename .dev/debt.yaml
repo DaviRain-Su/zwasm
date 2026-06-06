@@ -275,9 +275,15 @@ entries:
       wast2json → `wasm-tools json-from-wast` (D-179) — its header documents the gotchas to reuse: wasm-tools
       has no `--enable-all` (proposals on by default), prefixes module ids with `$`, emits i32/i64 JSON
       values differently (needs the normalization baker), rejects some `(module definition ...)` forms.
-      REMAINING wabt sites to migrate: (1) `scripts/regen_spec_2_0_assert.sh` (wast2json → json-from-wast),
-      (2) `scripts/regen_test_data.sh` (wast2json), (3) `build.zig` spectest.wat→spectest.wasm pipeline +
-      `flake.nix` wabt pin (wat2wasm → `wasm-tools parse`), (4) any ad-hoc `.wat` fixture gen. DISCHARGE:
+      ALSO DONE (`b0bb147a`): `build.zig` spectest.wat→spectest.wasm now uses `wasm-tools parse` (build-time
+      gen, no committed-data drift; test-spec green; flake.nix:56 provides wasm-tools to the remote nix shell
+      so 3-host build unaffected). REMAINING wabt sites — all REGEN COMMITTED FIXTURES, so each is a
+      regenerate-and-reverify cycle (bytes/format may drift, needs full spec-suite + 3-host green, NOT a quick
+      swap): (1) `scripts/regen_spec_2_0_assert.sh` (912 LOC, bespoke wast2json-output parsing + own
+      normalization — port the D-179 baker), (2) `scripts/regen_test_data.sh` (43 LOC, copies `$n.0.wasm`
+      binaries — wasm-tools may emit different-but-valid encoding → fixture bytes change), (3)
+      `scripts/regen_v1_carry_over.sh` (parses wast2json JSON commands → manifest + .wasm), (4) drop the
+      `flake.nix` wabt pin once all consumers migrated. DISCHARGE:
       `rg -n 'wat2wasm|wast2json|wabt' scripts/ build.zig flake.nix` returns nothing (or only historical
       comments); wabt dropped from flake.nix; all spec-regen + fixture builds use wasm-tools; 3-host
       test-all + test-spec green after the swap. Low urgency (current tooling works); do as deliberate
