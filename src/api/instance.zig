@@ -1231,14 +1231,21 @@ pub export fn wasm_memory_data_size(m: ?*const Memory) callconv(.c) usize {
 }
 
 /// `wasm_memory_size(*const Memory)` — Wasm spec §4.4.7
-/// (`memory.size`) — page count. Page size = 64 KiB per spec.
+/// (`memory.size`) — page count in the memory's page-size units
+/// (64 KiB default; custom-page-sizes ADR-0168 v0.2 = 1 << page_size_log2).
 pub export fn wasm_memory_size(m: ?*const Memory) callconv(.c) u32 {
     const handle = m orelse return 0;
+    var ps_log2: u6 = 16;
     const len: usize = if (handle.instance) |inst| blk: {
         const rt = inst.runtime orelse return 0;
+        if (rt.memories.len > 0) ps_log2 = @intCast(rt.memories[0].page_size_log2);
         break :blk rt.memory.len;
-    } else (handle.minst orelse return 0).bytes.len;
-    return @intCast(len / 65536);
+    } else dblk: {
+        const mi = handle.minst orelse return 0;
+        ps_log2 = @intCast(mi.page_size_log2);
+        break :dblk mi.bytes.len;
+    };
+    return @intCast(len >> ps_log2);
 }
 
 /// `wasm_memory_grow(*Memory, delta)` — Wasm spec §4.4.7
@@ -1253,8 +1260,10 @@ pub export fn wasm_memory_grow(m: ?*Memory, delta: u32) callconv(.c) bool {
     const handle = m orelse return false;
     if (handle.instance) |inst| {
         const rt = inst.runtime orelse return false;
-        const old_pages = rt.memory.len / 65536;
-        const new_bytes = (old_pages + delta) * 65536;
+        // Custom-page-sizes (ADR-0168 v0.2): grow in the memory's page units.
+        const ps_log2: u6 = if (rt.memories.len > 0) @intCast(rt.memories[0].page_size_log2) else 16;
+        const old_pages = rt.memory.len >> ps_log2;
+        const new_bytes = (old_pages + delta) << ps_log2;
         const grown = rt.alloc.realloc(rt.memory, new_bytes) catch return false;
         @memset(grown[rt.memory.len..new_bytes], 0);
         rt.setMemory0Bytes(grown);
@@ -1264,8 +1273,9 @@ pub export fn wasm_memory_grow(m: ?*Memory, delta: u32) callconv(.c) bool {
     const mi = handle.minst orelse return false;
     const store = handle.store orelse return false;
     const alloc = storeAllocator(store) orelse return false;
+    const ps_log2: u6 = @intCast(mi.page_size_log2);
     const old_len = mi.bytes.len;
-    const new_bytes = (old_len / 65536 + delta) * 65536;
+    const new_bytes = ((old_len >> ps_log2) + delta) << ps_log2;
     const grown = alloc.realloc(mi.bytes, new_bytes) catch return false;
     @memset(grown[old_len..new_bytes], 0);
     mi.bytes = grown;
