@@ -31,10 +31,12 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
   `x86_64/op_call.zig:1178` (`encShrRImm8 >>16`) → must become `>> page_size_log2`, `instantiate.zig:1380/1716`,
   `api/instance.zig`, `aot/*`. Validate page_size_log2 ∈ {0,16}; limits cap scales by idx_type (2^32 i32 / 2^48
   i64), NOT the 256MiB host cap.
-- **Plan**: chunk 1 = parse (0x08 + uleb page_size_log2, validate ∈{0,16}) + data shape (MemoryEntry +
-  MemoryInstance `page_size_log2`) + parse unit tests (red). chunk 2 = thread page_size into setup alloc + interp
-  memory.size/grow (byte units) + interp test. chunk 3 = JIT page-count shift `>>page_size_log2` both arches +
-  edge fixtures (`(memory 1 1 (pagesize 1))`: memory.size = byte count, grow-by-N, fine-grained load/store).
+- **Plan**: ~~chunk 1 parse + data shape~~ **DONE @27b1b4d7** (0x08 + uleb page_size_log2 ∈{0,16}, mask ~0x0F;
+  MemoryEntry+MemoryInstance field; 4 parse tests; binary verified via wabt: `(pagesize 1)`→flag 0x09/log2-trailing).
+  **NEXT chunk 2** = thread `page_size = 1<<page_size_log2` into setup alloc (`setup.zig:391` min*ps) + interp
+  memory.size/grow byte units (`memory.zig:165/612` wasm_page_size, `runtime.zig:400/412/420` growMemory,
+  `setup.zig:172` jitMemoryGrow) + interp test. chunk 3 = JIT page-count shift `>>page_size_log2` both arches
+  (`arm64/emit.zig:1373`, `x86_64/op_call.zig:1178`) + edge fixtures (`(memory 1 1 (pagesize 1))`).
 - **17.1-atomics DONE 3-host @9eb84833** (fence+load/store/rmw/cmpxchg+notify/wait, interp+JIT; D-028 win flake
   noted). **17.2-wide-arith DONE @231d4536** (add128/sub128/mul_wide_s/u, interp+JIT both arches; Mac+ubuntu green
   @aa95e204, windows batched 5/12). **D-299** (inline load/store JIT misaligned-trap) still DEFERRED.
@@ -47,7 +49,7 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
 - **Phase 17 (v0.2) IN-PROGRESS** (ADR-0168); **17.1-atomics DONE+3-host-confirmed @9eb84833** (full op set,
   interp+JIT both arches; win lone fail = D-028 known flake). **17.2-wide-arith DONE @231d4536** (4 ops,
   interp+JIT both arches; Mac+ubuntu green @aa95e204, windows batched). Now **17.3-custom-page-sizes ACTIVE**
-  (survey done; LARGE ~30 sites); NEXT = chunk-1 parse+data-shape. D-299 deferred.
+  (chunk-1 parse+data-shape DONE @27b1b4d7); NEXT = chunk-2 setup+interp byte-units. D-299 deferred.
   Phase 16 (完成形) DONE. No release/tag ever (ADR-0156).
 - Debt ledger: **65 entries, 0 `now`** (D-264 dogfooding discharged). Remaining = `.dev/remaining_sweep.md`
   (Bucket A prune / B actionable-low / C deferred / D externally-blocked) — sweep between features, never idle.
