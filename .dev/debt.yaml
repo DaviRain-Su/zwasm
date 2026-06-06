@@ -279,19 +279,26 @@ entries:
       and the KEY distiller gotcha — wasm-tools emits some quote/text modules as `.wat` where wabt compiled
       `.wasm` (proven: comments.wast module[4] → `.wat`), so any JSON-distiller script that copies only `.wasm`
       must add a `wasm-tools parse <wat> -o <wasm>` conversion for `.wat`-typed `filename`s.
+      KEY CONSTRAINT (found 2026-06-06): the committed spec corpora are SNAPSHOTS with NO recorded upstream
+      pin, and upstream has drifted (e.g. func.wast: committed manifest 56 entries vs current-wabt 53 — a
+      coverage reduction). So re-running ANY distiller (wabt or wasm-tools) against current upstream produces a
+      large diff dominated by spec-content drift, NOT the tool swap — byte-verifying the migrated script vs the
+      committed corpus is IMPOSSIBLE. Therefore each distiller migration is a TOOL-ONLY SCRIPT SWAP, validated
+      by: regenerate IN PLACE → run the script's `test-spec*` target green (proves the migrated tool emits a
+      valid, consumable corpus) → `git checkout -- <corpus>` + `git clean -fd <corpus>` (revert data; commit
+      ONLY the script). A genuine corpus refresh (bump upstream + accept dropped coverage) is a DELIBERATE
+      separate initiative, out of D-290 scope.
       DONE THIS SESSION: `build.zig` spectest → `wasm-tools parse` (`b0bb147a`, build-time gen, zero churn,
-      ubuntu-green @a6b3f86f); `regen_test_data.sh` → json-from-wast + strip --all (`c43aba23`, 7/9
-      byte-identical, nop/unreachable +2B elem-encoding, test+test-spec green); DELETED orphaned
-      `regen_v1_carry_over.sh` (`615b9c10`, regenerated dissolved `test/v1_carry_over/`, superseded by
-      regen_wasmtime_misc.sh in 6.B). REMAINING (all DISTILLER-class = parse JSON commands → manifest + multi
-      `.wasm`; each needs the .wat-conversion + strip --all + both-ways drift audit BEFORE committing the
-      regenerated corpus, then the matching `test-spec*` target green): (1) `regen_test_data_2_0.sh` (50 names
-      → test/spec/wasm-2.0/; measured drift: 1/50 manifest [comments .wat], 22/1151 wasm +2B), (2)
-      `regen_spec_1_0_assert.sh`, (3) `regen_spec_2_0_assert.sh` (912 LOC), (4) `regen_wasmtime_misc.sh`,
-      (5) `regen_spec_simd_assert.sh` (v128 list-of-lane normalization, riskiest — see its header), then
-      (6) drop the `flake.nix` wabt pin + (7) `scripts/windows/install_tools.ps1` wabt provisioning lines.
-      `regen_spec_3_0_assert.sh` already migrated (D-179 precedent). Drift-audit harness pattern (both-ways
-      manifest diff + per-wasm cmp after strip --all) is in this session's transcript — reuse it per script.
+      ubuntu+win green); `regen_test_data.sh` → json-from-wast + strip --all (`c43aba23`, 7/9 byte-identical,
+      committed nop/unreachable +2B — those 2 fixtures WERE committed since drift-free); DELETED orphaned
+      `regen_v1_carry_over.sh` (`615b9c10`, dissolved corpus); `regen_test_data_2_0.sh` → .wat-aware distiller
+      (`503fb429`, script-only, validated test-spec-wasm-2.0 green 1151 passed then data reverted). REMAINING
+      (tool-only script swaps per the constraint above, reuse the regen_test_data_2_0 distiller recipe —
+      valid-binary→strip --all, valid-text→parse+strip, invalid/malformed-binary→raw copy): (1)
+      `regen_spec_1_0_assert.sh`, (2) `regen_spec_2_0_assert.sh` (912 LOC), (3) `regen_wasmtime_misc.sh`,
+      (4) `regen_spec_simd_assert.sh` (v128 list-of-lane normalization, riskiest — see its header), then
+      (5) drop the `flake.nix` wabt pin + (6) `scripts/windows/install_tools.ps1` wabt provisioning lines.
+      `regen_spec_3_0_assert.sh` already migrated (D-179 precedent).
       DISCHARGE: `rg -n 'wat2wasm|wast2json|wabt' scripts/ build.zig flake.nix` returns nothing (or only
       historical comments); wabt dropped from flake.nix; 3-host test-all + every test-spec* target green.
       Low urgency (current tooling works); do as deliberate per-script hygiene.

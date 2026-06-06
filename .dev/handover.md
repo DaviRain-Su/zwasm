@@ -53,25 +53,22 @@ audit-gap list closed-or-deferred.
     →unreachable(5) mis-report. **D** (`4bdaec59`): trap-UX audit vs wasmtime/wasmer/v1 — clean, ADR-0159-aligned;
     one bug found → **D-294** (JIT call_indirect null-elem → mislabels indirect_call_mismatch; fix = code 13).
 
-## ← LEAD: D-290 — 3 sites done (`b0bb147a` `c43aba23` `615b9c10`); remaining = 5 distiller scripts + flake/win
+## ← LEAD: D-290 — 4 sites done (`b0bb147a` `c43aba23` `615b9c10` `503fb429`); remaining = 4 distiller + flake/win
 
-**D-290 progress this session**: (1) build.zig spectest → `wasm-tools parse` (`b0bb147a`, build-time gen, zero
-churn, ubuntu-green @a6b3f86f); (2) regen_test_data.sh → `json-from-wast` + `strip --all` (`c43aba23`, 7/9
-byte-identical, nop/unreachable +2B elem-encoding, test+test-spec green); (3) DELETED orphaned
-regen_v1_carry_over.sh (`615b9c10`, regenerated the dissolved test/v1_carry_over/, superseded by
-regen_wasmtime_misc.sh in 6.B). **METHODOLOGY established** (debt row D-290 has full detail): wabt emits
-minimal name-free modules → wasm-tools `json-from-wast` adds a `name` section (+2B extended elem-seg) →
-`strip --all` recovers near-parity; KEY gotcha = wasm-tools emits some quote modules as `.wat` (proven:
-comments.wast m[4]) so JSON-distiller scripts must add a `wasm-tools parse <wat>` conversion. **REMAINING (all
-distiller-class, each = .wat-conversion + strip --all + both-ways drift audit + test-spec* green BEFORE
-committing the regenerated corpus)**: regen_test_data_2_0.sh (measured: 1/50 manifest, 22/1151 wasm),
-regen_spec_1_0/2_0_assert.sh, regen_wasmtime_misc.sh, regen_spec_simd_assert.sh (v128 normalization, riskiest);
-then drop flake.nix wabt pin + windows/install_tools.ps1. Do as focused per-script cycles.
+**D-290 done this session**: build.zig spectest→`wasm-tools parse` (`b0bb147a`); regen_test_data.sh→
+json-from-wast+strip --all (`c43aba23`, drift-free so 2 fixtures committed); deleted orphaned
+regen_v1_carry_over.sh (`615b9c10`); regen_test_data_2_0.sh→.wat-aware distiller (`503fb429`, script-only).
+**KEY CONSTRAINT found** (debt row D-290 full detail): committed spec corpora are SNAPSHOTS with NO upstream
+pin + upstream drifted (func.wast 56→53 entries = coverage loss) → re-running any distiller produces
+drift-dominated churn, so byte-verify vs committed is IMPOSSIBLE. Each remaining distiller = TOOL-ONLY SCRIPT
+SWAP, validated by: regenerate in place → `test-spec*` target green → `git checkout -- <corpus>` +
+`git clean -fd` → commit script ONLY. Distiller recipe: valid-binary→`strip --all`, valid-text→`parse`+strip,
+invalid/malformed-binary→raw copy. **REMAINING**: regen_spec_1_0/2_0_assert.sh, regen_wasmtime_misc.sh,
+regen_spec_simd_assert.sh (v128, riskiest); then drop flake.nix wabt pin + windows/install_tools.ps1.
 
-**Prior (still landed)**: D-291 closed (`23874eda` arm64 callee-saved-home spill fix). D-284 DONE (`fbc60815`,
-`runner.runWasiLenient` unified JIT entry-resolution). **NEXT — queue**: D-290 distiller scripts (above);
-**D-288** (interp native-recursion → flat/trampolined redesign, ADR-grade, biggest); **D-279** (Win64
-spec-simd heisenbug, streak 2/5). 0 `now` debts.
+**Prior (still landed)**: D-291 closed (`23874eda`). D-284 DONE (`fbc60815`). **NEXT — queue**: D-290 distiller
+scripts (above); **D-288** (interp native-recursion → flat/trampolined redesign, ADR-grade, biggest); **D-279**
+(Win64 spec-simd heisenbug, streak 3/5). 0 `now` debts. All 3 hosts green @ee940144 (win cadence recorded).
 
 **Other status**: ADR-0164 COMPLETE. **D-294 3-HOST GREEN** (`partial`, residuals polish). **D-279 sha256 lead
 FALSE** (corrected — zwasm hashes correctly; fixture has a wrong baked-in constant, golden-matched, never gates;
