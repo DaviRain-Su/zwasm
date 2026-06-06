@@ -983,7 +983,16 @@ entries:
     layer: "code"
     status: "note"
     description: |-
-      **Win64-only SIMD JIT heisenbug — `zwasm-spec-simd` intermittent crash (exit 3).** Surfaced 2026-06-05
+      **Win64-only SIMD JIT heisenbug — `zwasm-spec-simd` intermittent crash (exit 3).**
+      STREAK 5/5 (2026-06-06): 5 consecutive `silent` windows runs over 5 structurally-distinct SHAs
+      (7e46c054 → e707fd31, spanning the whole D-288 + D-289 body of work) — `track_heisenbug.sh` flags a
+      DISCHARGE CANDIDATE. NOT fully discharged: investigation_discipline §2 condition (4) (named root cause
+      OR ADR-documented rate-reduction mitigation) is UNMET — the bug was never root-caused (surfaced once,
+      never reproduced) and the windows cadence (D7/D8) DETECTS but does not reduce the crash rate. So this
+      stays a WATCH note: empirically it appears resolved/extremely-rare, but a no-root-cause heisenbug is
+      kept tracked. If it resurfaces, `track_heisenbug.sh win64-testall segv` resets the streak + reopen the
+      `[d-163-jit]`-dump investigation. Original report below.
+      Surfaced 2026-06-05
       during the WASI-program 3-host check: windows `test-all` crashed at `simd_bit_shift` (i64x2 shift, JIT mode,
       `[d-163-jit]` codegen dump preceding) with process exit code 3; a re-run of the same `zwasm-spec-simd.exe`
       passed CLEAN (`simd_assert_runner: 13351 passed, 0 failed`). So it is INTERMITTENT (non-deterministic), not a
