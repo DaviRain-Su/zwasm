@@ -1091,6 +1091,7 @@ pub fn compile(
             // like atomic.fence; forwards to the shared mem emitter.
             // Single-threaded substrate → plain aligned load (B2 = trap).
             .@"i32.atomic.load" => try op_memory.emitI32AtomicLoad(&ctx, &ins),
+            .@"i64.atomic.load" => try op_memory.emitI64AtomicLoad(&ctx, &ins),
             .@"i32.load8_s" => try op_memory.emitI32Load8S(&ctx, &ins),
             .@"i32.load8_u" => try op_memory.emitI32Load8U(&ctx, &ins),
             .@"i32.load16_s" => try op_memory.emitI32Load16S(&ctx, &ins),

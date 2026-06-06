@@ -1581,6 +1581,7 @@ pub const Validator = struct {
             },
             // i32.atomic.load (natural align = 2): pop addr → push i32.
             0x10 => try self.opAtomicLoad(.i32, 2),
+            0x11 => try self.opAtomicLoad(.i64, 3), // i64.atomic.load (natural align 3 = 8B)
             else => return Error.NotImplemented,
         }
     }

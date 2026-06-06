@@ -52,6 +52,7 @@ inline fn memorySlice(rt: *Runtime, extra: u32) []u8 {
 pub fn register(table: *DispatchTable) void {
     table.interp[op(.@"i32.load")] = i32Load;
     table.interp[op(.@"i32.atomic.load")] = i32AtomicLoad;
+    table.interp[op(.@"i64.atomic.load")] = i64AtomicLoad;
     table.interp[op(.@"i64.load")] = i64Load;
     table.interp[op(.@"f32.load")] = f32Load;
     table.interp[op(.@"f64.load")] = f64Load;
@@ -117,6 +118,20 @@ fn i32AtomicLoad(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     if (ea + 4 > mem.len) return Trap.OutOfBoundsLoad;
     const v = std.mem.readInt(u32, mem[@intCast(ea)..][0..4], .little);
     try rt.pushOperand(.{ .u32 = v });
+}
+
+/// Wasm threads §exec — `i64.atomic.load` (ADR-0168): naturally
+/// aligned 8-byte seq-cst load. Mirrors `i32AtomicLoad` (alignment
+/// trap `ea mod 8 ≠ 0` BEFORE bounds, spec step 8 < 14a); natural
+/// align pinned to 3 by validation.
+fn i64AtomicLoad(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
+    const rt = Runtime.fromOpaque(c);
+    const mem = memorySlice(rt, instr.extra);
+    const ea: u64 = @as(u64, rt.popOperand().u32) + @as(u64, instr.payload);
+    if (ea & 7 != 0) return Trap.UnalignedAtomic;
+    if (ea + 8 > mem.len) return Trap.OutOfBoundsLoad;
+    const v = std.mem.readInt(u64, mem[@intCast(ea)..][0..8], .little);
+    try rt.pushOperand(.{ .u64 = v });
 }
 
 fn i64Load(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
@@ -422,6 +437,26 @@ test "i32.atomic.load unaligned address traps UnalignedAtomic (before bounds)" {
     // addr=2 is in-bounds but not 4-aligned → alignment trap, not OOB.
     try rt.pushOperand(.{ .u32 = 2 });
     try testing.expectError(Trap.UnalignedAtomic, driveOne(&rt, &t, .@"i32.atomic.load", 0, 0));
+}
+
+test "i64.atomic.load reads an aligned doubleword + traps unaligned (4 not 8-aligned)" {
+    var t = DispatchTable.init();
+    register(&t);
+    var rt = Runtime.init(testing.allocator);
+    defer rt.deinit();
+    rt.memory = try testing.allocator.alloc(u8, 64);
+    @memset(rt.memory, 0);
+
+    try rt.pushOperand(.{ .u32 = 8 });
+    try rt.pushOperand(.{ .u64 = 0x0123456789ABCDEF });
+    try driveOne(&rt, &t, .@"i64.store", 0, 0);
+    try rt.pushOperand(.{ .u32 = 8 });
+    try driveOne(&rt, &t, .@"i64.atomic.load", 0, 0);
+    try testing.expectEqual(@as(u64, 0x0123456789ABCDEF), rt.popOperand().u64);
+
+    // addr=4 is 4-aligned but NOT 8-aligned → UnalignedAtomic.
+    try rt.pushOperand(.{ .u32 = 4 });
+    try testing.expectError(Trap.UnalignedAtomic, driveOne(&rt, &t, .@"i64.atomic.load", 0, 0));
 }
 
 test "i32.load8_s sign-extends" {

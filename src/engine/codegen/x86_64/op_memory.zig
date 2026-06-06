@@ -135,7 +135,7 @@ pub fn emitMemOp(
         .@"i64.load32_u",
         .@"i64.store32",
         => 4,
-        .@"i64.load", .@"i64.store", .@"f64.load", .@"f64.store" => 8,
+        .@"i64.load", .@"i64.atomic.load", .@"i64.store", .@"f64.load", .@"f64.store" => 8,
         else => unreachable,
     };
 
@@ -208,7 +208,7 @@ pub fn emitMemOp(
                 .@"i32.load8_u" => inst.encMovzxR32_8MemBaseIdx(dst_r, .rax, .rdx),
                 .@"i32.load16_s" => inst.encMovsxR32_16MemBaseIdx(dst_r, .rax, .rdx),
                 .@"i32.load16_u" => inst.encMovzxR32_16MemBaseIdx(dst_r, .rax, .rdx),
-                .@"i64.load" => inst.encMovR64FromBaseIdx(dst_r, .rax, .rdx),
+                .@"i64.load", .@"i64.atomic.load" => inst.encMovR64FromBaseIdx(dst_r, .rax, .rdx),
                 .@"i64.load8_s" => inst.encMovsxR64_8MemBaseIdx(dst_r, .rax, .rdx),
                 .@"i64.load8_u" => inst.encMovzxR64_8MemBaseIdx(dst_r, .rax, .rdx),
                 .@"i64.load16_s" => inst.encMovsxR64_16MemBaseIdx(dst_r, .rax, .rdx),
@@ -267,6 +267,7 @@ pub fn emitI32Load(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
 }
 pub const emitI32Load8S = emitI32Load;
 pub const emitI32AtomicLoad = emitI32Load; // threads (ADR-0168) — forwards ins.op to emitMemOp
+pub const emitI64AtomicLoad = emitI32Load; // forwards ins.op to emitMemOp (i64.atomic.load)
 pub const emitI32Load8U = emitI32Load;
 pub const emitI32Load16S = emitI32Load;
 pub const emitI32Load16U = emitI32Load;
@@ -342,7 +343,7 @@ fn emitMemOpI64(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
         .@"i32.load8_s", .@"i32.load8_u", .@"i32.store8", .@"i64.load8_s", .@"i64.load8_u", .@"i64.store8" => 1,
         .@"i32.load16_s", .@"i32.load16_u", .@"i32.store16", .@"i64.load16_s", .@"i64.load16_u", .@"i64.store16" => 2,
         .@"i32.load", .@"i32.atomic.load", .@"i32.store", .@"f32.load", .@"f32.store", .@"i64.load32_s", .@"i64.load32_u", .@"i64.store32" => 4,
-        .@"i64.load", .@"i64.store", .@"f64.load", .@"f64.store" => 8,
+        .@"i64.load", .@"i64.atomic.load", .@"i64.store", .@"f64.load", .@"f64.store" => 8,
         else => unreachable,
     };
 
@@ -400,7 +401,7 @@ fn emitMemOpI64(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
                 .@"i32.load8_u" => inst.encMovzxR32_8MemBaseIdx(dst_r, .rax, .rdx),
                 .@"i32.load16_s" => inst.encMovsxR32_16MemBaseIdx(dst_r, .rax, .rdx),
                 .@"i32.load16_u" => inst.encMovzxR32_16MemBaseIdx(dst_r, .rax, .rdx),
-                .@"i64.load" => inst.encMovR64FromBaseIdx(dst_r, .rax, .rdx),
+                .@"i64.load", .@"i64.atomic.load" => inst.encMovR64FromBaseIdx(dst_r, .rax, .rdx),
                 .@"i64.load8_s" => inst.encMovsxR64_8MemBaseIdx(dst_r, .rax, .rdx),
                 .@"i64.load8_u" => inst.encMovzxR64_8MemBaseIdx(dst_r, .rax, .rdx),
                 .@"i64.load16_s" => inst.encMovsxR64_16MemBaseIdx(dst_r, .rax, .rdx),
