@@ -53,22 +53,24 @@ audit-gap list closed-or-deferred.
     →unreachable(5) mis-report. **D** (`4bdaec59`): trap-UX audit vs wasmtime/wasmer/v1 — clean, ADR-0159-aligned;
     one bug found → **D-294** (JIT call_indirect null-elem → mislabels indirect_call_mismatch; fix = code 13).
 
-## ← LEAD: D-290 — 4 sites done (`b0bb147a` `c43aba23` `615b9c10` `503fb429`); remaining = 4 distiller + flake/win
+## ← LEAD: D-290 — 5 sites done; the 3 proposal-laden distillers BLOCKED (tool-output divergence); pivot queue
 
-**D-290 done this session**: build.zig spectest→`wasm-tools parse` (`b0bb147a`); regen_test_data.sh→
-json-from-wast+strip --all (`c43aba23`, drift-free so 2 fixtures committed); deleted orphaned
-regen_v1_carry_over.sh (`615b9c10`); regen_test_data_2_0.sh→.wat-aware distiller (`503fb429`, script-only).
-**KEY CONSTRAINT found** (debt row D-290 full detail): committed spec corpora are SNAPSHOTS with NO upstream
-pin + upstream drifted (func.wast 56→53 entries = coverage loss) → re-running any distiller produces
-drift-dominated churn, so byte-verify vs committed is IMPOSSIBLE. Each remaining distiller = TOOL-ONLY SCRIPT
-SWAP, validated by: regenerate in place → `test-spec*` target green → `git checkout -- <corpus>` +
-`git clean -fd` → commit script ONLY. Distiller recipe: valid-binary→`strip --all`, valid-text→`parse`+strip,
-invalid/malformed-binary→raw copy. **REMAINING**: regen_spec_1_0/2_0_assert.sh, regen_wasmtime_misc.sh,
-regen_spec_simd_assert.sh (v128, riskiest); then drop flake.nix wabt pin + windows/install_tools.ps1.
+**D-290 done**: build.zig (`b0bb147a`); regen_test_data.sh (`c43aba23`); deleted regen_v1_carry_over.sh
+(`615b9c10`); regen_test_data_2_0.sh (`503fb429`, script-only); regen_spec_1_0_assert.sh (`00d24722`,
+i32/i64 unsigned-mask + .wat-aware, test-spec-assert green 212). **HARD BLOCKER found** (debt row D-290 full
+detail): the SIMPLE corpora migrate cleanly, but the 3 PROPOSAL-LADEN distillers do NOT. Proven on
+regen_wasmtime_misc.sh: upstream is STABLE (old-wabt reproduces committed EXACTLY, basic 72/0 + runtime 266/0),
+yet the wasm-tools swap → basic 72/1 + runtime 327/35 = genuine TOOL-OUTPUT divergence, not drift. Concrete:
+`memory-copy.1.wasm` validates under wabt but v2 REJECTS the wasm-tools encoding (possible v2 validator gap —
+worth its own probe), + wasm-tools emits ~91 more runtime directives → 35 v2 gaps. So `regen_wasmtime_misc.sh`,
+`regen_spec_2_0_assert.sh` (912 LOC), `regen_spec_simd_assert.sh` (v128) + dropping flake.nix's wabt pin are
+BLOCKED on a direction call: re-curate (drops good coverage — bad) vs keep-wabt (re-scope "one CLI") vs
+fix-v2-to-accept-wasm-tools-encoding. wabt STAYS for now. Methodology + recipe preserved in debt row.
 
-**Prior (still landed)**: D-291 closed (`23874eda`). D-284 DONE (`fbc60815`). **NEXT — queue**: D-290 distiller
-scripts (above); **D-288** (interp native-recursion → flat/trampolined redesign, ADR-grade, biggest); **D-279**
-(Win64 spec-simd heisenbug, streak 3/5). 0 `now` debts. All 3 hosts green @ee940144 (win cadence recorded).
+**NEXT — pivot to other queue** (D-290 remainder is direction-gated): **D-288** (interp native-recursion →
+flat/trampolined redesign, ADR-grade, biggest) OR **D-279** (Win64 spec-simd heisenbug, streak 3/5). Possible
+side-probe: is `memory-copy.1.wasm` a real v2 validator gap (wasm-tools emits spec-valid wasm v2 rejects)?
+**Prior landed**: D-291 (`23874eda`), D-284 (`fbc60815`). 0 `now` debts. All 3 hosts green @ee940144.
 
 **Other status**: ADR-0164 COMPLETE. **D-294 3-HOST GREEN** (`partial`, residuals polish). **D-279 sha256 lead
 FALSE** (corrected — zwasm hashes correctly; fixture has a wrong baked-in constant, golden-matched, never gates;
