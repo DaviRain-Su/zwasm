@@ -57,37 +57,31 @@ const EmitCtx = ctx_mod.EmitCtx;
 const Error = ctx_mod.Error;
 const CallFixup = ctx_mod.CallFixup;
 
-/// Regalloc slot-id boundary between caller-saved (volatile) and callee-saved
-/// home registers. Slots 0..4 map to X9..X13 (caller-saved scratch); slots 5..7
-/// map to X20..X22 (callee-saved, survive a call). A register-homed local in a
-/// caller-saved slot is clobbered by a BL/BLR and must be spilled around it; a
-/// callee-saved home is preserved by the callee and needs no spill. Mirrors
-/// `abi.slotToReg`'s pool split (`allocatable_caller_saved_scratch_gprs.len`).
-const callee_saved_slot_boundary: u16 = abi.allocatable_caller_saved_scratch_gprs.len;
-
-/// ADR-0155 stage 2 (D-265 Phase IV) — spill every register-homed local whose
-/// home lives in a CALLER-SAVED register to its in-frame slot, BEFORE a BL/BLR.
+/// ADR-0155 stage 2 (D-265 Phase IV) — spill EVERY register-homed local to its
+/// in-frame slot BEFORE a BL/BLR, then reload after. D-291: this MUST include
+/// callee-saved-bank homes (X20..X22) — per ADR-0060 the JIT prologue installs
+/// invariants into X19..X28 WITHOUT stack-saving them, so a JIT callee that homes
+/// a local in X20..X22 clobbers the caller's value (NOT AAPCS64 callee-preserved).
 /// Call after args are marshalled (so the home register still holds the local's
 /// current value — `local.set` writes the home reg directly, so the register IS
-/// the live value). Homed locals in callee-saved slots (5..7 = X20..X22) survive
-/// the call and are skipped. Paired with `reloadHomedCallerSaved` after the call
-/// (omitted for tail calls, where control does not return).
+/// the live value). Paired with `reloadHomedCallerSaved` after the call (omitted
+/// for tail calls, where control does not return).
 fn spillHomedCallerSaved(ctx: *EmitCtx) Error!void {
     try homedCallerSavedSpillReload(ctx, .spill);
 }
 
-/// Reload every caller-saved register-homed local from its in-frame slot AFTER a
-/// BL/BLR (before the result is captured). Inverse of `spillHomedCallerSaved`.
+/// Reload every register-homed local from its in-frame slot AFTER a BL/BLR
+/// (before the result is captured). Inverse of `spillHomedCallerSaved`.
 fn reloadHomedCallerSaved(ctx: *EmitCtx) Error!void {
     try homedCallerSavedSpillReload(ctx, .reload);
 }
 
 const SpillDir = enum { spill, reload };
 
-/// Shared body for the spill-before / reload-after of caller-saved homed locals.
-/// For each homed rank, resolves the home pseudo-vreg's regalloc slot; only a
-/// register-resident home in a caller-saved slot (< `callee_saved_slot_boundary`)
-/// emits an STR (spill) / LDR (reload) at `local_base_off + local_offsets[lidx]`.
+/// Shared body for the spill-before / reload-after of register-homed locals.
+/// For each homed rank, resolves the home pseudo-vreg's regalloc slot; every
+/// register-resident home (caller- OR callee-saved, D-291) emits an STR (spill) /
+/// LDR (reload) at `local_base_off + local_offsets[lidx]`.
 /// i32 homes use the W-form (zero-extended, matching the prologue seed + the
 /// `local.get`/`set` W-form contract); i64 homes use the X-form.
 fn homedCallerSavedSpillReload(ctx: *EmitCtx, dir: SpillDir) Error!void {
@@ -97,10 +91,15 @@ fn homedCallerSavedSpillReload(ctx: *EmitCtx, dir: SpillDir) Error!void {
     while (r < homing.count) : (r += 1) {
         const home_vreg: u32 = ctx.n_temp + r;
         const home_reg: inst.Xn = switch (ctx.alloc.slot(home_vreg, .gpr)) {
-            .reg => |id| blk: {
-                if (id >= callee_saved_slot_boundary) continue; // callee-saved: no spill
-                break :blk abi.slotToReg(id) orelse return Error.SlotOverflow;
-            },
+            // D-291: the callee-saved bank (X20..X22) is NOT preserved across a
+            // JIT-to-JIT call — per ADR-0060 the JIT prologue installs runtime
+            // invariants into X19..X28 but does NOT stack-save them, and a callee
+            // that homes a local in X20..X22 clobbers it. So a call-crossing local
+            // homed in a callee-saved reg must ALSO be spilled/reloaded here (the
+            // old `id >= callee_saved_slot_boundary → continue` skip wrongly assumed
+            // AAPCS64 callee-preservation; func 11 in ed25519 lost its saved-SP
+            // local2 across `call 14`/`call 17`, over-restoring __stack_pointer).
+            .reg => |id| abi.slotToReg(id) orelse return Error.SlotOverflow,
             // A spilled home already lives in its frame slot across the call;
             // nothing to save/restore.
             .spill => continue,

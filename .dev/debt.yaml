@@ -147,8 +147,19 @@ entries:
       arm64/bounds_check.zig (the still-generic append sites)
   - id: "D-291"
     layer: "code"
-    status: "note"
+    status: "resolved"
     description: |-
+      ✅ FIXED 2026-06-06 (arm64 op_call.zig `homedCallerSavedSpillReload`): ed25519 `--engine jit` now exits 0
+      (was oob_table trap), `zig build test` + `test-spec` green. ROOT CAUSE: the arm64 homed-local cross-call
+      spill SKIPPED callee-saved-bank homes (`id >= callee_saved_slot_boundary → continue`), wrongly assuming
+      AAPCS64 callee-preservation — but per ADR-0060 the JIT prologue installs invariants into X19..X28 WITHOUT
+      stack-saving, and a JIT callee that homes a local in X20..X22 clobbers it. func 11 (ed25519, 21 locals,
+      high reg pressure) homed its saved-SP local2 in a callee-saved reg, call-crossing; `call 14`/`call 17`
+      clobbered it → epilogue over-restored __stack_pointer to garbage → func 7 read corrupt sp → data-region
+      result buffer → func 17 stored the funcptr global → cind oob_table trap. FIX: spill/reload callee-saved
+      homes across calls too (removed the skip) — matches x86_64's already-correct `homedSpillReload` (no skip;
+      RBX/R12-R14 also JIT-unsaved). ARM64-ONLY bug (x86_64 was correct); pending 3-host gate (windows). Full
+      investigation chain + the trap_aux diag journey below = audit trail; see lesson. DISCHARGE pending 3-host green.
       note (ADR-0163 A; surfaced by D-289; CHARACTERIZED 2026-06-05): `shootout/ed25519.wasm` now JIT-COMPILES
       (D-289 lifted the frame-offset cap) but TRAPS at runtime under `--engine jit` (wasmtime exit 0; interp
       280s timeout = just slow). CHARACTERIZED via lldb: it is a **controlled JIT trap, NOT a SIGSEGV** — lldb
