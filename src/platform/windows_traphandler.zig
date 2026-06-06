@@ -138,8 +138,33 @@ const impl = if (builtin.os.tag == .windows) struct {
     const EXCEPTION_CONTINUE_EXECUTION: c_long = -1;
     const EXCEPTION_INT_DIVIDE_BY_ZERO: u32 = 0xC0000094;
     const EXCEPTION_INT_OVERFLOW: u32 = 0xC0000095;
+    const EXCEPTION_STACK_OVERFLOW: u32 = 0xC00000FD;
+
+    // Minimal stderr write for the exhausted-stack diagnostic (mirrors
+    // `signal.zig`'s D-292 pattern). kernel32 = Windows system library, not
+    // libc (ADR-0070 does not fire); Zig 0.16 std.os.windows omits these.
+    extern "kernel32" fn GetStdHandle(nStdHandle: win.DWORD) callconv(.winapi) win.HANDLE;
+    extern "kernel32" fn WriteFile(hFile: win.HANDLE, lpBuffer: [*]const u8, nBytes: win.DWORD, lpWritten: ?*win.DWORD, lpOverlapped: ?*anyopaque) callconv(.winapi) win.BOOL;
+    const STD_ERROR_HANDLE: win.DWORD = @bitCast(@as(i32, -12)); // MSDN
 
     var veh_handle: ?win.PVOID = null;
+
+    /// D-279 H3 confirmation primitive. A Win64 stack overflow (1 MB default
+    /// thread stack vs 8 MB on Mac/Linux) is the leading hypothesis for the
+    /// intermittent SIMD-JIT exit-3 crash — it would be Win64-only,
+    /// depth-dependent, message-less, and NOT VEH-recovered. This logs it
+    /// wherever it fires (armed or not — a stack overflow is process-fatal
+    /// regardless), then CONTINUE_SEARCHes: diagnostic ONLY, no recovery, so
+    /// ADR-0105 D4's deliberate "do not recover stack overflows" stands (no
+    /// guard-page restoration). The write is a single fixed-string `WriteFile`
+    /// — no Zig formatting / stderr lock / allocation — so it survives the
+    /// exhausted-stack guard-page slack that a `std.debug.print` would fault in.
+    fn diagStackOverflow() void {
+        const msg = "[d-279-veh] STACK-OVERFLOW (H3 confirmed: Win64 1MB stack exhausted, not a miscompile)\n";
+        const h = GetStdHandle(STD_ERROR_HANDLE);
+        var written: win.DWORD = 0;
+        _ = WriteFile(h, msg.ptr, @intCast(msg.len), &written, null);
+    }
 
     /// D-279 permanent diagnostic. Emitted only when recovery is ARMED but
     /// the VEH cannot recover (unfiltered code, or RIP outside the JIT
@@ -155,6 +180,14 @@ const impl = if (builtin.os.tag == .windows) struct {
     }
 
     fn vehHandler(exception_info: *win.EXCEPTION_POINTERS) callconv(.winapi) c_long {
+        // D-279 H3: catch a stack overflow BEFORE the armed-check — it may
+        // fire outside an arm()-guarded JIT region (the spec-runner / interp /
+        // host fn), which is exactly the unguarded path H3 predicts. Log +
+        // CONTINUE_SEARCH (no recovery; ADR-0105 D4).
+        if (exception_info.ExceptionRecord.ExceptionCode == EXCEPTION_STACK_OVERFLOW) {
+            diagStackOverflow();
+            return win.EXCEPTION_CONTINUE_SEARCH;
+        }
         if (!@atomicLoad(bool, &recovery.active, .acquire)) {
             return win.EXCEPTION_CONTINUE_SEARCH;
         }
