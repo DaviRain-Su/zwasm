@@ -1,9 +1,9 @@
 //! zwasm v2 — minimal Zig host example (§13.5).
 //!
 //! Drives the **native Zig embedding API** (ADR-0109): Engine → compile →
-//! instantiate → `typedFunc().call()`. This is the Zig-native counterpart
-//! to `examples/c_host/hello.c` (which uses the wasm-c-api C ABI) — same
-//! module, two embedding surfaces.
+//! inspect (`Module.exports`) → instantiate → `typedFunc().call()`. This is
+//! the Zig-native counterpart to `examples/c_host/hello.c` (which uses the
+//! wasm-c-api C ABI) — same module, two embedding surfaces.
 //!
 //!   (module (func (export "main") (result i32) (i32.const 42)))
 //!
@@ -28,6 +28,17 @@ pub fn main() !void {
     defer eng.deinit();
     var mod = try eng.compile(&hello_wasm);
     defer mod.deinit();
+
+    // Inspect the module before instantiating (introspection, ADR-0109
+    // §3.3). A real embedder uses `Module.imports()` the same way to learn
+    // what host definitions a `Linker` must supply. Here the module has no
+    // imports and one export: "main" (a function).
+    var exports = try mod.exports(alloc);
+    defer exports.deinit();
+    for (exports.items) |e| {
+        std.debug.print("zwasm zig_host: export \"{s}\" ({s})\n", .{ e.name, @tagName(e.kind) });
+    }
+
     var inst = try mod.instantiate(.{});
     defer inst.deinit();
 
