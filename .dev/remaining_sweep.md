@@ -85,6 +85,8 @@ Refs: each row body has its discharge SHA; `.claude/rules/yaml_ssot_yq.md` (dele
 The 31 `blocked-by` rows. Each `/continue` §0.5 checks whether the named barrier dissolved this
 resume; if so the row leaves D and becomes A/B/C. Grouped by barrier:
 - **call_ref / §10.R**: D-186, D-206. **iso-recursive GC subtype**: D-198, D-211, D-202.
+- **specific-validator-error surfacing**: D-197 (parse-vs-validate axis discharged cyc127; residual = precise
+  error kinds).
 - **Phase 11 WASI / emcc**: D-007, D-026, D-074, D-082, D-177, D-249. **typed-funcref ADR-0123**: D-195, D-196.
 - **Zig upstream**: D-010, D-148. **wabt version**: D-179. **v0.2 host-construct**: D-178.
 - **spec-runner harness**: D-234, D-237, D-022, D-021, D-020. **x86_64 EH parity**: D-238.
@@ -104,7 +106,9 @@ verify at every Step 0.7. Refs: D-279 row, `src/platform/windows_traphandler.zig
 
 ## Audit (run when refreshing this index; `audit_scaffolding`-adjacent)
 
-- Every `.dev/debt.yaml` id appears in exactly one bucket here (A/B/C/D) or "Special".
-  Check: `comm -3 <(yq -r '.entries[].id' .dev/debt.yaml|sort) <(grep -oE 'D-[0-9]+' remaining_sweep.md|sort -u)`.
+- Every `.dev/debt.yaml` id appears in ≥1 bucket here (A/B/C/D) or "Special". The index MAY also reference
+  discharged/predecessor ids (e.g. D-264 discharged, D-285 predecessor) — that is fine; only the *missing*
+  direction is a defect. Check (must print NOTHING):
+  `comm -23 <(yq -r '.entries[].id' .dev/debt.yaml|sort -u) <(grep -oE 'D-[0-9]+' remaining_sweep.md|sort -u)`.
 - Each Bucket-A/B/C ref-chain path/ADR resolves (file exists / ADR present).
 - A row that newly went `now` or had a barrier dissolve → move it up + retarget the next sweep.

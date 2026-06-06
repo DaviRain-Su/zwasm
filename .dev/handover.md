@@ -97,10 +97,12 @@ wabt stays). **D-264** ClojureWasm dogfooding gated. `.dev/proposal_watch.md` = 
 
 - **ubuntu**: re-kicked each turn (D6 always). Verify `[run_remote_ubuntu] OK` in `/tmp/ubuntu.log`. Last GREEN
   @`660bb771`. Red → auto-revert (D3).
-- **windows**: BATCHED (D8). Last GREEN @`660bb771` (`--record`ed; H3 diag validated, D-279 did not reproduce).
-  Red → NOT auto-revert; **first grep `[d-279-veh] STACK-OVERFLOW`** — if present = H3 CONFIRMED (extend stack
-  guard); if a SIMD exit-3 crash WITHOUT it = D-279 (`track_heisenbug.sh win64-testall segv` + proceed, re-open
-  H-enumeration). Don't poll-wait.
+- **windows**: a **D-279 reproduction hunt is IN FLIGHT @`9d4523b8`** (kicked 2026-06-07; `/tmp/win.log`) — at
+  resume, FIRST `grep -aE '\[run_remote_windows\] (OK|FAILED)|d-279-veh' /tmp/win.log`. If the run finished:
+  GREEN/OK → D-279 silent again (`track_heisenbug.sh win64-testall silent`); **`[d-279-veh] STACK-OVERFLOW`
+  present = H3 CONFIRMED** (extend the stack-limit guard to the overflowing path); a SIMD exit-3 crash WITHOUT
+  that line = D-279 still un-mechanism'd (`track_heisenbug.sh win64-testall segv`, re-open H-enumeration). NOT
+  auto-revert (D7). Last recorded GREEN @`660bb771`. Don't poll-wait; verify when it lands.
 - **Gate note**: `[run_remote_windows] OK` = real green; `Build Summary: N failed` (no OK) = RED. EXPECTED
   non-failures: `zig-host-hello` exit-42 + `--__selftest-crash` exit-70 "failed command"; the sha256 `verify:
   FAIL` line is the known fixture-wrong-constant FALSE lead (zwasm hashes correctly).
