@@ -23,55 +23,38 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
 - **Goal**: implement the WebAssembly threads/atomics `0xFE`-prefix op set (ZirOps already reserved
   `zir_ops.zig:596+`). Single-threaded substrate (ADR-0168): atomic load/store/rmw/cmpxchg = aligned seq-cst
   memory ops; `atomic.fence` = no-op; wait→trap-on-non-shared / notify→0.
-- **Continuity-memo**: 0xFE prefix dispatch now LIVE in `lower.zig:emitPrefixFE` + `validator.zig
-  :dispatchPrefixFE` (mirrors 0xFD). Remaining-absent: shared-mem flag still HARD-REJECTED
-  (`parse/sections.zig:903` `is_shared→BadValType`) — only needed for wait/notify + spec shared fixture, NOT
-  load/store/rmw (atomics need a memory but not a shared one). EXACT natural-align + runtime align-trap are the
-  subtle correctness points (validator + per-arch JIT). ZirOp/per-op-file count consistency watch.
-- **DONE**: `atomic.fence` (0x03) @9971b708 (no-op). **ALL atomic LOADS + STORES** (0x10-0x1d) — loads @e1a18357,
-  stores @e6c22a57(non-JIT)+@85b8f150(JIT). Pattern: validate `opAtomicLoad`/`opAtomicStore` (EXACT natural align,
-  `readMemargCheckAlignExact`; atomics need NO shared mem per wasm-tools `check_shared_memarg`) + lower emitMemarg
-  + interp (`atomicLoadU`/`atomicStoreEa`, alignment-trap BEFORE bounds spec exec 8<14a, `Trap.UnalignedAtomic`/
-  `TrapKind.unaligned_atomic`=14) + JIT-plain via emitMemOp arms+aliases + liveness. Both arches; edge+unit green.
-- **D-299 (JIT misaligned-trap) = DEFERRED, ENV-CONSTRAINED**: B2's x86_64 runtime align-trap didn't fire (native
-  ubuntu, reliable). My Mac/Rosetta investigation harness is UNRELIABLE (got-i32:0 vs NotImplemented for the same
-  fixture across runs; load-only-atomic works fine on arm64 — so the iso NotImplemented was a harness artifact).
-  Needs a reliable native-x86_64 + lldb env to crack (Mac/Rosetta can't). Error-path-only (well-formed programs
-  never unalign atomics; threads spec-suite not yet wired → gate green). Interp traps correctly; the central
-  `emitMemOp` JIT align-trap is the single D-299 fix that covers ALL atomic ops once cracked.
-- **ALL atomics INTERP DONE** (0x10-0x4e): loads+stores+rmw(@96231c18)+cmpxchg(@78aa7dd2). **Shared-memory parse
-  gate OPEN @b54059fc** (limits 0x02; shared needs max; MemoryEntry/MemoryInstance.shared threaded; edge
-  shared_mem=42). **load/store/rmw/cmpxchg ALL have JIT** now; only notify/wait remain.
-- **load/store JIT x86_64 now CORRECT @fbdefda9** (Win64 gate caught 2 x86_64-only bugs; cracked via Rosetta
-  hexdump-diff): (1) `emitMemOp` is_store/access_size/is_fp store-groups were missing the 7 atomic-store tags
-  (store-JIT partial-apply gap) → `i32.atomic.store` hit `access_size else=>unreachable` compile-panic; (2)
-  `usage.usesRuntimePtr` missed ALL atomic load/store → an atomics-only fn got the uses_runtime_ptr=false 4-byte
-  prologue (no MOV R15) → load/store read garbage vm_base, returned 0 (D-180-class; arm64 immune, X19 always set).
-  `i32_atomic_store.wasm` (atomic store+load, no plain memop) is the regression fixture. Add rmw/cmpxchg to
-  usesRuntimePtr when their JIT lands. `check_uses_runtime_ptr.sh` did NOT catch the memop gap (only trap-stub
-  drift) — detection-script gap noted, not blocking.
-- **rmw @5b38c895 + cmpxchg @ab6972e1 JIT DONE** (both arches, callout): 42 rmw (1 `atomic_rmw_fn` slot + opcode
-  arg) + 7 cmpxchg (`atomic_cmpxchg_fns[width_log2]` array slot, per-width ptrs → clean 4 args, no Win64 stack
-  arg / no width-in-ea). All TRAILING slots (keep @offsetOf stable, size→512). Helpers are the prod impls (no host
-  state); 4-arg marshal mirrors table.grow, conflict-free (arg regs not allocatable, compile-asserted); offset
-  folded into ea. trap_flag on unaligned/oob → epilogue raises (no post-call check); Zig-side align-check →
-  **rmw/cmpxchg sidestep the inline D-299 gap** (jitTrapCode 14). `rmwMapOf`/`cmpxchgMapOf`/`isAtomic*` in jit_abi
-  = single ABI source; usesRuntimePtr + regalloc_compute (force-spill) classify both. 12 fixtures green 3-arch
-  incl. **crossing-clobber (459008)** + i64 res64 + narrow + nomatch.
-- **NEXT = notify/wait** (0x00-0x02: `memory.atomic.notify`/`wait32`/`wait64`) — FULL slice (validate+lower+
-  interp+JIT), not yet started (NOT in the 0x10-0x4e interp-done range). Single-thread: notify→0 (after oob/align
-  trap); wait→**trap on non-shared** (`MemoryInstance.shared` threaded @b54059fc), else 1 (≠exp) / 2 (timed out).
-  Validator sigs: notify [i32 i32]→i32, wait32 [i32 i32 i64]→i32, wait64 [i32 i64 i64]→i32; align i32/i32/i64.
-  After this the bundle exit-condition is met. 3-host RUN-verifies x86_64 (Rosetta reliable; revert-on-red).
+- **Continuity-memo**: only notify/wait JIT remains (interp done). Mirror rmw/cmpxchg callout: TRAILING JitRuntime
+  slots + `mem0_shared` flag + usesRuntimePtr/regalloc_compute predicates + edge fixtures → bundle exit. See NEXT.
+- **DONE (fence+load/store+rmw+cmpxchg, full JIT both arches)**: 0xFE dispatch in `validator:dispatchPrefixFE` +
+  `lower:emitPrefixFE`. EXACT natural-align (`readMemargCheckAlignExact`) + align-trap-BEFORE-bounds. fence
+  @9971b708 (no-op); load/store interp+JIT (@e1a18357/@e6c22a57/@85b8f150) — JIT x86_64 fix @fbdefda9 (Win64 gate
+  caught `emitMemOp` store-group `unreachable` + `usesRuntimePtr` garbage-R15, D-180-class; `i32_atomic_store` is
+  the regression fixture); rmw @5b38c895 + cmpxchg @ab6972e1 via CALLOUT (TRAILING `atomic_rmw_fn` + opcode arg /
+  `atomic_cmpxchg_fns[wlog2]` per-width array; 4-arg marshal mirrors table.grow, conflict-free; helpers are prod
+  impls; trap_flag→epilogue; sidestep inline D-299 via jitTrapCode 14). 12+ fixtures green 3-arch incl.
+  crossing-clobber + i64 res64 + narrow. Shared-mem parse gate OPEN @b54059fc.
+- **D-299 (inline load/store JIT misaligned-trap) = DEFERRED, ENV-CONSTRAINED**: B2's x86_64 align-trap didn't
+  fire (native ubuntu). Needs native-x86_64+lldb (Mac/Rosetta unreliable for it). Error-path-only (well-formed
+  programs never unalign; spec threads-suite not wired → gate green); interp traps correctly. rmw/cmpxchg/wait
+  callouts already get it RIGHT (Zig-side check) — D-299 is now ONLY the inline load/store path.
+- **notify/wait INTERP DONE @100e4644** (validate+lower+interp+liveness+4 unit tests): notify→0 (align+bounds
+  trap; non-shared OK); wait→**trap ExpectedSharedMemory on non-shared** (new Trap kind=15), else 1(≠exp)/2(timed-
+  out). Also wired jitTrapCode 14→unaligned_atomic (was MISSING — latent rmw/cmpxchg JIT align-trap fix) + 15;
+  trapKindName updated (test-all-only runner, D-228 lesson).
+- **NEXT = notify/wait JIT** (callout, mirror rmw/cmpxchg): add `atomic_notify_fn(rt,ea)` + `atomic_wait_fns[2]`
+  (per-width) TRAILING slots + a **`mem0_shared` flag on JitRuntime** (set at setup from memories[0].shared — JIT
+  rt has no MemoryInstance; wait helper needs it). notify emit pops count+addr (count unused); wait pops
+  timeout+expected+addr (timeout unused). Add to usesRuntimePtr+regalloc_compute. Then edge fixtures → **bundle
+  exit-condition MET**. 3-host RUN-verifies x86_64 (revert-on-red).
 - **Exit-condition**: a `test/edge_cases/p17/atomics/*` (or spec atomics manifest) green 3-host with the full
   load/store/rmw/cmpxchg set + fence; wait/notify minimal-single-thread; shared-mem parse+validate.
 - **Cycles-remaining**: ~many (large feature). No tag (ADR-0156).
 
 ## Current state
 
-- **Phase 17 (v0.2) IN-PROGRESS** (ADR-0168); 17.1-atomics ACTIVE: fence+load/store/rmw/**cmpxchg** ALL full JIT
-  (@ab6972e1); NEXT = **notify/wait** (full slice). rmw/cmpxchg callouts crack their own align-trap (D-299 remains
-  only for inline load/store).
+- **Phase 17 (v0.2) IN-PROGRESS** (ADR-0168); 17.1-atomics ACTIVE: fence+load/store/rmw/cmpxchg full JIT;
+  **notify/wait INTERP done @100e4644**; NEXT = notify/wait JIT (last piece → bundle exit). rmw/cmpxchg callouts
+  crack their own align-trap (D-299 remains only for inline load/store).
   Phase 16 (完成形) DONE. No release/tag ever (ADR-0156).
 - Debt ledger: **65 entries, 0 `now`** (D-264 dogfooding discharged). Remaining = `.dev/remaining_sweep.md`
   (Bucket A prune / B actionable-low / C deferred / D externally-blocked) — sweep between features, never idle.
