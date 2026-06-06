@@ -51,35 +51,27 @@ audit-gap list closed-or-deferred.
   validates). **D-288** (queued): interp recurses NATIVELY, `frame_buf[256]` is a SEGV guard; real fix = flat/
   trampolined interp OR native-stack-limit check (ADR) — see queue.
 
-- ✅ **D-293 DONE (slices 1–4d, substantially complete; details in debt.yaml/commits)**: per-kind JIT trap
-  codegen unified arm64+x86_64 via demuxed fixup-channels — oob_table(2)/cind_sig(3)/invalid_conversion(9)/
-  trunc-overflow(8)/null_reference(10)/array_oob(6)/cast_failure(11); plus slice-4a fixed the INTERP surface
-  (null/cast/uncaught were mis-reported `binding_error`) + a latent arm64 call_ref→oob_table mis-report. Each
-  has a runner_trap_test (JIT+interp parity). Remaining GC trampolines/i31 debt-rowed (lowest-freq, interp ok).
+- ✅ **ADR-0164 trap-crash-exception-diagnostics PROGRAM COMPLETE** (full detail in debt.yaml D-292/D-293 +
+  commits; this session's body of work):
+  - **D-293** (slices 1–4d): per-kind JIT trap codes unified arm64+x86_64 via demuxed fixup-channels —
+    oob_table(2)/cind_sig(3)/trunc-overflow(8)/invalid_conversion(9)/null_reference(10)/array_oob(6)/cast_failure
+    (11); slice-4a also fixed the INTERP surface (null/cast/uncaught were `binding_error`) + a latent arm64
+    call_ref→oob_table mis-report. runner_trap_test per kind (JIT+interp parity). GC trampolines/i31 deferred.
+  - **D-292 B-core** (`400c7006`, ADR-0166, bundle closed): production internal-fault handler — internal SIGSEGV
+    → `zwasm: internal error …` + **exit 70** (vs trap exit 1 / silent crash). POSIX sigaction + Windows VEH
+    (`First=1`, the gate caught it losing to Zig's default); `test-internal-fault` 3-host green. Lesson filed.
+  - **D-292 C** (`c2650de5`): JIT uncaught throw/throw_ref → uncaught_exception(12); fixed a latent x86_64
+    →unreachable(5) mis-report. **D** (`4bdaec59`): trap-UX audit vs wasmtime/wasmer/v1 — clean, ADR-0159-aligned;
+    one bug found → **D-294** (JIT call_indirect null-elem → mislabels indirect_call_mismatch; fix = code 13).
 
-- ✅ **D-292 B-core DONE (ADR-0166; bundle CLOSED)** — production internal-fault handler: an internal
-  SIGSEGV/crash now surfaces `zwasm: internal error … this is a bug …` + **exit 70** instead of a silent
-  signal-death (distinct from a clean wasm trap = exit 1). cycle I `c395cf64` POSIX sigaction (SEGV/BUS/ILL/FPE
-  → raw write + `_exit(70)`, no recovery, installed first in main.zig); cycle II `8c076db2` Windows VEH
-  (`RtlAddVectoredExceptionHandler`, kernel32 per-MSDN) + a `test-internal-fault` build step
-  (`zwasm --__selftest-crash`, `expectExitCode(70)`) in test-all; the gate caught a Windows bug (lost to Zig's
-  own First=0 segfault VEH) → **fixed `400c7006`** (`First=1`, beats Zig's). **Exit-condition MET**:
-  `test-internal-fault` exits 70 on ALL 3 hosts — windows confirmed GREEN at the `400c7006` kick
-  (`[run_remote_windows] OK`, "internal error" printed + exit 70). Lesson:
-  `2026-06-06-windows-custom-fault-veh-must-be-first`.
+## ← LEAD: fresh-context work — D-294 (bounded JIT fix) / D-291 / D-279
 
-- ✅ **D-292 C DONE** (`c2650de5`): JIT uncaught throw/throw_ref → `uncaught_exception` (code 12), both arches
-  (new `uncaught_exc_fixups` channel; routed in the shared `emitTrampolineCallAndTrap`). Fixed a latent x86_64
-  mis-report (uncaught JMP → `unreach_fixups` = code 5 `unreachable`). Test: throw-no-catch → 12 (was 5 x86_64).
-
-## ← LEAD: D-292 D (audit vs wasmtime/wasmer/v1 → gap list) — last ADR-0164 piece; then fresh-context correctness
-
-ADR-0164 trap-diagnostics: A/B/C + D-293 ALL done. Remaining = **D** = audit zwasm's trap UX (messages, exit
-codes, backtrace) vs wasmtime/wasmer/v1 → a gap list (bounded, local; ref clones in `~/Documents/OSS/` +
-`zwasm/`). After D, the ADR-0164 program closes. Higher-value but DEEPER, needing **FRESH context** (NOT extreme
-session depth): **D-291** (ed25519 JIT large-frame address miscompile, paused — its row says "fresh-context
-session") and **D-279** (Win64 heisenbug, non-deterministic — H3: possible shared root with D-291, partly
-Mac-testable). Correctness-first → D-291/D-279 when fresh; D-292 D is the bounded fill.
+ADR-0164 trap-diagnostics is COMPLETE. Remaining are all best on **FRESH context** (this session is extremely
+deep): **D-294** (JIT call_indirect null-elem → uninitialized_element, code 13 — bounded codegen, the grooved
+per-kind-channel pattern in op_call.zig both arches + a null check before the sig check); **D-291** (ed25519 JIT
+large-frame address miscompile, paused — "fresh-context session"); **D-279** (Win64 heisenbug, non-deterministic
+— H3: possible shared root w/ D-291, partly Mac-testable). Correctness-first ordering: D-294 (quick) → D-291 ⊇?
+D-279. Also queued: D-288 (interp recursion redesign), D-284, D-290.
 
 ## Queue (time-consuming first, per user directive)
 
@@ -93,9 +85,9 @@ Mac-testable). Correctness-first → D-291/D-279 when fresh; D-292 D is the boun
 - **Phase 16 (完成形) — open-ended; the loop CONTINUES, no release (ADR-0156).** v0.1.0-scope program is
   thoroughly complete + 3-host green (`deb97903`); ADR-0163 bench+docs program ALL DONE. Tag/publish/cutover are
   manual, user-only — there is no release gate.
-- Debt ledger: 0 `now`. **D-293** + **D-292 A/B/C all DONE** — ADR-0164 trap-diagnostics nearly complete (only
-  D = audit-gap-list remains). B-core 3-host green @`400c7006`; C `c2650de5` Mac-green + x86_64-XC clean (ubuntu
-  verifies the x86_64 uncaught-fix). Then deep correctness (D-291/D-279) on fresh context. Phase 16, no release.
+- Debt ledger: 1 `now` (**D-294**, JIT call_indirect null-elem trap-kind mislabel, found by the D-292-D audit).
+  **ADR-0164 trap-crash-exception-diagnostics COMPLETE** (D-293 + D-292 A/B-core/C/D all done). B-core 3-host
+  green @`400c7006`; C ubuntu-green @`0b68bdf7`. Next (all fresh-context): D-294 (quick) / D-291 / D-279. Phase 16.
 
 ## Step 0.7 (next resume) — verify remote logs
 

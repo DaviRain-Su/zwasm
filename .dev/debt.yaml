@@ -3,6 +3,29 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
+  - id: "D-294"
+    layer: "code"
+    status: "now"
+    description: |-
+      now: JIT call_indirect on a NULL (uninitialized, in-bounds) table element mislabels the trap kind.
+      Surfaced by the D-292-D audit (zwasm-v2 vs wasmtime/wasmer/v1, 2026-06-06). The interp + ALL THREE
+      reference engines report `uninitialized element`; zwasm-v2 JIT reports `indirect call type mismatch`
+      (indirect_call_mismatch, code 3). It DOES trap (exit 1) — only the KIND is wrong (a diagnostic-precision
+      miss, same class as D-293, not a crash/over-accept). MECHANISM: the JIT call_indirect does bounds → sig
+      check (CMP typeidx[idx] vs canonical) → funcptr; a null element's typeidx slot fails the sig CMP → reports
+      code 3, never reaching a null check. FIX: add a null-element check (the loaded funcptr/element == 0 → trap)
+      that PRECEDES the sig check, routed to a new uninitialized_elem JIT code (TrapKind.uninitialized_elem
+      exists; next free JIT code = 13) — same per-kind-channel pattern as D-293/D-292-C, both arches
+      (op_call.zig). Also verify return_call_indirect + the subtyping-trampoline path. RELATED minor (same row):
+      the call_indirect OOB-INDEX trap prints `out of bounds table access` (oob_table) but the spec canonical
+      text is "undefined element" (wasmtime/wasmer prefix it) — table.get OOB = "out of bounds table access" but
+      call_indirect OOB-index = "undefined element"; consider a distinct message (cheap, one constant). Low
+      urgency (both still trap correctly); fix on a fresh-context codegen cycle.
+    first_raised: "2026-06-06"
+    last_reviewed: "2026-06-06"
+    refs: |-
+      D-292 workstream D audit. src/engine/codegen/{arm64,x86_64}/op_call.zig (call_indirect sig/null).
+      src/api/trap_surface.zig jitTrapCode (add 13 => .uninitialized_elem). Pattern: D-293 slices.
   - id: "D-292"
     layer: "code"
     status: "note"
@@ -20,10 +43,13 @@ entries:
       clean trap exit 1 / silent signal). `test-internal-fault` build step in test-all, 3-host GREEN incl.
       windows OK @400c7006. Lesson 2026-06-06-windows-custom-fault-veh-must-be-first.** **C) ✅ DONE
       (c2650de5): JIT uncaught throw/throw_ref → uncaught_exception (code 12), both arches — fixed a latent
-      x86_64 mis-report (uncaught JMP → unreach_fixups = code 5). interp parity.** D) audit vs
-      wasmtime/wasmer/WasmEdge/v1 (messages,
-      backtrace, exit codes) → gap list. **Synergy: workstream A first directly UNBLOCKS D-291** (ed25519's
-      trap kind becomes one command away). INVESTIGATION/AUDIT FIRST (spans engines), then fix.
+      x86_64 mis-report (uncaught JMP → unreach_fixups = code 5). interp parity.** **D) ✅ DONE (2026-06-06,
+      subagent audit vs wasmtime 43 / wasmer 5 / v1): zwasm-v2's trap messages match the spec canonical strings +
+      wasmer/v1 (better than v1's non-canonical wording); exit-1-for-traps aligns with wasmer/v1 (wasmtime=134
+      outlier); no wasm-backtrace = acceptable per ADR-0159 minimalism (wasmer/v1 also omit it). The ONE real
+      finding (JIT call_indirect null-elem mislabel) → filed D-294; minor "undefined element" wording also in
+      D-294.** **⇒ ADR-0164 trap-crash-exception-diagnostics PROGRAM COMPLETE (A + B-core + C + D + D-293).**
+      Remaining product fixes are debt-rowed (D-294, D-291). (Historical: workstream A first UNBLOCKED D-291.)
       PROGRESS (b6da8604, 2026-06-06): workstream A CLI surface done — JIT/AOT run paths thread trap_kind →
       trap_surface.jitTrapCode → CLI per-kind message; single-message interp-parity (double-`Trap` bug fixed,
       genuine trap = exit 1 not re-raised error.Trap).
