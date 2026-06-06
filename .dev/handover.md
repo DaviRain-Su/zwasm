@@ -41,14 +41,13 @@ audit detail in **D-296** (note). Residual Zig-API gaps = v0.2/deferred, cross-r
 **Remaining (post-audit)**: (a) blocked-by 31 (external/future); (b) v0.2.0 features (proposal_watch + the
 D-296 Zig-API residuals: Memory.grow/sliceAt, Linker.defineInstance, funcref-call, full WASI config); (d)
 dogfooding (D-264 gated). No actionable HIGH-value 完成形 surface gap remains.
-**Recently closed** (D-296 Zig-API residuals, all green Mac test+spec+lint, ubuntu @cff0f0fd): `Memory.grow`
-(`f163e882`, shared `Runtime.growMemory`, test-spec 9/0) + `Memory.sliceAt` (`e5f34ff8`) + `Engine.linker()`
-(`994a5aef`). **Quick/clean Zig-API residuals are now EXHAUSTED.**
-**Remaining D-296 residual** = `Linker.defineInstance()` — ASSESSED as convenience SUGAR not a capability gap
-(point-wise defineCross* already exceeds wasmtime; full impl needs cross-module global/table/memory alias paths
-first = a real investigation, not a quick chunk). Other residuals on own rows (funcref D-269, WASI-config D-177,
-standalone Global/Memory D-178). **NEXT track** = pivot away from Zig-API surface: memory-safety sweep, a debt
-row, or the deeper defineInstance cross-module-alias investigation if prioritized.
+**Recently closed** (D-296 Zig-API residuals, all green Mac test+spec+lint, ubuntu @3aaf9df2): `Memory.grow`
+(`f163e882`, test-spec 9/0) + `Memory.sliceAt` (`e5f34ff8`) + `Engine.linker()` (`994a5aef`) +
+`Linker.defineInstance()` (`dba99bb8`, all 4 export kinds — the prior "deferred sugar" call was over-cautious;
+all 4 cross-module alias paths already existed → clean compose). **ALL implementable Zig-API residuals CLOSED.**
+**NEXT track** = pivot OFF the Zig-API surface (it's complete). Remaining D-296 residuals are separate tracked
+rows: funcref-call handle (D-269), full WASI config (D-177), standalone Global/Memory (D-178). Open options:
+a memory-safety sweep, a debt-row pickup, or revisit one of those cross-ref'd rows. No Zig-API gap remains.
 **CADENCE (ADR-0076 D8)**: windows BATCHED (≥6 ABI-risk / ≥12 else); chain MANY chunks/turn, never poll-wait
 on windows.
 
