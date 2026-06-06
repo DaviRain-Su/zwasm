@@ -17,12 +17,38 @@ v0.3 feature work** (2026-06-06) — "AIが思いのほか早いのでどんど�
    hunted; verify the signal at every Step 0.7.
 Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE** (cw v1 side succeeded).
 
+## Active bundle (ADR-0118 D6) — Phase 17.1 Threads/Atomics (v0.2, ADR-0168)
+
+- **Bundle-ID**: 17.1-atomics
+- **Goal**: implement the WebAssembly threads/atomics `0xFE`-prefix op set (ZirOps already reserved
+  `zir_ops.zig:596+`). Single-threaded substrate (ADR-0168): atomic load/store/rmw/cmpxchg = aligned seq-cst
+  memory ops; `atomic.fence` = no-op; wait→trap-on-non-shared / notify→0.
+- **Layer state (survey @1d75be1b — ALL absent except ZirOps)**: parse `0xFE` dispatch ABSENT
+  (`parse/sections_codes.zig`; mirror the `0xFD`/`0xFC` prefix) ← **biggest blocker, wire FIRST**; validate
+  ABSENT (`validator.zig:~1125`); lower ABSENT (`lower.zig:~590`); interp/JIT ABSENT; **shared-mem flag
+  HARD-REJECTED** (`parse/sections.zig:903` `is_shared→BadValType`) — gate it open + add
+  `MemoryInstance.is_shared`; atomics need **EXACT** natural-alignment (align==size, else trap), stricter than
+  `readMemargCheckAlign`'s `≤` check.
+- **Continuity-memo**: 0xFE prefix dispatch must be added in BOTH `lower.zig` (`emitPrefixFE`, mirror
+  `emitPrefixFD` @lower.zig:601) AND the validator's prefix switch (`validator.zig:~1125`); watch that the
+  ZirOp count / per-op file registration stays consistent; the EXACT-alignment check + shared-mem gate are the
+  two subtle correctness points. First proof = `atomic.fence` runs end-to-end.
+- **First milestone (current chunk)**: `atomic.fence` (0xFE 0x03) END-TO-END — 0 operands, no memory: proves
+  the whole 0xFE pipeline (parse→validate→lower→interp→JIT no-op) with a `.wasm` fixture. THEN per-op:
+  i32.atomic.load → store → rmw add/sub/and/or/xor/xchg → cmpxchg → i64 variants → wait/notify (established
+  per-op chunk pattern, bundle several/turn).
+- **Exit-condition**: a `test/edge_cases/p17/atomics/*` (or spec atomics manifest) green 3-host with the full
+  load/store/rmw/cmpxchg set + fence; wait/notify minimal-single-thread; shared-mem parse+validate.
+- **Cycles-remaining**: ~many (large feature). No tag (ADR-0156).
+
 ## Current state
 
-- **Phase 16 (完成形) — open-ended; the loop CONTINUES, no release (ADR-0156).** Phases 0–15 DONE;
-  v0.1.0-scope complete + 3-host green. Tag/publish/cutover are manual, user-only — no release gate.
-- Debt ledger: **66 entries, 0 `now`** (D-213 discharged this turn). All remaining = blocked-by future phases /
-  notes (QoI/exotic/historical) / 3 partial. No actionable HIGH-value item open (verified §0.5 sweep 2026-06-06).
+- **Phase 17 (v0.2 feature line) IN-PROGRESS** (ADR-0168, user-unblocked). Phase 16 (完成形) DONE; v0.1 surface
+  audited+documented+exampled, memory-safety swept SOUND, dogfooding DONE (cw v1). No release/tag ever (ADR-0156).
+- Debt ledger: **65 entries, 0 `now`** (D-264 dogfooding discharged). Remaining = `.dev/remaining_sweep.md`
+  (Bucket A prune / B actionable-low / C deferred / D externally-blocked) — sweep between features, never idle.
+- **D-279** Win64 SIMD heisenbug: H3 stack-overflow diagnostic deployed; re-kick windows as work lands to keep
+  hunting the reproduction (user: never leave it idle). Mac-side investigation walled (needs the Win64 signal).
 
 ## ← LEAD: 完成形 surface work COMPLETE; entering maintenance/depth (2026-06-06 session)
 
