@@ -57,10 +57,9 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
 
 ## Current state
 
-- **Phase 17 (v0.2 feature line) IN-PROGRESS** (ADR-0168); 17.1-atomics bundle ACTIVE: fence + loads + stores +
-  rmw-binops-interp DONE; NEXT = rmw JIT emit + cmpxchg. JIT misaligned-trap = D-299 (deferred/env-constrained).
-  Phase 16 (完成形) DONE; v0.1 surface audited+documented+exampled, memory-safety SOUND, dogfooding DONE (cw v1).
-  No release/tag ever (ADR-0156).
+- **Phase 17 (v0.2) IN-PROGRESS** (ADR-0168); 17.1-atomics ACTIVE: fence+loads+stores full; ALL rmw+cmpxchg
+  INTERP done @78aa7dd2; NEXT = rmw+cmpxchg JIT emit. JIT misaligned-trap = D-299 (deferred/env-constrained).
+  Phase 16 (完成形) DONE. No release/tag ever (ADR-0156).
 - Debt ledger: **65 entries, 0 `now`** (D-264 dogfooding discharged). Remaining = `.dev/remaining_sweep.md`
   (Bucket A prune / B actionable-low / C deferred / D externally-blocked) — sweep between features, never idle.
 - **D-279** Win64 SIMD heisenbug: H3 stack-overflow diagnostic deployed; re-kick windows as work lands to keep
