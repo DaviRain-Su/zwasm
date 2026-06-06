@@ -20,25 +20,26 @@ implementable residuals this session — `Memory.grow` (`f163e882`, shared `Runt
 kinds). Surface reviewed CLEAN (subagent, no HIGH/MED), `docs/zig_api_design.md` synced (`e120cc15`), example
 introspection demo (`40553679`).
 
-**Memory-safety (完成形 dimension)**: facade additions reviewed clean; **cross-module aliasing** audited
-(**D-297**) — model SOUND (zombie-parking keeps aliased storage alive past instance deletes; DISPROVED a claimed
-table-UAF). One real gap fixed (`477a9004`): documented the **Linker-must-outlive-its-Instances** contract
-(importer holds raw ptr into Linker-owned CallCtx). Optional debug-assert guard deferred (D-297). NOT-yet-swept:
-WASI fd resource lifecycle (the one remaining distinct area).
+**Memory-safety (完成形 dimension) — ALL major manual-memory areas now swept SOUND**: facade additions reviewed
+clean; **cross-module aliasing** (**D-297**) SOUND (zombie-parking; disproved a table-UAF; documented the
+Linker-outlives-Instances contract `477a9004`); **WASI fd lifecycle** swept this turn → SOUND (no double-close /
+UAF / realloc-bug; stdio correct; Host correctly BORROWS preopen handles; `path_open` unimplemented so no owned
+fds; the CLI preopen fds are an intentional documented process-lifetime choice run.zig:62, not a leak). The
+audit's "fd-leak REAL BUG" was the **3rd overstated finding this session** to dissolve under verification.
+**Discipline: always adversarially verify audit "CRITICAL" labels** (table-UAF, fd-leak, Linker-#6 all overstated).
 
-**D-279 (Win64 SIMD-JIT heisenbug, the one open RED-class issue)**: resurfaced @23542591 (wasm-2.0-assert exit-3)
-→ confirmed FLAKE (D7 re-run green, facade exonerated: ubuntu green, exit-3=crash not wrong-result). Streak reset
-6→0 then 1. INSTRUMENTED (`22310693`): `windows_traphandler.zig::diagUnrecovered` emits `[d-279-veh] UNRECOVERED
-(unfiltered-code | rip-outside-jit): code/rip/jit` on the two previously-silent armed-but-escaping VEH paths →
-**next Win64 crash self-identifies its mechanism**. Investigation: REFUTED H1 (SIMD-spill aligned-move #GP —
-spills use MOVUPS); refined lead = FP-walk/stack-walk corruption (D-180/D-245). Can't progress until the next
-crash surfaces a `[d-279-veh]` line.
+**D-279 (Win64 SIMD-JIT heisenbug — the one open RED-class issue)**: RESURFACED @d0c5b737 (3 SIMD crashes:
+test.exe + spec-simd + wasm-2-0-assert, all exit-3; segv recorded streak→0). MAJOR NARROWING: the `[d-279-veh]`
+diagnostic did NOT fire + NO panic message + NO 0xC0000005 in the log → **NOT a VEH hardware fault, NOT a
+standard panic**. New **leading hypothesis H3 = Win64 1 MB stack overflow** (vs Mac/Linux 8 MB): a deep SIMD test
+path fitting 8 MB but overflowing 1 MB → Win64-only + intermittent-by-depth + no-message + not-VEH-caught (filter
+excludes EXCEPTION_STACK_OVERFLOW per ADR-0105 D4). Fits ALL evidence + the deep-stack lineage. Full analysis +
+next-diagnostic (re-add EXCEPTION_STACK_OVERFLOW to the VEH filter with a `[d-279-veh] stack-overflow` log) in
+D-279. NOT auto-reverted (D7; ubuntu 8 MB green every time, facade exonerated).
 
-**NEXT track** (high-value autonomous surface work is largely done): (a) WASI fd memory-safety sweep (last
-distinct unswept area; tight HIGH-confidence brief + adversarially verify any finding — last audit had a false
-positive); OR (b) wait for a `[d-279-veh]` line on the next Win64 RED to pick the D-279 hypothesis; OR (c)
-blocked-by barrier-dissolution re-checks. Discipline reinforced: **always adversarially verify audit "CRITICAL"
-labels** (the cross-module audit flip-flopped + 1/2 criticals was a false positive).
+**NEXT track**: (a) the D-279 H3 stack-overflow diagnostic (re-add EXCEPTION_STACK_OVERFLOW to the VEH filter +
+log — confirms/refutes H3 on the next Win64 run; a focused Win64-trap chunk); OR (b) high-value autonomous
+surface work is otherwise largely done — blocked-by barrier-dissolution re-checks / await user direction.
 
 **Blocked / parked**: 31 blocked-by (call_ref §10.R / Phase-11 D-177 WASI-config / D-178 standalone Global-Memory /
 future proposals). **D-290** = 3 proposal-laden distillers, direction-gated (wasm-tools↔wabt output divergence;

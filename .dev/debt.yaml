@@ -1021,10 +1021,26 @@ entries:
       code / RIP outside the JIT window) — previously SILENT before the exit-3 crash. The next D-279 occurrence
       self-identifies its mechanism: `unfiltered-code` (a JIT SIMD op faulted with an unexpected exception code)
       vs `rip-outside-jit` (the FP-walk/stack-walk lineage — fault in non-JIT code reached from JIT). Cross-
-      compiled x86_64-windows-gnu green. NEXT: read the `[d-279-veh]` line at the next Win64 crash to pick the
-      surviving hypothesis, then fix or add the next narrower primitive.
-      Prior streak note (2026-06-06, now superseded): reached 5/5 then 6 `silent` over distinct SHAs
-      (7e46c054 → e707fd31, D-288 + D-289 body) before this resurfacing. Original report below.
+      compiled x86_64-windows-gnu green.
+      RESURFACED AGAIN @`d0c5b737` (segv, streak→0): Win64 test-all RED with **3** SIMD crashes this run
+      (`test.exe` + `zwasm-spec-simd.exe` + `zwasm-spec-wasm-2-0-assert.exe`, all exit-3). MAJOR NARROWING from
+      this occurrence: (1) the `[d-279-veh]` diagnostic did **NOT** fire → D-279 does NOT go through the
+      armed-VEH-escape path → it is **NOT a VEH-caught hardware fault** (the VEH diagnostic was the wrong
+      instrument; it stays as a valid general VEH-escape logger but is orthogonal to D-279). (2) NO Zig panic
+      message + NO `0xC0000005`/exception code anywhere in the log → not a standard panic-with-message either.
+      ~~LEADING HYPOTHESIS H2 (was FP-walk/stack-walk corruption)~~ → SUPERSEDED by **H3 (Win64 1 MB stack
+      overflow)**, which fits ALL evidence: Windows default thread stack = **1 MB** vs Mac/Linux **8 MB**, so a
+      deep-but-bounded SIMD test path that fits 8 MB (Mac+Linux GREEN) overflows 1 MB → **Win64-only**,
+      **intermittent** (depth-dependent per test), **no message** (a stack overflow cannot print), **not
+      VEH-caught** (the filter deliberately EXCLUDES `EXCEPTION_STACK_OVERFLOW` per ADR-0105 D4 — handled by the
+      JIT-prologue probe, but a NON-JIT-probed path (the spec-runner's own recursion / interp / host fn / a
+      mixed test) overflowing is unguarded). Matches the "deep call stack" lineage exactly. D-288 added an
+      INTERP native-stack-limit check (128 KB headroom) but the JIT/runner paths on Win64's 1 MB stack may not
+      be covered. NEXT diagnostic: re-add `EXCEPTION_STACK_OVERFLOW` to the VEH filter with a `[d-279-veh]
+      stack-overflow rip=…` log (confirm/refute H3 on the next Win64 run) — if confirmed, extend the
+      stack-limit guard to the uncovered path. Counter-check: ubuntu (8 MB) GREEN on the same SHA every time.
+      Prior streak note (2026-06-06, superseded): reached 5/5 then 6 `silent` (7e46c054 → e707fd31) before the
+      first resurfacing. Original report below.
       Surfaced 2026-06-05
       during the WASI-program 3-host check: windows `test-all` crashed at `simd_bit_shift` (i64x2 shift, JIT mode,
       `[d-163-jit]` codegen dump preceding) with process exit code 3; a re-run of the same `zwasm-spec-simd.exe`
