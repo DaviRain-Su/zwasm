@@ -28,23 +28,22 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
   (`parse/sections.zig:903` `is_shared→BadValType`) — only needed for wait/notify + spec shared fixture, NOT
   load/store/rmw (atomics need a memory but not a shared one). EXACT natural-align + runtime align-trap are the
   subtle correctness points (validator + per-arch JIT). ZirOp/per-op-file count consistency watch.
-- **DONE @9971b708**: `atomic.fence` (0xFE 0x03) END-TO-END — the 0xFE prefix pipeline is now live in BOTH
-  validator (`dispatchPrefixFE`) + lower (`emitPrefixFE`); interp shares `nopOp`; arm64+x86_64 emit transparent
-  0→0 no-op; liveness stackEffect 0→0; `test/edge_cases/p17/atomics/fence` green (=42); build.zig wires p17 edge
-  dir; emit_test_local unsupported-probe retargeted fence→rmw.cmpxchg.
-- **i32.atomic.load Chunk A DONE @219e7d58** (validate/lower/interp + `Trap.UnalignedAtomic` + `TrapKind
-  .unaligned_atomic`=14): 裏取り'd atomics need NO shared memory (wasm-tools `check_shared_memarg` — only EXACT
-  static align + a memory). validator `opAtomicLoad`/`readMemargCheckAlignExact` (==natural, not ≤); interp
-  alignment-trap BEFORE bounds (spec exec 8<14a); stackEffect 1→1.
-- **NEXT (current chunk)**: `i32.atomic.load` **Chunk B = JIT emit** — mirror `i32.load`, which uses the
-  dispatch_collector (NOT a switch arm): (1) meta `src/instruction/<level>/i32_atomic_load.zig` (op_tag +
-  `wasm_level` — pick/confirm the threads WasmLevel; cf. `instruction/wasm_1_0/i32_load.zig`); (2) arm64+x86_64
-  per-op files `ops/<level>/i32_atomic_load.zig` → call `op_memory.emitMemOp`; (3) APPEND to `collected_ops`
-  registry; (4) add `.@"i32.atomic.load"` arm (access_size=4, LDR/MOV) to BOTH `op_memory.zig:emitMemOp`
-  (arm64@77, x86_64@69). **Chunk B2** = RUNTIME align-trap: AND ea,#3 + cond-branch to a NEW trap stub
-  (`jitTrapCode`=14 `unaligned_atomic`, mirror oob_fixups/bounds_check both arches). Heed
-  `dispatch_consistency_audit` (ZirOp=per-op-file=handler count). edge fixtures: aligned (=val) + misaligned
-  `expect trap`. THEN store → rmw set → cmpxchg → i64 → shared-mem gate → notify/wait.
+- **DONE**: `atomic.fence` (0xFE 0x03) END-TO-END @9971b708 — 0xFE prefix pipeline live in validator
+  `dispatchPrefixFE` + lower `emitPrefixFE`; interp `nopOp`; arm64+x86_64 legacy-switch 0→0 no-op; edge fixture
+  green. `i32.atomic.load` **Chunk A** @219e7d58 — validate `opAtomicLoad`/`readMemargCheckAlignExact` (==natural
+  align, not ≤; atomics need NO shared mem per wasm-tools `check_shared_memarg`) + lower + interp (alignment-trap
+  BEFORE bounds, spec exec 8<14a) + `Trap.UnalignedAtomic`/`TrapKind.unaligned_atomic`=14 + stackEffect 1→1.
+- **NEXT (current chunk)**: `i32.atomic.load` **Chunk B = JIT emit**. **DESIGN FORK (decide first)**: `i32.load`
+  uses dispatch_collector (meta+per-op files) BUT that path needs a threads classification — `WasmLevel = enum
+  {v1_0,v2_0,v3_0}` has NO threads + `Feature = enum {none}` (threads not a value yet) → would need an ADR +
+  裏取り (is atomics ∈ Wasm 3.0? if so wasm_level=.v3_0 + add to feature_level_check.v3_op_tags). **VS** the
+  legacy-switch path `atomic.fence` already used — add `.@"i32.atomic.load" => op_memory.emitMemOp` to BOTH
+  emit.zig legacy switches (sidesteps classification entirely; recommend THIS for the bundle unless atomics
+  cleanly == v3_0). Either way: add `.@"i32.atomic.load"` arm (access_size=4, LDR/MOV) to BOTH
+  `op_memory.zig:emitMemOp` (arm64@77, x86_64@69 — check x86_64 emitI32Load wrapper vs direct). **Chunk B2** =
+  RUNTIME align-trap: AND ea,#3 + cond-branch to NEW trap stub (`jitTrapCode`=14, mirror oob_fixups/bounds_check
+  both arches). edge fixtures: aligned (=val) + misaligned `expect trap`. **PRE-PUSH: `zig build
+  test-runtime-runner-smoke`** (lesson trapkind-variant). THEN store → rmw set → cmpxchg → i64 → notify/wait.
 - **Exit-condition**: a `test/edge_cases/p17/atomics/*` (or spec atomics manifest) green 3-host with the full
   load/store/rmw/cmpxchg set + fence; wait/notify minimal-single-thread; shared-mem parse+validate.
 - **Cycles-remaining**: ~many (large feature). No tag (ADR-0156).
@@ -102,8 +101,11 @@ wabt stays). **D-264** ClojureWasm dogfooding gated. `.dev/proposal_watch.md` = 
 
 ## Step 0.7 (next resume) — verify remote logs
 
-- **ubuntu**: re-kicked each turn (D6 always). Verify `[run_remote_ubuntu] OK` in `/tmp/ubuntu.log`. Last GREEN
-  @`660bb771`. Red → auto-revert (D3).
+- **ubuntu**: re-kicked each turn (D6 always). Verify `[run_remote_ubuntu] OK` in `/tmp/ubuntu.log`. @`92c8fb3b`
+  was RED — `wast_runtime_runner.zig:967 trapKindName` missed `unaligned_atomic` (test-all-only runner; Mac `zig
+  build test` doesn't compile it). FORWARD-FIXED @`5202d0b0` (lesson `trapkind-variant-breaks-test-all-only-
+  runner-switch` — should've run `zig build test-runtime-runner-smoke` pre-push; verified 5/0). Verify GREEN this
+  resume @ new HEAD. Red → auto-revert (D3).
 - **windows**: @`487e4bbd` run finished **clean GREEN** (`OK.` present, simd 13351/0, no veh, no exit-3) →
   D-279 silent **streak 3** (toward discharge-5); batch recorded @`92c8fb3b`. No kick pending — re-kicks when the
   next batch fires (≥6 ABI-touch / ≥12 else since 92c8fb3b). Future crash self-IDs via `[d-279-veh]
