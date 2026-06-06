@@ -74,10 +74,15 @@ audit-gap list closed-or-deferred.
   per MSDN — not libc) → same msg + `ExitProcess(70)`; + a hidden `--__selftest-crash` flag (main.zig) + a
   `test-internal-fault` build step (`zwasm --__selftest-crash`, `expectExitCode(70)`) wired into **test-all** →
   the only behavioural test of the Windows VEH. Mac exit-70 confirmed; Win+Linux cross-compile clean; libc OK.
-- **Exit-condition**: the `test-internal-fault` step passes on all 3 hosts (esp. the Windows VEH behaviourally).
-- **Next step (cycle III = close)**: verify `test-internal-fault` GREEN on ubuntu + windows (Step 0.7 of the
-  cycle-II kick). ⚠️ windows is D-279-noisy — grep specifically for `test-internal-fault`/`zwasm` exit-70, not
-  the heisenbug. If green 3-host → `check_bundle_active.sh --close` + retrospective + retarget LEAD.
+- **cycle-II gate finding (`7d77c8f0`)**: `test-internal-fault` PASSED Mac+ubuntu but **FAILED on Windows** (got
+  exit 3, expected 70) — Zig's own segfault VEH (`First=0`, attached pre-main in safety builds) ran first +
+  exited 3, ours never fired. **FIXED `400c7006`**: register `First=1` (front) so ours — registered later in
+  main — beats Zig's; verified vs Zig std source (`attachSegfaultHandler` uses First=0). Mac still 70; Win/Linux
+  cross-compile clean. (windows D-279 `wasm-2-0-assert` also failed — heisenbug, recorded `fail @400c7006`.)
+- **Exit-condition**: `test-internal-fault` exits 70 on all 3 hosts (esp. the Windows VEH).
+- **Next step (cycle III = close)**: the First=1 fix is kicked this turn — **verify `test-internal-fault` exit-70
+  GREEN on windows** (Step 0.7, grep `run exe zwasm` past the D-279 noise). If green → `check_bundle_active.sh
+  --close` + retrospective + retarget LEAD (→ D-279 formal investigation per its new §1 hypotheses).
 
 ## ← LEAD: D-292 B-core cycle III — 3-host verify the test-internal-fault step, then close (see bundle)
 
@@ -93,10 +98,10 @@ audit-gap list closed-or-deferred.
 - **Phase 16 (完成形) — open-ended; the loop CONTINUES, no release (ADR-0156).** v0.1.0-scope program is
   thoroughly complete + 3-host green (`deb97903`); ADR-0163 bench+docs program ALL DONE. Tag/publish/cutover are
   manual, user-only — there is no release gate.
-- Debt ledger: 0 `now`. **D-293 substantially complete** (partial). **D-292 B-core cycles I+II DONE** (`c395cf64`
-  POSIX + `8c076db2` Windows VEH + `--__selftest-crash`/`test-internal-fault` end-to-end test). cycle I ubuntu
-  GREEN (`OK b1c83e5c`); cycle I windows = D-279 heisenbug, now **3 failed steps** (escalating — investigation
-  flag). cycle II kicked this turn (verifies the Windows VEH behaviourally). D-291 diag gated.
+- Debt ledger: 0 `now`. **D-293 substantially complete** (partial). **D-292 B-core**: POSIX (`c395cf64`) +
+  Windows VEH (`8c076db2`) + **Windows First=1 fix (`400c7006`)** — the gate's `test-internal-fault` step caught
+  the Windows handler losing to Zig's default. Mac+ubuntu green (exit 70); windows re-kicked this turn to verify
+  the fix. D-279 added a §1 hypothesis list (`7eeb4a32`, incl. possible D-291 shared root). D-291 diag gated.
 
 ## Step 0.7 (next resume) — verify remote logs
 
