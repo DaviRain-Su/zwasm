@@ -1167,14 +1167,47 @@ entries:
       MISREAD — the C export `zwasm_wasi_config_set_envs` EXISTS + is tested (wasi.zig:84, test:572), and
       `zwasm_wasi_config_new` returns `*Host` so `cfg.setEnvs` was always available. The C-API WASI-config env
       surface is COMPLETE; the only gap was the missing CLI wiring (now fixed). NO C-API audit finding here.
-      DISCHARGE: P0 (--env) DONE; P1 (--verbose) = next; P2 (WAT) = direction call. Audit method reusable for
-      the C-API + Zig-API surface audits (the other two 完成形 targets — no findings carried over from P0).
+      P1 `--verbose` REASSESSED 2026-06-06 (lower value than the audit estimated → DEFER): there is no rich
+      user-facing verbose content to expose yet — `diagnostic.zig:26` flags backtraces as M5 (planned, not
+      implemented), and `ZWASM_DIAG` is internal DEV tracing (codegen passes / jit_exec) behind the
+      `trace_ringbuffer` build flag, not a user surface. A `--verbose` toggling only that = a dev tool as a user
+      flag (low value + build-gated). DEFER until M5 wasm-backtrace-on-trap lands (then --verbose has real
+      content). The CLI surface's one genuine gap (--env) is now closed; P2 (WAT) needs a parser (v0.2-ish).
+      DISCHARGE: P0 (--env) DONE; P1 (--verbose) deferred-to-M5; P2 (WAT) = direction call. Audit method reusable
+      for the C-API + Zig-API surface audits (the other two 完成形 targets — no findings carried over from P0).
     first_raised: "2026-06-06"
     last_reviewed: "2026-06-06"
     refs: |-
       src/cli/main.zig (arg parse ~120-176, --dir@159, --env wiring target); src/cli/run.zig (runWasmJit@44 /
       runCwasmWasi@122 / runWasmCapturedWithPreopens — setArgs+addPreopen sites @56/62/149/152/253/260);
       src/wasi/host.zig (setEnvs@160, setArgs@143, EnvEntry@61); ADR-0159 (CLI scope lock); ADR-0016 (diag).
+  - id: "D-296"
+    layer: "api"
+    status: "note"
+    description: |-
+      note (Phase 16 完成形 surface audits — C-API + Zig-API, 2026-06-06; the other two of three audit targets
+      after CLI→D-295). Both audits ran as Explore subagents vs the industry bar (wasm-c-api standard; wasmtime's
+      Rust embedding API).
+      C-API: ZERO gaps. 293/293 wasm-c-api functions exported + tested 3-host; verified by
+      scripts/capi_surface_gap.sh (gap=0). `include/wasm.h` byte-identical to upstream. Phase 13's "wasm-c-api
+      conformance" claim VERIFIED + EXCEEDED (serialize/deserialize, host-info 27 fns, ref as_ref all 9 types,
+      tagtype EH, frames). Intentional design notes (NOT bugs, already tracked): D-271 serialize=byte-model not
+      AOT-cache (QoI); D-269 funcref payload raw-ptr (spec-correct); D-253-D standalone `_copy`→null. NO new debt.
+      Zig-API (native `@import("zwasm")` facade): surface is 完成形-ready + idiomatic (Engine/Module/Instance/
+      TypedFunc/Memory/Global/Table/Linker/Caller/full-12-variant-Trap). Closed the ONE HIGH-value あるべき論 gap
+      this session — `Module.imports()`/`.exports()` pre-instantiation introspection (`a9c850be`), which ADR-0109
+      line 378 carved out as a "Phase 11 D6 follow-up" while its siblings (Instance.global/.table, Linker.
+      defineGlobal/Table) all landed → it had slipped through. Residual Zig-API gaps are v0.2/deferred + mostly
+      cross-ref existing debt, none 完成形-blocking: Memory.grow() no-op (J.5-doc'd), Memory.sliceAt() windowed
+      accessor (v0.2), Linker.defineInstance() (doc'd-not-coded; point-wise defineCross* already exceed wasmtime),
+      callable funcref handle (D-269), full WASI config envs/preopens/stdio (D-177), standalone host-constructed
+      Global/Memory (D-178), `engine.linker()` shorthand (LOW QoL). DISCHARGE: all 3 完成形 surface audits done
+      (CLI→D-295, C-API→0 gaps, Zig-API→gap#1 closed); remainder = v0.2 enhancements + the named existing rows.
+    first_raised: "2026-06-06"
+    last_reviewed: "2026-06-06"
+    refs: |-
+      src/zwasm/module.zig (imports/exports@~95+); src/zwasm.zig (ExternKind/ImportItem/ExportItem re-exports);
+      ADR-0109 (line 378 carve-out); scripts/capi_surface_gap.sh; include/wasm.h; D-269 / D-177 / D-178 / D-271.
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.

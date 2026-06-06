@@ -30,20 +30,18 @@ cadence (user-directed). D-291/284/287 prior.
   bench) · **D-289** param/stack arms (degenerate-only) — all correctly deferred, no measured need.
 - **D-283** (realworld WASI JIT e2e) would SURFACE failures (46/55 compile) = creates debt, counterproductive.
 
-**DIRECTION (user-steered 2026-06-06): 完成形 surface audits.** CLI surface AUDIT DONE → **D-295** (subagent vs
-wasmtime/wasmer): CLI is ~85% complete + intentionally lean (validate/inspect/wat declined per ADR-0159 = not
-gaps). Genuine gaps prioritized: **P0 `--env KEY=VAL`** (WASI environ — host `setEnvs` infra EXISTS, unwired at
-CLI; mirror `--dir`: accumulate in main.zig + thread `envs` into runWasmJit/runCwasmWasi/runWasmCapturedOpts +
-`host.setEnvs` after setArgs — all 3 call sites @main.zig:212/223/225) · **P1 `--verbose`** (LOW effort) ·
-**P0 `--env KEY=VAL` DONE** (`90e3ebfd`, 3-host green): threaded through all 3 engines → `host.setEnvs`; CLI
-parse + usage; new `test/wasi/env_echo` fixture + `.env` sidecar (runner reads it) → test-wasi-p1 green.
-(Correction: my earlier "C-API config setEnvs gap / wasm-c-api conformance finding" was a double misread — the
-C export `zwasm_wasi_config_set_envs` exists + is tested, `cfg` is a `*Host`; the ONLY gap was CLI wiring. No
-C-API audit finding from P0.) **NEXT: P1 `--verbose`** (LOW effort — a flag toggling trap/diag verbosity, ADR-
-0016 infra exists; D-295). **P2 WAT input** = direction call (needs a parser). Then the **C-API + Zig-API
-surface audits** (the other two 完成形 audit targets; reuse the subagent method, no carryover findings).
-**Remaining (non-audit)**: (a) blocked-by 31 (external/future); (b) v0.2.0 features (proposal_watch); (d)
-dogfooding (D-264 gated).
+**DIRECTION (user-steered 2026-06-06): 完成形 surface audits — ALL THREE DONE.** CLI→**D-295** (~85% + lean;
+declines per ADR-0159 ≠ gaps); P0 `--env KEY=VAL` DONE (`90e3ebfd`, 3-host), P1 `--verbose` deferred-to-M5
+(no rich user content yet), P2 WAT = v0.2 parser. **C-API→ZERO gaps** (`scripts/capi_surface_gap.sh` 293/293;
+Phase 13 conformance VERIFIED+EXCEEDED — no debt). **Zig-API→gap#1 CLOSED** (`a9c850be`): `Module.imports()`/
+`.exports()` pre-instantiation introspection (was ADR-0109 line-378 "Phase 11 D6 follow-up" carve-out that
+slipped while siblings landed; reuses sections.decode*, arena-backed result, ExternKind native mirror). All
+audit detail in **D-296** (note). Residual Zig-API gaps = v0.2/deferred, cross-ref D-269/D-177/D-178, none
+完成形-blocking.
+**Remaining (post-audit)**: (a) blocked-by 31 (external/future); (b) v0.2.0 features (proposal_watch + the
+D-296 Zig-API residuals: Memory.grow/sliceAt, Linker.defineInstance, funcref-call, full WASI config); (d)
+dogfooding (D-264 gated). No actionable HIGH-value 完成形 surface gap remains — next work = v0.2 enhancements or
+memory-safety/debt sweeps.
 **CADENCE (ADR-0076 D8)**: windows BATCHED (≥6 ABI-risk / ≥12 else); chain MANY chunks/turn, never poll-wait
 on windows.
 
@@ -56,15 +54,15 @@ more silent win run → discharge candidate). 31 blocked-by (external/future). 0
 
 - **Phase 16 (完成形) — open-ended; the loop CONTINUES, no release (ADR-0156).** Phases 0–15 all DONE;
   v0.1.0-scope complete + 3-host green. Tag/publish/cutover are manual, user-only — no release gate.
-- Debt ledger: **65 entries, 0 `now`** (31 blocked-by / 31 note / 3 partial). Resolved entries deleted per
-  ledger discipline (git retains via discharge commits — D-288/D-291/D-285/D-284 closed this session).
+- Debt ledger: **66 entries, 0 `now`** (+D-296 Zig/C-API audit note). Resolved entries deleted per ledger
+  discipline (git retains via discharge commits).
 
 ## Step 0.7 (next resume) — verify remote logs
 
-- **windows**: ✅ GREEN @`23269621` (`[run_remote_windows] OK`) — D-288 verified, no false-traps (spec_assert
-  212/0, wast 1158/0, realworld 55/55, simd_assert 13351/0). Cadence recorded. D-279 heisenbug `silent`,
-  **streak 4/5** (one more silent win run → discharge candidate).
-- **ubuntu**: ✅ GREEN @`8906af1b` (`OK`). Re-kick on the next code commit (D6 = always).
+- **ubuntu**: re-kicked this turn at the Module.imports/exports commit (`a9c850be`); verify `[run_remote_ubuntu]
+  OK` in `/tmp/ubuntu.log`. D6 = always re-kick on next code commit.
+- **windows**: BATCHED (D8). Last GREEN @`23269621`; cadence batch counting up (was 1/12 @`90e3ebfd`). Verify
+  `should_gate_windows.sh` before kicking; don't poll-wait. D-279 heisenbug `silent` streak 4/5.
 - **Gate note**: `[run_remote_windows] OK` = real green; `Build Summary: N failed` (no OK) = RED.
   `zig-host-hello` exit-42 + `--__selftest-crash` exit-70 "failed command" = EXPECTED, not crashes; the sha256
   `verify: FAIL` line is the known fixture-wrong-constant FALSE lead (zwasm hashes correctly).
