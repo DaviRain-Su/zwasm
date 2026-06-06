@@ -1452,6 +1452,13 @@ pub fn compile(
             .@"i64.atomic.load8_u",
             .@"i64.atomic.load16_u",
             .@"i64.atomic.load32_u",
+            .@"i32.atomic.store",
+            .@"i64.atomic.store",
+            .@"i32.atomic.store8",
+            .@"i32.atomic.store16",
+            .@"i64.atomic.store8",
+            .@"i64.atomic.store16",
+            .@"i64.atomic.store32",
             => try op_memory.emitMemOp(&ctx, &ins),
             // §9.9 / 9.9-m-3a: data.drop / elem.drop — write 1 to
             // the dropped-flag byte at `[r15+ptr_off]+idx`. No

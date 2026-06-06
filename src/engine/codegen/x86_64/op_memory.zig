@@ -140,7 +140,7 @@ pub fn emitMemOp(
         .@"i64.atomic.load32_u",
         .@"i64.store32",
         => 4,
-        .@"i64.load", .@"i64.atomic.load", .@"i64.store", .@"f64.load", .@"f64.store" => 8,
+        .@"i64.load", .@"i64.atomic.load", .@"i64.atomic.store", .@"i64.store", .@"f64.load", .@"f64.store" => 8,
         else => unreachable,
     };
 
@@ -182,16 +182,16 @@ pub fn emitMemOp(
         } else {
             const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, val_v, 1);
             const enc = switch (op) {
-                .@"i32.store" => inst.encStoreR32MemBaseIdx(src_r, .rax, .rdx),
-                .@"i32.store8" => inst.encStoreR8MemBaseIdx(src_r, .rax, .rdx),
-                .@"i32.store16" => inst.encStoreR16MemBaseIdx(src_r, .rax, .rdx),
-                .@"i64.store" => inst.encStoreR64MemBaseIdx(src_r, .rax, .rdx),
+                .@"i32.store", .@"i32.atomic.store" => inst.encStoreR32MemBaseIdx(src_r, .rax, .rdx),
+                .@"i32.store8", .@"i32.atomic.store8" => inst.encStoreR8MemBaseIdx(src_r, .rax, .rdx),
+                .@"i32.store16", .@"i32.atomic.store16" => inst.encStoreR16MemBaseIdx(src_r, .rax, .rdx),
+                .@"i64.store", .@"i64.atomic.store" => inst.encStoreR64MemBaseIdx(src_r, .rax, .rdx),
                 // i64.store{8,16,32}: low N bits of the GPR; same
                 // encoders as i32.store{8,16} + a 32-bit-store form
                 // for the .32 variant.
-                .@"i64.store8" => inst.encStoreR8MemBaseIdx(src_r, .rax, .rdx),
-                .@"i64.store16" => inst.encStoreR16MemBaseIdx(src_r, .rax, .rdx),
-                .@"i64.store32" => inst.encStoreR32MemBaseIdx(src_r, .rax, .rdx),
+                .@"i64.store8", .@"i64.atomic.store8" => inst.encStoreR8MemBaseIdx(src_r, .rax, .rdx),
+                .@"i64.store16", .@"i64.atomic.store16" => inst.encStoreR16MemBaseIdx(src_r, .rax, .rdx),
+                .@"i64.store32", .@"i64.atomic.store32" => inst.encStoreR32MemBaseIdx(src_r, .rax, .rdx),
                 else => unreachable,
             };
             try buf.appendSlice(allocator, enc.slice());
@@ -278,6 +278,13 @@ pub const emitI32AtomicLoad16U = emitI32Load;
 pub const emitI64AtomicLoad8U = emitI32Load;
 pub const emitI64AtomicLoad16U = emitI32Load;
 pub const emitI64AtomicLoad32U = emitI32Load;
+pub const emitI32AtomicStore = emitI32Load;
+pub const emitI64AtomicStore = emitI32Load;
+pub const emitI32AtomicStore8 = emitI32Load;
+pub const emitI32AtomicStore16 = emitI32Load;
+pub const emitI64AtomicStore8 = emitI32Load;
+pub const emitI64AtomicStore16 = emitI32Load;
+pub const emitI64AtomicStore32 = emitI32Load;
 pub const emitI32Load8U = emitI32Load;
 pub const emitI32Load16S = emitI32Load;
 pub const emitI32Load16U = emitI32Load;
@@ -350,10 +357,10 @@ fn emitMemOpI64(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     const idx_r = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, idx_v, 0);
 
     const access_size: i8 = switch (op) {
-        .@"i32.load8_s", .@"i32.load8_u", .@"i32.store8", .@"i64.load8_s", .@"i64.load8_u", .@"i32.atomic.load8_u", .@"i64.atomic.load8_u", .@"i64.store8" => 1,
-        .@"i32.load16_s", .@"i32.load16_u", .@"i32.store16", .@"i64.load16_s", .@"i64.load16_u", .@"i32.atomic.load16_u", .@"i64.atomic.load16_u", .@"i64.store16" => 2,
-        .@"i32.load", .@"i32.atomic.load", .@"i32.store", .@"f32.load", .@"f32.store", .@"i64.load32_s", .@"i64.load32_u", .@"i64.atomic.load32_u", .@"i64.store32" => 4,
-        .@"i64.load", .@"i64.atomic.load", .@"i64.store", .@"f64.load", .@"f64.store" => 8,
+        .@"i32.load8_s", .@"i32.load8_u", .@"i32.store8", .@"i64.load8_s", .@"i64.load8_u", .@"i32.atomic.load8_u", .@"i64.atomic.load8_u", .@"i32.atomic.store8", .@"i64.atomic.store8", .@"i64.store8" => 1,
+        .@"i32.load16_s", .@"i32.load16_u", .@"i32.store16", .@"i64.load16_s", .@"i64.load16_u", .@"i32.atomic.load16_u", .@"i64.atomic.load16_u", .@"i32.atomic.store16", .@"i64.atomic.store16", .@"i64.store16" => 2,
+        .@"i32.load", .@"i32.atomic.load", .@"i32.store", .@"i32.atomic.store", .@"f32.load", .@"f32.store", .@"i64.load32_s", .@"i64.load32_u", .@"i64.atomic.load32_u", .@"i64.atomic.store32", .@"i64.store32" => 4,
+        .@"i64.load", .@"i64.atomic.load", .@"i64.atomic.store", .@"i64.store", .@"f64.load", .@"f64.store" => 8,
         else => unreachable,
     };
 
@@ -383,13 +390,13 @@ fn emitMemOpI64(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
         } else {
             const src_r = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, val_v, 1);
             const enc = switch (op) {
-                .@"i32.store" => inst.encStoreR32MemBaseIdx(src_r, .rax, .rdx),
-                .@"i32.store8" => inst.encStoreR8MemBaseIdx(src_r, .rax, .rdx),
-                .@"i32.store16" => inst.encStoreR16MemBaseIdx(src_r, .rax, .rdx),
-                .@"i64.store" => inst.encStoreR64MemBaseIdx(src_r, .rax, .rdx),
-                .@"i64.store8" => inst.encStoreR8MemBaseIdx(src_r, .rax, .rdx),
-                .@"i64.store16" => inst.encStoreR16MemBaseIdx(src_r, .rax, .rdx),
-                .@"i64.store32" => inst.encStoreR32MemBaseIdx(src_r, .rax, .rdx),
+                .@"i32.store", .@"i32.atomic.store" => inst.encStoreR32MemBaseIdx(src_r, .rax, .rdx),
+                .@"i32.store8", .@"i32.atomic.store8" => inst.encStoreR8MemBaseIdx(src_r, .rax, .rdx),
+                .@"i32.store16", .@"i32.atomic.store16" => inst.encStoreR16MemBaseIdx(src_r, .rax, .rdx),
+                .@"i64.store", .@"i64.atomic.store" => inst.encStoreR64MemBaseIdx(src_r, .rax, .rdx),
+                .@"i64.store8", .@"i64.atomic.store8" => inst.encStoreR8MemBaseIdx(src_r, .rax, .rdx),
+                .@"i64.store16", .@"i64.atomic.store16" => inst.encStoreR16MemBaseIdx(src_r, .rax, .rdx),
+                .@"i64.store32", .@"i64.atomic.store32" => inst.encStoreR32MemBaseIdx(src_r, .rax, .rdx),
                 else => unreachable,
             };
             try ctx.buf.appendSlice(ctx.allocator, enc.slice());
