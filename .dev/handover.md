@@ -35,9 +35,13 @@ wasmtime/wasmer): CLI is ~85% complete + intentionally lean (validate/inspect/wa
 gaps). Genuine gaps prioritized: **P0 `--env KEY=VAL`** (WASI environ — host `setEnvs` infra EXISTS, unwired at
 CLI; mirror `--dir`: accumulate in main.zig + thread `envs` into runWasmJit/runCwasmWasi/runWasmCapturedOpts +
 `host.setEnvs` after setArgs — all 3 call sites @main.zig:212/223/225) · **P1 `--verbose`** (LOW effort) ·
-**P2 WAT input** (needs a parser; maybe v0.2). **NEXT: implement P0 `--env`** (atomic — CLI + 3 runners + a
-test; needs an env-reading fixture or CLI integration test — deferred from this session's tail to fresh
-context, full plan in D-295). Then P1 `--verbose`, then the C-API + Zig-API surface audits (reuse the method).
+**P2 WAT input** (needs a parser; maybe v0.2). **`--env` FULLY SCOPED (D-295) — multi-layer, ship in ONE fresh
+pass**: it's NOT a quick CLI change. FOUNDATION first — the interp path runs via the C-API `zwasm_wasi_config`
+which has NO `setEnvs` (only the Zig `wasi_host.Host` does, used by JIT/AOT); so add a C-API config env setter
+(also a wasm-c-api conformance gap = the first concrete C-API-audit finding). Then CLI accumulate+thread (3
+call sites) → host.setEnvs (jit/aot) + cfg.setEnvs (interp) → a hand-written WASI env-reader `.wat` fixture +
+runWasmCaptured test. Full recipe (incl. the .wat memory layout) in D-295. **NEXT (fresh session): ship --env
+in one pass; then P1 --verbose; then the C-API surface audit (the setEnvs gap is its first finding).**
 **Remaining (non-audit)**: (a) blocked-by 31 (external/future); (b) v0.2.0 features (proposal_watch); (d)
 dogfooding (D-264 gated).
 **CADENCE (ADR-0076 D8)**: windows BATCHED (≥6 ABI-risk / ≥12 else); chain MANY chunks/turn, never poll-wait
