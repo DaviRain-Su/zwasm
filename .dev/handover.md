@@ -24,14 +24,15 @@ needs the subtyping-trampoline null sentinel). NOT cheap standalone fixes → fo
 **Triage of the B-group (2026-06-06)**: D-294 residuals → D-293-class (deferred); **D-286** → perf-measure-first
 DEFER (byte loops are spec-correct; row admits no fill/init-bound bench → no measured need). The genuine
 **correctness/completeness** gaps that warrant fresh-context codegen work, in priority order:
-- **D-289** — arm64 frame-offset imm12 cap. GPR paths (`340eaf5e`) + **FP/v128 local.get/set/tee arms now DONE**
-  (`7dfc5992`: `gpr.frameLdrFp`/`frameStrFp` + d289_fp_large_frame fixture, 85/0 green). REMAINING: param-marshal
-  (emit.zig :397-455) + stack-args (:466-531) large arms — lift with the same helpers + a fixture each.
+- **D-289 PRACTICALLY DONE** — arm64 frame-offset imm12 cap. GPR (`340eaf5e`) + FP/v128 body-local arms
+  (`7dfc5992`, ubuntu OK @27611097). Reachability analysis: the remaining param-marshal/stack-args arms are
+  CONTRIVED-ONLY (params sit at the lowest offsets → only cross the cap via a >32KB outgoing-call-args area or
+  4000+ params — degenerate, not real programs). Tracked in debt; no fixture forced.
 - **D-229** — x86_64 SysV param-bearing multi-value wrapper thunk UNIMPLEMENTED (arm64 has it `f1858416`):
   backend asymmetry; a real completeness/parity gap.
 - **D-293** — kinded-fixup refactor (splits the shared bounds_fixups/code-2 channel; subsumes D-294 R2).
 - **D-283** (realworld WASI not JIT-run e2e — but only 46/55 compile, so enabling surfaces failures) ·
-  **D-204** (validator.zig at cap=3300 split review). NEXT: D-289.
+  **D-204** (validator.zig at cap=3300 split review). NEXT: D-229 (x86_64 multi-value param thunk parity).
 
 **Blocked / parked**: **D-290** remainder = 3 proposal-laden distillers (wasmtime_misc / spec_2_0_assert /
 spec_simd) direction-gated — wasm-tools vs wabt TOOL-OUTPUT divergence breaks curated gates (NOT drift; debt

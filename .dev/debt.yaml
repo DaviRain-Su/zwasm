@@ -224,10 +224,17 @@ entries:
       local.get/set/tee f32/f64/v128 in emit.zig (caps + truncating offset_w/x/q casts removed). New fixture
       `test/edge_cases/p9/large_frame/d289_fp_large_frame.wat` (5000 f64 locals → local[4999] off ~40000 > the
       32760 D-form cap; round-trips 1234.5, returns 1) green + many_locals/spill no regression (85/0) + full
-      test + lint clean. REMAINING (follow-on, no failing fixture yet): param-marshal (:397-455) + stack-args
-      (:466-531) FP/GPR large arms still cap → UnsupportedOp; lift with the same helpers when a fixture needs
-      them. SEPARATE (→ D-291, now CLOSED): ed25519 SIGSEGV was the arm64 callee-saved-home spill bug.
-      DISCHARGE (this row): the param-marshal + stack-args large arms lifted + a fixture each.
+      test + lint clean. REMAINING param-marshal + stack-args arms are CONTRIVED-ONLY (reachability analysis
+      2026-06-06): `param_off_u = local_base_off + layout.offsets[p_idx]` and params occupy the LOWEST offsets
+      (indices 0..num_params first), so a param crosses the 32760 cap only when `local_base_off`
+      (= outgoing_max_bytes) is itself huge — i.e. the function CALLS something with a >32 KB stack-arg area
+      (~4000+ stack args to one call); the stack-args SOURCE arm (`[X29, #16+8*idx]`) needs >4095 incoming
+      stack args = a 4100+-param function. Both are degenerate, not real programs. PRACTICAL D-289 completeness
+      (the reachable cases — GPR + FP/v128 body locals in large frames) is DONE. The contrived arms stay
+      "lift opportunistically if a real fixture ever appears" — same helpers (frameStrGpr/Fp with a scratch ≠
+      the value reg: stack-arg sites hold the value in X16 → use X17/IP1; reg-arg sites can use X16).
+      DISCHARGE (downgraded): practical large-frame body-local cases lifted (done); the degenerate
+      param/stack arms tracked here, no fixture forced.
     first_raised: "2026-06-05"
     last_reviewed: "2026-06-05"
     refs: |-
