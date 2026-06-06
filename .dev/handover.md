@@ -17,6 +17,29 @@ v0.3 feature work** (2026-06-06) — "AIが思いのほか早いのでどんど�
    hunted; verify the signal at every Step 0.7.
 Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE** (cw v1 side succeeded).
 
+## Active bundle (ADR-0118 D6) — relaxed-SIMD official spec corpus (`(either)` conformance)
+
+- **Bundle-ID**: relaxed-simd-spec-corpus
+- **Goal**: run the 7 upstream relaxed-SIMD `.wast` files (official conformance) through `simd_assert_runner`,
+  complementing the hand-written `test/edge_cases/p17/relaxed_simd/` fixtures. Closes the last 100%-spec rigor
+  gap for 17.4. Per ADR-0169 the corpus is `(either)`-aware (accepts EITHER per-arch hardware outcome), host-
+  agnostic (same corpus all 3 hosts; NOT bit-identical-compared).
+- **Continuity-memo**: feasibility CONFIRMED this cycle — `wast2json --enable-relaxed-simd <f>.wast` succeeds and
+  emits the 2-outcome assert as `"expected":[{"either":[{type:v128,...},{type:v128,...}]}]`. 7 files at
+  `~/Documents/OSS/WebAssembly/testsuite/`: i8x16_relaxed_swizzle, i32x4_relaxed_trunc, relaxed_madd_nmadd,
+  relaxed_laneselect, relaxed_min_max, i16x8_relaxed_q15mulr_s, relaxed_dot_product.
+- **Plan** (3 chunks): **chunk1** = teach the baker `scripts/regen_spec_simd_assert.sh` (python distiller):
+  add the 7 NAMES + `--enable-relaxed-simd` to the wast2json call; add an `either` branch in the result handling
+  — when an expected elem has key `either`, emit `either:<tok1>|<tok2>` where each tok is the existing
+  fmt_token output (v128:/v128_lanes:). **chunk2** = teach the runner `test/spec/simd_assert_runner.zig`
+  runAssertReturn: an `either:` result token → split on `|`, parse each as the existing v128/v128_lanes token,
+  PASS if `got` matches ANY. **chunk3** = run regen, commit the baked corpus dirs, wire into the
+  `simd_assert_runner` manifest list, verify pass+0-fail Mac+ubuntu (Win64 next batch). Each chunk: `zig build
+  test` (the runner is a unit-tested build target) + edge runner unaffected.
+- **Exit-condition**: `simd_assert_runner` runs the 7 relaxed corpora green (each `(either)` assertion accepts
+  the arch's hardware outcome), 0 skip-impl for relaxed, 3-host.
+- **Cycles-remaining**: ~3. No tag (ADR-0156).
+
 ## Current state
 
 - **Phase 17 (v0.2) IN-PROGRESS** (ADR-0168). DONE+**3-host-confirmed**: **17.1-atomics @9eb84833** ·
@@ -26,7 +49,8 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
   recorded; D-279 silent streak=3; 1-failed=D-028 IPC flake, 0 assertions). **Wasm-3.0 100%-spec is COMPLETE —
   no lurking reserved-but-unimpl Phase-5 ops** (audited zir_ops enum 2026-06-07; only stack-switching/
   memory-control stubs remain = Phase-3).
-- **NEXT track = sweep/completeness, NOT new-proposal features.** Stack-switching **DEFERRED @D-300** (survey
+- **NEXT = relaxed-simd-spec-corpus bundle chunk1** (baker `(either)` support; feasibility confirmed — see Active
+  bundle above). Then sweep/completeness. **NOT new-proposal features** — stack-switching **DEFERRED @D-300** (survey
   2026-06-07: Phase-3 unstable format + 3 architecture ADRs + ~25-35cyc — re-survey at Phase 4). compact-import/
   memory-control also pre-Phase-4. So pick from `.dev/remaining_sweep.md` Bucket B/C (D-231 build-DCE gate,
   D-209 memory64 >4GiB memarg completeness, D-259 spillBytes measure-first, …) + re-check proposal_watch
