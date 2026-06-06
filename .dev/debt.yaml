@@ -205,14 +205,25 @@ entries:
       is NOT in these helpers. KEY: 16777416 is in the **DATA region (>16MB)**; the C stack/heap are BELOW the
       data (16MB+), so a stack temp should be a LOW (<16MB) address — the caller computes an address ~16MB TOO
       HIGH = a GROSS miscompile, not a small frame-offset slip. (Also noted a LATENT non-D-291 gap: arm64
-      epilogue frame-restore at emit.zig ~1636/~1675 lacks the prologue's `frame_bytes > 0xFFFFFF` guard.) NEXT:
-      runtime-capture the func-17 CALLER's result-buffer computation (it likely does `global.get $sp` or
-      `local.get $fp` + off, or a `memory.*`-style addr); a gated capture at the call site OR func-17 prologue
-      (W1 = incoming param-0, gated func_idx==17), keyed to the clobbering invocation (mind the 733-call race).
-      Likely a stack-pointer global (`global.get`/`global.set` of __stack_pointer) or a wide i32 add/sub miscompile.
-      Permanent diag infra (trap_aux..trap_aux4 + entry print) committed, gated `-Dtrace-stackprobe`. Repros:
-      regen `/tmp/d291*.wat`. DISCHARGE: the large-frame address miscompile fixed + a minimal fixture; ed25519
-      jit matches wasmtime.
+      epilogue frame-restore at emit.zig ~1636/~1675 lacks the prologue's `frame_bytes > 0xFFFFFF` guard.)
+      ⚠️ RE-LOCALIZED 2026-06-06 (trap_aux5/6 caller-capture, gated `call 17` arg0 in op_call.zig) — the
+      "caller passes a wrong result-buffer (733 suspects)" framing is REFUTED. trap_aux5 gates each `call 17`
+      on X1 (wasm arg0 = result ptr, since X0=runtime_ptr) == 16777416 → it NEVER fired (tested at TWO
+      positions: right after marshalCallArgs AND post-spillHomedCallerSaved). The unconditional capture shows
+      the last `call 17` = caller func 8, arg0=**0xffc3b0** (a VALID stack addr, ~15KB below the 16MB top). So
+      NO caller passes 16777416 — func 17 RECEIVES a correct result-buffer, yet its store still lands at
+      16777416. ⇒ the corruption is INSIDE func 17 (or the call-tail), NOT a caller. func 17 is __multi3: it
+      pushes `local.get 0` (result ptr) at the VERY START, then ~40 i64 ops of 128-bit-multiply (spill-heavy,
+      reuses param slots via local.tee), then `i64.store offset=8` using that early-held ptr as base. The
+      held result-ptr (0xffc3b0) is corrupted to **__stack_pointer_init + 0xC8 = 16777416** across the heavy
+      computation = a context-dependent REGALLOC/SPILL miscompile of the long-lived `local.get 0` operand. NEXT:
+      distinguish (P1) func-17-internal spill corruption vs (P2) call-tail X1 clobber — gated capture of func
+      17's RECEIVED X1 at its prologue (gated func_idx==17, ==16777416 → flag). If received==16777416 → P2
+      (spillHomedCallerSaved/rt-restore clobbers X1, unlikely — it uses X16/X17 scratch); else P1 → trace the
+      early `local.get 0` spill slot through func 17's body (the value diverges to sp_init+0xC8 mid-multiply).
+      Permanent diag infra (trap_aux..trap_aux6 + entry print) gated `-Dtrace-stackprobe`. Repro: build
+      `-Dtrace-stackprobe=true` + `zwasm run --engine jit bench/runners/wasm/shootout/ed25519.wasm`.
+      DISCHARGE: the func-17 spill/address miscompile fixed + a minimal fixture; ed25519 jit matches wasmtime.
     first_raised: "2026-06-05"
     last_reviewed: "2026-06-06"
     refs: |-

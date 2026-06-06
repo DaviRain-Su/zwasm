@@ -278,7 +278,11 @@ pub const JitRuntime = extern struct {
     /// (m-2) reads.
     elem_dropped_ptr: [*]u8 = undefined,
     elem_dropped_count: u32 = 0,
-    _pad7: u32 = 0,
+    /// ADR-0164 B / D-291 — gated caller-capture scratch #5 (former `_pad7`):
+    /// the func_idx of the CALLER that passed result-buffer ptr == 16777416 to
+    /// func 17 (__multi3). emitCall gates `call 17` on X1 (wasm arg0) == 16777416
+    /// and stores `ctx.func.func_idx` here → names the miscompiling caller.
+    trap_aux5: u32 = 0,
     /// §9.9 / 9.9-m-3b (per ADR-0056): per-data-segment slice
     /// descriptor array. Each entry is a `SegmentSlice` (16 bytes:
     /// `ptr` + `len`). JIT `memory.init dataidx` indexes this with
@@ -286,7 +290,9 @@ pub const JitRuntime = extern struct {
     /// bytes, then memcpy n bytes into linear memory at dst.
     data_segments_ptr: [*]const SegmentSlice = undefined,
     data_segments_count: u32 = 0,
-    _pad8: u32 = 0,
+    /// ADR-0164 B / D-291 — gated diagnostic scratch #6 (former `_pad8`): the
+    /// actual X1 (wasm arg0 / result-buffer ptr) value at the LAST `call 17`.
+    trap_aux6: u32 = 0,
     /// §9.9 / 9.9-m-2a (per ADR-0058): per-table slice descriptor
     /// array. Each entry is a `TableSlice` (16 bytes: `refs`,
     /// `len`, `max`). JIT `table.get` / `table.set` / `table.size`
@@ -960,6 +966,10 @@ pub const trap_aux2_off: u12 = @offsetOf(JitRuntime, "trap_aux2");
 /// ADR-0164 B / D-291 — gated store-watchpoint scratch (see `trap_aux3`/`trap_aux4`).
 pub const trap_aux3_off: u12 = @offsetOf(JitRuntime, "trap_aux3");
 pub const trap_aux4_off: u12 = @offsetOf(JitRuntime, "trap_aux4");
+/// ADR-0164 B / D-291 — gated caller-capture scratch (see `trap_aux5`).
+pub const trap_aux5_off: u12 = @offsetOf(JitRuntime, "trap_aux5");
+/// ADR-0164 B / D-291 — gated arg0-value scratch (see `trap_aux6`).
+pub const trap_aux6_off: u12 = @offsetOf(JitRuntime, "trap_aux6");
 /// Phase 10.E IT-6 cycle 3c — EH dispatcher integration. Trampoline
 /// reads ptr+count via `[X19/R15 + off]` to materialize
 /// `ExceptionTable` + `CodeMap` slices for `dispatchThrow`.
