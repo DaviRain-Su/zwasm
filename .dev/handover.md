@@ -40,7 +40,7 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
   legacy-switch path `atomic.fence` already used — add `.@"i32.atomic.load" => op_memory.emitMemOp` to BOTH
   emit.zig legacy switches (sidesteps classification entirely; recommend THIS for the bundle unless atomics
   cleanly == v3_0). Either way: add `.@"i32.atomic.load"` arm (access_size=4, LDR/MOV) to BOTH
-  `op_memory.zig:emitMemOp` (arm64@77, x86_64@69 — check x86_64 emitI32Load wrapper vs direct). **Chunk B2** =
+  `op_memory.zig:emitMemOp` (arm64@77, x86_64@69). **Chunk B2** =
   RUNTIME align-trap: AND ea,#3 + cond-branch to NEW trap stub (`jitTrapCode`=14, mirror oob_fixups/bounds_check
   both arches). edge fixtures: aligned (=val) + misaligned `expect trap`. **PRE-PUSH: `zig build
   test-runtime-runner-smoke`** (lesson trapkind-variant). THEN store → rmw set → cmpxchg → i64 → notify/wait.
