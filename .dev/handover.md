@@ -41,12 +41,14 @@ audit detail in **D-296** (note). Residual Zig-API gaps = v0.2/deferred, cross-r
 **Remaining (post-audit)**: (a) blocked-by 31 (external/future); (b) v0.2.0 features (proposal_watch + the
 D-296 Zig-API residuals: Memory.grow/sliceAt, Linker.defineInstance, funcref-call, full WASI config); (d)
 dogfooding (D-264 gated). No actionable HIGH-value 完成形 surface gap remains.
-**This turn closed** (D-296 Zig-API residuals): `Memory.grow(delta)→?prev_pages` (`f163e882`, extracted shared
-`Runtime.growMemory`, interp handler delegates, test-spec 9/0) + `Memory.sliceAt(offset,len)` bounds-checked
-window (`e5f34ff8`). Both green Mac test+spec+lint.
-**NEXT candidate chunks** (all MED/LOW, pick any): `engine.linker()` shorthand (LOW, trivial); `Linker.
-defineInstance()` (MED, doc'd-not-coded); or pivot to a memory-safety / debt sweep. Cross-ref residuals
-(funcref-call D-269, WASI-config D-177, standalone Global/Memory D-178) stay on their own rows.
+**Recently closed** (D-296 Zig-API residuals, all green Mac test+spec+lint, ubuntu @cff0f0fd): `Memory.grow`
+(`f163e882`, shared `Runtime.growMemory`, test-spec 9/0) + `Memory.sliceAt` (`e5f34ff8`) + `Engine.linker()`
+(`994a5aef`). **Quick/clean Zig-API residuals are now EXHAUSTED.**
+**Remaining D-296 residual** = `Linker.defineInstance()` — ASSESSED as convenience SUGAR not a capability gap
+(point-wise defineCross* already exceeds wasmtime; full impl needs cross-module global/table/memory alias paths
+first = a real investigation, not a quick chunk). Other residuals on own rows (funcref D-269, WASI-config D-177,
+standalone Global/Memory D-178). **NEXT track** = pivot away from Zig-API surface: memory-safety sweep, a debt
+row, or the deeper defineInstance cross-module-alias investigation if prioritized.
 **CADENCE (ADR-0076 D8)**: windows BATCHED (≥6 ABI-risk / ≥12 else); chain MANY chunks/turn, never poll-wait
 on windows.
 
