@@ -34,16 +34,18 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
   madd×4/laneselect×4/dot_add, 2-pop rest — mirror `v128.bitselect` @686) + interp (SIMD currently JIT-only;
   per-op instruction stubs `error.NotMigrated`) + JIT both arches (dispatch_collector preferred per ADR-0086, or
   legacy switch `emit.zig:1909ff`). Stack pop order 3-op = c,b,a.
-- **Plan** (sequence, chunk by family): ~~chunk1 front-end all 18 @f27eee15~~ ~~chunk2 swizzle JIT @6e044e92~~
-  ~~chunk3 trunc JIT @3dab4e24~~ ~~chunk4 min/max JIT + ADR-0169 @1fd3a614~~ DONE. **NEXT chunk5 = madd/nmadd**
-  (FMA — arm64 FMLA; x86 VFMADD or @mulAdd; 3-pop ternop; uniform FMA per ADR-0169) → chunk6 laneselect
-  (bitselect, 3-pop) → chunk7 q15mulr+dot (q15 sat→INT16_MAX; dot b=signed i8). SIMD is JIT-only in v2.
-  **Two JIT routes used**: chunk2 swizzle went via dispatch_collector per-op files (meta+arch ops+register+count
-  bump); chunks 3-4 trunc/min/max went via the **legacy switch** in `{arm64,x86_64}/emit.zig` (simpler when
-  reusing/adding an emit fn; no per-op file / count bump). Either is fine — legacy-switch is lighter for
-  reuse-heavy ops. **ADR-0169**: relaxed ops = per-arch hardware semantics (NaN/±0 impl-defined, NOT forced
-  cross-arch); edge fixtures use finite-distinct inputs so one `.expect` is valid 3-host. Fixtures via wat2wasm
-  `--enable-relaxed-simd` + `v128.const f32x4 ...` form, run `zig build test-edge-cases`.
+- **Plan**: ~~chunk1 front-end @f27eee15~~ ~~chunk2 swizzle @6e044e92~~ ~~chunk3 trunc @3dab4e24~~
+  ~~chunk4 min/max +ADR-0169 @1fd3a614~~ ~~chunk5 madd/nmadd @cb781fd3~~ ~~chunk6 laneselect @4ab9f77a~~ DONE
+  (17/18 ops JIT both arches). **NEXT chunk7 = q15mulr + dot** (LAST: i16x8.relaxed_q15mulr_s overflow→INT16_MAX
+  ≈ SQRDMULH arm64 / PMULHRSW x86; i16x8.relaxed_dot_i8x16_i7x16_s + i32x4.relaxed_dot_i8x16_i7x16_add_s, b=signed
+  i8 — SDOT/PMADDUBSW; the dot_add is 3-pop). Likely NEW encoders. After chunk7 → bundle exit-condition + close.
+  **JIT routes**: chunk2 used dispatch_collector per-op files (meta+arch ops+register+count bump in
+  dispatch_collector.zig); chunks 3-6 used the **legacy switch** in `{arm64,x86_64}/emit.zig` (lighter for
+  reuse/add-emit-fn; no per-op file/count bump). chunk5 added NEW arm64 FMLA/FMLS encoders (inst_neon_arith) +
+  emitV128FpFma helper (op_simd, mirrors bitselect 3-V-reg); x86 unfused via emitV128FpFmaX86 (op_simd_float).
+  **ADR-0169**: relaxed = per-arch hardware (NaN/±0 impl-defined); fixtures use finite/exact inputs → one
+  `.expect` valid 3-host. Fixtures: wat2wasm `--enable-relaxed-simd` + `v128.const f32x4 ...`, `zig build
+  test-edge-cases`. emit_test UnsupportedOp probe now uses `memory.discard` (stable).
 - **Tests**: 7 upstream wast at `~/Documents/OSS/WebAssembly/testsuite/{relaxed_madd_nmadd,relaxed_laneselect,
   relaxed_min_max,i8x16_relaxed_swizzle,i32x4_relaxed_trunc,i16x8_relaxed_q15mulr_s,relaxed_dot_product}.wast`
   — use `(either ...)` 2-outcome asserts (impl-defined latitude); runner `test/spec/simd_assert_runner.zig`,
@@ -58,8 +60,9 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
   @231d4536** · **17.3-custom-page-sizes @cd0de2dd** (all surfaces parse+validate+interp+JIT+C-API). The
   wide-arith+custom-page JIT batch is **windows-confirmed green @b9102acb** (size_1byte=1, grow_bytes=11,
   load_store=1611516670, wide mul/sub all PASS; simd 13351/0, D-279 silent streak=1). Now **17.4-relaxed-SIMD
-  ACTIVE** (front-end @f27eee15 all 18; JIT done: swizzle @6e044e92, trunc ×4 @3dab4e24, min/max ×4 @1fd3a614
-  +ADR-0169; 11/18 ops run both arches. NEXT = chunk5 madd/nmadd FMA). **D-299** (inline load/store
+  ACTIVE** (front-end @f27eee15 all 18; JIT: swizzle/trunc/min-max/madd-nmadd/laneselect done @4ab9f77a,
+  +ADR-0169; 17/18 ops run both arches, all edge fixtures 3-host incl Win64. NEXT = chunk7 q15mulr+dot = LAST
+  → close bundle). **D-299** (inline load/store
   JIT misaligned-trap) still DEFERRED. Phase 16 (完成形) DONE. No release/tag ever (ADR-0156).
 - Debt ledger: **65 entries, 0 `now`** (D-264 dogfooding discharged). Remaining = `.dev/remaining_sweep.md`
   (Bucket A prune / B actionable-low / C deferred / D externally-blocked) — sweep between features, never idle.
