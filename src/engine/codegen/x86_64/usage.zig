@@ -76,6 +76,29 @@ pub fn usesRuntimePtr(func: *const ZirFunc) bool {
             .@"i64.store8",
             .@"i64.store16",
             .@"i64.store32",
+            // Wasm threads/atomics (ADR-0168) — the atomic load/store
+            // emit reloads vm_base / mem_limit via `[R15+...]` exactly
+            // like the plain memory family. Omitting them = D-180-class
+            // silent miscompile: a function whose ONLY memory ops are
+            // atomic got the 4-byte (uses_runtime_ptr=false) prologue,
+            // so R15 was never set and the store/load hit a garbage base
+            // (returned 0 on x86_64; Mac arm64 immune — X19 always set).
+            // rmw/cmpxchg join here when their JIT emit lands (callout
+            // passes rt=RDI=R15 + a trap-stub fixup).
+            .@"i32.atomic.load",
+            .@"i32.atomic.load8_u",
+            .@"i32.atomic.load16_u",
+            .@"i64.atomic.load",
+            .@"i64.atomic.load8_u",
+            .@"i64.atomic.load16_u",
+            .@"i64.atomic.load32_u",
+            .@"i32.atomic.store",
+            .@"i32.atomic.store8",
+            .@"i32.atomic.store16",
+            .@"i64.atomic.store",
+            .@"i64.atomic.store8",
+            .@"i64.atomic.store16",
+            .@"i64.atomic.store32",
             .@"f32.load",
             .@"f64.load",
             .@"f32.store",
