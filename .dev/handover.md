@@ -64,19 +64,17 @@ audit-gap list closed-or-deferred.
     →unreachable(5) mis-report. **D** (`4bdaec59`): trap-UX audit vs wasmtime/wasmer/v1 — clean, ADR-0159-aligned;
     one bug found → **D-294** (JIT call_indirect null-elem → mislabels indirect_call_mismatch; fix = code 13).
 
-## ← LEAD: D-291 RESOLVED (`23874eda`) — next: remove diag infra, D-295 guard, queue
+## ← LEAD: D-291 FULLY CLOSED (`23874eda` fix + `713633d6` diag removed) — next: D-295 guard, queue
 
-**D-291 FIXED** — ed25519 `--engine jit` exits 0 (was oob_table trap); `zig build test`/`test-spec` green,
-test-all in flight. ROOT CAUSE (~7-turn hunt): arm64 `homedCallerSavedSpillReload` SKIPPED callee-saved-bank
-homes (X20-X22) across JIT calls, assuming AAPCS64 callee-preservation — but per ADR-0060 the JIT prologue
-installs invariants into X19-X28 WITHOUT stack-saving, so a callee homing a local in X20-X22 clobbers it. func
-11 homed its saved-SP local2 in callee-saved, call-crossing → clobbered → __stack_pointer over-restored to
-garbage → func 7 data-region buffer → func 17 clobbered the funcptr global → cind oob_table. FIX = spill ALL
-register-homed locals across calls (removed the skip), matching x86_64's already-correct `homedSpillReload`.
-ARM64-ONLY. Lesson filed. **NEXT**: (1) **remove the gated D-291 diag infra** (trap_aux5..9 + the `>=16MB`/
-sp-overset captures in op_call/op_globals/entry/jit_abi, `-Dtrace-stackprobe`-gated) now that it's fixed —
-revert to clean codegen; (2) **D-295** (`now`): regression guard (JIT-exec ed25519 in CI — not minimally
-reproducible); (3) 3-host gate confirms (arm64 fix; x86_64/Win64 unaffected). Then queue: D-288, D-284, D-290, D-279.
+**D-291 DONE**: ed25519 `--engine jit` exits 0 (was oob_table trap); 3-host green (Mac test-all + ubuntu @ca758ace
++ windows @7e46c054); gated diag scaffolding removed (−177 lines, clean codegen; D-165 trap-probe diag kept).
+ROOT CAUSE: arm64 `homedCallerSavedSpillReload` SKIPPED callee-saved-bank homes (X20-X22) across JIT calls —
+but per ADR-0060 the JIT prologue installs invariants into X19-X28 WITHOUT stack-saving, so a callee homing a
+local in X20-X22 clobbers it. FIX = spill ALL register-homed locals across calls, matching x86_64's correct path.
+Lesson filed. **NEXT**: (1) **D-295** (`now`): regression guard — JIT-exec ed25519 in CI (the bug needs
+realworld-scale register pressure, not minimally reproducible; cleanest = a test running ed25519 via
+`runner.runVoidExportWasi` asserting no trap). Then queue: **D-288** (interp recursion redesign, ADR), **D-284**
+(entry-resolution unify), **D-290** (wabt→wasm-tools hygiene), **D-279** (Win64 spec-simd heisenbug, streak 1/5).
 
 **Other status**: ADR-0164 COMPLETE. **D-294 3-HOST GREEN** (`partial`, residuals polish). **D-279 sha256 lead
 FALSE** (corrected — zwasm hashes correctly; fixture has a wrong baked-in constant, golden-matched, never gates;
