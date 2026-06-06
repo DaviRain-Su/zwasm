@@ -2006,6 +2006,13 @@ pub fn compile(
             .@"f32x4.relaxed_nmadd" => try op_simd_float.emitF32x4RelaxedNmadd(&ctx, &ins),
             .@"f64x2.relaxed_madd" => try op_simd_float.emitF64x2RelaxedMadd(&ctx, &ins),
             .@"f64x2.relaxed_nmadd" => try op_simd_float.emitF64x2RelaxedNmadd(&ctx, &ins),
+            // §17.4 relaxed-SIMD laneselect — full bitwise (a&m)|(b&~m) = exactly
+            // v128.bitselect (ADR-0169 full-bitselect choice); lane width irrelevant.
+            .@"i8x16.relaxed_laneselect",
+            .@"i16x8.relaxed_laneselect",
+            .@"i32x4.relaxed_laneselect",
+            .@"i64x2.relaxed_laneselect",
+            => try op_simd.emitV128Bitselect(&ctx, &ins),
             // §9.6/9.6-f-ii — v128.const + i8x16.shuffle (per ADR-0042
             // const-pool with PC-relative LDR-Q-literal + fixup pass).
             .@"v128.const" => try op_simd.emitV128Const(&ctx, &ins),

@@ -1516,6 +1516,13 @@ pub fn compile(
             .@"f32x4.relaxed_nmadd" => try op_simd_float.emitF32x4RelaxedNmadd(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
             .@"f64x2.relaxed_madd" => try op_simd_float.emitF64x2RelaxedMadd(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
             .@"f64x2.relaxed_nmadd" => try op_simd_float.emitF64x2RelaxedNmadd(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            // §17.4 relaxed-SIMD laneselect — full bitwise (a&m)|(b&~m) = exactly
+            // v128.bitselect (ADR-0169); lane width irrelevant.
+            .@"i8x16.relaxed_laneselect",
+            .@"i16x8.relaxed_laneselect",
+            .@"i32x4.relaxed_laneselect",
+            .@"i64x2.relaxed_laneselect",
+            => try op_simd.emitV128Bitselect(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
             // §9.7 / 9.7-ac: i8x16.swizzle (1 op). 10-instr inline
             // recipe synthesises 0x0F broadcast + PCMPGTB-detect of
             // idx>15 + POR-correct + PSHUFB. No const-pool dep.
