@@ -565,6 +565,18 @@ entries:
     status: "note"
     description: |-
       now: `src/validate/validator.zig` (3204 LOC) sits at its raised cap=3300 (ADR-0099 Revision 2026-05-30). Its file-scope MODULE-LEVEL validation helpers — `validateTypeSection` / `validateGlobalInits` / `constExprResultType` / `funcTypeImportCompatible` / `gcValTypeSubtype` family (≳500 LOC) — do NOT touch the Validator instance's private type/control stacks, so they form a genuinely separable P1 sub-language (UNLIKE the GC opcode handlers, which DO consume the shared stacks → "intrinsically singular"). Discharge: when the file NEXT presses the cap, EXTRACT these file-scope helpers to a `validate/` sibling (e.g. `module_validate.zig`) instead of raising the cap again. They're file-scope (not Validator methods), so moving them + qualified-ref updates should avoid N2 pub-leak. | **validator.zig cap stopgap=3300; extraction is the real fix at next cap-press** (the deliberately-tight headroom is the forcing function).
+      EXTRACTION-READY ANALYSIS (2026-06-06): dependency check confirmed the GC-subtype cluster (validator.zig
+      lines 2895-3077: `valTypeIsSubtypeFree`, `gcHeapAbstractSubtype`, `castTargetType`, `gcConcreteReaches`,
+      `gcConcreteReachesCanonical`, `gcValTypeSubtype`, `gcFieldSubtype` — ~180 LOC, all PRIVATE `fn`) references
+      NO Validator instance state (no `self.`/type_stack/control_stack) — only `zir.*`/`sections.*`/`ValType`
+      module types + each other. CLEAN EXTRACT to `src/validate/gc_subtype.zig` (import std + zir + sections +
+      the ValType alias; make the 7 `pub fn` with a SIBLING-PUB marker per P1). Callers stay in validator.zig
+      (lines ~771/781/792/798/808 + 1593 `castTargetType`, + `typeDefIsSubtype`@3078 calls
+      `gcFieldSubtype`/`gcValTypeSubtype`) → qualify via `const gc_subtype = @import("gc_subtype.zig");`.
+      ~180 LOC drop → 3267→~3087, healthy headroom. MUST be ONE atomic commit (a half-done move breaks the
+      build). The pub helpers (constExprResultType / validateGlobalInits / funcTypeImportCompatible /
+      validateTypeSection) are externally called → extract SEPARATELY (or leave); the 7 private GC-subtype fns
+      are the clean first slice. Deferred from this session's tail (atomic refactor → wants fresh context).
     first_raised: "2026-05-30"
     last_reviewed: "2026-06-03"
     refs: |-
