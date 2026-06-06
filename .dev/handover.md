@@ -70,15 +70,15 @@ audit-gap list closed-or-deferred.
 `homedCallerSavedSpillReload` callee-saved-home-skip fix (`23874eda`), gated diag removed (`713633d6`), and a
 **validated regression guard** (`9ab34d18` — runner_trap_test JIT-runs ed25519 via runVoidExportWasi asserting
 no trap; revert-test confirmed it catches the bug; ed25519.wasm copied to src/engine/testdata/). Lesson filed.
-**NEXT: implement D-284** (SURVEYED + scoped 2026-06-06, option A — see the D-284 debt row). Unify the JIT CLI
-entry-resolution (`runWasmJit`, run.zig:53 — strict `_start` only) to the interp/AOT lenient chain
-(`_start→main→first-func-export`, else instantiate-only → exit 0, wasmtime-aligned). The JIT path is
-`runVoidExportWasi`-based + there's no arbitrary-sig JIT runner → add chain resolution + per-sig dispatch
-(void→runVoidExportWasi, ()→scalar→runI32/etc., none→instantiate-only) to runWasmJit. TDD: a no-_start void
-fixture + a differential test (jit==interp==aot exit code). Zero breaking changes (no existing test exercises a
-no-_start-no-main default). Regression risk: `zwasm run` hot path. Then queue: **D-290** (wabt→wasm-tools
-hygiene), **D-288** (interp native-recursion → flat/trampolined redesign, ADR-grade), **D-279** (Win64 spec-simd
-heisenbug, streak 2/5, hard). D-291+D-295+diag-removal all 3-host GREEN.
+**D-284 DONE** (`fbc60815`): unified the JIT CLI entry-resolution to the interp/AOT lenient chain via new
+`runner.runWasiLenient` (`_start→main→first-func-export`, else instantiate-only → exit 0; per-sig dispatch
+void/()→i32). nbody `--engine jit` now exits 0 (was 1) == interp; new test + test-spec green. Residual edge
+(noted): zero-func-export module → JIT instantiate-only (exit 0) vs interp/AOT NoFuncExport — unify in a
+follow-on if it matters. **NEXT — queue**: **D-290** (wabt→wasm-tools toolchain hygiene — swap
+wast2json→json-from-wast in regen_spec_2_0_assert.sh + regen_test_data.sh, wat2wasm→`wasm-tools parse` in
+build.zig spectest + flake.nix wabt pin; mind D-179 JSON-normalization gotchas; 3-host verify after); **D-288**
+(interp native-recursion → flat/trampolined redesign, ADR-grade, the biggest); **D-279** (Win64 spec-simd
+heisenbug, non-deterministic, streak 2/5). D-291+D-294+D-295 all done; 0 `now` debts.
 
 **Other status**: ADR-0164 COMPLETE. **D-294 3-HOST GREEN** (`partial`, residuals polish). **D-279 sha256 lead
 FALSE** (corrected — zwasm hashes correctly; fixture has a wrong baked-in constant, golden-matched, never gates;
