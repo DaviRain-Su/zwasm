@@ -995,15 +995,19 @@ entries:
     layer: "code"
     status: "note"
     description: |-
-      **Win64-only SIMD JIT heisenbug — `zwasm-spec-simd` intermittent crash (exit 3).**
-      STREAK 5/5 (2026-06-06): 5 consecutive `silent` windows runs over 5 structurally-distinct SHAs
-      (7e46c054 → e707fd31, spanning the whole D-288 + D-289 body of work) — `track_heisenbug.sh` flags a
-      DISCHARGE CANDIDATE. NOT fully discharged: investigation_discipline §2 condition (4) (named root cause
-      OR ADR-documented rate-reduction mitigation) is UNMET — the bug was never root-caused (surfaced once,
-      never reproduced) and the windows cadence (D7/D8) DETECTS but does not reduce the crash rate. So this
-      stays a WATCH note: empirically it appears resolved/extremely-rare, but a no-root-cause heisenbug is
-      kept tracked. If it resurfaces, `track_heisenbug.sh win64-testall segv` resets the streak + reopen the
-      `[d-163-jit]`-dump investigation. Original report below.
+      **Win64-only SIMD JIT heisenbug — `zwasm-spec-*` intermittent crash (exit 3).**
+      RESURFACED 2026-06-06 @ batch HEAD `23542591` (`track_heisenbug.sh win64-testall segv` → streak RESET to
+      0). The Win64 `test-all` batch (13 commits of Zig-API facade work) crashed in `zwasm-spec-wasm-2-0-assert.exe`
+      with process exit code 3, `[d-163-jit]` SIMD codegen dumps preceding (func7/8 movd `0f6ec0` / movaps
+      `0f28c0`). Confirms the crash class is the WHOLE SIMD-JIT spec surface, not just `zwasm-spec-simd` — same
+      exit-3 lineage. **NO LONGER a discharge candidate** (the prior 5/5→6 silent streak was extremely-rare luck,
+      not resolution; the bug is real + unresolved). EXONERATES the session's facade work: ubuntu x86_64 ran the
+      SAME wasm-2.0-assert GREEN @23542591, exit-3 is a process CRASH (0 test-assertion failures: 2418 pass + 128
+      skip = 2546 total, 0 fail), and the growMemory refactor (interp memory.grow) would fail on ubuntu too +
+      yield WRONG RESULTS not a crash. NOT auto-reverted (D7). Still no root cause — the `[d-163-jit]` dump +
+      FP-walk / X29-sentinel / RSP-parity lineage (D-180/D-245) remain the leads.
+      Prior streak note (2026-06-06, now superseded): reached 5/5 then 6 `silent` over distinct SHAs
+      (7e46c054 → e707fd31, D-288 + D-289 body) before this resurfacing. Original report below.
       Surfaced 2026-06-05
       during the WASI-program 3-host check: windows `test-all` crashed at `simd_bit_shift` (i64x2 shift, JIT mode,
       `[d-163-jit]` codegen dump preceding) with process exit code 3; a re-run of the same `zwasm-spec-simd.exe`

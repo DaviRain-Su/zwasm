@@ -56,9 +56,16 @@ alive past instance deletes; DISPROVED a claimed table-UAF). One real gap FIXED 
 post-deinit cross-module call = UAF) — now documented on header + deinit. Optional debug-assert guard deferred
 (D-297, contract-based OK for v0.1 à la wasmtime). Verify finding: ALWAYS adversarially check audit "CRITICAL"
 labels — this audit flip-flopped + missed the zombie-parking model; 1 of 2 "criticals" was a false positive.
-**NEXT track**: another high-risk memory-safety area (JIT codegen mmap/code-buffer mgmt, or WASI fd table) via
-a similarly-scoped HIGH-confidence-only subagent + adversarial verify, OR a blocked-by barrier-dissolution
-sweep. High-value autonomous surface work is largely done; memory-safety sweeps are the remaining 完成形 track.
+**Windows batch RED @`23542591` = D-279 resurfacing** (NOT a regression). Win64 test-all crashed in
+`zwasm-spec-wasm-2-0-assert.exe` exit-3 (SIMD-JIT heisenbug; `[d-163-jit]` movd/movaps dumps preceding).
+EXONERATED: ubuntu ran the SAME assert GREEN, exit-3 = process crash (0 test-assertion fails), facade/growMemory
+changes don't touch SIMD + would fail on ubuntu too. Recorded `track_heisenbug.sh win64-testall segv` (streak
+6→0; NO LONGER discharge candidate — bug is real + unresolved, no root cause). NOT auto-reverted (D7). Windows
+cadence NOT --record'd (RED). Also shipped `Engine.linker()`/`defineInstance`/lifetime-doc/example-introspection.
+**NEXT track**: D-279 is the one open RED — a deep Win64-only non-deterministic SIMD-JIT crash (FP-walk/
+X29-sentinel/RSP-parity lineage D-180/D-245). Optionally re-kick windows once to confirm flake (it passes clean
+on re-run per the row). Else: a memory-safety sweep of another area, or a blocked-by barrier-dissolution sweep.
+High-value autonomous surface work is largely done.
 **CADENCE (ADR-0076 D8)**: windows BATCHED (≥6 ABI-risk / ≥12 else); chain MANY chunks/turn, never poll-wait
 on windows.
 
