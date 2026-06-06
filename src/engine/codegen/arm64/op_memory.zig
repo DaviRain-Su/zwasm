@@ -138,6 +138,7 @@ pub fn emitMemOp(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         .@"i64.store16",
         => 2,
         .@"i32.load",
+        .@"i32.atomic.load",
         .@"i32.store",
         .@"i64.load32_s",
         .@"i64.load32_u",
@@ -242,7 +243,7 @@ pub fn emitMemOp(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         else
             try gpr.gprDefSpilled(ctx.alloc, result, 0);
         const word: u32 = switch (ins.op) {
-            .@"i32.load" => inst.encLdrWReg(wd, 28, ip0),
+            .@"i32.load", .@"i32.atomic.load" => inst.encLdrWReg(wd, 28, ip0),
             .@"i32.load8_s" => inst.encLdrsbWReg(wd, 28, ip0),
             .@"i32.load8_u" => inst.encLdrbWReg(wd, 28, ip0),
             .@"i32.load16_s" => inst.encLdrshWReg(wd, 28, ip0),
@@ -321,6 +322,7 @@ fn emitMemOpI64(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         .@"i64.store16",
         => 2,
         .@"i32.load",
+        .@"i32.atomic.load",
         .@"i32.store",
         .@"i64.load32_s",
         .@"i64.load32_u",
@@ -411,7 +413,7 @@ fn emitMemOpI64(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         else
             try gpr.gprDefSpilled(ctx.alloc, result, 0);
         const word: u32 = switch (ins.op) {
-            .@"i32.load" => inst.encLdrWReg(wd, 28, ip0),
+            .@"i32.load", .@"i32.atomic.load" => inst.encLdrWReg(wd, 28, ip0),
             .@"i32.load8_s" => inst.encLdrsbWReg(wd, 28, ip0),
             .@"i32.load8_u" => inst.encLdrbWReg(wd, 28, ip0),
             .@"i32.load16_s" => inst.encLdrshWReg(wd, 28, ip0),

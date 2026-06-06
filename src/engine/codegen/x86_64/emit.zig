@@ -1087,6 +1087,10 @@ pub fn compile(
             .@"i64.trunc_f32_u" => try op_convert.emitI64TruncF32U(&ctx, &ins),
             .@"i64.trunc_f64_u" => try op_convert.emitI64TruncF64U(&ctx, &ins),
             .@"i32.load" => try op_memory.emitI32Load(&ctx, &ins),
+            // i32.atomic.load (threads, ADR-0168) — legacy-switch path
+            // like atomic.fence; forwards to the shared mem emitter.
+            // Single-threaded substrate → plain aligned load (B2 = trap).
+            .@"i32.atomic.load" => try op_memory.emitI32AtomicLoad(&ctx, &ins),
             .@"i32.load8_s" => try op_memory.emitI32Load8S(&ctx, &ins),
             .@"i32.load8_u" => try op_memory.emitI32Load8U(&ctx, &ins),
             .@"i32.load16_s" => try op_memory.emitI32Load16S(&ctx, &ins),
