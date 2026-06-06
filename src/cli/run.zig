@@ -50,7 +50,6 @@ pub fn runWasmJit(
     preopens: []const PreopenDir,
 ) !u8 {
     const runner = @import("../engine/runner.zig");
-    const entry_name = invoke_name orelse "_start";
     var host = try wasi_host.Host.init(alloc);
     defer host.deinit();
     host.io = io;
@@ -66,7 +65,7 @@ pub fn runWasmJit(
     // the JIT trap mechanism (returns Error.Trap). Surface the guest's exit
     // code; a trap with NO exit_code is a genuine fault → propagate (exit 1).
     var trap_code: u32 = 0;
-    _ = runner.runVoidExportWasi(alloc, bytes, entry_name, &host, &trap_code) catch |err| {
+    _ = runner.runWasiLenient(alloc, bytes, invoke_name, &host, &trap_code) catch |err| {
         if (host.exit_code) |code| return @intCast(@min(code, std.math.maxInt(u8)));
         // A genuine trap (no recorded exit_code) surfaces its kind on stderr
         // then maps to exit 1 — interp-parity per ADR-0164 workstream A. A
@@ -829,4 +828,24 @@ test "runWasmJit: --dir preopen makes the JIT's fd_prestat_get(3) succeed (D-244
     // No preopen → fd 3 is badf (8).
     const code2 = try runWasmJit(testing.allocator, testing.io, &prestat_jit, null, &.{}, &.{});
     try testing.expectEqual(@as(u8, 8), code2);
+}
+
+// D-284: `(module (func (export "init")))` — a void export, NO `_start` (the
+// nbody shape). Pre-fix the JIT resolved `_start` ONLY → ExportNotFound (exit 1),
+// while interp ran the first func export → exit 0. `runWasmJit` now uses the
+// lenient `_start → main → first-func-export → instantiate-only` chain, matching
+// `runWasm`(interp)/`runCwasm`(AOT) → SAME exit code (the D-284 discharge).
+const no_start_init_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x01, 0x04, 0x01, 0x60, 0x00, 0x00, // type ()->()
+    0x03, 0x02, 0x01, 0x00, // func: 1 func, type 0
+    0x07, 0x08, 0x01, 0x04, 0x69, 0x6e, 0x69, 0x74, 0x00, 0x00, // export "init" func 0
+    0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b, // code: 1 func, empty body
+};
+
+test "runWasmJit: no-_start module runs the first func export, jit==interp (D-284)" {
+    const jit_code = try runWasmJit(testing.allocator, testing.io, &no_start_init_wasm, null, &.{}, &.{});
+    const interp_code = try runWasm(testing.allocator, testing.io, &no_start_init_wasm, &.{});
+    try testing.expectEqual(@as(u8, 0), jit_code); // was Error.ExportNotFound (exit 1) pre-fix
+    try testing.expectEqual(interp_code, jit_code); // intra-zwasm agreement
 }

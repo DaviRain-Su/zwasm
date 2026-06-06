@@ -373,7 +373,7 @@ entries:
       `.dev/findings/d285_jit_bulk_memory_byteloop.md`; `src/engine/codegen/arm64/op_memory.zig:581`; `src/engine/codegen/x86_64/op_memory.zig:614`; `src/instruction/wasm_2_0/bulk_memory.zig:75`; `bench/results/all_engine_matrix.md` §Findings 5; §1.3/§3.2
   - id: "D-284"
     layer: "infra"
-    status: "note"
+    status: "resolved"
     description: |-
       note (ADR-0163 A, 2026-06-05): `bench/runners/wasm/handwritten/nbody.wasm` exports
       `init`/`run`/`advance` with NO `_start`, but `run_bench.sh` only drives WASI `_start`. So strict

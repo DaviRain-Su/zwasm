@@ -418,6 +418,76 @@ pub fn runVoidExportWasi(
     return owned.rt.jit_executed_flag;
 }
 
+/// D-284 — lenient default-entry resolution for the JIT CLI, mirroring the
+/// interp/AOT chain: `_start` → `main` → first func export → null (no func
+/// export → instantiate-only). Returns the entry func index, or null.
+fn resolveLenientEntryIdx(allocator: Allocator, wasm_bytes: []const u8) Error!?u32 {
+    var module = try parser.parse(allocator, wasm_bytes);
+    defer module.deinit(allocator);
+    const export_section = module.find(.@"export") orelse return null;
+    var exports = try sections.decodeExports(allocator, export_section.body);
+    defer exports.deinit();
+    var first_func: ?u32 = null;
+    var start_idx: ?u32 = null;
+    var main_idx: ?u32 = null;
+    for (exports.items) |e| {
+        if (e.kind != .func) continue;
+        if (first_func == null) first_func = e.idx;
+        if (std.mem.eql(u8, e.name, "_start")) start_idx = e.idx;
+        if (std.mem.eql(u8, e.name, "main")) main_idx = e.idx;
+    }
+    return start_idx orelse main_idx orelse first_func;
+}
+
+/// D-284 — run a WASI module via the LENIENT entry chain so the JIT CLI matches
+/// the interp (`runWasmCaptured`) + AOT (`runCwasm`): `--invoke NAME` → `_start`
+/// → `main` → first func export, else INSTANTIATE-ONLY (exit 0, wasmtime-aligned)
+/// — instead of strict `_start`-only → ExportNotFound on no-`_start` modules
+/// (D-284 nbody). A void entry runs via `callVoidNoArgs` (proc_exit code flows
+/// through the host); a no-arg `() -> i32` entry runs via `callI32NoArgs` (i32 →
+/// exit, AOT-aligned). Other default-entry shapes (params / non-i32 result) have
+/// no args to supply → instantiate-only. `--invoke` of an unsupported sig keeps
+/// the existing UnsupportedEntrySignature contract.
+pub fn runWasiLenient(
+    allocator: Allocator,
+    wasm_bytes: []const u8,
+    invoke_name: ?[]const u8,
+    wasi_host: ?*anyopaque,
+    trap_code_out: ?*u32,
+) Error!u32 {
+    const entry_idx: ?u32 = if (invoke_name) |name|
+        try findExportFunc(allocator, wasm_bytes, name)
+    else
+        try resolveLenientEntryIdx(allocator, wasm_bytes);
+
+    var compiled = try compileWasm(allocator, wasm_bytes);
+    defer compiled.deinit(allocator);
+
+    var owned = try setupRuntime(allocator, &compiled, wasm_bytes);
+    defer owned.deinit(allocator);
+    owned.rt.wasi_host = wasi_host;
+
+    const idx = entry_idx orelse return owned.rt.jit_executed_flag; // no entry → instantiate-only
+    if (idx >= compiled.func_sigs.len) return Error.ExportNotFound;
+    if (idx < compiled.num_imports) return Error.UnsupportedEntrySignature;
+    const sig = compiled.func_sigs[idx];
+
+    if (sig.params.len == 0 and sig.results.len == 0) {
+        entry.callVoidNoArgs(compiled.module, idx, &owned.rt) catch |err| {
+            if (err == Error.Trap) {
+                if (trap_code_out) |p| p.* = owned.rt.trap_kind;
+            }
+            return err;
+        };
+        return owned.rt.jit_executed_flag;
+    }
+    if (sig.params.len == 0 and sig.results.len == 1 and sig.results[0] == .i32) {
+        return entry.callI32NoArgs(compiled.module, idx, &owned.rt);
+    }
+    if (invoke_name != null) return Error.UnsupportedEntrySignature;
+    return owned.rt.jit_executed_flag; // unsupported default-entry shape → instantiate-only
+}
+
 /// Map a scalar `ValType` to a 0..3 dispatch key (i32/i64/f32/f64);
 /// null for non-scalar (v128 / ref) types so the caller can reject the
 /// shape as an enumerated spec-corpus skip. `==` against the void-tag
