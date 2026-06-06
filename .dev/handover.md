@@ -34,9 +34,11 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
   madd×4/laneselect×4/dot_add, 2-pop rest — mirror `v128.bitselect` @686) + interp (SIMD currently JIT-only;
   per-op instruction stubs `error.NotMigrated`) + JIT both arches (dispatch_collector preferred per ADR-0086, or
   legacy switch `emit.zig:1909ff`). Stack pop order 3-op = c,b,a.
-- **Plan** (sequence, chunk by family): chunk1 validate+lower+liveness wiring (all 18, NotImpl→typed) →
-  chunk2 swizzle+trunc+min/max (2-pop, hardware-direct) → chunk3 madd/nmadd (FMA, 3-pop) → chunk4 laneselect
-  (bitselect, 3-pop) → chunk5 q15mulr+dot. Per-family JIT both arches + interp + edge fixtures.
+- **Plan** (sequence, chunk by family): ~~chunk1 validate+lower+liveness wiring (all 18) @f27eee15~~ DONE
+  (6 validator unit tests, NotImpl→OK). **NEXT chunk2 = swizzle JIT** (reuse i8x16.swizzle emit, OOB→0 same as
+  strict; both arches + fixture) → chunk3 trunc (FCVTZS/U // CVTTPS2DQ, sat-clamp) → chunk4 min/max (FMIN/FMAX //
+  MINPS/MAXPS) → chunk5 madd/nmadd (FMA) → chunk6 laneselect (bitselect) → chunk7 q15mulr+dot. SIMD is JIT-only
+  in v2 (no interp surface — mvp.zig has no v128). Each family JIT both arches + spec/edge fixtures.
 - **Tests**: 7 upstream wast at `~/Documents/OSS/WebAssembly/testsuite/{relaxed_madd_nmadd,relaxed_laneselect,
   relaxed_min_max,i8x16_relaxed_swizzle,i32x4_relaxed_trunc,i16x8_relaxed_q15mulr_s,relaxed_dot_product}.wast`
   — use `(either ...)` 2-outcome asserts (impl-defined latitude); runner `test/spec/simd_assert_runner.zig`,
@@ -51,7 +53,7 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
   @231d4536** · **17.3-custom-page-sizes @cd0de2dd** (all surfaces parse+validate+interp+JIT+C-API). The
   wide-arith+custom-page JIT batch is **windows-confirmed green @b9102acb** (size_1byte=1, grow_bytes=11,
   load_store=1611516670, wide mul/sub all PASS; simd 13351/0, D-279 silent streak=1). Now **17.4-relaxed-SIMD
-  ACTIVE** (survey done this cycle; NEXT = chunk1 validate+lower+liveness wiring). **D-299** (inline load/store
+  ACTIVE** (chunk1 front-end @f27eee15 — all 18 validate+lower+liveness; NEXT = chunk2 swizzle JIT). **D-299** (inline load/store
   JIT misaligned-trap) still DEFERRED. Phase 16 (完成形) DONE. No release/tag ever (ADR-0156).
 - Debt ledger: **65 entries, 0 `now`** (D-264 dogfooding discharged). Remaining = `.dev/remaining_sweep.md`
   (Bucket A prune / B actionable-low / C deferred / D externally-blocked) — sweep between features, never idle.
