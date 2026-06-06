@@ -248,6 +248,36 @@ pub fn emitI16x8RelaxedDot(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
 }
 
+// §17.4 `i32x4.relaxed_dot_i8x16_i7x16_add_s` — 4-way i8 dot + accumulate:
+// result[j] = Σ_{k=0..3} a[4j+k]*b[4j+k] + c[j]. = (i16x8 dot) → signed
+// pairwise widen-add to i32x4 (SADDLP) → + c. 3-pop ternop. Spill-everything
+// regalloc routes a/b/c/result through stage regs V29/V30 + V31 scratch, so
+// (like strict dot) result reuses a's stage-0 reg with no alias hazard.
+pub fn emitI32x4RelaxedDotAdd(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
+    const c_vreg = ctx.pushed_vregs.pop().?;
+    const b_vreg = ctx.pushed_vregs.pop().?;
+    const a_vreg = ctx.pushed_vregs.pop().?;
+    const b_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, b_vreg, 1);
+    const a_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, a_vreg, 0);
+    const result_vreg = ctx.next_vreg.*;
+    ctx.next_vreg.* += 1;
+    if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
+    const result_v = try gpr.qDefSpilled(ctx.alloc, result_vreg, 0);
+
+    // i16x8 dot: low→V31, high→result, ADDP→result (a consumed at SMULL2).
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon_arith.encSmull8H(op_simd.simd_scratch_v, a_v, b_v));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon_arith.encSmull2_8H(result_v, a_v, b_v));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon_arith.encAddp8H(result_v, op_simd.simd_scratch_v, result_v));
+    // i16x8 → i32x4 signed pairwise widen-add.
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon_arith.encSaddlp4S(result_v, result_v));
+    // + c (load into stage 1; b is dead).
+    const c_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, c_vreg, 1);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon_arith.encAdd4S(result_v, result_v, c_v));
+
+    try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 0);
+    try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
+}
+
 // ============================================================
 // §9.9 / 9.9-g-10 — int min/max + avgr_u (14 ops)
 // ============================================================

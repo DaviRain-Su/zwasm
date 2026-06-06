@@ -1101,6 +1101,61 @@ pub fn emitI16x8RelaxedDot(allocator: Allocator, buf: *std.ArrayList(u8), alloc:
     return op_simd.emitV128IntBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPmaddubsw);
 }
 
+/// §17.4 `i32x4.relaxed_dot_i8x16_i7x16_add_s` (3-pop a,b,c) — 4-way i8 dot +
+/// accumulate: PMADDUBSW(a,b)→i16x8; PMADDWD(·, ones_i16)→i32x4 pairwise sum;
+/// PADDD(·, c). ones_i16 is materialised const-free via PCMPEQW+PSRLW#15. Same
+/// 3-operand staging as emitV128FpFmaX86 (force b→XMM15, c→XMM14, a→dst).
+pub fn emitI32x4RelaxedDotAdd(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    if (pushed_vregs.items.len < 3) return Error.AllocationMissing;
+    const c_v = pushed_vregs.pop().?;
+    const b_v = pushed_vregs.pop().?;
+    const a_v = pushed_vregs.pop().?;
+    const result_v = next_vreg.*;
+    next_vreg.* += 1;
+    if (result_v >= alloc.slots.len) return Error.SlotOverflow;
+
+    const xmm14 = abi.fp_spill_stage_xmms[0];
+    const xmm15 = abi.fp_spill_stage_xmms[1];
+
+    // Force b → XMM15, c → XMM14 (alias-safe vs dst).
+    const c_home = try gpr.xmmLoadSpilledV128(allocator, buf, alloc, spill_base_off, c_v, 0);
+    if (c_home != xmm14) try buf.appendSlice(allocator, inst.encMovapsXmmXmm(xmm14, c_home).slice());
+    const b_home = try gpr.xmmLoadSpilledV128(allocator, buf, alloc, spill_base_off, b_v, 1);
+    if (b_home != xmm15) try buf.appendSlice(allocator, inst.encMovapsXmmXmm(xmm15, b_home).slice());
+
+    const result_slot = alloc.slot(result_v, .fpr);
+    const dst: inst.Xmm = switch (result_slot) {
+        .reg => |id| abi.fpSlotToReg(id) orelse return Error.SlotOverflow,
+        .spill => .xmm7,
+    };
+    // Load a into dst.
+    switch (alloc.slot(a_v, .fpr)) {
+        .reg => |id| {
+            const a_home = abi.fpSlotToReg(id) orelse return Error.SlotOverflow;
+            if (dst != a_home) try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst, a_home).slice());
+        },
+        .spill => |off| {
+            const abs_off = spill_base_off + off;
+            if (abs_off > 0x7FFF_FFFF) return Error.SlotOverflow;
+            try buf.appendSlice(allocator, inst.encLoadXmmV128MemRBPDisp32(dst, -@as(i32, @intCast(abs_off))).slice());
+        },
+    }
+
+    try buf.appendSlice(allocator, inst.encPmaddubsw(dst, xmm15).slice()); // dst = i16x8 dot (b consumed)
+    // ones_i16 → XMM15 (reuse, b dead): PCMPEQW gives -1, PSRLW#15 → 1 per lane.
+    try buf.appendSlice(allocator, inst.encPcmpeqW(xmm15, xmm15).slice());
+    try buf.appendSlice(allocator, inst.encPsrlwImm(xmm15, 15).slice());
+    try buf.appendSlice(allocator, inst.encPmaddwd(dst, xmm15).slice()); // dst = i32x4 pairwise sum
+    try buf.appendSlice(allocator, inst.encPaddD(dst, xmm14).slice()); // dst += c
+
+    if (result_slot == .spill) {
+        const abs_off = spill_base_off + result_slot.spill;
+        if (abs_off > 0x7FFF_FFFF) return Error.SlotOverflow;
+        try buf.appendSlice(allocator, inst.encStoreXmmV128MemRBPDisp32(-@as(i32, @intCast(abs_off)), .xmm7).slice());
+    }
+    try pushed_vregs.append(allocator, result_v);
+}
+
 /// 16-byte 0x0F-per-byte mask used by popcnt's nibble-split path.
 const NIBBLE_MASK_BROADCAST: [16]u8 = [_]u8{0x0F} ** 16;
 
