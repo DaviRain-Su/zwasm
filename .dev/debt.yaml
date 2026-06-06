@@ -1157,21 +1157,18 @@ entries:
       P2 WAT (.wat text) input acceptance — LOW effort / HIGH dev-UX value, but needs a WAT→wasm parse path
       (wasm-tools/wabt or a minimal Zig parser); not 完成形-blocking (ecosystem converts). Possibly v0.2.
       Lower: --mapdir alias, --fuel (D-277 deferred), trap-kind→exit-code differentiation, shell completion.
-      P0 `--env` FULLY SCOPED 2026-06-06 (multi-layer, NOT a quick CLI change — ship in a fresh focused session
-      in ONE pass): (1) FOUNDATION — the interp path runs via the C-API `zwasm_wasi_config` (run.zig:208+) which
-      has setArgs/addPreopen but **NO setEnvs**; only the Zig `wasi_host.Host` has `setEnvs` (host.zig:160, used
-      by runWasmJit:53 + runCwasmWasi:143). So add a C-API config env setter (`zwasm_wasi_config_set_env` /
-      a `cfg.setEnvs` wrapping the inner host) — this is ALSO a wasm-c-api CONFORMANCE GAP (standard
-      `wasi_config_set_env` / `_inherit_env`) → feeds the next C-API surface-audit target. (2) CLI — accumulate
-      env_keys/env_vals in main.zig (mirror --dir@159), thread to all 3 call sites (212/223/225). (3) WIRING —
-      `host.setEnvs(keys,vals)` after setArgs in runWasmJit + runCwasmWasi; `cfg.setEnvs` in runWasmCapturedOpts
-      (needs (1)). (4) TEST — no env-reading fixture exists; write a minimal WASI `.wat`
-      (environ_sizes_get→[0]/[4], environ_get→ptrs@64/buf@128, fd_write the buf[0..buf_size-1] to stdout =
-      "GREETING=hi") + a runWasmCaptured test with env_keys=["GREETING"],vals=["hi"] asserting stdout. host
-      setEnvs already unit-tested (host.zig:258-298). 5 runner variants exist; CLI only needs the 3 above.
-      DISCHARGE: P0 (--env, foundation→CLI→wiring→test) + P1 (--verbose) landed; P2 (WAT) = direction call.
-      Audit method reusable for the C-API + Zig-API surfaces (the other two 完成形 surface-audit targets; the
-      C-API setEnvs gap above is the first concrete C-API audit finding).
+      P0 `--env KEY=VAL` DONE 2026-06-06 (`90e3ebfd`, 3-host: Mac test + ubuntu + windows green via the batch):
+      threaded env_keys/env_vals through runWasmJit/runCwasmWasi/runWasmCapturedOpts → `host.setEnvs` (all 3
+      engines; `cfg` IS a `*wasi_host.Host` so `cfg.setEnvs` works directly). CLI accumulate+parse in main.zig
+      (mirror --dir); usage updated. TEST: new `test/wasi/env_echo.wat/.wasm` (environ_sizes_get + environ_get +
+      fd_write) + a `.env` sidecar; taught `test/wasi/runner.zig` to read `<name>.env` (KEY=VAL lines) + thread
+      via runWasmCapturedOpts → stdout "GREETING=hi" asserted; `test-wasi-p1` green (3 passed).
+      CORRECTION (honest): my earlier "C-API config lacks setEnvs / wasm-c-api conformance gap" was a DOUBLE
+      MISREAD — the C export `zwasm_wasi_config_set_envs` EXISTS + is tested (wasi.zig:84, test:572), and
+      `zwasm_wasi_config_new` returns `*Host` so `cfg.setEnvs` was always available. The C-API WASI-config env
+      surface is COMPLETE; the only gap was the missing CLI wiring (now fixed). NO C-API audit finding here.
+      DISCHARGE: P0 (--env) DONE; P1 (--verbose) = next; P2 (WAT) = direction call. Audit method reusable for
+      the C-API + Zig-API surface audits (the other two 完成形 targets — no findings carried over from P0).
     first_raised: "2026-06-06"
     last_reviewed: "2026-06-06"
     refs: |-

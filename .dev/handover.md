@@ -35,13 +35,13 @@ wasmtime/wasmer): CLI is ~85% complete + intentionally lean (validate/inspect/wa
 gaps). Genuine gaps prioritized: **P0 `--env KEY=VAL`** (WASI environ — host `setEnvs` infra EXISTS, unwired at
 CLI; mirror `--dir`: accumulate in main.zig + thread `envs` into runWasmJit/runCwasmWasi/runWasmCapturedOpts +
 `host.setEnvs` after setArgs — all 3 call sites @main.zig:212/223/225) · **P1 `--verbose`** (LOW effort) ·
-**P2 WAT input** (needs a parser; maybe v0.2). **`--env` FULLY SCOPED (D-295) — multi-layer, ship in ONE fresh
-pass**: it's NOT a quick CLI change. FOUNDATION first — the interp path runs via the C-API `zwasm_wasi_config`
-which has NO `setEnvs` (only the Zig `wasi_host.Host` does, used by JIT/AOT); so add a C-API config env setter
-(also a wasm-c-api conformance gap = the first concrete C-API-audit finding). Then CLI accumulate+thread (3
-call sites) → host.setEnvs (jit/aot) + cfg.setEnvs (interp) → a hand-written WASI env-reader `.wat` fixture +
-runWasmCaptured test. Full recipe (incl. the .wat memory layout) in D-295. **NEXT (fresh session): ship --env
-in one pass; then P1 --verbose; then the C-API surface audit (the setEnvs gap is its first finding).**
+**P0 `--env KEY=VAL` DONE** (`90e3ebfd`, 3-host green): threaded through all 3 engines → `host.setEnvs`; CLI
+parse + usage; new `test/wasi/env_echo` fixture + `.env` sidecar (runner reads it) → test-wasi-p1 green.
+(Correction: my earlier "C-API config setEnvs gap / wasm-c-api conformance finding" was a double misread — the
+C export `zwasm_wasi_config_set_envs` exists + is tested, `cfg` is a `*Host`; the ONLY gap was CLI wiring. No
+C-API audit finding from P0.) **NEXT: P1 `--verbose`** (LOW effort — a flag toggling trap/diag verbosity, ADR-
+0016 infra exists; D-295). **P2 WAT input** = direction call (needs a parser). Then the **C-API + Zig-API
+surface audits** (the other two 完成形 audit targets; reuse the subagent method, no carryover findings).
 **Remaining (non-audit)**: (a) blocked-by 31 (external/future); (b) v0.2.0 features (proposal_watch); (d)
 dogfooding (D-264 gated).
 **CADENCE (ADR-0076 D8)**: windows BATCHED (≥6 ABI-risk / ≥12 else); chain MANY chunks/turn, never poll-wait
