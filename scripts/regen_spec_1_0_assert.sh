@@ -2,9 +2,9 @@
 # Regenerate Wasm 1.0 spec corpus with full assertion manifests
 # (§9.7 / 7.5-spec-assertion-driver-a).
 #
-# wast2json bakes binary modules + commands JSON; this script
-# distills the JSON into an extended manifest format the
-# spec_assert_runner consumes:
+# `wasm-tools json-from-wast` (D-290: one modern CLI) bakes binary
+# modules + commands JSON; this script distills the JSON into an
+# extended manifest format the spec_assert_runner consumes:
 #
 #   module <file>                                  → load .wasm
 #   assert_return <fn> <args> -> <results>         → invoke + compare
@@ -15,6 +15,12 @@
 #
 # Drives §9.7 / 7.5 row toward `pass=fail=skip=0` from the
 # 10/12 compile-success baseline.
+#
+# D-290 tool swap validated by: regenerate in place → `zig build
+# test-spec-assert` green (212 passed) → revert data (the committed
+# corpus is an unpinned snapshot; this is a script-only migration).
+# NOTE: the handcrafted_* dirs are manually-authored fixtures, not
+# produced by this script.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -22,8 +28,8 @@ cd "$(dirname "$0")/.."
 UPSTREAM=${WASM_SPEC_REPO:-$HOME/Documents/OSS/WebAssembly/spec}
 DEST=test/spec/wasm-1.0-assert
 
-if ! command -v wast2json >/dev/null 2>&1; then
-  echo "[regen_spec_1_0_assert] wast2json not found (need wabt in PATH or dev shell)" >&2
+if ! command -v wasm-tools >/dev/null 2>&1; then
+  echo "[regen_spec_1_0_assert] wasm-tools not found (need it in PATH or dev shell)" >&2
   exit 1
 fi
 if ! command -v python3 >/dev/null 2>&1; then
@@ -57,13 +63,9 @@ for n in "${NAMES[@]}"; do
   TMP=$(mktemp -d)
   trap "rm -rf '$TMP'" EXIT
 
-  if ! ( cd "$TMP" && wast2json \
-      --enable-function-references \
-      --enable-tail-call \
-      --enable-extended-const \
-      --enable-multi-memory \
-      "$src" -o "$n.json" >/dev/null 2>&1 ); then
-    echo "[regen_spec_1_0_assert] skip $n (wast2json rejected)" >&2
+  # wasm-tools enables all proposals by default (no --enable-* flags).
+  if ! ( cd "$TMP" && wasm-tools json-from-wast "$src" -o "$n.json" --wasm-dir . >/dev/null 2>&1 ); then
+    echo "[regen_spec_1_0_assert] skip $n (wasm-tools json-from-wast rejected)" >&2
     rm -rf "$TMP"
     trap - EXIT
     continue
@@ -78,12 +80,31 @@ import json, sys
 src, dst = sys.argv[1], sys.argv[2]
 d = json.load(open(src))
 def fmt(v):
-    return f"{v['type']}:{v['value']}"
+    # D-290 baker normalization (wabt wast2json → wasm-tools
+    # json-from-wast): wabt emits i32/i64 values UNSIGNED
+    # (4294967295); wasm-tools emits them SIGNED (-1), sometimes as a
+    # JSON number rather than a string. The committed baseline + spec
+    # runner manifest use unsigned decimals — fold any negative into
+    # its unsigned width here, accepting both str and int inputs.
+    # f32/f64 are bit-pattern decimals in both tools (identical) → pass.
+    val = v['value']
+    t = v['type']
+    if t in ('i32', 'i64'):
+        n = int(val)
+        if n < 0:
+            n += (1 << 32) if t == 'i32' else (1 << 64)
+        val = str(n)
+    return f"{t}:{val}"
+def norm_wasm(fn):
+    # wasm-tools emits some valid TEXT modules as `.wat` where wabt
+    # compiled `.wasm`; the copy loop converts via `wasm-tools parse`,
+    # so normalize the manifest name to its `.wasm` form here.
+    return fn[:-4] + '.wasm' if fn.endswith('.wat') else fn
 lines = []
 for c in d['commands']:
     t = c.get('type')
     if t == 'module':
-        lines.append('module ' + c['filename'])
+        lines.append('module ' + norm_wasm(c['filename']))
     elif t == 'assert_return':
         a = c['action']
         if a.get('type') != 'invoke':
@@ -154,14 +175,26 @@ with open(dst, 'w') as f:
     f.write('\n'.join(lines) + '\n')
 PY
 
-  # Copy referenced .wasm files only (both `module ` directive
-  # and `assert_invalid ` per 7.5-close-a — the latter references
-  # malformed .wasm fixtures that the runner reads + validates).
-  while read -r line; do
-    set -- $line
-    if [ "$1" = "module" ] || [ "$1" = "assert_invalid" ] || [ "$1" = "assert_malformed" ]; then
-      cp "$TMP/$2" "$out_dir/"
-    fi
+  # Materialize referenced .wasm files (D-290 tool-difference rules):
+  #   - `module` (valid): strip wasm-tools' name section; if emitted as
+  #     a `.wat` text module, parse it to .wasm first.
+  #   - `assert_invalid` / `assert_malformed`: intentionally
+  #     type-invalid / malformed — copy RAW (never re-encode/strip).
+  while read -r d1 file _; do
+    case "$d1" in
+      module)
+        base="${file%.wasm}"
+        if [ -f "$TMP/$file" ]; then
+          wasm-tools strip --all "$TMP/$file" -o "$out_dir/$file"
+        else
+          wasm-tools parse "$TMP/$base.wat" -o "$TMP/$base.fromwat.wasm"
+          wasm-tools strip --all "$TMP/$base.fromwat.wasm" -o "$out_dir/$file"
+        fi
+        ;;
+      assert_invalid|assert_malformed)
+        cp "$TMP/$file" "$out_dir/"
+        ;;
+    esac
   done < "$out_dir/manifest.txt"
 
   rm -rf "$TMP"
