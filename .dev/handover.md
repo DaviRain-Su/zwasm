@@ -91,13 +91,12 @@ D-279. Also queued: D-288 (interp recursion redesign), D-284, D-290.
 
 ## Step 0.7 (next resume) — verify remote logs
 
-- **ubuntu**: ✅ GREEN through `6beb2630` (B-core handler + `test-internal-fault` exit-70). Whatever's kicked
-  next turn — verify `/tmp/ubuntu.log` `OK`.
-- **windows**: ✅ **GREEN at `400c7006`** (`[run_remote_windows] OK`) — full test-all clean (D-279 did NOT fire
-  this run) + `test-internal-fault` exit-70 (First=1 VEH confirmed). D-279 update: it's **NON-deterministic**
-  (silent this run; streak reset toward the §2 ≥5-silent discharge gate, now 1). My earlier "escalating
-  reproducible" read was wrong — it's the classic heisenbug. Formal D-279 investigation = H3 (D-291 link, partly
-  Mac-testable) when fresh.
+- **ubuntu**: ✅ GREEN through D-292 C `0b68bdf7` (`OK`) — x86_64 uncaught-fix (code 12) confirmed. Next kick
+  verify `/tmp/ubuntu.log` `OK`.
+- **windows**: ✅ **GREEN at the D-292 C kick** (`[run_remote_windows] OK`) — full test-all clean, B-core
+  `test-internal-fault` exit-70 holds, D-279 did NOT fire. **D-279 is NON-deterministic** (classic heisenbug,
+  not "escalating reproducible" — my earlier read was wrong); **silent streak = 2** (≥5 over ≥3 SHAs discharges
+  per §2). Formal D-279 = H3 (D-291 shared-root, partly Mac-testable) when fresh.
 - **Gate note**: `run_remote_windows.sh` `OK` line = real green; `Build Summary: N failed` (no `OK`) = RED.
 
 ## Key refs
