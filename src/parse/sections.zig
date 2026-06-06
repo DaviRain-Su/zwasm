@@ -871,6 +871,11 @@ pub const MemoryEntry = struct {
     min: u64,
     /// Optional upper bound in pages.
     max: ?u64 = null,
+    /// Wasm threads proposal (ADR-0168) — limits-flag bit 0x02. A shared
+    /// memory MUST declare a maximum. On the single-threaded substrate it
+    /// behaves identically to an unshared memory; the flag is carried so
+    /// `memory.atomic.wait*` can trap on non-shared memories.
+    shared: bool = false,
 
     pub const IdxType = enum(u1) { i32 = 0, i64 = 1 };
 };
@@ -900,8 +905,12 @@ fn readMemLimits(body: []const u8, pos: *usize) Error!MemoryEntry {
     const has_max = (flag & 0x01) != 0;
     const is_shared = (flag & 0x02) != 0;
     const is_i64 = (flag & 0x04) != 0;
-    if (is_shared) return Error.BadValType;
-    if ((flag & ~@as(u8, 0x05)) != 0) return Error.BadValType;
+    // Wasm threads (ADR-0168): bit 0x02 = shared. A shared memory MUST
+    // declare a maximum (spec §5.4.4 limits validation), so flag 0x02
+    // (shared without max) is malformed. Accept bits {0,1,2}; reject any
+    // other bit (custom-page-size 0x08 still unsupported).
+    if (is_shared and !has_max) return Error.BadValType;
+    if ((flag & ~@as(u8, 0x07)) != 0) return Error.BadValType;
     if (is_i64) {
         if (comptime @intFromEnum(build_options.wasm_level) < @intFromEnum(@TypeOf(build_options.wasm_level).v3_0)) {
             return Error.Memory64Unsupported;
@@ -910,7 +919,7 @@ fn readMemLimits(body: []const u8, pos: *usize) Error!MemoryEntry {
     const min = try leb128.readUleb128(u64, body, pos);
     const max: ?u64 = if (has_max) try leb128.readUleb128(u64, body, pos) else null;
     const idx_type: MemoryEntry.IdxType = if (is_i64) .i64 else .i32;
-    return .{ .idx_type = idx_type, .min = min, .max = max };
+    return .{ .idx_type = idx_type, .min = min, .max = max, .shared = is_shared };
 }
 
 /// Decode the body of a memory section (`SectionId.memory`):
@@ -1701,8 +1710,19 @@ test "decodeMemory: min only + min/max forms (i32 default)" {
     try testing.expectEqual(@as(u64, 3), m.items[1].max.?);
 }
 
-test "decodeMemory: rejects shared flag (threads not supported)" {
+test "decodeMemory: accepts shared memory with max (threads, ADR-0168)" {
+    // flag 0x03 = has_max + shared; min 1, max 2.
     const body = [_]u8{ 0x01, 0x03, 0x01, 0x02 };
+    var mems = try decodeMemory(testing.allocator, &body);
+    defer mems.deinit();
+    try testing.expectEqual(@as(usize, 1), mems.items.len);
+    try testing.expect(mems.items[0].shared);
+    try testing.expectEqual(@as(?u64, 2), mems.items[0].max);
+}
+
+test "decodeMemory: rejects shared without max (spec §5.4.4)" {
+    // flag 0x02 = shared WITHOUT has_max → malformed (shared needs a max).
+    const body = [_]u8{ 0x01, 0x02, 0x01 };
     try testing.expectError(Error.BadValType, decodeMemory(testing.allocator, &body));
 }
 

@@ -1385,6 +1385,7 @@ pub fn instantiateRuntime(
                     .idx_type = entry.idx_type,
                     .pages_min = entry.min,
                     .pages_max = entry.max,
+                    .shared = entry.shared,
                 };
                 mi[slot] = &def_storage[di];
                 slot += 1;

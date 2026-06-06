@@ -25,4 +25,8 @@ pub const MemoryInstance = struct {
     idx_type: sections.MemoryEntry.IdxType = .i32,
     pages_min: u64 = 0,
     pages_max: ?u64 = null,
+    /// Wasm threads (ADR-0168) — carried from the memtype's 0x02 flag so
+    /// `memory.atomic.wait*` can trap on a non-shared memory. No runtime
+    /// behaviour difference on the single-threaded substrate.
+    shared: bool = false,
 };
