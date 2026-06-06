@@ -1036,9 +1036,16 @@ entries:
       JIT-prologue probe, but a NON-JIT-probed path (the spec-runner's own recursion / interp / host fn / a
       mixed test) overflowing is unguarded). Matches the "deep call stack" lineage exactly. D-288 added an
       INTERP native-stack-limit check (128 KB headroom) but the JIT/runner paths on Win64's 1 MB stack may not
-      be covered. NEXT diagnostic: re-add `EXCEPTION_STACK_OVERFLOW` to the VEH filter with a `[d-279-veh]
-      stack-overflow rip=…` log (confirm/refute H3 on the next Win64 run) — if confirmed, extend the
-      stack-limit guard to the uncovered path. Counter-check: ubuntu (8 MB) GREEN on the same SHA every time.
+      be covered. H3 DIAGNOSTIC LANDED @`b86ac7fc`: `windows_traphandler.zig::diagStackOverflow` adds an
+      `EXCEPTION_STACK_OVERFLOW` (0xC00000FD) arm to the VEH (checked BEFORE the armed-recovery gate, since the
+      overflow may fire in the unguarded runner/interp path H3 predicts) that does a minimal fixed-string
+      kernel32 `WriteFile` `[d-279-veh] STACK-OVERFLOW (H3 confirmed…)` (no formatting/lock/alloc → survives the
+      exhausted-stack guard-page slack; mirrors signal.zig D-292) then CONTINUE_SEARCH. DIAGNOSTIC-ONLY (no
+      recovery → ADR-0105 D4 stands). Cross-compiled x86_64-windows-gnu + libc-boundary green. NEXT: read the
+      next Win64 RED — if `[d-279-veh] STACK-OVERFLOW` prints → H3 CONFIRMED, extend the stack-limit guard
+      (D-288's interp check, but for the overflowing path) to cover it; if it does NOT print but exit-3 recurs →
+      H3 refuted, the crash is neither VEH-fault nor panic nor stack-overflow (re-open hypothesis enumeration).
+      Counter-check: ubuntu (8 MB) GREEN on the same SHA every time.
       Prior streak note (2026-06-06, superseded): reached 5/5 then 6 `silent` (7e46c054 → e707fd31) before the
       first resurfacing. Original report below.
       Surfaced 2026-06-05

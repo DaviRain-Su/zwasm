@@ -37,9 +37,14 @@ excludes EXCEPTION_STACK_OVERFLOW per ADR-0105 D4). Fits ALL evidence + the deep
 next-diagnostic (re-add EXCEPTION_STACK_OVERFLOW to the VEH filter with a `[d-279-veh] stack-overflow` log) in
 D-279. NOT auto-reverted (D7; ubuntu 8 MB green every time, facade exonerated).
 
-**NEXT track**: (a) the D-279 H3 stack-overflow diagnostic (re-add EXCEPTION_STACK_OVERFLOW to the VEH filter +
-log — confirms/refutes H3 on the next Win64 run; a focused Win64-trap chunk); OR (b) high-value autonomous
-surface work is otherwise largely done — blocked-by barrier-dissolution re-checks / await user direction.
+**D-279 H3 diagnostic LANDED** (`b86ac7fc`): `EXCEPTION_STACK_OVERFLOW` VEH arm → minimal fixed-string
+`[d-279-veh] STACK-OVERFLOW` WriteFile (survives exhausted stack; diagnostic-only, ADR-0105 D4 stands; cross-
+compile + libc-boundary green). The next Win64 RED now confirms/refutes H3: if it prints → extend the
+stack-limit guard to the overflowing path; if exit-3 recurs WITHOUT it → H3 refuted, re-open enumeration.
+**NEXT track**: D-279 is now maximally-instrumented from Mac (awaits the next Win64 crash signal — an external
+input). High-value autonomous surface work is otherwise done. Remaining: blocked-by barrier-dissolution
+re-checks, or low-ROI items (exotic D-209), or await a Win64 crash signal / user direction. Approaching the
+honest limit of high-value autonomous work absent new external signal.
 
 **Blocked / parked**: 31 blocked-by (call_ref §10.R / Phase-11 D-177 WASI-config / D-178 standalone Global-Memory /
 future proposals). **D-290** = 3 proposal-laden distillers, direction-gated (wasm-tools↔wabt output divergence;
