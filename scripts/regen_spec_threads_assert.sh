@@ -77,13 +77,11 @@ for c in d["commands"]:
         if act.get("type") != "invoke":
             lines.append("skip-impl non-invoke-action")
             continue
-        # memory.atomic.wait{32,64} require a SHARED memory; the non_simd runner's
-        # scratch (base.growable_memory) is not shared → wait traps kind=15
-        # (ExpectedSharedMemory). That is a runner-setup limit, NOT a zwasm bug —
-        # wait works on real shared memory (test/edge_cases/p17/atomics). Skip.
-        if act["field"].startswith("memory.atomic.wait"):
-            lines.append(f"skip-impl runner-nonshared-scratch {act['field']}")
-            continue
+        # memory.atomic.wait{32,64} run on the atomics corpus's `(memory 1 1 shared)`
+        # modules: the runner now seeds `current_mem_shared` from the module
+        # (base.extractMemory0Shared → makeJitRuntime.mem0_shared), so wait does NOT
+        # trap kind=15. zwasm's wait is non-blocking (single-thread → 1=not-equal /
+        # 2=timed-out immediately), so no hang. Emit the real assert_return.
         args_s, bad = toks(act.get("args", []))
         res_s, bad2 = toks(c.get("expected", []))
         if bad or bad2:

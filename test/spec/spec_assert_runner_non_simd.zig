@@ -198,6 +198,9 @@ fn nonSimdOnModuleLoaded(
     const mem_max_pages = base.effectiveMemory0Max(gpa, wasm_bytes, base.current_registered);
     base.resetGrowableMemory(@intCast(mem_min_pages));
     base.current_mem_max_pages = if (mem_max_pages) |m| @intCast(m) else null;
+    // Threads/atomics: seed memory-0 shared flag so memory.atomic.wait{32,64}
+    // runs on the corpus's `(memory … shared)` modules (else trap kind=15).
+    base.current_mem_shared = base.extractMemory0Shared(gpa, wasm_bytes);
     @memset(scratch_globals[0..], 0);
 
     // Close-plan §6 (j) Step B cohort 1 — populate the importer's

@@ -243,8 +243,8 @@ assert_trap i64.atomic.rmw16.cmpxchg_u i32:1 i64:0 i64:0
 assert_trap i64.atomic.rmw32.cmpxchg_u i32:1 i64:0 i64:0
 module atomic.1.wasm
 assert_return init i64:281474976710655 -> ()
-skip-impl runner-nonshared-scratch memory.atomic.wait32
-skip-impl runner-nonshared-scratch memory.atomic.wait64
+assert_return memory.atomic.wait32 i32:0 i32:0 i64:0 -> i32:1
+assert_return memory.atomic.wait64 i32:0 i64:0 i64:0 -> i32:1
 assert_return memory.atomic.notify i32:0 i32:0 -> i32:0
 module atomic.2.wasm
 assert_invalid atomic.3.wasm

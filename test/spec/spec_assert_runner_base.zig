@@ -348,6 +348,10 @@ pub fn makeJitRuntime(
         .data_segments_count = active_data_segments_count,
         .data_dropped_ptr = &scratch_data_dropped,
         .data_dropped_count = active_data_segments_count,
+        // Threads/atomics (ADR-0168): memory-0 shared flag so
+        // `memory.atomic.wait{32,64}` runs vs trapping kind=15. Seeded
+        // per-module by the runner's on_module_loaded (default 0).
+        .mem0_shared = current_mem_shared,
     };
 }
 
@@ -1860,6 +1864,13 @@ pub var growable_memory: [GROWABLE_MEMORY_CAPACITY]u8 align(16) = undefined;
 /// module load via `resetGrowableMemory`.
 pub var current_mem_bytes: u64 = 65536;
 
+/// Module-scoped memory-0 shared flag (1 = `(memory … shared)`), consumed by
+/// `makeJitRuntime` as `mem0_shared` so `memory.atomic.wait{32,64}` does not
+/// trap kind=15 on the corpus's shared-memory modules. Reset to 0 (non-shared)
+/// by `resetGrowableMemory`; each runner's `on_module_loaded` overrides it from
+/// the module's declared memory.
+pub var current_mem_shared: u32 = 0;
+
 /// d-20: module-scoped max-pages cap. Wasm 1.0 §4.2.8 says
 /// `memory.grow` returns -1 when the declared module-level max
 /// would be exceeded. `null` means no max (= `GROWABLE_MEMORY_CAPACITY`
@@ -1871,6 +1882,7 @@ pub var current_mem_max_pages: ?u32 = null;
 /// Called from each runner's `on_module_loaded` callback. Zeros the
 /// in-use region so prior module state doesn't leak into this one.
 pub fn resetGrowableMemory(initial_pages: u32) void {
+    current_mem_shared = 0; // default non-shared; on_module_loaded overrides for shared memories
     current_mem_bytes = @as(u64, initial_pages) * 65536;
     if (current_mem_bytes > GROWABLE_MEMORY_CAPACITY) {
         // Pathological declared initial size — clamp + log. Spec
@@ -1897,6 +1909,21 @@ pub fn extractMemoryLimits(allocator: std.mem.Allocator, wasm_bytes: []const u8)
     defer memories.deinit();
     if (memories.items.len == 0) return .{ .min = 0, .max = null };
     return .{ .min = memories.items[0].min, .max = memories.items[0].max };
+}
+
+/// Returns 1 if the module's DEFINED memory 0 is `(memory … shared)`, else 0.
+/// Used by runners' `on_module_loaded` to seed `current_mem_shared` so
+/// `memory.atomic.wait{32,64}` runs (vs trapping kind=15) on the atomics
+/// corpus's shared-memory modules. Imported shared memory is out of scope (no
+/// corpus module imports a shared memory); parse failure / no-memory → 0.
+pub fn extractMemory0Shared(allocator: std.mem.Allocator, wasm_bytes: []const u8) u32 {
+    var module = zwasm.parse.parser.parse(allocator, wasm_bytes) catch return 0;
+    defer module.deinit(allocator);
+    const sec = module.find(.memory) orelse return 0;
+    var memories = zwasm.parse.sections.decodeMemory(allocator, sec.body) catch return 0;
+    defer memories.deinit();
+    if (memories.items.len == 0) return 0;
+    return if (memories.items[0].shared) 1 else 0;
 }
 
 /// d-37: detect whether a module imports state the spec runner
