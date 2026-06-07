@@ -59,35 +59,29 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
   **EXIT @85bcb5a5**: `wasi_p2_fs.wasm` runs e2e through `runWasiP2Main` (get-directories → open-at "out.txt" → write
   "DATA42" → drop), file content asserted. Fixture uses minimal WIT flags/enum (zwasm classifies by interface+core-sig,
   so it runs; full real-WASI-type conformance is the Phase E2 toolchain proof).
-- **Phase D3 IN-PROGRESS** (plan §Phase D3; adapter P2Op/classify already complete — the gap is the trampolines at
-  `api/component.zig` `defineClassifiedFunc`). Wiring map: `private/notes/p17-D3-trampoline-map.md`. Done:
-  - **D3-1 cli_exit** — `wasi:cli/exit.exit(result)` `(i32)->()` → P1 `procExit`; noreturn via new
-    `InvokeError.ProcExit` (instance.zig: unwind variant, NOT a wasm Trap; `mapDispatchErr` arm) caught in
-    `runWasiP2Main`. Fixture `wasi_p2_exit.{wat,wasm}`, e2e host.exit_code==1.
-  - **D3-2 clocks_monotonic_now** — `now()->instant(u64)` `()->i64` → factored `clocks.clockTimeNs(host,id)` (shared
-    w/ P1 clock_time_get). Fixture `wasi_p2_clock.{wat,wasm}` verifies sane+monotonic via exit(0/1).
-  - **D3-3 clocks_wall_now** — `now()->datetime{sec u64, ns u32}` `(i32 retptr)->()` → writes 12B record (sec@0,
-    ns@8) via clockTimeNs(id 0). Fixture `wasi_p2_wallclock.{wat,wasm}` (type-via-exported-binding per README gotcha).
-  - **D3-4 random_get_bytes** — `get-random-bytes(u64)->list<u8>` → allocs via guest `cabi_realloc`, fills via factored
-    `clocks.randomFill`, writes (ptr,len)@retptr. Fixture `wasi_p2_random.{wat,wasm}`. First D3 list-return op.
-  - **D3-5 stdin** — `cli_get_stdin` mints INPUT_STREAM_RT(3) bound to fd 0; `input-stream.read(self,len)->result<list,
-    stream-error>` reads via factored `fd.readStdinSlice` into a cabi_realloc'd buf, writes result (ok disc@0, ptr@4,
-    len@8; EOF→err closed). `in_stream_drop`→generic drop. Fixture `wasi_p2_stdin.{wat,wasm}` feeds "zwasm" → exit 0.
-- **NEXT = D3-6** (remaining error-group: fs descriptor `read`/`sync`/`stat`/`get-type` + `out_stream_blocking_flush`).
-  fs `read` = list (same realloc); `stat` = descriptor-stat struct retptr; needs P1→P2 error-code = **D-307** for err
-  arms. Sockets spike-first (last). OR Phase E (conformance corpus + Rust/Go proof). Cross-component aggregate → D-305.
-  **D-308**: runWasiP2Main error-cleanup SEGVs on a failed-import wire (error path only).
+- **Phase D3 IN-PROGRESS** (plan §Phase D3; adapter P2Op/classify complete — trampolines at `api/component.zig`
+  `defineClassifiedFunc`). Wiring map: `private/notes/p17-D3-trampoline-map.md`. Done: **D3-1 cli_exit** (procExit;
+  noreturn via `InvokeError.ProcExit`) · **D3-2/3 clocks** monotonic `()->i64` + wall `()->datetime` 12B · **D3-4
+  random_get_bytes** (list via cabi_realloc) · **D3-5 stdin** (INPUT_STREAM_RT; input-stream.read) · **D3-6 fs
+  descriptor completion** @43909eba — `read`(iovec→fdPread)/`sync`/`stat`(canonical descriptor-stat)/`get-type` +
+  `out-stream.blocking-flush`; **D-307 DISCHARGED** @beb887c6 (`adapter.errnoToP2ErrorCode`; all fs err arms incl
+  open-at/write emit `result.err(error-code)`, no trap). Fixtures `wasi_p2_fs_full` (5 ops) + `wasi_p2_fs_err`.
+- **NEXT = D3-7** = `poll` (pollable resource + `poll.poll-list`, needed before sockets); then **sockets last (spike
+  first)**. OR Phase E (conformance corpus + Rust/Go proof). Cross-component aggregate → D-305. **D-308**: runWasiP2Main
+  error-cleanup SEGVs on a failed-import wire (unknown-interface error path only). **D-309**: `component.zig` 1834 LOC
+  size smell — extract WASI-P2 trampolines before the 2000 hard cap.
 
 ## Current state
 
 - **Phase 17 (v0.2) IN-PROGRESS** (ADR-0168). DONE+3-host: atomics @9eb84833 · wide-arith @231d4536 ·
   custom-page-sizes @cd0de2dd · relaxed-SIMD @08342ec5 (+official corpus @8ef2e752, 13420 pass arm64+x86). Wasm-3.0
-  core 100%-spec COMPLETE. Last SHA **7f5c6677** (WASI-P2 stdin read — D3-5; windows gating suspended @9d832f1d).
+  core 100%-spec COMPLETE. Last SHA **beb887c6** (WASI-P2 D3-6 fs descriptor + D-307; windows gating suspended @9d832f1d).
 - **Atomics fully conformant @e6f3b0c0** — official corpus **294 pass, 0 SKIPPED** (D-301), incl. the JIT
   unaligned-atomic-trap fix D-303 (code-14 `unaligned_atomic_fixups` both arches, @5b0db8e1, 3-host).
 - **ALL bounded debt CLEARED**: ✅ D-301 · ✅ D-303 · ✅ D-231 (cross-x86 DCE gate wired @aac4fe2f) · ✅ D-302
   (branch-hint custom-section verified @dcc8d71c) · ✅ **D-279 DISCHARGED @c287d39c**.
-- Debt ledger **53 entries**. `now` = D-299 only (env-constrained). **Correctly DEFERRED (do NOT clear)**: D-209
+- Debt ledger **54 entries** (D-307 discharged; D-309 component.zig-size note added). `now` = D-299 only
+  (env-constrained). **Correctly DEFERRED (do NOT clear)**: D-209
   (hot-path), D-259 (W54-ABI-risk), D-300 stack-switching (Phase-3 unstable), D-299 (x86_64 W^X).
 - 完成形 v0.1 surface COMPLETE: CLI D-295 (~85%, intentionally lean) · C-API ZERO gaps (293/293) · Zig-API
   COMPLETE · memory-safety all-areas SOUND (D-296/D-297). Dogfooding D-264 DONE (cw v1 side).

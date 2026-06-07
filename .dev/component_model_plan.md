@@ -157,10 +157,17 @@ design forks. Update this doc's `[x]` + handover NEXT each chunk.
   - **D3-5 stdin** @7f5c6677 — `get-stdin` mints INPUT_STREAM_RT(3); `input-
     stream.read->result<list,stream-error>` via factored `fd.readStdinSlice`.
     Fixture `wasi_p2_stdin`.
-  - **NEXT = D3-6**: fs descriptor `read`(list)/`sync`/`stat`(struct)/`get-type`
-    + `out_stream_blocking_flush`; needs **D-307** (P1 Errno → P2 error-code) for
-    the err arms. Then poll; **sockets last (spike first)**. **D-308**:
-    runWasiP2Main error-cleanup SEGVs on a failed-import wire (error path only).
+  - **D3-6 fs descriptor completion + flush** @43909eba — `read`(list via
+    cabi_realloc+iovec→fdPread) / `sync` / `stat`(canonical descriptor-stat
+    layout) / `get-type` + `out-stream.blocking-flush`. **D-307 DISCHARGED**
+    @beb887c6 — `adapter.errnoToP2ErrorCode` (canonical fs error-code ordinals);
+    all fs err arms (incl open-at/write) emit `result.err(error-code)`, no trap.
+    Fixtures `wasi_p2_fs_full` (5 ops, guest asserts+traps) + `wasi_p2_fs_err`
+    (open-at noent → err(no-entry)). Smell: `component.zig` 1834 LOC → **D-309**.
+  - **NEXT = D3-7**: `poll` (pollable resource + `poll.poll-list`) — needed before
+    sockets. Then **sockets last (spike first)**. OR Phase E (conformance corpus +
+    Rust/Go proof). **D-308**: runWasiP2Main error-cleanup SEGVs on a failed-import
+    wire (unknown-interface error path only).
 
 ### Phase E — conformance + proof (Tier 2 = wasmtime-equivalent)
 
