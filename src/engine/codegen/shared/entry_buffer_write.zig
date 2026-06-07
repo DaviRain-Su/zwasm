@@ -45,6 +45,7 @@ const builtin = @import("builtin");
 
 const jit_abi = @import("jit_abi.zig");
 const stack_limit_mod = @import("../../../platform/stack_limit.zig");
+const entry = @import("entry.zig");
 
 pub const JitRuntime = jit_abi.JitRuntime;
 
@@ -88,8 +89,24 @@ pub fn invokeBufferWrite(
 ) Error!void {
     rt.stack_limit = stack_limit_mod.computeStackLimit(stack_limit_mod.STACK_GUARD_HEADROOM);
     rt.trap_flag = 0;
-    const code = fn_ptr(rt, results, args);
+    // D-311 / D-245: route through the non-inline cohort-clobber trampoline so
+    // the host's callee-saved registers (RBX/R12-R15 · X19-X28) are saved &
+    // restored around the JIT call. The native_emit'd body MOV-installs that
+    // pinned cohort from `rt` WITHOUT stack-saving the caller's values, so a
+    // plain `fn_ptr(...)` call loses any live value ReleaseSafe's optimized host
+    // kept there → undefined-memory read / SEGV. The register/void entry paths
+    // already do this (`entry.invokeAndCheck`); the buffer-write path had not.
+    const code = @call(.never_inline, jitTrampolineBuf, .{ fn_ptr, rt, results, args });
     if (code != ErrCode_OK or rt.trap_flag != 0) return Error.Trap;
+}
+
+/// D-311 — buffer-write sibling of `entry.jitTrampoline`. Non-inline (a real
+/// prologue/epilogue) so the trailing `asm` clobber forces THIS frame to
+/// preserve the JIT-clobbered callee-saved cohort across the call.
+fn jitTrampolineBuf(f: BufferWriteFn, rt: *JitRuntime, results: [*]u64, args: [*]const u64) ErrCode {
+    const code = f(rt, results, args);
+    asm volatile ("" ::: entry.jit_cohort_clobbers);
+    return code;
 }
 
 /// ADR-0106 cycle 3e Phase 2'h step 2 — Win64 routing helper for

@@ -146,7 +146,7 @@ const x86_64_win64_call_clobbers: if (builtin.target.cpu.arch == .x86_64 and bui
 /// masking the JIT's clobber. XMM/FP is omitted — the JIT already preserves
 /// win64 XMM6-15, and the SysV/AAPCS64 FP cohort is caller-saved. The x86_64
 /// arm is identical for SysV and Windows (same JIT regalloc pool).
-const jit_cohort_clobbers: if (builtin.target.cpu.arch == .aarch64 or builtin.target.cpu.arch == .x86_64) std.builtin.assembly.Clobbers else void =
+pub const jit_cohort_clobbers: if (builtin.target.cpu.arch == .aarch64 or builtin.target.cpu.arch == .x86_64) std.builtin.assembly.Clobbers else void =
     if (builtin.target.cpu.arch == .aarch64) .{
         .x19 = true,
         .x20 = true,
