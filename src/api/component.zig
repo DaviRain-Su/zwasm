@@ -487,6 +487,16 @@ fn p2DescriptorDrop(caller: *Caller, self_handle: u32) WasiP2Error!void {
     _ = try ctx.resources.drop(WasiP2Ctx.DESCRIPTOR_RT, self_handle);
 }
 
+/// Generic classified `canon resource.drop`: drop a handle of ANY host-modeled
+/// P2 resource (output-stream / descriptor — both rep = a P1 fd) and close the
+/// underlying fd (a noop for stdio per P1 `fd_close`). The language-level drop
+/// already named the type; the table's stored type is authoritative, so the
+/// host need not resolve which interface's resource was dropped.
+fn p2ResourceDrop(caller: *Caller, self_handle: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    if (try ctx.resources.dropAny(self_handle)) |fd| _ = wasi_fd.fdClose(ctx.host, @intCast(fd));
+}
+
 /// The WASI fd of the preopen rooted at host-OS fd `host_fd` (its `.dir`
 /// fd-table slot), or null if not found.
 fn preopenWasiFd(host: *wasi_host.Host, host_fd: std.posix.fd_t) ?wasi_p1.Fd {
@@ -574,9 +584,11 @@ fn defineClassifiedFunc(lk: *Linker, module: []const u8, name: []const u8, op: a
         .cli_get_stdout => try lk.defineFuncCtx(module, name, ctx, fn (*Caller) WasiP2Error!u32, p2GetStdout),
         .cli_get_stderr => try lk.defineFuncCtx(module, name, ctx, fn (*Caller) WasiP2Error!u32, p2GetStderr),
         .out_stream_write, .out_stream_blocking_write_and_flush => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32, u32, u32) WasiP2Error!void, p2OutStreamWrite),
-        .out_stream_drop => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!void, p2OutStreamDrop),
+        // Any classified `canon resource.drop` (classifyCoreExport returns
+        // out_stream_drop for all) routes to the generic drop — correct for both
+        // output-stream and descriptor handles (both rep = a P1 fd).
+        .out_stream_drop, .fs_descriptor_drop => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!void, p2ResourceDrop),
         .fs_descriptor_write => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32, u32, u64, u32) WasiP2Error!void, p2DescriptorWrite),
-        .fs_descriptor_drop => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!void, p2DescriptorDrop),
         .fs_get_directories => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!void, p2GetDirectories),
         .fs_descriptor_open_at => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32, u32, u32, u32, u32, u32) WasiP2Error!void, p2DescriptorOpenAt),
         // Classified but not yet trampolined (stdin/exit/clocks/random + the rest

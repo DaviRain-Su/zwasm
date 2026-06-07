@@ -130,6 +130,18 @@ pub const ResourceTable = struct {
         return if (removed.own) removed.rep else null;
     }
 
+    /// Drop a handle WITHOUT a resource-type check — for a host that models
+    /// several P2 resource kinds in ONE table and routes `canon resource.drop`
+    /// generically (the handle's stored `rt` is authoritative; the language-level
+    /// drop already named the type). Same own/borrow + still-lent semantics as
+    /// `drop`. Returns the owning `rep` to destroy, or null for a `borrow`.
+    pub fn dropAny(self: *ResourceTable, i: u32) Error!?u32 {
+        const h = try self.handlePtr(i);
+        if (h.own and h.num_lends != 0) return Error.HandleStillBorrowed;
+        const removed = try self.removeAt(i);
+        return if (removed.own) removed.rep else null;
+    }
+
     /// Return a lent owning handle (`num_lends -= 1`). Called when a `borrow`
     /// derived from `lender` is dropped (the lender must still be live).
     pub fn endLend(self: *ResourceTable, lender: u32) Error!void {
@@ -150,6 +162,17 @@ test "new + rep round-trips; handle is >= 1" {
     const h = try t.new(7, 0xCAFE);
     try testing.expect(h >= 1);
     try testing.expectEqual(@as(u32, 0xCAFE), try t.rep(7, h));
+}
+
+test "dropAny removes a handle of any type without an rt check (returns its rep)" {
+    var t = try ResourceTable.init(testing.allocator);
+    defer t.deinit();
+    const a = try t.new(1, 100); // output-stream-typed
+    const b = try t.new(2, 200); // descriptor-typed
+    try testing.expectEqual(@as(?u32, 100), try t.dropAny(a));
+    try testing.expectEqual(@as(?u32, 200), try t.dropAny(b));
+    // Both are now stale (double-drop traps).
+    try testing.expectError(Error.InvalidHandle, t.dropAny(a));
 }
 
 test "handle 0 (sentinel) is always invalid" {
