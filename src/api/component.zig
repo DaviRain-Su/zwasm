@@ -567,6 +567,42 @@ test "C2-3b-1: a real 2-component graph decodes (nested components + instances +
     try testing.expect(b_lift);
 }
 
+/// A real WASI Preview 2 "hello world" component (hand-authored + wasm-tools):
+/// imports `wasi:cli/stdout` + `wasi:io/streams` (+ `wasi:io/error`), exports
+/// `wasi:cli/run`'s `run`, prints "hello" (verified via wasmtime). Source +
+/// provenance: `test/component/wasi_p2_hello.{wat,go}` + README.
+const wasi_p2_hello_path = "test/component/wasi_p2_hello.wasm";
+
+test "D1-2: WASI-P2 hello-world component decodes structurally (imports wasi:cli/io)" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, wasi_p2_hello_path, testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    try testing.expectEqual(decode.Kind.component, try decode.classify(bytes));
+    var comp = try decode.decode(testing.allocator, bytes);
+    defer comp.deinit(testing.allocator);
+
+    var has_import = false;
+    var has_core_module = false;
+    var has_canon = false;
+    for (comp.sections.items) |sec| {
+        switch (sec.id) {
+            .import => has_import = true,
+            .core_module => has_core_module = true,
+            .canon => has_canon = true,
+            else => {},
+        }
+    }
+    try testing.expect(has_import and has_core_module and has_canon);
+
+    // It imports the WASI P2 CLI-print interfaces (the adapter D1-1 name-maps).
+    // (Full type-info decode needs instance-type decode — D1-2 bundle.)
+    try testing.expect(std.mem.find(u8, bytes, "wasi:cli/stdout") != null);
+    try testing.expect(std.mem.find(u8, bytes, "wasi:io/streams") != null);
+}
+
 test "C2-3b-2 (EXIT): a 2-component graph links + runs (A calls B across components)" {
     var threaded: std.Io.Threaded = .init(testing.allocator, .{});
     defer threaded.deinit();
