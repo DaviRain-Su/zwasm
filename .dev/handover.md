@@ -39,9 +39,14 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
   `proposals/threads/atomic.wast` (NOT spec/test/core). **Action-handling RESOLVED (scout)**: non_simd runner
   PERSISTS memory across directives (@non_simd:147) + already runs `init`-action invokes (@622) → distiller emits
   the 59 `action` (store/init) commands as **void-result invokes** (`assert_return <fn> <args> -> ()`), NOT skip.
-  Module = `(memory 1 1 shared)`; rmw asserts largely self-contained (rmw returns old + mutates). Manifest fmt:
-  `module <f>` + `assert_return <fn> <type>:<v>… -> <type>:<v>|()`. chunk3 = run, fix surfaced bug
-  (relaxed-corpus caught the x86 dot sign bug), 3-host.
+  Module = `(memory 1 1 shared)`. **chunk2-3 DONE (spiked @this cycle)**: regen `scripts/regen_spec_threads_assert.sh`
+  written; `spec_assert_runner_non_simd` runs the corpus — **226 asserts PASS, ZERO atomics bugs**. **NOW BLOCKED
+  @D-301 (chunk4 = runner extension, REQUIRED)**: (a) 3-arg-scalar dispatch (cmpxchg/wait take 3 args; runner
+  maxes at 2 AND they're sequence-setup ops → skipping breaks dependent loads) — add entry helpers
+  callI32_i32i32i32 / callI64_i32i64i64 / callI32_i32i32i64 / callI32_i32i64i64 (entry.zig) + non_simd dispatch;
+  (b) assert_trap arg-parse (nonSimdRunAssertTrap can't parse i64/multi-arg the assert_return path handles).
+  Then regen → wire build.zig test-spec-threads-assert step → corpus green 3-host. Regen script committed
+  (untracked corpus NOT committed until green). Atomic JIT edge-covered (p17/atomics) meanwhile.
 - **Exit-condition**: atomic.wast assert_returns execute (not skip) + pass in a runner, 0 fail, 3-host; any
   surfaced bug fixed.
 - **Cycles-remaining**: ~3-4. No tag (ADR-0156).
