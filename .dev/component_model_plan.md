@@ -140,9 +140,27 @@ design forks. Update this doc's `[x]` + handover NEXT each chunk.
   resource-drop @75d79a6c · **EXIT @85bcb5a5** `wasi_p2_fs.wasm` runs e2e
   (get-directories → open-at → write "DATA42" → drop). clocks/random (free funcs,
   not resources) + exit/stdin + P1→P2 error-code (D-307) → D3.
-- [ ] **D3 — broader native P2 host** (clocks/random/exit/stdin trampolines +
-  full fs/poll; sockets last, where the corpus demands past the adapter
-  shortcut). Spike sockets first. Error-code result mapping = D-307.
+- [ ] **D3 — broader native P2 host** (free-func + stdin trampolines DONE; fs
+  descriptor completion + poll/sockets remain). The gap is the trampolines at
+  `api/component.zig` `defineClassifiedFunc`; wiring map in
+  `private/notes/p17-D3-trampoline-map.md`. Done:
+  - **D3-1 cli_exit** @9ce02433 — `exit(result)` → P1 procExit; noreturn via new
+    `InvokeError.ProcExit` (instance.zig unwind variant, NOT a wasm Trap) caught
+    in runWasiP2Main. Fixture `wasi_p2_exit`.
+  - **D3-2 monotonic-clock.now** @f90cd931 — `()->i64`; factored
+    `clocks.clockTimeNs`. Fixture `wasi_p2_clock`.
+  - **D3-3 wall-clock.now** @85e8685f — `()->datetime` 12B record to retptr.
+    Fixture `wasi_p2_wallclock`.
+  - **D3-4 random.get-random-bytes** @6040671a — `->list<u8>` via guest
+    `cabi_realloc` (ctx.reallocGuest), factored `clocks.randomFill`. Fixture
+    `wasi_p2_random`. First list-return op.
+  - **D3-5 stdin** @7f5c6677 — `get-stdin` mints INPUT_STREAM_RT(3); `input-
+    stream.read->result<list,stream-error>` via factored `fd.readStdinSlice`.
+    Fixture `wasi_p2_stdin`.
+  - **NEXT = D3-6**: fs descriptor `read`(list)/`sync`/`stat`(struct)/`get-type`
+    + `out_stream_blocking_flush`; needs **D-307** (P1 Errno → P2 error-code) for
+    the err arms. Then poll; **sockets last (spike first)**. **D-308**:
+    runWasiP2Main error-cleanup SEGVs on a failed-import wire (error path only).
 
 ### Phase E — conformance + proof (Tier 2 = wasmtime-equivalent)
 
