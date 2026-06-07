@@ -117,7 +117,58 @@ pub const ComponentInstance = struct {
             .realloc_fn = reallocViaGuest,
         };
     }
+
+    /// Invoke a `func(string) -> string` component export end-to-end through the
+    /// canonical ABI (B6 IT-3b-3). `core_func` is the lowered core export; the
+    /// string result is too wide to flatten, so the core returns a RETURN-AREA
+    /// POINTER to `[out_ptr:i32, out_len:i32]` in guest memory (the canon-lift
+    /// convention). `post_return` (if the canon-lift had one) is called for
+    /// cleanup. Returns a host-owned copy (allocated from `out_alloc`).
+    ///
+    /// NOTE (IT-3b shortcut): exports are addressed by their core name; the
+    /// general canon-lift→core-func resolution (alias / core-instance decode)
+    /// is the follow-up. utf8 string-encoding only.
+    pub fn invokeString(
+        self: *ComponentInstance,
+        core_func: []const u8,
+        post_return: ?[]const u8,
+        arg: []const u8,
+        out_alloc: std.mem.Allocator,
+    ) InvokeStringError![]u8 {
+        const cx = try self.canonContext();
+        const lowered = try canon.lowerString(cx, arg);
+
+        var args = [_]Value{ .{ .i32 = @bitCast(lowered.ptr) }, .{ .i32 = @bitCast(lowered.packed_length) } };
+        var results = [_]Value{.{ .i32 = 0 }};
+        try self.core.invoke(core_func, &args, &results);
+        const ret_ptr: u32 = @bitCast(results[0].i32);
+
+        // Re-fetch memory: a growing cabi_realloc could have moved the backing.
+        const cx2 = try self.canonContext();
+        const out_ptr = try readU32LE(cx2.memory, ret_ptr);
+        const out_len = try readU32LE(cx2.memory, ret_ptr + 4);
+        const borrowed = try canon.liftString(cx2, out_ptr, out_len);
+        const owned = try out_alloc.dupe(u8, borrowed);
+        errdefer out_alloc.free(owned);
+
+        if (post_return) |pr| {
+            var pr_args = [_]Value{.{ .i32 = @bitCast(ret_ptr) }};
+            try self.core.invoke(pr, &pr_args, &.{});
+        }
+        return owned;
+    }
 };
+
+pub const InvokeStringError = error{
+    OutOfBounds,
+    OutOfMemory,
+} || canon.StringError || Instance.InvokeError || CanonContextError;
+
+/// Read a little-endian u32 from a guest-memory slice (bounds-checked).
+fn readU32LE(mem: []const u8, off: u32) error{OutOfBounds}!u32 {
+    if (@as(usize, off) + 4 > mem.len) return error.OutOfBounds;
+    return std.mem.readInt(u32, mem[off..][0..4], .little);
+}
 
 pub const InvokeFlatError = error{
     TooManyParams,
@@ -360,6 +411,29 @@ test "IT-3b-2: a real wasm-tools string→string component decodes through the p
         if (std.mem.eql(u8, e.name, "greet")) found_export = true;
     }
     try testing.expect(found_export);
+}
+
+test "IT-3b-3 (EXIT): a real string→string component runs end-to-end" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, greet_component_path, testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var ci = try instantiate(&eng, testing.allocator, bytes);
+    defer ci.deinit();
+
+    // greet("zwasm") ⇒ "Hello, zwasm!" — a real component runs via zwasm.
+    const result = try ci.invokeString("greet", "cabi_post_greet", "zwasm", testing.allocator);
+    defer testing.allocator.free(result);
+    try testing.expectEqualStrings("Hello, zwasm!", result);
+
+    // A second call (fresh allocations through the guest) still works.
+    const result2 = try ci.invokeString("greet", "cabi_post_greet", "世界", testing.allocator);
+    defer testing.allocator.free(result2);
+    try testing.expectEqualStrings("Hello, 世界!", result2);
 }
 
 test "IT-1: a core module (not a component) is rejected as NotAComponent" {
