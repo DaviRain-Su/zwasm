@@ -610,7 +610,7 @@ entries:
       memory64 `> 4 GiB`-static-offset consumer appears, OR consciously close as won't-do for v1.0.
       `ZirInstr.payload` is already **u64** (10.Z), so the "payload u32" framing below is obsolete. **Realworld memory64 memarg-offset gap — common case FIXED cyc214**: clang `--target=wasm64` / lld emit the memarg `offset` as a width-padded (9-byte) LEB128, valid for a u64 (memory64) offset (≤ 10 bytes) but the validator (`skipMemarg`/`readMemargCheckAlign`) + lowerer (`emitMemarg`/`emitMemargLane`) decoded it at u32 width → `Error.Overlong`. The spec corpus only emits minimal-LEB offsets so this was invisible until the `clang_wasm64/wasm64_load_store` realworld fixture ran. Fix: validator decodes the offset at u64 width for memory64 (`skipMemargOffset`, keyed on `memory0_idx_type`); lowerer decodes at u64 then range-checks ≤ u32 for the payload slot (`readMemargOffset`). **Residual (the blocked-by)**: a genuine memory64 offset > 4 GiB (> u32 max) is rejected with `Error.BadMemarg` because `payload` is u32 — spec-valid but unsupported. Real code never uses > 4 GiB *static* offsets (large memory ≠ large offset), and the spec corpus doesn't exercise it, so deferred. Discharge (ADR-0128 §4 — web-verified): the official memory64 corpus's max EXECUTED offset is `2^32−1` (`address64.wast offset=4294967295`); offsets ≥ 2^32 appear only in assert_malformed/assert_invalid (validator path, never reach the lowerer), so spec-100% does NOT need the lowerer to accept `> 4 GiB`. The only residual is a leftover `> maxInt(u32)` reject in `readMemargOffset` (`lower.zig:864-867`) + `lower_simd.zig:372` — return u64 + drop the reject + ensure 64-bit `base+offset` math with wrap-trap + add an edge-case fixture for offset `> 2^32−1`. NO ZirInstr layout change / side-table (that plan is obsolete). | **STALE blocker (payload now u64); minimal fix = lift the leftover u32 check; spec corpus max offset = 2^32−1 so this never blocked spec-100%.**
     first_raised: "2026-05-30"
-    last_reviewed: "2026-06-03"
+    last_reviewed: "2026-06-07"
     refs: |-
       `src/validate/validator.zig` (skipMemargOffset); `src/ir/lower.zig` + `src/ir/lower_simd.zig` (readMemargOffset); `test/realworld/p10/clang_wasm64/`; ROADMAP §10 / 10.M
   - id: "D-211"
@@ -795,7 +795,7 @@ entries:
       CAUTION: frame-size changes are ABI-offset-adjacent (W54 class) — test Mac aarch64
       first + differential suite. Low priority; skip unless §15.P has slack.
     first_raised: "2026-06-04"
-    last_reviewed: "2026-06-04"
+    last_reviewed: "2026-06-07"
     refs: |-
       src/engine/codegen/shared/regalloc.zig (spillBytes, class-blind slot space @127-137);
       regalloc_vreg_class.zig (vregClassOfOp); ADR-0150; ADR-0038/0040

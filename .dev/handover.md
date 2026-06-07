@@ -36,7 +36,12 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
   `if (comptime wasm_v3_plus)` guard arm64 had). Fixed; v1_0 x86 wasm_3_0 3→0. REMAINING D-231 = wire the gate
   (cross-nm x86 in check_build_dce; mechanism validated). D-209 memory64 >4GiB = correctly measure-first-deferred
   (hot-path branch cost, no consumer). D-259 spillBytes = measure-first.
-- **NEXT = wire D-231 x86 DCE gate** OR continue sweep. **NOT new-proposal features** — stack-switching **DEFERRED
+- **Sweep state (2026-06-07 barrier-review)**: safe-actionable items exhausted this cycle. D-231 leak FIXED; its
+  gate-wiring is LOW-urgency (check_build_dce only runs at manual main-merge, never in-branch). D-209 (hot-path,
+  exotic, no consumer) + D-259 (W54-ABI-risk, zero perf benefit) both correctly stay deferred. **NEXT = either
+  re-survey proposal_watch for any newly-Phase-4 proposal, wire another official spec corpus (relaxed-SIMD
+  pattern — high-value conformance, may surface more bugs), or D-231 gate-wiring (env-fragile cross-nm, fresh
+  context).** **NOT new-proposal features** — stack-switching **DEFERRED
   @D-300** (survey 2026-06-07: Phase-3 unstable format + 3 architecture ADRs + ~25-35cyc — re-survey Phase 4). compact-import/
   memory-control also pre-Phase-4. So pick from `.dev/remaining_sweep.md` Bucket B/C (D-231 build-DCE gate,
   D-209 memory64 >4GiB memarg completeness, D-259 spillBytes measure-first, …) + re-check proposal_watch
