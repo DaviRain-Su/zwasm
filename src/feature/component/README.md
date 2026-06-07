@@ -2,9 +2,12 @@
 
 Reserved subsystem slot per ADR-0023 §3 P-H + §3 reference table.
 
-Implementation phase: post-v0.2.0 (proposal still maturing). Until
-this slot opens, the directory is intentionally empty except for
-this README — `-Denable=component` is rejected at build configuration
-time.
+**Campaign OPENING (2026-06-07, ADR-0170)** — the full wasmtime-equivalent
+Component Model + WASI-P2 campaign is now active. This slot opens in plan
+chunk **A1**, which adds `decode.zig` and flips the `-Denable=component`
+build gate. Until A1 lands, the directory stays README-only and
+`-Denable=component` is still rejected at build configuration time.
 
-See `.dev/proposal_watch.md` for the proposal's spec phase.
+Driver: [`../../../.dev/component_model_plan.md`](../../../.dev/component_model_plan.md)
+(work sequence + reference chains). Decision: ADR-0170. Spec phase:
+`.dev/proposal_watch.md`.

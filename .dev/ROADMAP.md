@@ -1210,7 +1210,7 @@ of each phase advances it.
 | 14    | DONE        | CI matrix infrastructure — workflows + fuzz infra; §14.P re-scoped past D-245 win64 (ADR-0145)                                                                                                                                                |
 | 15    | DONE        | Performance parity with v1 (§15.P parity measured + D-265 register-homing rework closed; §15.6 ClojureWasm DEFERRED → D-264)                                                                                                                 |
 | 16    | DONE        | Completion finalization (完成形) — surface audits (C/Zig/CLI) + memory-safety + docs + debt; dogfooding DONE (cw v1 succeeded, ADR-0168); **no autonomous release/tag** (ADR-0156, reconfirmed)                                                  |
-| 17    | IN-PROGRESS | **v0.2.0 feature line** (user-unblocked 2026-06-06, ADR-0168) — Threads/atomics first, then wide-arith / custom-page-sizes / relaxed-residuals / Component Model / WASI 0.2 (→v0.3). Capability work, NOT a version march; **no tag** (ADR-0156) |
+| 17    | IN-PROGRESS | **v0.2.0 feature line** (user-unblocked 2026-06-06, ADR-0168). DONE: atomics / wide-arith / custom-page-sizes / relaxed-SIMD (all 3-host). **NOW: Component Model + WASI Preview 2 — full wasmtime-equivalent campaign** (ADR-0170, user-directed 2026-06-07); driver = [`.dev/component_model_plan.md`](component_model_plan.md) (its Work sequence supersedes this row's ordering). Capability work, NOT a version march; **no tag** (ADR-0156) |
 
 State values: `IN-PROGRESS` (one phase at a time), `PENDING`,
 `DONE`. Update this table whenever §9.<N>.7 closes a phase or when
@@ -2092,6 +2092,12 @@ that's fine, but the act of typing it is the act of re-deciding.
   wasm-c-api against zwasm) materialise to justify v0.2.0 work
   (Component Model + WASI 0.2)? If only ClojureWasm consumes zwasm,
   v0.2.0 priorities can shift toward smaller wins.
+  **RESOLVED 2026-06-07 (ADR-0170, user-directed) — in CM's favour.** Not on
+  consumer-count: "Component Model works" is a rare capability (only
+  wasmtime-class; wasmer/wazero/WAMR lack a CM host) and thus a strategic
+  differentiator for the ClojureWasm story, valuable independent of a current
+  consumer. Full wasmtime-equivalent CM + WASI-P2 is now the active campaign
+  (`.dev/component_model_plan.md`).
 
 ---
 

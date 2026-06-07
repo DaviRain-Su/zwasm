@@ -74,7 +74,7 @@ Text Encoding Builtins` (skip).
 | WASI version   | zwasm phase   | Notes                                   |
 |----------------|---------------|-----------------------------------------|
 | 0.1 (preview1) | Phases 4 / 11 | de-facto baseline; complete in Phase 11 |
-| 0.2 (preview2) | post-v0.1.0   | Component Model required                |
+| 0.2 (preview2) | **Phase 17 (ACTIVE)** | Component Model required; full campaign per ADR-0170 (`component_model_plan.md`) |
 | 0.3            | post-v0.1.0   | async / streams; needs stack-switching  |
 
 ## Toolchain proposals (non-Wasm; trigger zwasm scaffolding changes)
@@ -90,6 +90,11 @@ Text Encoding Builtins` (skip).
   `~/zwasm/private/v2-investigation/surveys/wasm-proposal-status.md`.
 - **2026-05-03** — added "Toolchain proposals" section tracking
   ziglang/zig#22822 as the ADR-0009 sunset trigger.
+- **2026-06-07** — **Component Model + WASI-P2**: the ROADMAP §15 ecosystem-gate
+  is RESOLVED in CM's favour (ADR-0170, user-directed) — CM-as-capability is a
+  rare differentiator (only wasmtime-class), not consumer-count-gated. Now the
+  active Phase-17 campaign; full wasmtime-equivalent target; driver
+  `component_model_plan.md`. Supersedes the prior "deferred to post-v0.1.0" framing.
 - **2026-06-07** — **branch-hinting** (`metadata.code.branch_hint` custom
   section): v1 advertised COMPLETE; the proposal is an advisory QoI hint with
   NO conformance effect. v2 accepts it via the generic custom-section skip
