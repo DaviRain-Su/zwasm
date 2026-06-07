@@ -137,6 +137,10 @@ pub const DefType = union(enum) {
     variant: VariantType,
     option: OptionType,
     result: ResultType,
+    /// `own<i>` (0x69) — an owning handle to resource type `i`.
+    own: u32,
+    /// `borrow<i>` (0x68) — a borrowed handle to resource type `i`.
+    borrow: u32,
 };
 
 /// Component-level `sort` (`Binary.md`); `core` nests a `core:sort`.
@@ -161,13 +165,25 @@ pub const Sort = union(enum) {
     instance,
 };
 
-/// `externdesc` (`Binary.md`) — what an import/export refers to. A2 models the
-/// type-index-carrying forms; `value`/`type` bounds defer to later chunks.
+/// `typebound` (`Binary.md`) — a `(type ...)` import/export bound.
+pub const TypeBound = union(enum) {
+    /// `(eq i)` — equal to type `i`.
+    eq: u32,
+    /// `(sub resource)` — a fresh abstract resource type.
+    sub_resource,
+};
+
+/// `externdesc` (`Binary.md`) — what an import/export refers to.
 pub const ExternDesc = union(enum) {
     core_module: u32,
     func: u32,
     component: u32,
     instance: u32,
+    /// `(type b)` — a type import/export with bound `b`.
+    type_bound: TypeBound,
+    /// `(value b)` — a value import/export. B carries an `eq valueidx` or an
+    /// inline `valtype`; modelled minimally (the valtype/idx) for now.
+    value_bound: ?ValType,
 };
 
 pub const Import = struct {
@@ -582,9 +598,11 @@ fn decodeDefType(arena: Allocator, body: []const u8, pos: *usize) Error!DefType 
             const ok = try decodeOptionalValType(body, pos);
             break :blk .{ .result = .{ .ok = ok, .err = try decodeOptionalValType(body, pos) } };
         },
-        // TODO(p17/CM-C*): own 0x69 / borrow 0x68 (resources) / stream 0x66 /
-        // future 0x65 (async) — decoded with their runtime machinery.
-        0x69, 0x68, 0x66, 0x65 => Error.UnsupportedTypeForm,
+        0x69 => .{ .own = try leb128.readUleb128(u32, body, pos) },
+        0x68 => .{ .borrow = try leb128.readUleb128(u32, body, pos) },
+        // TODO(p17/CM): stream 0x66 / future 0x65 (async) — decoded with their
+        // runtime machinery.
+        0x66, 0x65 => Error.UnsupportedTypeForm,
         // TODO(p17/CM-C*): componenttype 0x41 / instancetype 0x42 /
         // resourcetype 0x3f,0x3e (recurse into the declarator tree).
         0x41, 0x42, 0x3f, 0x3e => Error.UnsupportedTypeForm,
@@ -632,8 +650,29 @@ fn decodeExternDesc(body: []const u8, pos: *usize) Error!ExternDesc {
         0x01 => return .{ .func = try leb128.readUleb128(u32, body, pos) },
         0x04 => return .{ .component = try leb128.readUleb128(u32, body, pos) },
         0x05 => return .{ .instance = try leb128.readUleb128(u32, body, pos) },
-        // TODO(p17/CM): value-bound (0x02) + type-bound (0x03) externdescs.
-        0x02, 0x03 => return Error.UnsupportedTypeForm,
+        0x02 => { // value bound: 0x00 eq valueidx | 0x01 valtype
+            if (pos.* >= body.len) return Error.Truncated;
+            const vtag = body[pos.*];
+            pos.* += 1;
+            return switch (vtag) {
+                0x00 => blk: { // eq valueidx
+                    _ = try leb128.readUleb128(u32, body, pos);
+                    break :blk .{ .value_bound = null };
+                },
+                0x01 => .{ .value_bound = try decodeValType(body, pos) },
+                else => Error.InvalidExternDesc,
+            };
+        },
+        0x03 => { // type bound: 0x00 eq typeidx | 0x01 sub resource
+            if (pos.* >= body.len) return Error.Truncated;
+            const tb = body[pos.*];
+            pos.* += 1;
+            return switch (tb) {
+                0x00 => .{ .type_bound = .{ .eq = try leb128.readUleb128(u32, body, pos) } },
+                0x01 => .{ .type_bound = .sub_resource },
+                else => Error.InvalidExternDesc,
+            };
+        },
         else => return Error.InvalidExternDesc,
     }
 }
@@ -1079,8 +1118,32 @@ test "tuple decode + empty record rejected" {
     try testing.expectError(Error.InvalidDefType, decodeBoth(comptime buildComponent(&.{.{ 7, &[_]u8{ 0x01, 0x72, 0x00 } }})));
 }
 
-test "own/borrow still defer with UnsupportedTypeForm (0x69)" {
-    const bytes = comptime buildComponent(&.{.{ 7, &[_]u8{ 0x01, 0x69, 0x00 } }});
+test "own/borrow decode (0x69 / 0x68)" {
+    // type[0] = own<3>, type[1] = borrow<3>
+    const body = [_]u8{ 0x02, 0x69, 0x03, 0x68, 0x03 };
+    const bytes = comptime buildComponent(&.{.{ 7, &body }});
+    var info = try decodeBoth(bytes);
+    defer info.deinit();
+    try testing.expectEqual(@as(u32, 3), info.deftypes.items[0].own);
+    try testing.expectEqual(@as(u32, 3), info.deftypes.items[1].borrow);
+}
+
+test "externdesc type-bound (sub resource / eq) on an import" {
+    // import "r" (type (sub resource)) : externdesc 0x03 0x01
+    const sub = [_]u8{ 0x01, 0x00, 0x01, 'r', 0x03, 0x01 };
+    var s = try decodeBoth(comptime buildComponent(&.{.{ 10, &sub }}));
+    defer s.deinit();
+    try testing.expectEqual(TypeBound.sub_resource, s.imports.items[0].desc.type_bound);
+
+    // import "t" (type (eq 5)) : externdesc 0x03 0x00 5
+    const eq = [_]u8{ 0x01, 0x00, 0x01, 't', 0x03, 0x00, 0x05 };
+    var e = try decodeBoth(comptime buildComponent(&.{.{ 10, &eq }}));
+    defer e.deinit();
+    try testing.expectEqual(@as(u32, 5), e.imports.items[0].desc.type_bound.eq);
+}
+
+test "stream/future still defer with UnsupportedTypeForm (0x66)" {
+    const bytes = comptime buildComponent(&.{.{ 7, &[_]u8{ 0x01, 0x66, 0x00 } }});
     try testing.expectError(Error.UnsupportedTypeForm, decodeBoth(bytes));
 }
 
