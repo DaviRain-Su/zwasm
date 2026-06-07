@@ -56,11 +56,19 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
   `drop-os`; core module `$libc` (exports memory) + its instance; core module `$M` (imports `io.{get-stdout,write,
   drop-os}` + `libc.memory`, exports `run`); core instance `$deps-io` (re-exports the 3 lowered funcs); core instance
   `$m` = instantiate $M with io=$deps-io + libc=$libc; canon-lift run → RunShim subcomponent → export `wasi:cli/run`.
-  SURVEY FIRST: does `ctypes.TypeInfo`/`decode.zig` expose core-modules + core-instances (instantiate args / inline-
-  exports) + canon-lowers? If yes, build a `runWasiP2Main` in `api/component.zig`: instantiate $libc → get its memory;
-  instantiate $M via a `Linker` wiring its `io.*` imports to `defineWasiP2Io` trampolines + `libc.memory` to $libc's
-  memory (cross-instance, like C2 `defineMemoryInstance`); invoke `$m`'s `run`; assert `host.stdout_buffer` == "hello\n".
-  If the decode does NOT yet expose core-instances, that decode extension is the first sub-chunk.
+  SURVEY DONE: `ctypes.TypeInfo` exposes `core_instances` (`.instantiate{module,args:[{name,instance}]}` /
+  `.inline_exports:[{name,sort,index}]`), `canons` (`.lower{func,opts}` / `.lift{core_func,opts,type_index}` /
+  `.resource_drop`), `aliases` (`.core_export{instance,name}` / `.outer`). Core modules = the Nth `.core_module`
+  section. **FIRST SUB-CHUNK = fix the core-func index-space model**: `types.zig resolveCoreFuncExport` (line ~359)
+  walks ONLY core-func aliases, so for `wasi_p2_hello` (core funcs [0=lower get-stdout, 1=lower write,
+  2=resource.drop, 3=alias $m.run]) index 3 mis-resolves. Build a unified walk assigning core-func indices in
+  definition order across {canon lower, canon resource.{new,drop,rep}-that-mint-core-funcs, core-func aliases} →
+  map idx → {lowered-component-func J | resource-builtin | core-export alias}. THEN `runWasiP2Main` in
+  `api/component.zig`: from the `canon lift run` → its core_func alias → core_export{$m,"run"}; $m =
+  core_instances[..].instantiate{module=$M, args=[io→$deps-io, libc→$libc]}; instantiate $libc (no-arg) → memory;
+  instantiate $M via a Linker wiring `io.*` (resolve $deps-io inline_exports → canon-lower idx → map the lowered
+  component-import name via `adapter.classifyImport` → `defineWasiP2Io` trampoline) + `libc.memory` → $libc memory
+  (`defineMemoryInstance`, cross-instance like C2); invoke run; assert `host.stdout_buffer` == "hello\n".
 - **Exit-condition**: `wasi_p2_hello.wasm` runs via `api/component.zig` and writes "hello" to the captured stdout.
 
 ## Current state
