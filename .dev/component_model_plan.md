@@ -114,7 +114,7 @@ design forks. Update this doc's `[x]` + handover NEXT each chunk.
 
 ### Phase C — resources + linking (Tier 1 complete)
 
-- [ ] **C1 — resource type + handle table.** `resource_table.zig`: own/borrow,
+- [x] **C1 — resource type + handle table.** `resource_table.zig`: own/borrow,
   `resource.new/drop/rep`, parent/child ownership + tombstones (the live table
   is the hard part). **Refs**: wasmtime `resource_table.rs`; spec resources.
   **Red**: own/borrow lifecycle + double-drop trap.

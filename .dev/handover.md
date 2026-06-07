@@ -31,10 +31,13 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
   ADR-0171 (cabi_realloc seam) + ADR-0172 (Zone split). **Bundle CM-B6-IT CLOSED** (exit met @e0e7c9f5).
 - **Discipline**: pure logic Zone 1 (`feature/component/`), orchestration Zone 3 (`api/component.zig`); component-value
   DISTINCT from `runtime.Value`; TDD; no-copy; 3-host gate; **no tag**.
-- **NEXT = chunk C1** (Phase C, resources): `resource_table.zig` — own/borrow, `resource.new/drop/rep`, parent/child
-  ownership + tombstones (the live handle table is the hard part). Refs: wasmtime `resource_table.rs`; spec resources.
-  Red = own/borrow lifecycle + double-drop trap. Then C2 (multi-component linking — also discharges **D-304**, the B6
-  alias/core-instance export-resolution shortcut). Plan doc §Phase C is authoritative.
+- **C1 DONE @11043031** (Phase C resources): `resource_table.zig` (Zone 1) — the handles table (dense slots + free list,
+  index 0 sentinel) of `ResourceHandle{rt,rep,own,num_lends}`; new/rep/drop/newBorrow/endLend; double-drop +
+  use-after-drop + type-mismatch + still-lent guards. dtor-invoke + borrow_scope/Task lifetime defer.
+- **NEXT = chunk C2** (multi-component linking / instance graph + adapters). Red = a 2-component graph (one imports the
+  other's interface) links + runs. This ALSO discharges **D-304** (it needs the core-instance §2 + alias §6 section
+  decode → the component core-func index space → resolves canon-lift.core_func to the real core export, dropping B6's
+  invoke-by-name shortcut). Plan doc §Phase C is authoritative. (C2 likely a multi-cycle bundle.)
 
 ## Current state
 
