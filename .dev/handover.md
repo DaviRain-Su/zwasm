@@ -23,10 +23,11 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
 - **Step 0 survey is DONE** — do NOT re-survey. Read `.dev/component_model_survey.md` (architecture, 4 hard pieces,
   module breakdown) + the plan's "Reference chains" (spec `~/Documents/OSS/WebAssembly/component-model/`; v1
   textbook `~/Documents/MyProducts/zwasm/src/{component,wit,wit_parser,canon_abi}.zig`; wasmtime/wasm-tools refs).
-- **A1 DONE @6c51c89b** — `decode.zig` (layer discriminator + section walk, Binary.md §section_0..12) + `-Dcomponent`
-  build gate flipped (slot opened). 8 decode tests green; lint clean. **NEXT = chunk A2** (component type section +
-  import/export index spaces; red = imported+exported func type round-trips). Then A3→A4 (Tier 0), B* (canon ABI),
-  C* (resources/linking), D* (WASI-P2), E* (corpus + Rust/Go proof).
+- **A1 DONE @6c51c89b** (decode.zig: layer discriminator + section walk + `-Dcomponent` gate). **A2 DONE @8d70230d**
+  (types.zig: component ValType/FuncType/DefType model + type index space + import/export decode via negative-SLEB128
+  scheme; compound defvaltypes deferred to B-chunks, component/instance/resource to C-chunks via typed
+  `UnsupportedTypeForm`). **NEXT = chunk A3** (WIT lexer + parser, primitive subset — `wit/lexer.zig` + `wit/parser.zig`;
+  red = parse a `10_greet`-class `.wit` to an AST). Then A4 (Tier 0 done), B* (canon ABI), C*, D*, E*.
 - **Discipline**: Zone-2 new layer, NO core-VM change (consume `runtime/instance/*` + memory + `Runtime.invoke` as
   black box); component-value type DISTINCT from `runtime.Value`; TDD + boundary fixtures + spec-citation; no-copy;
   3-host gate; no tag. Full discipline list in the plan doc.

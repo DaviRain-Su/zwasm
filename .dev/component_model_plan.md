@@ -72,7 +72,7 @@ design forks. Update this doc's `[x]` + handover NEXT each chunk.
   enumerates sections of a wasm-tools-emitted empty component. **ADR**: opening
   the slot + component-value-vs-`runtime.Value` boundary (small, in ADR-0170
   scope; note in commit).
-- [ ] **A2 — component type + import/export index spaces.** Decode component
+- [x] **A2 — component type + import/export index spaces.** Decode component
   type section (func/instance/component types), import/export decls. **Refs**:
   `Binary.md` §type, v1 `component.zig`. **Red**: a component declaring an
   imported+exported func type round-trips to the type model. **Exit**: type
