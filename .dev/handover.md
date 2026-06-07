@@ -66,11 +66,12 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
     `runWasiP2Main`. Fixture `wasi_p2_exit.{wat,wasm}`, e2e host.exit_code==1.
   - **D3-2 clocks_monotonic_now** — `now()->instant(u64)` `()->i64` → factored `clocks.clockTimeNs(host,id)` (shared
     w/ P1 clock_time_get). Fixture `wasi_p2_clock.{wat,wasm}` verifies sane+monotonic via exit(0/1).
-  - **D3-3 clocks_wall_now** — `now()->datetime{sec u64, ns u32}` `(i32 retptr)->()` → writes 12B record to guest mem
-    (sec@0, ns@8) via clockTimeNs(id 0). Fixture `wasi_p2_wallclock.{wat,wasm}` (libc memory + canon-lower-with-memory;
-    type-via-exported-binding per README gotcha), e2e seconds>1.5e9 → exit 0.
-- **NEXT = D3-4** (list-returning ops, heavier — `cabi_realloc` return area via `ctx.reallocGuest`, pattern =
-  p2GetDirectories): random.get-random-bytes `(i64 len, i32 retptr)` + stdin (cli_get_stdin) + input-stream.read.
+  - **D3-3 clocks_wall_now** — `now()->datetime{sec u64, ns u32}` `(i32 retptr)->()` → writes 12B record (sec@0,
+    ns@8) via clockTimeNs(id 0). Fixture `wasi_p2_wallclock.{wat,wasm}` (type-via-exported-binding per README gotcha).
+  - **D3-4 random_get_bytes** — `get-random-bytes(u64)->list<u8>` `(i64 len, i32 retptr)->()` → allocs via guest
+    `cabi_realloc` (ctx.reallocGuest), fills via factored `clocks.randomFill`, writes (ptr,len)@retptr. Fixture
+    `wasi_p2_random.{wat,wasm}` (libc bump cabi_realloc), e2e ORs 16 bytes → exit 0. First D3 list-return op.
+- **NEXT = D3-5**: stdin (cli_get_stdin mints input-stream) + input-stream.read (list, same realloc pattern). Then
   P1→P2 error-code = **D-307**; sockets spike-first (last). OR Phase E (conformance corpus + Rust/Go proof).
   Cross-component aggregate → D-305. **D-308**: runWasiP2Main error-cleanup SEGVs on a failed-import wire (error path only).
 
@@ -78,7 +79,7 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
 
 - **Phase 17 (v0.2) IN-PROGRESS** (ADR-0168). DONE+3-host: atomics @9eb84833 · wide-arith @231d4536 ·
   custom-page-sizes @cd0de2dd · relaxed-SIMD @08342ec5 (+official corpus @8ef2e752, 13420 pass arm64+x86). Wasm-3.0
-  core 100%-spec COMPLETE. Last SHA **85e8685f** (WASI-P2 wall-clock.now — D3-3; windows gating suspended @9d832f1d).
+  core 100%-spec COMPLETE. Last SHA **6040671a** (WASI-P2 random.get-random-bytes list — D3-4; windows gating suspended @9d832f1d).
 - **Atomics fully conformant @e6f3b0c0** — official corpus **294 pass, 0 SKIPPED** (D-301), incl. the JIT
   unaligned-atomic-trap fix D-303 (code-14 `unaligned_atomic_fixups` both arches, @5b0db8e1, 3-host).
 - **ALL bounded debt CLEARED**: ✅ D-301 · ✅ D-303 · ✅ D-231 (cross-x86 DCE gate wired @aac4fe2f) · ✅ D-302
