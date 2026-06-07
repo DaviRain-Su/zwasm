@@ -61,29 +61,28 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
 ## Active bundle
 
 - **Bundle-ID**: CM-D2-fs (resource-modeled WASI-P2 filesystem — the plan §Phase D *red*: "resource-typed P2 fs handle ops")
-- **Cycles-remaining**: ~2
-- **Continuity-memo**: Survey DONE (digest: descriptor.write = flat ABI no-realloc → easiest; read/get-directories
-  return lists → need cabi_realloc return-area). **descriptor.write DONE @b766c583**: `WasiP2Ctx.resources` table keyed
-  by RT id (OUTPUT_STREAM_RT=1, DESCRIPTOR_RT=2); `p2DescriptorWrite`/`p2DescriptorDrop` + `fd.pwriteSlice`; unit-tested
-  via injected handle + tmpfile. RE-ENTRANCY RESOLVED (lesson `2026-06-07-engine-invoke-is-reentrant-stack-disciplined`): `Instance.invoke` is
-  stack-disciplined (op_base save/restore + per-call locals) → a trampoline CAN call `cabi_realloc` via nested
-  `m.invoke` mid-guest-call, NO engine change. **get-directories plan** (next, ~1-2 cyc): (1) thread a realloc cap into
-  `WasiP2Ctx` — set the instance ptr after `lk.instantiate(m_mod)`, before `m.invoke("run")`; trampoline calls
-  `m.invoke(realloc_name,...)` (mirror `reallocViaGuest`). (2) `p2GetDirectories(retptr)`: for the single preopen,
-  realloc a 12B tuple `(descr_handle i32, str_ptr i32, str_len i32)` + realloc+copy the path string + mint
-  `resources.new(DESCRIPTOR_RT, preopen_fd)`; write `(list_ptr, list_len=1)` to retptr. (3) fixture: a `$libc` core
-  exporting a real bump `cabi_realloc` (current stub = memory only) + a component importing `wasi:filesystem/{preopens,
-  types}` that calls get-directories → descriptor → descriptor.write → e2e file content. Also: `classifyCoreExport` maps
-  ALL `resource_drop`→`out_stream_drop` (shortcut) — full-component fs needs per-type resolution (resource.drop typeidx
-  → interface's resource). Stream-via methods + sockets defer (D3).
-- **Exit-condition**: a real WASI-P2 component obtains a descriptor via `get-directories` + writes/reads a file via the
-  descriptor resource e2e (runWasiP2Main), asserted on file content.
+- **Cycles-remaining**: ~1
+- **Continuity-memo**: **ALL fs trampolines DONE + unit-tested**: descriptor.write/drop @b766c583,
+  **get-directories @e9d05999** (realloc-from-trampoline via `WasiP2Ctx.realloc_instance`+`reallocGuest`; nested invoke
+  per the re-entrancy lesson), **open-at @a8264fb4** (`p2DescriptorOpenAt` → pathOpen, P2 open-flags map 1:1 to P1
+  oflags; mini-flow open+write+drop tested). Re-entrancy confirmed empirically (get-directories test runs cabi_realloc
+  mid-call). **REMAINING = the bundle EXIT (1 chunk, intricate WAT)**: a real WASI-P2 component fixture importing
+  `wasi:filesystem/{preopens,types}` (descriptor resource type + get-directories/open-at/write/drop method sigs) with a
+  `$libc` core exporting a bump `cabi_realloc` (+ memory), whose `run` does get-directories → open-at "out.txt" → write →
+  drop, lifted to `wasi:cli/run`. Then `runWasiP2Main`: set `ctx.realloc_instance` to the sub-instance exporting
+  `cabi_realloc` (find it in the sub-instance loop, like libc memory) before `m.invoke("run")`; assert file content.
+  GOTCHAS: (a) `classifyCoreExport` maps ALL `resource_drop`→`out_stream_drop` (shortcut) — a descriptor drop in the
+  component would mis-route → resolve resource.drop typeidx → its interface's resource first; (b) the canon-lower opts
+  for get-directories/open-at carry the memory+realloc core-func refs the host must honour. Build the WAT with wasm-tools
+  (validate --features component-model). Stream-via methods + sockets defer (D3); error-code result mapping = D-307.
+- **Exit-condition**: a real WASI-P2 component obtains a descriptor via `get-directories` + writes a file via the
+  descriptor resource e2e through `runWasiP2Main`, asserted on file content.
 
 ## Current state
 
 - **Phase 17 (v0.2) IN-PROGRESS** (ADR-0168). DONE+3-host: atomics @9eb84833 · wide-arith @231d4536 ·
   custom-page-sizes @cd0de2dd · relaxed-SIMD @08342ec5 (+official corpus @8ef2e752, 13420 pass arm64+x86). Wasm-3.0
-  core 100%-spec COMPLETE. Last SHA **b766c583** (WASI-P2 descriptor.write — file write via the descriptor resource).
+  core 100%-spec COMPLETE. Last SHA **a8264fb4** (WASI-P2 descriptor.open-at — open+write under a dir descriptor).
 - **Atomics fully conformant @e6f3b0c0** — official corpus **294 pass, 0 SKIPPED** (D-301), incl. the JIT
   unaligned-atomic-trap fix D-303 (code-14 `unaligned_atomic_fixups` both arches, @5b0db8e1, 3-host).
 - **ALL bounded debt CLEARED**: ✅ D-301 · ✅ D-303 · ✅ D-231 (cross-x86 DCE gate wired @aac4fe2f) · ✅ D-302
