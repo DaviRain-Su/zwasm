@@ -392,6 +392,61 @@ test "IT-3a: two allocations via the guest allocator don't overlap" {
 /// root so the cwd-relative path resolves.
 const greet_component_path = "test/component/greet_component.wasm";
 
+/// A real 2-component graph (wasm-tools): component B exports `adder(u32,u32)->
+/// u32`; component A imports it + exports `add-five(x)=adder(x,5)`; the outer
+/// instantiates B, instantiates A `with "adder"=B.adder`, re-exports add-five.
+const adder_graph_path = "test/component/adder_graph.wasm";
+
+test "C2-3b-1: a real 2-component graph decodes (nested components + instances + wiring)" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, adder_graph_path, testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var comp = try decode.decode(testing.allocator, bytes);
+    defer comp.deinit(testing.allocator);
+
+    // The outer embeds 2 nested child components (§4).
+    var children: usize = 0;
+    for (comp.sections.items) |sec| {
+        if (sec.id == .component) children += 1;
+    }
+    try testing.expectEqual(@as(usize, 2), children);
+
+    var info = try ctypes.decodeTypeInfo(testing.allocator, &comp);
+    defer info.deinit();
+
+    // Two component-instances: instantiate child 0 (B) and child 1 (A) with a
+    // `with` arg satisfying A's import.
+    try testing.expectEqual(@as(usize, 2), info.component_instances.items.len);
+    try testing.expectEqual(@as(u32, 0), info.component_instances.items[0].instantiate.component);
+    try testing.expectEqual(@as(u32, 1), info.component_instances.items[1].instantiate.component);
+    try testing.expect(info.component_instances.items[1].instantiate.args.len >= 1);
+
+    // The outer re-exports add-five.
+    var found = false;
+    for (info.exports.items) |e| {
+        if (std.mem.eql(u8, e.name, "add-five")) found = true;
+    }
+    try testing.expect(found);
+
+    // Recursively decode child component B → it canon-lifts its `adder` export.
+    const b_bytes = for (comp.sections.items) |sec| {
+        if (sec.id == .component) break sec.body;
+    } else unreachable;
+    try testing.expectEqual(decode.Kind.component, try decode.classify(b_bytes));
+    var b = try decode.decode(testing.allocator, b_bytes);
+    defer b.deinit(testing.allocator);
+    var b_info = try ctypes.decodeTypeInfo(testing.allocator, &b);
+    defer b_info.deinit();
+    var b_lift = false;
+    for (b_info.canons.items) |c| {
+        if (c == .lift) b_lift = true;
+    }
+    try testing.expect(b_lift);
+}
+
 test "IT-3b-2: a real wasm-tools string→string component decodes through the pipeline" {
     var threaded: std.Io.Threaded = .init(testing.allocator, .{});
     defer threaded.deinit();
