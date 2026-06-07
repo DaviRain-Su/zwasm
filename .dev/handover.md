@@ -27,13 +27,17 @@ funcs funcref-able: per-import placeholder sig + call_indirect→host_calls) + c
 (trampolines use `WasiP2Ctx.mem_instance`, not the memory-less shim caller) · core-table decode @73df8a7e ·
 cli/environment+terminal+check-write @0888a3f9. Fixture `test/component/wasi_p2_hello_rust.wasm` (78 KB) + e2e + dogfood.
 
-**NEXT = E1** (plan §Phase E, the first `[ ]`): official component-model spec corpus runner — distil the
-`WebAssembly/component-model` + wasm-tools component tests into a runner (mirror `test/spec/spec_assert_runner_*`),
-wired into `test-all`, truthful pass/skip (no blanket skips — D-301 lesson). Self-contained, no new toolchain.
-Then **E3** (WASI-P2 conformance + edge cases). E2 remainder (Go/tinygo cross-toolchain proof + io/error trampoline)
-is opportunistic — toolchain-gated (wit-bindgen-go not in the gen shell), do it when convenient, not the blocker.
+**E1 DONE** (plan §Phase E): `test/spec/component_model_assert_runner.zig` — a Component-Model spec corpus runner
+that decodes+instantiates+invokes over `test/spec/component-model-assert/`, built against a component-ENABLED
+`zwasm` module (`core_comp` in build.zig), wired into `test-all`. First corpus = greet (string→string) + adder graph
+(cross-module i32): 4 pass, 0 skip. ADR-0174 lesson: missing corpus root = hard `exit(1)`. Fixtures reuse `test/component/`.
+
+**NEXT = E3** (plan §Phase E, the next `[ ]`): WASI-P2 conformance + edge cases — AND grow the E1 corpus by distilling
+official `WebAssembly/component-model` + wasm-tools `.wat` fixtures → committed `.wasm` on Mac, with truthful skips for
+unsupported features. E2 remainder (Go/tinygo cross-toolchain proof + io/error trampoline) is opportunistic —
+toolchain-gated (wit-bindgen-go not in the gen shell), do it when convenient, not the blocker.
 **Resume routing**: handover §Active campaign DRIVER → `component_model_plan.md` §Work sequence (close-plan-override);
-ROADMAP §17 row also redirects there. Follow the plan's first `[ ]` (= E1). `/continue` alone resumes correctly.
+ROADMAP §17 row also redirects there. Follow the plan's first `[ ]` (= E3). `/continue` alone resumes correctly.
 
 ## Active campaign — Component Model + WASI Preview 2 (ADR-0170, user-directed 2026-06-07)
 
@@ -68,7 +72,7 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
   random · D3-5 stdin · **D3-6 fs descriptor** @43909eba (read/sync/stat/get-type + flush; **D-307 DISCHARGED**
   @beb887c6) · **D3-7 wasi:io/poll** @3a128a01 (pollable + subscribe + ready/block/poll). **D-309 DONE** @ccdee2fa —
   WASI-P2 trampolines extracted to `api/component_wasi_p2.zig` (component.zig 1922→1250).
-- **NOW = E2 bundle above** (real Rust component). Deferred: D3-8 sockets (spike-first), E1 conformance corpus.
+- **NOW = E3** (conformance + corpus growth; E1 runner DONE). Deferred: D3-8 sockets (spike-first).
   Cross-component aggregate → D-305. **D-308**: runWasiP2Main error-cleanup SEGVs on a failed-import wire (error path).
 
 ## Current state

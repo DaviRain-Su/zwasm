@@ -178,10 +178,16 @@ design forks. Update this doc's `[x]` + handover NEXT each chunk.
 
 ### Phase E — conformance + proof (Tier 2 = wasmtime-equivalent)
 
-- [ ] **E1 — official component-model spec corpus runner.** Distil the
-  `WebAssembly/component-model` + wasm-tools component tests into a runner
-  (mirror `test/spec/spec_assert_runner_*`), wired into `test-all`. Track
-  pass/skip with truthful reasons (no blanket skips — the D-301 lesson).
+- [x] **E1 — official component-model spec corpus runner.** `test/spec/component_model_assert_runner.zig`
+  drives the `-Dcomponent` host API (decode+instantiate+invoke) over a corpus
+  root (`test/spec/component-model-assert/`); built against a component-ENABLED
+  `zwasm` module (`core_comp` in build.zig); wired into `test-all`. Directives:
+  `component`/`graph` + `assert_string`/`assert_flat_i32` + `skip-impl`/`skip-adr-*`.
+  Fixtures reuse the committed `test/component/` set (no duplication). ADR-0174
+  lesson honoured: a missing corpus root is a hard `exit(1)`, not a silent skip.
+  First corpus = greet (string→string) + adder graph (cross-module i32): 4 pass, 0 skip.
+  **NEXT corpus growth = E3** (distil official `WebAssembly/component-model` + wasm-tools
+  `.wat` fixtures → committed `.wasm` on Mac; truthful skips for unsupported features).
 - [~] **E2 — Rust proof DONE @96e1ccce; Go (tinygo) remains.** A real
   `rustc --target wasm32-wasip2` component (no cargo-component/adapter; flake gen
   shell gained the wasip2 target) RUNS e2e through zwasm and prints. Delivered:
