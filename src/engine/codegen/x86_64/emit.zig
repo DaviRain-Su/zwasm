@@ -728,6 +728,9 @@ pub fn compile(
     // ADR-0164 A3 / D-292 — memory oob (code 6) demuxed from bounds_fixups.
     var oob_fixups: std.ArrayList(u32) = .empty;
     defer oob_fixups.deinit(allocator);
+    // D-303 — atomic load/store unaligned-access (code 14 = unaligned_atomic).
+    var unaligned_atomic_fixups: std.ArrayList(u32) = .empty;
+    defer unaligned_atomic_fixups.deinit(allocator);
     // D-293 — table/cind oob_table (code 2) demuxed from bounds_fixups.
     var oobtable_fixups: std.ArrayList(u32) = .empty;
     defer oobtable_fixups.deinit(allocator);
@@ -813,6 +816,7 @@ pub fn compile(
         .cast_fail_fixups = &cast_fail_fixups,
         .uncaught_exc_fixups = &uncaught_exc_fixups,
         .oob_fixups = &oob_fixups,
+        .unaligned_atomic_fixups = &unaligned_atomic_fixups,
         .oobtable_fixups = &oobtable_fixups,
         .cind_sig_fixups = &cind_sig_fixups,
         .uninit_elem_fixups = &uninit_elem_fixups,

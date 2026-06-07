@@ -674,6 +674,9 @@ pub fn compile(
     defer divzero_fixups.deinit(allocator);
     var overflow_fixups: std.ArrayList(u32) = .empty;
     defer overflow_fixups.deinit(allocator);
+    // D-303 — atomic load/store unaligned-access (code 14 = unaligned_atomic).
+    var unaligned_atomic_fixups: std.ArrayList(u32) = .empty;
+    defer unaligned_atomic_fixups.deinit(allocator);
     // D-293 slice-3 — trapping-trunc NaN (code 9 = invalid_conversion) demuxed from bounds_fixups.
     var invalid_conv_fixups: std.ArrayList(u32) = .empty;
     defer invalid_conv_fixups.deinit(allocator);
@@ -782,6 +785,7 @@ pub fn compile(
         .uninit_elem_fixups = &uninit_elem_fixups,
         .divzero_fixups = &divzero_fixups,
         .overflow_fixups = &overflow_fixups,
+        .unaligned_atomic_fixups = &unaligned_atomic_fixups,
         .invalid_conv_fixups = &invalid_conv_fixups,
         .null_ref_fixups = &null_ref_fixups,
         .cast_fail_fixups = &cast_fail_fixups,
@@ -1853,6 +1857,8 @@ pub fn compile(
                 try EmitCindStub.emit(allocator, &buf, unreach_fixups.items, 5, frame_bytes);
                 try EmitCindStub.emit(allocator, &buf, divzero_fixups.items, 7, frame_bytes);
                 try EmitCindStub.emit(allocator, &buf, overflow_fixups.items, 8, frame_bytes);
+                // D-303 — atomic load/store unaligned-access (B.NE → code 14 = unaligned_atomic).
+                try EmitCindStub.emit(allocator, &buf, unaligned_atomic_fixups.items, 14, frame_bytes);
                 // D-293 slice-3 — trapping-trunc NaN (B.VS → code 9 = invalid_conversion).
                 try EmitCindStub.emit(allocator, &buf, invalid_conv_fixups.items, 9, frame_bytes);
                 // D-293 slice-4b — call_ref-null + ref.as_non_null (B.EQ → code 10 = null_reference).

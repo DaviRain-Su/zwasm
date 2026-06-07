@@ -112,6 +112,28 @@ pub fn emitMemOp(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         .@"f32.load", .@"f64.load", .@"f32.store", .@"f64.store" => true,
         else => false,
     };
+    // D-303 — atomic load/store trap on an unaligned effective address (spec
+    // exec step 8, BEFORE bounds). The inline path previously omitted this
+    // check that the interp has (memory.zig:202); RMW/cmpxchg/wait/notify
+    // already check it in the jit_abi helper.
+    const is_atomic = switch (ins.op) {
+        .@"i32.atomic.load",
+        .@"i64.atomic.load",
+        .@"i32.atomic.load8_u",
+        .@"i32.atomic.load16_u",
+        .@"i64.atomic.load8_u",
+        .@"i64.atomic.load16_u",
+        .@"i64.atomic.load32_u",
+        .@"i32.atomic.store",
+        .@"i64.atomic.store",
+        .@"i32.atomic.store8",
+        .@"i32.atomic.store16",
+        .@"i64.atomic.store8",
+        .@"i64.atomic.store16",
+        .@"i64.atomic.store32",
+        => true,
+        else => false,
+    };
     const ip0: inst.Xn = 16;
     const ip1: inst.Xn = 17;
     const offset_imm = ins.payload;
@@ -216,6 +238,14 @@ pub fn emitMemOp(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
             }
             try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddReg(ip0, ip0, ip1));
         }
+    }
+    // D-303 — atomic alignment trap BEFORE bounds (spec exec step 8 < 14a).
+    // ea is in ip0; TST its low log2(size) bits, B.NE → unaligned_atomic stub.
+    if (is_atomic and access_size > 1) {
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encTstImmLowBitsW(ip0, @intCast(@ctz(access_size))));
+        const al_fixup: u32 = @intCast(ctx.buf.items.len);
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.ne, 0)); // nonzero low bits = unaligned
+        try ctx.unaligned_atomic_fixups.append(ctx.allocator, al_fixup);
     }
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12(ip1, ip0, access_size));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegX(ip1, 27));
@@ -330,6 +360,28 @@ fn emitMemOpI64(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         .@"f32.load", .@"f64.load", .@"f32.store", .@"f64.store" => true,
         else => false,
     };
+    // D-303 — atomic load/store trap on an unaligned effective address (spec
+    // exec step 8, BEFORE bounds). The inline path previously omitted this
+    // check that the interp has (memory.zig:202); RMW/cmpxchg/wait/notify
+    // already check it in the jit_abi helper.
+    const is_atomic = switch (ins.op) {
+        .@"i32.atomic.load",
+        .@"i64.atomic.load",
+        .@"i32.atomic.load8_u",
+        .@"i32.atomic.load16_u",
+        .@"i64.atomic.load8_u",
+        .@"i64.atomic.load16_u",
+        .@"i64.atomic.load32_u",
+        .@"i32.atomic.store",
+        .@"i64.atomic.store",
+        .@"i32.atomic.store8",
+        .@"i32.atomic.store16",
+        .@"i64.atomic.store8",
+        .@"i64.atomic.store16",
+        .@"i64.atomic.store32",
+        => true,
+        else => false,
+    };
     const ip0: inst.Xn = 16;
     const ip1: inst.Xn = 17;
     const offset_imm = ins.payload;
@@ -415,6 +467,13 @@ fn emitMemOpI64(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
             if (lane3 != 0) try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovkImm16(ip1, lane3, 3));
             try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddReg(ip0, ip0, ip1));
         }
+    }
+    // D-303 — atomic alignment trap BEFORE bounds (memory64 path). ea in ip0.
+    if (is_atomic and access_size > 1) {
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encTstImmLowBitsW(ip0, @intCast(@ctz(access_size))));
+        const al_fixup: u32 = @intCast(ctx.buf.items.len);
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.ne, 0)); // nonzero low bits = unaligned
+        try ctx.unaligned_atomic_fixups.append(ctx.allocator, al_fixup);
     }
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12(ip1, ip0, access_size));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegX(ip1, 27));

@@ -196,16 +196,16 @@ assert_return i64.atomic.load i32:0 -> i64:1229782938247347951
 assert_return init i64:1229782938247303441 -> ()
 assert_return i64.atomic.rmw32.cmpxchg_u i32:0 i64:286331153 i64:14608453322185352933 -> i64:286331153
 assert_return i64.atomic.load i32:0 -> i64:1229782941362267877
-skip-impl jit-unaligned-trap-gap-D303 i32.atomic.load
-skip-impl jit-unaligned-trap-gap-D303 i64.atomic.load
-skip-impl jit-unaligned-trap-gap-D303 i32.atomic.load16_u
-skip-impl jit-unaligned-trap-gap-D303 i64.atomic.load16_u
-skip-impl jit-unaligned-trap-gap-D303 i64.atomic.load32_u
-skip-impl jit-unaligned-trap-gap-D303 i32.atomic.store
-skip-impl jit-unaligned-trap-gap-D303 i64.atomic.store
-skip-impl jit-unaligned-trap-gap-D303 i32.atomic.store16
-skip-impl jit-unaligned-trap-gap-D303 i64.atomic.store16
-skip-impl jit-unaligned-trap-gap-D303 i64.atomic.store32
+assert_trap i32.atomic.load i32:1
+assert_trap i64.atomic.load i32:1
+assert_trap i32.atomic.load16_u i32:1
+assert_trap i64.atomic.load16_u i32:1
+assert_trap i64.atomic.load32_u i32:1
+assert_trap i32.atomic.store i32:1 i32:0
+assert_trap i64.atomic.store i32:1 i64:0
+assert_trap i32.atomic.store16 i32:1 i32:0
+assert_trap i64.atomic.store16 i32:1 i64:0
+assert_trap i64.atomic.store32 i32:1 i64:0
 assert_trap i32.atomic.rmw.add i32:1 i32:0
 assert_trap i64.atomic.rmw.add i32:1 i64:0
 assert_trap i32.atomic.rmw16.add_u i32:1 i32:0

@@ -119,6 +119,11 @@ pub const EmitCtx = struct {
     /// dedicated trap stub recording its precise `trap_kind`.
     divzero_fixups: *std.ArrayList(u32),
     overflow_fixups: *std.ArrayList(u32),
+    /// D-303 — atomic load/store unaligned-access (B.NE on `ea & (size-1)` →
+    /// code 14 = unaligned_atomic) fixups. The RMW/cmpxchg/wait/notify family
+    /// checks alignment in the jit_abi helper; inline atomic load/store had NO
+    /// check (interp-only), so this demuxed stub closes the JIT/interp gap.
+    unaligned_atomic_fixups: *std.ArrayList(u32),
     /// D-293 slice-3 — trapping-trunc NaN (B.VS → code 9 = invalid_conversion)
     /// fixups, demuxed out of `bounds_fixups`. The trunc range checks reuse
     /// `overflow_fixups` (code 8). Other `bounds_fixups` kinds stay generic.

@@ -531,6 +531,17 @@ pub fn encTstImm1W(rn: Xn) u32 {
     return 0x72000000 | (@as(u32, rn) << 5) | @as(u32, 31);
 }
 
+/// `TST Wn, #((1<<n_bits)-1)` — test the low `n_bits` of Wn (32-bit ANDS
+/// WZR, Wn, #mask). A contiguous low-bits mask encodes as N=0, immr=0,
+/// imms = n_bits-1 (Arm IHI 0055 §C6.2.15 bitmask immediate). Used by the
+/// atomic load/store alignment check (D-303): n_bits ∈ {1,2,3} for a
+/// 2/4/8-byte access (ea & (size-1) ≠ 0 → unaligned). Generalises
+/// `encTstImm1W` (n_bits=1). Tests only the low 32 bits, which is
+/// sufficient — alignment depends solely on the low 3 bits of `ea`.
+pub fn encTstImmLowBitsW(rn: Xn, n_bits: u3) u32 {
+    return 0x72000000 | (@as(u32, n_bits - 1) << 10) | (@as(u32, rn) << 5) | @as(u32, 31);
+}
+
 /// `MOVN Wd, #imm16, lsl #0` — move ~imm16 (zeroed-then-NOT
 /// the lower 16). `MOVN Wd, #0` produces 0xFFFFFFFF = -1
 /// (used by memory.grow's "failure" stub return).

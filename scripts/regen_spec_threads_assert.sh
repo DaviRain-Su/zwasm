@@ -95,13 +95,10 @@ for c in d["commands"]:
     elif t == "assert_trap":
         # Atomic unaligned-access traps. nonSimdRunAssertTrap's dispatch ladder
         # covers every atomics trap shape (1-arg load, 2-arg store/rmw, 3-arg
-        # i32/i64 cmpxchg) as of §17.4 D-301, so emit the real directive — the
-        # RMW / cmpxchg family traps correctly on the JIT. **EXCEPTION (D-303)**:
-        # JIT inline `*.atomic.load*` / `*.atomic.store*` codegen (op_memory.zig,
-        # both arches) is MISSING the unaligned-atomic alignment check the interp
-        # has (`ea & (size-1) != 0 → Trap.UnalignedAtomic`), so they do NOT trap
-        # → skip with the precise reason until the JIT fix lands. NOT a runner
-        # gap; a real codegen bug tracked as D-303.
+        # i32/i64 cmpxchg) as of §17.4 D-301; the JIT now traps on unaligned ea
+        # for load/store too (D-303 fix: unaligned_atomic_fixups stub, both
+        # arches) as well as RMW/cmpxchg/wait/notify (jit_abi helper), so emit
+        # the real directive — Error.Trap is the only PASS.
         a = c["action"]
         if a.get("type") != "invoke":
             lines.append("skip-impl non-invoke-action-trap")
@@ -110,9 +107,6 @@ for c in d["commands"]:
         args_s, bad = toks(a.get("args", []))
         if bad:
             lines.append(f"skip-impl bad-token {fn} {bad}")
-            continue
-        if ".atomic.load" in fn or ".atomic.store" in fn:
-            lines.append(f"skip-impl jit-unaligned-trap-gap-D303 {fn}")
             continue
         fn_tok = f"'{fn}'" if " " in fn else fn
         lines.append(f"assert_trap {fn_tok} {args_s}")

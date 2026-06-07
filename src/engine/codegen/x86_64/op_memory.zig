@@ -74,6 +74,7 @@ pub fn emitMemOp(
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
     oob_fixups: *std.ArrayList(u32),
+    unaligned_atomic_fixups: *std.ArrayList(u32),
     spill_base_off: u32,
     op: zir.ZirOp,
     offset: u32,
@@ -101,6 +102,26 @@ pub fn emitMemOp(
     };
     const is_fp = switch (op) {
         .@"f32.load", .@"f64.load", .@"f32.store", .@"f64.store" => true,
+        else => false,
+    };
+    // D-303 — atomic load/store trap on unaligned ea (spec exec step 8, BEFORE
+    // bounds). The inline path omitted the check the interp has (memory.zig:202).
+    const is_atomic = switch (op) {
+        .@"i32.atomic.load",
+        .@"i64.atomic.load",
+        .@"i32.atomic.load8_u",
+        .@"i32.atomic.load16_u",
+        .@"i64.atomic.load8_u",
+        .@"i64.atomic.load16_u",
+        .@"i64.atomic.load32_u",
+        .@"i32.atomic.store",
+        .@"i64.atomic.store",
+        .@"i32.atomic.store8",
+        .@"i32.atomic.store16",
+        .@"i64.atomic.store8",
+        .@"i64.atomic.store16",
+        .@"i64.atomic.store32",
+        => true,
         else => false,
     };
 
@@ -177,6 +198,14 @@ pub fn emitMemOp(
             try buf.appendSlice(allocator, inst.encMovImm64Q(.rcx, @as(u64, offset)).slice());
             try buf.appendSlice(allocator, inst.encAddRR(.q, .rdx, .rcx).slice());
         }
+    }
+    // D-303 — atomic alignment trap BEFORE bounds (spec exec step 8 < 14a). ea
+    // is in RDX; TEST its low (size-1) bits, JNE → unaligned_atomic stub.
+    if (is_atomic and access_size > 1) {
+        try buf.appendSlice(allocator, inst.encTestRImm32(.d, .rdx, @as(u32, @intCast(access_size - 1))).slice());
+        const al_fixup: u32 = @intCast(buf.items.len);
+        try buf.appendSlice(allocator, inst.encJccRel32(.ne, 0).slice()); // nonzero low bits = unaligned
+        try unaligned_atomic_fixups.append(allocator, al_fixup);
     }
     try buf.appendSlice(allocator, inst.encLeaR64BaseDisp8(.rcx, .rdx, access_size).slice());
     try buf.appendSlice(allocator, inst.encCmpR64MemDisp32(.rcx, abi.runtime_ptr_save_gpr, jit_abi.mem_limit_off).slice());
@@ -278,6 +307,7 @@ pub fn emitI32Load(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
         ctx.pushed_vregs,
         ctx.next_vreg,
         ctx.oob_fixups,
+        ctx.unaligned_atomic_fixups,
         ctx.spill_base_off,
         ins.op,
         @as(u32, @intCast(ins.payload)),
@@ -364,6 +394,26 @@ fn emitMemOpI64(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
         .@"f32.load", .@"f64.load", .@"f32.store", .@"f64.store" => true,
         else => false,
     };
+    // D-303 — atomic load/store trap on unaligned ea (spec exec step 8, BEFORE
+    // bounds). The inline path omitted the check the interp has (memory.zig:202).
+    const is_atomic = switch (op) {
+        .@"i32.atomic.load",
+        .@"i64.atomic.load",
+        .@"i32.atomic.load8_u",
+        .@"i32.atomic.load16_u",
+        .@"i64.atomic.load8_u",
+        .@"i64.atomic.load16_u",
+        .@"i64.atomic.load32_u",
+        .@"i32.atomic.store",
+        .@"i64.atomic.store",
+        .@"i32.atomic.store8",
+        .@"i32.atomic.store16",
+        .@"i64.atomic.store8",
+        .@"i64.atomic.store16",
+        .@"i64.atomic.store32",
+        => true,
+        else => false,
+    };
 
     var idx_v: u32 = 0;
     var val_v: u32 = 0;
@@ -395,6 +445,13 @@ fn emitMemOpI64(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
             try ctx.buf.appendSlice(ctx.allocator, inst.encMovImm64Q(.rcx, offset).slice());
             try ctx.buf.appendSlice(ctx.allocator, inst.encAddRR(.q, .rdx, .rcx).slice());
         }
+    }
+    // D-303 — atomic alignment trap BEFORE bounds (memory64 path). ea in RDX.
+    if (is_atomic and access_size > 1) {
+        try ctx.buf.appendSlice(ctx.allocator, inst.encTestRImm32(.d, .rdx, @as(u32, @intCast(access_size - 1))).slice());
+        const al_fixup: u32 = @intCast(ctx.buf.items.len);
+        try ctx.buf.appendSlice(ctx.allocator, inst.encJccRel32(.ne, 0).slice()); // nonzero low bits = unaligned
+        try ctx.unaligned_atomic_fixups.append(ctx.allocator, al_fixup);
     }
     try ctx.buf.appendSlice(ctx.allocator, inst.encLeaR64BaseDisp8(.rcx, .rdx, access_size).slice());
     try ctx.buf.appendSlice(ctx.allocator, inst.encCmpR64MemDisp32(.rcx, abi.runtime_ptr_save_gpr, jit_abi.mem_limit_off).slice());
