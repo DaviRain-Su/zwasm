@@ -182,19 +182,19 @@ design forks. Update this doc's `[x]` + handover NEXT each chunk.
   `WebAssembly/component-model` + wasm-tools component tests into a runner
   (mirror `test/spec/spec_assert_runner_*`), wired into `test-all`. Track
   pass/skip with truthful reasons (no blanket skips — the D-301 lesson).
-- [ ] **E2 — Rust + Go sample-project proof.** **IN PROGRESS (bundle).** Path
-  found: `rustc --target wasm32-wasip2` emits a real component directly (no
-  cargo-component/adapter) — flake `gen` shell gains the wasip2 target. A real
-  Rust `println!` component built + validates (2.4 MB). **Gap (spike
-  `private/spikes/e2-rust-component/README.md`)**: wit-bindgen uses a **shim /
-  fixup-table indirection** for host funcs whose canon-lower needs memory/realloc
-  (output-stream.write, get-environment, get-terminal-*) — they reach `$main` as
-  `.alias` core funcs into the shim's `$imports` table, classifyCoreExport returns
-  null. Direct lowers (exit/get-std*/pollable.block) already work. **Bundle work**:
-  (1) shim indirect-lowering (populate `$imports` table post-main-instantiate);
-  (2) classifyCoreExport follows `.alias`→shim→lower; (3) missing interfaces
-  wasi:cli/environment + terminal-* + io/error + output-stream.check-write.
-  Exit: `zwasm run hello.component.wasm` prints its line + exit 0. Then add Go (tinygo).
+- [~] **E2 — Rust proof DONE @96e1ccce; Go (tinygo) remains.** A real
+  `rustc --target wasm32-wasip2` component (no cargo-component/adapter; flake gen
+  shell gained the wasip2 target) RUNS e2e through zwasm and prints. Delivered:
+  **ADR-0175** general instance-graph engine (@8eab1703 — builds every core
+  instance in order; the `$fixup` `elem` fills wit-bindgen's shim `$imports`
+  table) · **D-310** runtime fix (@4e802881 — imported host funcs funcref-able:
+  per-import placeholder sig + call_indirect→host_calls dispatch) + component
+  memory fix (@96e1ccce — trampolines source `WasiP2Ctx.mem_instance`, not the
+  memory-less shim caller) · cli/environment+terminal+check-write trampolines
+  (@0888a3f9) · core-table decode (@73df8a7e). Fixture
+  `test/component/wasi_p2_hello_rust.wasm` (stripped 78 KB) + e2e test + dogfood.
+  **Remaining**: a Go (tinygo + wit-bindgen-go) component for the cross-toolchain
+  proof; io/error trampoline (not yet exercised — a clean run never errors).
 - [ ] **E3 — WASI-P2 conformance + edge cases.** P2 test corpus + boundary
   fixtures; close the gap to wasmtime where "beyond is satisfiable" (ADR-0170).
 

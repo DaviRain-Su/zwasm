@@ -18,30 +18,18 @@ skip" lesson made a gate. Findings: [`windows_hardening_findings.md`](windows_ha
 user request. A13 strict-3-host merge gate (`gate_merge.sh`) UNCHANGED. **Now resume the CM+WASI-P2 campaign below
 (Phase D3/E).** Loop NEVER idles; **No release/tag EVER** (ADR-0156).
 
-## Active bundle — E2 real Rust wasip2 component (Phase E2)
+## ✅ E2 bundle CLOSED — a REAL Rust wasm32-wasip2 component RUNS via zwasm (@96e1ccce)
 
-- **Bundle-ID**: E2-real-rust-component
-- **Cycles-remaining**: ~2
-- **Continuity-memo**: GENERAL ENGINE DONE @8eab1703 (`runWasiP2Main` builds every core instance in order; existing
-  fixtures green; the real Rust component now builds the shim/main/fixup graph + fills the shim table + reaches
-  call_indirect). **Next = fix D-310** (the E2 blocker): an imported HOST func is NOT funcref-able —
-  `runtime/instance/instantiate.zig:~1330` `.wasi` arm leaves a PLACEHOLDER FuncEntity (no sig/typeidx), so the
-  `$fixup` elem stores a `()->()` funcref → IndirectCallTypeMismatch (slot 0: callee p=0 r=0 vs expected p=2). Fix:
-  set the `.wasi` FuncEntity typeidx/raw_typeidx from the import sig + ensure `funcs[i].sig` so call_indirect→invoke
-  routes to `host_calls[i]`. Standalone fixture first (core module: import host fn → elem into table → call_indirect).
-  Then io/error trampoline + the e2e: `zwasm run hello.component.wasm` prints + exit 0, commit as realworld fixture.
-- **Design**: **ADR-0175** (general instance-graph instantiation, not special-cased shim). `rustc --target
-  wasm32-wasip2` emits a real component (flake gen shell has the target). `private/spikes/e2-rust-component/`
-  has `hello.component.wasm` + findings. wit-bindgen uses a **shim/fixup-table**: a `$wit-component-shim` exports
-  `call_indirect` trampolines + a `$imports` table; memory-needing lowers are defined after `$main` and a
-  `$fixup` module's active `elem` wires them into the table.
-- **DONE**: step 4 @0888a3f9 — trampolines for cli/environment (empty env/args, none cwd) + terminal-* (none) +
-  output-stream.check-write (permit). Fixture `wasi_p2_cli_env`. (io/error deferred to the e2e step.)
-- **Remaining (ADR-0175 build order)**: (1-3) **general core-instance walk** in `runWasiP2Main`
-  (`api/component_wasi_p2.zig`) — instantiate every core instance in order via the existing engine (the `$fixup`
-  `elem` fills the shim table); component-level `canon lower`→host trampoline binding `$main`'s memory; (5) io/error
-  resource + to-debug-string; e2e: `zwasm run hello.component.wasm` prints + exit 0, commit as realworld fixture.
-- **Exit-condition**: `zwasm run hello.component.wasm` prints "hello from a real rust wasip2 component" + exit 0.
+The campaign headline: a genuine `rustc --target wasm32-wasip2` component (NOT hand-authored; wit-bindgen
+shim/fixup-table indirection, full wasi:cli world) prints "hello from a real rust wasip2 component" e2e + exit 0.
+Delivered: **ADR-0175** general instance-graph engine @8eab1703 · **D-310** runtime fix @4e802881 (imported host
+funcs funcref-able: per-import placeholder sig + call_indirect→host_calls) + component memory fix @96e1ccce
+(trampolines use `WasiP2Ctx.mem_instance`, not the memory-less shim caller) · core-table decode @73df8a7e ·
+cli/environment+terminal+check-write @0888a3f9. Fixture `test/component/wasi_p2_hello_rust.wasm` (78 KB) + e2e + dogfood.
+
+**NEXT (Phase E, plan §E)**: (a) **Go (tinygo + wit-bindgen-go) component** = the cross-toolchain proof (E2 remaining);
+OR (b) **E1** official component-model conformance corpus runner; OR (c) **E3** WASI-P2 conformance + edge cases.
+Also: io/error trampoline (not yet exercised — a clean run never errors); D3-8 sockets (spike-first). Pick (a) next.
 
 ## Active campaign — Component Model + WASI Preview 2 (ADR-0170, user-directed 2026-06-07)
 
@@ -83,12 +71,12 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
 
 - **Phase 17 (v0.2) IN-PROGRESS** (ADR-0168). DONE+3-host: atomics @9eb84833 · wide-arith @231d4536 ·
   custom-page-sizes @cd0de2dd · relaxed-SIMD @08342ec5 (+official corpus @8ef2e752, 13420 pass arm64+x86). Wasm-3.0
-  core 100%-spec COMPLETE. Last SHA **8eab1703** (E2 general instance-graph engine; D-310 blocker; windows susp @9d832f1d).
+  core 100%-spec COMPLETE. Last SHA **96e1ccce** (E2 EXIT MET: real Rust wasip2 component runs; windows susp @9d832f1d).
 - **Atomics fully conformant @e6f3b0c0** — official corpus **294 pass, 0 SKIPPED** (D-301), incl. the JIT
   unaligned-atomic-trap fix D-303 (code-14 `unaligned_atomic_fixups` both arches, @5b0db8e1, 3-host).
 - **ALL bounded debt CLEARED**: ✅ D-301 · ✅ D-303 · ✅ D-231 (cross-x86 DCE gate wired @aac4fe2f) · ✅ D-302
   (branch-hint custom-section verified @dcc8d71c) · ✅ **D-279 DISCHARGED @c287d39c**.
-- Debt ledger **53 entries** (D-307 + D-309 discharged this cycle). `now` = D-299 only
+- Debt ledger **53 entries** (D-307/D-309/D-310 discharged). `now` = D-299 only
   (env-constrained). **Correctly DEFERRED (do NOT clear)**: D-209
   (hot-path), D-259 (W54-ABI-risk), D-300 stack-switching (Phase-3 unstable), D-299 (x86_64 W^X).
 - 完成形 v0.1 surface COMPLETE: CLI D-295 (~85%, intentionally lean) · C-API ZERO gaps (293/293) · Zig-API
