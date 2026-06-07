@@ -40,18 +40,23 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
   `if (comptime wasm_v3_plus)` guard arm64 had). Fixed; v1_0 x86 wasm_3_0 3→0. REMAINING D-231 = wire the gate
   (cross-nm x86 in check_build_dce; mechanism validated). D-209 memory64 >4GiB = correctly measure-first-deferred
   (hot-path branch cost, no consumer). D-259 spillBytes = measure-first.
-- **Sweep state (2026-06-07 barrier-review)**: safe-actionable items exhausted this cycle. D-231 leak FIXED; its
-  gate-wiring is LOW-urgency (check_build_dce only runs at manual main-merge, never in-branch). D-209 (hot-path,
-  exotic, no consumer) + D-259 (W54-ABI-risk, zero perf benefit) both correctly stay deferred. **NEXT = either
-  re-survey proposal_watch for any newly-Phase-4 proposal, wire another official spec corpus (relaxed-SIMD
-  pattern — high-value conformance, may surface more bugs), or D-231 gate-wiring (env-fragile cross-nm, fresh
-  context).** **NOT new-proposal features** — stack-switching **DEFERRED
-  @D-300** (survey 2026-06-07: Phase-3 unstable format + 3 architecture ADRs + ~25-35cyc — re-survey Phase 4). compact-import/
-  memory-control also pre-Phase-4. So pick from `.dev/remaining_sweep.md` Bucket B/C (D-231 build-DCE gate,
-  D-209 memory64 >4GiB memarg completeness, D-259 spillBytes measure-first, …) + re-check proposal_watch
-  quarterly. **D-299** (inline atomic misaligned-trap, x86_64 W^X stale-page) still open. No tag (ADR-0156).
-- Debt ledger: **52 entries** (Bucket A 15 pruned @758ff210; +D-300 stack-switching defer). 0 `now` except
-  D-299. Sweep between features, never idle.
+- **v1-parity audit (2026-06-07, user-directed)** — v1 advertised "Full Wasm 3.0 (18/18) + Component Model/WASI-P2
+  + threads + branch-hinting". v2 MATCHES all Wasm-3.0-core + atomics/wide-arith/custom-page/relaxed-SIMD +
+  multi-memory(parse/validate/interp). **v2 gaps vs v1-claims**: (1) **Component Model + WASI Preview 2** = the
+  BIG one (v1 claimed complete; v2 deferred to v0.2.0 — the v0.2 entry per proposal_watch; multi-session campaign,
+  needs survey+ADRs); (2) **branch-hinting** = D-302 (advisory custom-section, no conformance effect, likely
+  already a no-op skip — quick verify); (3) **multi-memory JIT** = §14-deferred allowlist (~458 skips;
+  parse/interp done).
+- **NEXT CLEAN-SESSION — clear bounded debt in one go (refs all resolve; ordered)**:
+  1. **D-301** runner ext → un-skip 47 atomics asserts: nonSimdRunAssertTrap i64/multi-arg argparse + mark
+     scratch shared for wait32/64 (`test/spec/spec_assert_runner_non_simd.zig`, `base.growable_memory`).
+  2. **D-231** wire cross-nm x86 DCE gate into `check_build_dce.sh` (mechanism validated; ELF-nm in nix).
+  3. **D-302** verify a `metadata.code.branch_hint` module parses+runs on v2 (custom-section skip path).
+  Then the BIG forward track = **Component Model / WASI-P2 survey** (the real v1-parity completion + v0.2 entry).
+  **Correctly DEFERRED (do NOT clear)**: D-209 (hot-path/exotic), D-259 (W54-ABI-risk/zero-perf), D-300
+  stack-switching (Phase-3 unstable). **D-299** (inline atomic misalign-trap, x86_64 W^X) env-constrained. No tag.
+- Debt ledger: **54 entries** (+D-300 stack-switching, +D-301 atomics-corpus→note, +D-302 branch-hinting). 0
+  `now` except D-299. Never idle.
 - **D-279** Win64 SIMD heisenbug: H3 stack-overflow diagnostic deployed; re-kick windows as work lands to keep
   hunting the reproduction (user: never leave it idle). Mac-side investigation walled (needs the Win64 signal).
 
