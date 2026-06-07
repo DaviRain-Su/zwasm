@@ -104,12 +104,45 @@ pub const ComponentInstance = struct {
             out.* = try canon.lift(value_conv.zwasmToRuntime(resbuf[0]), rt);
         }
     }
+
+    /// Build a `canon.CanonContext` over the instance's linear memory + the
+    /// guest's `cabi_realloc`. NOTE: the captured `memory` slice is valid only
+    /// while the guest does not GROW memory mid-lift/lower; a growing
+    /// `cabi_realloc` would dangle it (addressed for the real fixture at IT-3b).
+    pub fn canonContext(self: *ComponentInstance) CanonContextError!canon.CanonContext {
+        const mem = self.core.memory() orelse return CanonContextError.NoMemory;
+        return .{
+            .memory = mem.slice(),
+            .realloc_ctx = @ptrCast(self),
+            .realloc_fn = reallocViaGuest,
+        };
+    }
 };
 
 pub const InvokeFlatError = error{
     TooManyParams,
     NotFlatScalar,
 } || canon.LowerError || canon.LiftError || Instance.InvokeError;
+
+/// The `cabi_realloc` callback (ADR-0171) that runs the guest's own
+/// `cabi_realloc` export — so canon lift/lower allocate in the guest's
+/// allocator (spec-conformant). `ctx` is the `*ComponentInstance`.
+fn reallocViaGuest(ctx: *anyopaque, old_ptr: u32, old_size: u32, alignment: u32, new_size: u32) canon.ReallocError!u32 {
+    const self: *ComponentInstance = @ptrCast(@alignCast(ctx));
+    var args = [_]Value{
+        .{ .i32 = @bitCast(old_ptr) },
+        .{ .i32 = @bitCast(old_size) },
+        .{ .i32 = @bitCast(alignment) },
+        .{ .i32 = @bitCast(new_size) },
+    };
+    var results = [_]Value{.{ .i32 = 0 }};
+    self.core.invoke("cabi_realloc", &args, &results) catch return canon.ReallocError.AllocFailed;
+    const ptr: u32 = @bitCast(results[0].i32);
+    if (ptr == 0 and new_size != 0) return canon.ReallocError.AllocFailed; // null = OOM
+    return ptr;
+}
+
+pub const CanonContextError = error{NoMemory};
 
 fn firstCoreModule(decoded: *const decode.Component) ?[]const u8 {
     for (decoded.sections.items) |sec| {
@@ -211,6 +244,66 @@ test "IT-2: trampoline lifts a signed result through the canon boundary" {
     var out: canon.Value = undefined;
     try ci.invokeFlat("add", &.{ .{ .s32 = -1 }, .{ .s32 = -1 } }, &.{ .s32, .s32 }, .s32, &out);
     try testing.expectEqual(@as(i32, -2), out.s32);
+}
+
+/// A core module with a 1-page memory + a bump-allocator `cabi_realloc` (it
+/// ignores `old`/`old_size`/`align` — sufficient for the align-1 string test —
+/// and never grows memory, keeping a captured memory slice valid):
+/// ```wat
+/// (module
+///   (memory (export "memory") 1)
+///   (global $next (mut i32) (i32.const 16))
+///   (func (export "cabi_realloc") (param i32 i32 i32 i32) (result i32) (local $ret i32)
+///     global.get $next  local.set $ret
+///     global.get $next  local.get 3  i32.add  global.set $next
+///     local.get $ret))
+/// ```
+const core_realloc = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // \0asm v1
+    0x01, 0x09, 0x01, 0x60, 0x04, 0x7f, 0x7f, 0x7f, 0x7f, 0x01, 0x7f, // type (i32×4)->i32
+    0x03, 0x02, 0x01, 0x00, // func: type 0
+    0x05, 0x03, 0x01, 0x00, 0x01, // memory: min 1 page
+    0x06, 0x06, 0x01, 0x7f, 0x01, 0x41, 0x10, 0x0b, // global $next (mut i32) = 16
+    0x07, 0x19, 0x02, // export section: 2 exports
+    0x06, 'm', 'e', 'm', 'o', 'r', 'y', 0x02, 0x00, // "memory" → mem 0
+    0x0c, 'c', 'a', 'b', 'i', '_', 'r', 'e', 'a', 'l', 'l', 'o', 'c', 0x00, 0x00, // "cabi_realloc" → func 0
+    0x0a, 0x13, 0x01, 0x11, 0x01, 0x01, 0x7f, // code: 1 func, body size 17, 1 i32 local
+    0x23, 0x00, 0x21, 0x04, // global.get 0; local.set 4 ($ret)
+    0x23, 0x00, 0x20, 0x03, 0x6a, 0x24, 0x00, // global.get 0; local.get 3; i32.add; global.set 0
+    0x20, 0x04, 0x0b, // local.get 4; end
+};
+const component_realloc = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x0d, 0x00, 0x01, 0x00, // component preamble
+    0x01, core_realloc.len, // core-module section
+} ++ core_realloc;
+
+test "IT-3a: cabi_realloc-via-guest — string lower/lift over real guest memory" {
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var ci = try instantiate(&eng, testing.allocator, &component_realloc);
+    defer ci.deinit();
+
+    const cx = try ci.canonContext();
+    // Lower a host string THROUGH the guest's own cabi_realloc allocator...
+    const lowered = try canon.lowerString(cx, "héllo, 世界");
+    try testing.expect(lowered.ptr >= 16); // past the bump start
+    // ...and lift it back out of the guest linear memory.
+    const back = try canon.liftString(cx, lowered.ptr, lowered.packed_length);
+    try testing.expectEqualStrings("héllo, 世界", back);
+}
+
+test "IT-3a: two allocations via the guest allocator don't overlap" {
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var ci = try instantiate(&eng, testing.allocator, &component_realloc);
+    defer ci.deinit();
+
+    const cx = try ci.canonContext();
+    const a = try canon.lowerString(cx, "first");
+    const b = try canon.lowerString(cx, "second");
+    try testing.expect(b.ptr >= a.ptr + a.packed_length); // bump advanced
+    try testing.expectEqualStrings("first", try canon.liftString(cx, a.ptr, a.packed_length));
+    try testing.expectEqualStrings("second", try canon.liftString(cx, b.ptr, b.packed_length));
 }
 
 test "IT-1: a core module (not a component) is rejected as NotAComponent" {
