@@ -267,6 +267,78 @@ pub const TypeInfo = struct {
         if (index >= self.deftypes.items.len) return null;
         return self.deftypes.items[index];
     }
+
+    /// A resolved core-func index-space entry pointing at a core-instance
+    /// export (the form `canon lift`/`canon lower` reference).
+    pub const CoreExportRef = struct {
+        instance: u32,
+        name: []const u8,
+    };
+
+    /// Resolve a core-func index → the core-instance export it aliases.
+    ///
+    /// The component's core-func index space is populated, in definition order,
+    /// by core-func aliases (and `canon lower` results — deferred until a
+    /// component needs them). This walks the core-func aliases and returns the
+    /// `core_func_idx`-th one's target. Returns null if the index is out of
+    /// range or the entry is not a direct core-export alias (e.g. an `outer`
+    /// alias — not yet resolved across component boundaries).
+    pub fn resolveCoreFuncExport(self: *const TypeInfo, core_func_idx: u32) ?CoreExportRef {
+        var idx: u32 = 0;
+        for (self.aliases.items) |al| {
+            if (!(al.sort == .core and al.sort.core == .func)) continue;
+            if (idx == core_func_idx) {
+                return switch (al.target) {
+                    .core_export => |ce| .{ .instance = ce.instance, .name = ce.name },
+                    else => null,
+                };
+            }
+            idx += 1;
+        }
+        return null;
+    }
+
+    /// A component `func` export resolved to the core exports the host must
+    /// invoke: the lowered core func + the canon options' realloc / post-return
+    /// core funcs.
+    pub const ResolvedLift = struct {
+        core_func: CoreExportRef,
+        realloc: ?CoreExportRef,
+        post_return: ?CoreExportRef,
+        string_encoding: StringEncoding,
+    };
+
+    /// Resolve a component `func` export (by name) to its `canon lift` and the
+    /// underlying core exports — so the host invokes the resolved core funcs
+    /// instead of guessing names. Assumes the func index space is populated by
+    /// `canon lift`s in order (true for a single-component leaf; func imports /
+    /// aliases occupy earlier slots and are handled when a component uses them).
+    pub fn resolveLiftedFunc(self: *const TypeInfo, export_name: []const u8) ?ResolvedLift {
+        var func_idx: ?u32 = null;
+        for (self.exports.items) |e| {
+            if (e.sort == .func and std.mem.eql(u8, e.name, export_name)) {
+                func_idx = e.index;
+                break;
+            }
+        }
+        const fi = func_idx orelse return null;
+
+        var li: u32 = 0;
+        for (self.canons.items) |c| {
+            if (c != .lift) continue;
+            if (li == fi) {
+                const lift = c.lift;
+                return .{
+                    .core_func = self.resolveCoreFuncExport(lift.core_func) orelse return null,
+                    .realloc = if (lift.opts.realloc) |r| self.resolveCoreFuncExport(r) else null,
+                    .post_return = if (lift.opts.post_return) |p| self.resolveCoreFuncExport(p) else null,
+                    .string_encoding = lift.opts.string_encoding,
+                };
+            }
+            li += 1;
+        }
+        return null;
+    }
 };
 
 pub const Error = error{

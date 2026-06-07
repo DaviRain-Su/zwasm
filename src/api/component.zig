@@ -45,7 +45,7 @@ pub const Error = error{
     /// The component embeds no core module to instantiate.
     NoCoreModule,
     OutOfMemory,
-} || decode.Error || Module.InstantiateError;
+} || decode.Error || ctypes.Error || Module.InstantiateError;
 
 /// An instantiated component. IT-1 holds a single embedded core module's
 /// instance; multi-module graphs land in C2. The `Module`/`Instance` are
@@ -54,16 +54,23 @@ pub const Error = error{
 pub const ComponentInstance = struct {
     alloc: Allocator,
     decoded: decode.Component,
+    /// Decoded type/canon/alias index spaces — used to resolve a component
+    /// export to the core funcs the host invokes (C2-2).
+    info: ctypes.TypeInfo,
     /// Borrowed — the caller owns the `Engine` and must outlive this.
     engine: *Engine,
     module: *Module,
     core: *Instance,
+    /// The core export name `reallocViaGuest` invokes — set per resolved call
+    /// (defaults to the conventional `cabi_realloc`).
+    realloc_name: []const u8 = "cabi_realloc",
 
     pub fn deinit(self: *ComponentInstance) void {
         self.core.deinit();
         self.alloc.destroy(self.core);
         self.module.deinit();
         self.alloc.destroy(self.module);
+        self.info.deinit();
         self.decoded.deinit(self.alloc);
     }
 
@@ -157,11 +164,27 @@ pub const ComponentInstance = struct {
         }
         return owned;
     }
+
+    /// Invoke a `func(string) -> string` component export BY ITS COMPONENT NAME
+    /// (C2-2, discharges D-304). Resolves the export → its `canon lift` → the
+    /// real core funcs (lowered func / realloc / post-return) via the decoded
+    /// alias + canon index spaces, then runs `invokeString` — no hard-coded core
+    /// names. utf8 string-encoding only.
+    pub fn invokeStringExport(self: *ComponentInstance, export_name: []const u8, arg: []const u8, out_alloc: std.mem.Allocator) InvokeStringError![]u8 {
+        const r = self.info.resolveLiftedFunc(export_name) orelse return InvokeStringError.ExportNotResolved;
+        if (r.string_encoding != .utf8) return InvokeStringError.UnsupportedEncoding;
+        if (r.realloc) |rr| self.realloc_name = rr.name;
+        const post: ?[]const u8 = if (r.post_return) |p| p.name else null;
+        return self.invokeString(r.core_func.name, post, arg, out_alloc);
+    }
 };
 
 pub const InvokeStringError = error{
     OutOfBounds,
     OutOfMemory,
+    /// The component export name didn't resolve to a `canon lift` over a core
+    /// export (unknown export, or an unresolvable alias form).
+    ExportNotResolved,
 } || canon.StringError || Instance.InvokeError || CanonContextError;
 
 /// Read a little-endian u32 from a guest-memory slice (bounds-checked).
@@ -187,7 +210,7 @@ fn reallocViaGuest(ctx: *anyopaque, old_ptr: u32, old_size: u32, alignment: u32,
         .{ .i32 = @bitCast(new_size) },
     };
     var results = [_]Value{.{ .i32 = 0 }};
-    self.core.invoke("cabi_realloc", &args, &results) catch return canon.ReallocError.AllocFailed;
+    self.core.invoke(self.realloc_name, &args, &results) catch return canon.ReallocError.AllocFailed;
     const ptr: u32 = @bitCast(results[0].i32);
     if (ptr == 0 and new_size != 0) return canon.ReallocError.AllocFailed; // null = OOM
     return ptr;
@@ -219,7 +242,10 @@ pub fn instantiate(engine: *Engine, alloc: Allocator, bytes: []const u8) Error!C
     errdefer alloc.destroy(core);
     core.* = try module.instantiate(.{});
 
-    return .{ .alloc = alloc, .decoded = decoded, .engine = engine, .module = module, .core = core };
+    var info = try ctypes.decodeTypeInfo(alloc, &decoded);
+    errdefer info.deinit();
+
+    return .{ .alloc = alloc, .decoded = decoded, .info = info, .engine = engine, .module = module, .core = core };
 }
 
 // ============================================================
@@ -436,6 +462,31 @@ test "IT-3b-3 (EXIT): a real string→string component runs end-to-end" {
     const result2 = try ci.invokeString("greet", "cabi_post_greet", "世界", testing.allocator);
     defer testing.allocator.free(result2);
     try testing.expectEqualStrings("Hello, 世界!", result2);
+}
+
+test "C2-2 (D-304): resolve the component export → core funcs (no hard-coded names)" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, greet_component_path, testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var ci = try instantiate(&eng, testing.allocator, bytes);
+    defer ci.deinit();
+
+    // The resolver maps the component func type + canon-lift to the core exports.
+    const r = ci.info.resolveLiftedFunc("greet").?;
+    try testing.expectEqualStrings("greet", r.core_func.name);
+    try testing.expectEqualStrings("cabi_realloc", r.realloc.?.name);
+    try testing.expectEqualStrings("cabi_post_greet", r.post_return.?.name);
+    try testing.expectEqual(ctypes.StringEncoding.utf8, r.string_encoding);
+
+    // Invoke BY THE COMPONENT EXPORT NAME — the host resolves the core funcs.
+    const result = try ci.invokeStringExport("greet", "zwasm", testing.allocator);
+    defer testing.allocator.free(result);
+    try testing.expectEqualStrings("Hello, zwasm!", result);
 }
 
 test "IT-1: a core module (not a component) is rejected as NotAComponent" {
