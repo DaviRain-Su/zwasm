@@ -39,16 +39,16 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
   `runtime.Value`↔`zwasm.Value` bridge proven) · **IT-3a @6e784d5c** (cabi_realloc-via-guest: `canonContext()` +
   `reallocViaGuest` invokes the guest's `cabi_realloc` export; a host string lowers THROUGH the guest allocator into
   guest memory + lifts back — ADR-0171's core seam proven e2e with a hand-crafted bump-allocator module).
-- **Continuity-memo**: NEXT = IT-3b, the EXIT, now scoped into sub-steps: **(b-1)** decode the component `canon`
-  section (id 8) — `canon ::= 0x00 0x00 core:funcidx opts typeidx` (canon lift) + `opts` (string-encoding / memory /
-  realloc / post-return) [`Binary.md` §canon]; deferred since A2, add to `decode.zig`/`types.zig`. **(b-2)** the full
-  component-export invoke path: export → its canon-lift → underlying core func + string-encoding opt + the
-  cabi_realloc-via-guest CanonContext; lift host string args → lower into guest → invoke; the string RESULT (2 flat
-  values > MAX_FLAT_RESULTS=1) returns via an INDIRECT return-area pointer (read `CanonicalABI.md` `canon_lift` /
-  `flatten_functype` / `lower_heap`); also handle memory-grow invalidating the captured slice (re-fetch after realloc).
-  **(b-3)** a REAL string→string fixture + exit assertion. TOOLCHAIN CHECKED (this session): nix + `wasm-tools` present
-  in `.#gen`, but **NO cargo-component** — build a core module (rustWasm/clang/wat) then `wasm-tools component embed
-  <wit> core.wasm` + `wasm-tools component new` to wrap it (canon section). Start with b-1 (pure Zig, no toolchain).
+- **Continuity-memo**: IT-3b-1 DONE @9024d4bb (canon section decode: `types.Canon` lift/lower + `CanonOpts` (encoding/
+  memory/realloc/post-return) + resource builtins; async/stream/future defer via `UnsupportedCanon`; `TypeInfo.canons`).
+  REORDERED — do the FIXTURE before the trampoline (the real fixture makes the exact core ABI shape concrete, removing
+  return-area ambiguity): **NEXT = IT-3b-2 (FIXTURE)** — generate a REAL string→string component. Toolchain (checked):
+  nix + `wasm-tools` in `.#gen`, NO cargo-component. EASIEST path likely `tinygo build -target=wasip2` (tinygo is in
+  `.#gen`, bundles wit-bindgen-go + wasm-tools) OR rustWasm+wit-bindgen then `wasm-tools component embed <wit> core.wasm`
+  + `wasm-tools component new`. Commit the `.wasm`; inspect via `wasm-tools print`/`dump` to read its canon section +
+  core func signature. Then **IT-3b-3 (TRAMPOLINE = EXIT)**: resolve component export → its canon-lift → core func +
+  string-opt + cabi_realloc CanonContext; lift host string args → lower into guest → invoke with the INDIRECT return-area
+  (read `CanonicalABI.md` `canon_lift`/`flatten_functype`/`lower_heap`); re-fetch memory slice after realloc (grow-safe).
 - **Exit-condition**: a string→string component runs via `api/component.zig` and returns the expected string.
 
 ## Current state
