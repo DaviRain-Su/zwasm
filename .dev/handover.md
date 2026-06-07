@@ -31,10 +31,15 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
   likely the right host BUT must verify it (a) handles a **shared-memory** module + (b) the 59 `action` commands
   (store-side; distiller currently `skip-impl directive-action` → loads may read uninit — check if atomic tests
   are self-contained or need action-execution).
-- **Plan**: chunk1 = pick+verify host runner (compile one atomic module through it, confirm shared-mem + an
-  arg-taking atomic.load assert executes); chunk2 = regen atomic.wast → corpus dir + wire (mirror relaxed-SIMD
-  baker pattern; `--enable-threads`); chunk3 = run, fix any surfaced bug (relaxed-corpus precedent), 3-host.
-  If `action`-commands matter, teach the distiller to emit them as side-effecting invokes.
+- **Plan**: ~~chunk1 host-runner identified~~ = **`spec_assert_runner_non_simd`** (broad arg-taking scalar exec,
+  25437 assertions; takes a `corpus_root` arg @non_simd:84-103 + auto-iterates subdirs; linear mem via
+  `base.growable_memory`). wasm_3_0 runner REJECTED (skips arg-taking). **NEXT chunk2** = regen atomic.wast →
+  a new `test/spec/threads-assert/atomic/` corpus + add a build.zig step reusing the non_simd runner binary
+  pointed at it (mirror build.zig:464 test-spec-wasm-2.0-assert). Distiller: clone regen_spec_3_0's python
+  (handles scalar assert_return/trap/invalid; add `--enable-threads`; the 59 `action` commands are currently
+  `skip-impl directive-action` — CHECK if atomic tests are self-contained (most assert_return funcs do
+  store-then-load internally) or need action-as-invoke execution). chunk3 = run, fix any surfaced bug
+  (relaxed-corpus precedent caught the x86 dot sign bug), 3-host. Verify a shared-memory module compiles+runs.
 - **Exit-condition**: atomic.wast assert_returns execute (not skip) + pass in a runner, 0 fail, 3-host; any
   surfaced bug fixed.
 - **Cycles-remaining**: ~3-4. No tag (ADR-0156).
