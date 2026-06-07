@@ -57,6 +57,12 @@ pub const WasiP2Ctx = struct {
     /// `2026-06-07-engine-invoke-is-reentrant-stack-disciplined`.
     realloc_instance: ?*Instance = null,
     realloc_name: []const u8 = "cabi_realloc",
+    /// Instance whose linear memory the lowered funcs read/write — the
+    /// canon-lower-bound memory (the memory-exporting instance: `$main`, or
+    /// `$libc` in the hand-authored fixtures). NOT the immediate caller's: a
+    /// lower reached via wit-bindgen's shim `call_indirect` has the memory-less
+    /// shim as caller, so trampolines must source memory from here (D-310).
+    mem_instance: ?*Instance = null,
 
     /// Resource-type ids for the P2 resources the host models (`pub` for the
     /// in-tree tests that mint handles directly).
@@ -87,7 +93,26 @@ pub const WasiP2Ctx = struct {
         if (ptr == 0 and size != 0) return WasiP2Error.ReallocFailed;
         return ptr;
     }
+
+    /// The guest linear memory the lowered funcs operate on (`mem_instance`).
+    fn memory(self: *WasiP2Ctx) WasiP2Error!Memory {
+        const inst = self.mem_instance orelse return WasiP2Error.NoMemory;
+        const rt = inst.handle.runtime orelse return WasiP2Error.NoMemory;
+        if (rt.memory.len == 0) return WasiP2Error.NoMemory;
+        return .{ .rt = rt };
+    }
 };
+
+/// The lowered-WASI guest memory for a trampoline. Prefers the canon-lower-bound
+/// memory recorded on `WasiP2Ctx` (`mem_instance`) — the immediate caller may be
+/// the memory-less wit-bindgen shim (D-310). Falls back to `caller.memory()`
+/// when no `mem_instance` is set (direct-call unit tests that build a ctx by
+/// hand), preserving the original direct-dispatch behaviour.
+fn ctxMemory(caller: *Caller) WasiP2Error!Memory {
+    const ctx = caller.data(WasiP2Ctx);
+    if (ctx.mem_instance != null) return ctx.memory();
+    return caller.memory() orelse return WasiP2Error.NoMemory;
+}
 
 pub const WasiP2Error = error{ NoMemory, OutOfBounds, WriteFailed, NoRealloc, ReallocFailed, ProcExit } ||
     resource_table.Error || Memory.Error;
@@ -135,7 +160,7 @@ fn p2MonotonicNow(caller: *Caller) WasiP2Error!i64 {
 /// nanoseconds @ 8). Reuses clockTimeNs; no realloc (the guest supplies retptr).
 fn p2WallNow(caller: *Caller, retptr: u32) WasiP2Error!void {
     const ctx = caller.data(WasiP2Ctx);
-    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    const mem = try ctxMemory(caller);
     const ns = wasi_clocks.clockTimeNs(ctx.host, 0) catch
         @panic("WASI-P2 wall-clock.now: host clock unavailable (host.io unset)");
     try mem.write(retptr, @as(u64, ns / std.time.ns_per_s));
@@ -155,7 +180,7 @@ fn p2GetStdin(caller: *Caller) WasiP2Error!u32 {
 /// stream is closed → err(stream-error::closed) (err disc@0=1, variant case@4=1).
 fn p2InStreamRead(caller: *Caller, self_handle: u32, len: u64, retptr: u32) WasiP2Error!void {
     const ctx = caller.data(WasiP2Ctx);
-    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    const mem = try ctxMemory(caller);
     _ = try ctx.resources.rep(WasiP2Ctx.INPUT_STREAM_RT, self_handle); // validate handle (rep = fd 0)
     const n: u32 = @intCast(@min(len, std.math.maxInt(u32)));
     const data_ptr: u32 = if (n == 0) 0 else try ctx.reallocGuest(n, 1);
@@ -176,7 +201,7 @@ fn p2InStreamRead(caller: *Caller, self_handle: u32, len: u64, retptr: u32) Wasi
 /// Mirrors the D2 list-return pattern (p2GetDirectories).
 fn p2RandomGetBytes(caller: *Caller, len: u64, retptr: u32) WasiP2Error!void {
     const ctx = caller.data(WasiP2Ctx);
-    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    const mem = try ctxMemory(caller);
     const n: u32 = @intCast(@min(len, std.math.maxInt(u32)));
     const data_ptr: u32 = if (n == 0) 0 else try ctx.reallocGuest(n, 1);
     if (n != 0) {
@@ -195,7 +220,7 @@ fn p2RandomGetBytes(caller: *Caller, len: u64, retptr: u32) WasiP2Error!void {
 pub fn p2OutStreamWrite(caller: *Caller, self_handle: u32, ptr: u32, len: u32, retptr: u32) WasiP2Error!void {
     const ctx = caller.data(WasiP2Ctx);
     const fd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.OUTPUT_STREAM_RT, self_handle));
-    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    const mem = try ctxMemory(caller);
     const bytes = mem.sliceAt(ptr, len) catch return WasiP2Error.OutOfBounds;
     if (wasi_fd.writeSlice(ctx.host, fd, bytes) != .success) return WasiP2Error.WriteFailed;
     try mem.write(retptr, @as(u8, 0));
@@ -214,7 +239,7 @@ pub fn p2OutStreamDrop(caller: *Caller, self_handle: u32) WasiP2Error!void {
 pub fn p2DescriptorWrite(caller: *Caller, self_handle: u32, buf_ptr: u32, buf_len: u32, offset: u64, retptr: u32) WasiP2Error!void {
     const ctx = caller.data(WasiP2Ctx);
     const fd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.DESCRIPTOR_RT, self_handle));
-    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    const mem = try ctxMemory(caller);
     const bytes = mem.sliceAt(buf_ptr, buf_len) catch return WasiP2Error.OutOfBounds;
     const errno = wasi_fd.pwriteSlice(ctx.host, fd, bytes, offset);
     if (errno != .success) {
@@ -257,6 +282,15 @@ fn instanceExportsFunc(inst: *Instance, name: []const u8) bool {
     return false;
 }
 
+/// True if `inst` exports a linear memory (the canon-lower-bound memory the
+/// host trampolines read/write — `$main` / `$libc`).
+fn instanceExportsMemory(inst: *Instance) bool {
+    for (inst.handle.exports_storage) |e| {
+        if (e.kind == .memory) return true;
+    }
+    return false;
+}
+
 /// The WASI fd of the preopen rooted at host-OS fd `host_fd` (its `.dir`
 /// fd-table slot), or null if not found.
 fn preopenWasiFd(host: *wasi_host.Host, host_fd: std.posix.fd_t) ?wasi_p1.Fd {
@@ -278,7 +312,7 @@ pub fn p2DescriptorOpenAt(caller: *Caller, self_handle: u32, path_flags: u32, pa
     _ = descriptor_flags;
     const ctx = caller.data(WasiP2Ctx);
     const dirfd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.DESCRIPTOR_RT, self_handle));
-    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    const mem = try ctxMemory(caller);
     const oflags: wasi_p1.Oflags = @intCast(open_flags & 0x000F);
     const rights = wasi_p1.RIGHTS_FD_READ | wasi_p1.RIGHTS_FD_WRITE;
     // pathOpen writes the opened fd to retptr+4; reuse that slot for the result payload.
@@ -301,7 +335,7 @@ pub fn p2DescriptorOpenAt(caller: *Caller, self_handle: u32, path_flags: u32, pa
 /// `retptr`. The list/string allocation is the nested-invoke realloc path.
 pub fn p2GetDirectories(caller: *Caller, retptr: u32) WasiP2Error!void {
     const ctx = caller.data(WasiP2Ctx);
-    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    const mem = try ctxMemory(caller);
     const preopens = ctx.host.preopens;
     const n: u32 = @intCast(preopens.len);
     // Each list element is a tuple (descriptor handle i32, str_ptr i32, str_len i32) = 12 bytes.
@@ -328,7 +362,7 @@ pub fn p2GetDirectories(caller: *Caller, retptr: u32) WasiP2Error!void {
 fn p2OutStreamFlush(caller: *Caller, self_handle: u32, retptr: u32) WasiP2Error!void {
     const ctx = caller.data(WasiP2Ctx);
     _ = try ctx.resources.rep(WasiP2Ctx.OUTPUT_STREAM_RT, self_handle); // validate handle
-    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    const mem = try ctxMemory(caller);
     try mem.write(retptr, @as(u8, 0)); // result disc: ok
 }
 
@@ -338,7 +372,7 @@ fn p2OutStreamFlush(caller: *Caller, self_handle: u32, retptr: u32) WasiP2Error!
 fn p2DescriptorSync(caller: *Caller, self_handle: u32, retptr: u32) WasiP2Error!void {
     const ctx = caller.data(WasiP2Ctx);
     const fd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.DESCRIPTOR_RT, self_handle));
-    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    const mem = try ctxMemory(caller);
     const errno = wasi_fd.fdSync(ctx.host, fd);
     if (errno == .success) {
         try mem.write(retptr, @as(u8, 0));
@@ -378,7 +412,7 @@ fn descriptorFilestat(ctx: *WasiP2Ctx, mem: Memory, fd: wasi_p1.Fd) WasiP2Error!
 fn p2DescriptorGetType(caller: *Caller, self_handle: u32, retptr: u32) WasiP2Error!void {
     const ctx = caller.data(WasiP2Ctx);
     const fd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.DESCRIPTOR_RT, self_handle));
-    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    const mem = try ctxMemory(caller);
     switch (try descriptorFilestat(ctx, mem, fd)) {
         .ok => |fs| {
             try mem.write(retptr, @as(u8, 0)); // result disc: ok
@@ -399,7 +433,7 @@ fn p2DescriptorGetType(caller: *Caller, self_handle: u32, retptr: u32) WasiP2Err
 fn p2DescriptorStat(caller: *Caller, self_handle: u32, retptr: u32) WasiP2Error!void {
     const ctx = caller.data(WasiP2Ctx);
     const fd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.DESCRIPTOR_RT, self_handle));
-    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    const mem = try ctxMemory(caller);
     switch (try descriptorFilestat(ctx, mem, fd)) {
         .ok => |fs| {
             try mem.write(retptr, @as(u8, 0)); // result disc: ok
@@ -429,7 +463,7 @@ fn p2DescriptorStat(caller: *Caller, self_handle: u32, retptr: u32) WasiP2Error!
 fn p2DescriptorRead(caller: *Caller, self_handle: u32, length: u64, offset: u64, retptr: u32) WasiP2Error!void {
     const ctx = caller.data(WasiP2Ctx);
     const fd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.DESCRIPTOR_RT, self_handle));
-    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    const mem = try ctxMemory(caller);
     const n: u32 = @intCast(@min(length, std.math.maxInt(u32)));
     const data_ptr: u32 = if (n == 0) 0 else try ctx.reallocGuest(n, 1);
     // A single-entry iovec + nread slot in a fresh scratch area (P1 fd_pread is
@@ -493,7 +527,7 @@ fn p2PollableBlock(caller: *Caller, self_handle: u32) WasiP2Error!void {
 /// `(data_ptr, in_len)` at `retptr`. Each input handle is validated.
 fn p2Poll(caller: *Caller, in_ptr: u32, in_len: u32, retptr: u32) WasiP2Error!void {
     const ctx = caller.data(WasiP2Ctx);
-    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    const mem = try ctxMemory(caller);
     var i: u32 = 0;
     while (i < in_len) : (i += 1) {
         _ = try ctx.resources.rep(WasiP2Ctx.POLLABLE_RT, try mem.read(u32, in_ptr + i * 4));
@@ -514,7 +548,7 @@ fn p2Poll(caller: *Caller, in_ptr: u32, in_len: u32, retptr: u32) WasiP2Error!vo
 /// `wasi:cli/environment` `get-environment`/`get-arguments` → the empty list:
 /// write `(data_ptr=0, len=0)` to the return area at `retptr`.
 fn p2EmptyList(caller: *Caller, retptr: u32) WasiP2Error!void {
-    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    const mem = try ctxMemory(caller);
     try mem.write(retptr, @as(u32, 0)); // list data ptr
     try mem.write(retptr + 4, @as(u32, 0)); // list length
 }
@@ -522,7 +556,7 @@ fn p2EmptyList(caller: *Caller, retptr: u32) WasiP2Error!void {
 /// An `option<...>` host query with no value (`initial-cwd`, `get-terminal-*`)
 /// → `none`: write the option discriminant 0 at `retptr`.
 fn p2ReturnNone(caller: *Caller, retptr: u32) WasiP2Error!void {
-    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    const mem = try ctxMemory(caller);
     try mem.write(retptr, @as(u8, 0)); // option disc: none
 }
 
@@ -532,7 +566,7 @@ fn p2ReturnNone(caller: *Caller, retptr: u32) WasiP2Error!void {
 fn p2CheckWrite(caller: *Caller, self_handle: u32, retptr: u32) WasiP2Error!void {
     const ctx = caller.data(WasiP2Ctx);
     _ = try ctx.resources.rep(WasiP2Ctx.OUTPUT_STREAM_RT, self_handle); // validate handle
-    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    const mem = try ctxMemory(caller);
     try mem.write(retptr, @as(u8, 0)); // result disc: ok
     try mem.write(retptr + 8, @as(u64, 4096)); // bytes the guest may write now
 }
@@ -768,9 +802,12 @@ pub fn runWasiP2Main(engine: *Engine, alloc: Allocator, bytes: []const u8, host:
                 gi.* = try lk.instantiate(mod);
                 try instances.append(alloc, gi);
                 // The instance exporting cabi_realloc is the list/string
-                // return-area allocator the trampolines call via nested invoke.
+                // return-area allocator the trampolines call via nested invoke;
+                // the memory-exporting instance is the lowers' bound memory.
                 if (ctx.realloc_instance == null and instanceExportsFunc(gi, ctx.realloc_name))
                     ctx.realloc_instance = gi;
+                if (ctx.mem_instance == null and instanceExportsMemory(gi))
+                    ctx.mem_instance = gi;
                 break :blk .{ .guest = gi };
             },
         };

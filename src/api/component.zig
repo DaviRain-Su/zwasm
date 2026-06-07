@@ -1125,6 +1125,30 @@ test "E2: WASI-P2 cli/environment + terminal + check-write (sandboxed non-tty ho
     try runWasiP2Main(&eng, testing.allocator, bytes, &host);
 }
 
+test "E2 (bundle exit): a real Rust wasm32-wasip2 component runs + prints via zwasm" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/wasi_p2_hello_rust.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+    host.io = io;
+    var capture: std.ArrayList(u8) = .empty;
+    defer capture.deinit(testing.allocator);
+    host.stdout_buffer = &capture;
+
+    // A real `rustc --target wasm32-wasip2` component (full wasi:cli world,
+    // wit-bindgen shim/fixup-table indirection) runs end-to-end through the
+    // general instance-graph engine (ADR-0175) + the D-310 host-funcs-in-tables
+    // fix — THE Phase E2 "CM actually works, real toolchain" existence proof.
+    try runWasiP2Main(&eng, testing.allocator, bytes, &host);
+    try testing.expectEqualStrings("hello from a real rust wasip2 component\n", capture.items);
+}
+
 test "D2: WASI-P2 get-directories returns a preopen descriptor list (realloc from trampoline)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
