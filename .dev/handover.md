@@ -34,15 +34,15 @@ E2 remainder (Go/tinygo cross-toolchain proof) is opportunistic — toolchain-ga
 ## Active bundle — ReleaseSafe-JIT-hardening (D-311, user-flagged 2026-06-08)
 
 - **Bundle-ID**: ReleaseSafe-JIT-hardening (ADR-0177 pending)
-- **Cycles-remaining**: ~2 — **production root cause FIXED @a0069ce8** (5/8): `invokeBufferWrite` bypassed the D-245
-  cohort trampoline → now routes through `jitTrampolineBuf`. Remaining 3 = UNIT tests calling raw `module.entry()` fn-ptrs
-  (119 such sites; seed-dependent) — NOT production. Full analysis: `.dev/releasesafe_jit_failures.md` §Resolution.
-- **Continuity-memo**: NEXT — the integration RUNNERS already pass ReleaseSafe (spec 212 / realworld 55 / wast 1158);
-  only core unit tests fail (raw-entry). So **build.zig per-exe optimize split**: integration-runner exes → ReleaseSafe
-  (the speed win), `core_tests` → Debug (raw-entry; user: unit-Debug fine). Then flip gate scripts' runner invocations.
-  Zig caches per optimize (no thrash). Avoids a 119-site raw-entry sweep.
-- **Exit-condition**: integration runners build+run ReleaseSafe (Mac+ubuntu green) via build.zig + gate scripts; core
-  unit `test` stays Debug; `gate_merge.sh` unchanged. Discharge D-311.
+- **Cycles-remaining**: ~1 (CLOSE pending ubuntu) — production fix @a0069ce8 (5/8 buffer-write cohort trampoline) +
+  **build.zig per-exe split DONE @02965aa6** (ADR-0177): `zwasm_lib_mod → core_rs` (ReleaseSafe twin) flips all
+  integration runners; `core_tests` stays Debug `core`. `zig build test-all` auto-runs runners ReleaseSafe — NO
+  gate-script change. **Mac test-all GREEN** (exit 0, 0 fail, ~245s incl cold RS compile).
+- **Continuity-memo**: NEXT = verify ubuntu `test-all` GREEN (its kick now compiles core_rs ReleaseSafe on x86_64 — cold,
+  slower once) at Step 0.7 → then **discharge D-311 + close this bundle** (resume parked CM-validation). The 3 remaining
+  ReleaseSafe failures are raw-`module.entry` UNIT tests (core_tests, Debug) — accepted test-harness tradeoff per ADR-0177.
+- **Exit-condition**: integration runners build+run ReleaseSafe green on Mac (DONE) + ubuntu (pending next kick); core
+  unit `test` Debug; `gate_merge.sh` unchanged. Then discharge D-311.
 
 ### CM-validation (ADR-0176) — structural rules DONE, parked
 
@@ -80,7 +80,7 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
   random · D3-5 stdin · **D3-6 fs descriptor** @43909eba (read/sync/stat/get-type + flush; **D-307 DISCHARGED**
   @beb887c6) · **D3-7 wasi:io/poll** @3a128a01 (pollable + subscribe + ready/block/poll). **D-309 DONE** @ccdee2fa —
   WASI-P2 trampolines extracted to `api/component_wasi_p2.zig` (component.zig 1922→1250).
-- **NOW = ReleaseSafe-JIT-hardening (D-311)** — production buffer-write fix DONE @a0069ce8 (5/8); NEXT = build.zig per-exe optimize (runners ReleaseSafe, unit Debug) → gate speed-up. CM-validation rules 1-4 DONE+parked. Deferred: D3-8 sockets.
+- **NOW = ReleaseSafe-JIT-hardening (D-311)** — prod fix @a0069ce8 + build.zig per-exe split @02965aa6 (runners ReleaseSafe, Mac green); NEXT = verify ubuntu green → discharge D-311. CM-validation rules 1-4 DONE+parked. Deferred: D3-8 sockets.
   Cross-component aggregate → D-305. **D-308 DISCHARGED @82d63d27** — unknown-wasi-import errors cleanly (no signal);
   ADR-0175 engine's per-instance cleanup is sound; adversarial guard `wasi_p2_unknown_import.wasm` (E3 edge case).
 
@@ -88,7 +88,7 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
 
 - **Phase 17 (v0.2) IN-PROGRESS** (ADR-0168). DONE+3-host: atomics @9eb84833 · wide-arith @231d4536 ·
   custom-page-sizes @cd0de2dd · relaxed-SIMD @08342ec5 (+official corpus @8ef2e752, 13420 pass arm64+x86). Wasm-3.0
-  core 100%-spec COMPLETE. Last SHA **a0069ce8** (D-311 buffer-write JIT cohort-preserve fix, 5/8 ReleaseSafe; Debug test+lint green; ubuntu OK @4beee353; windows susp @9d832f1d).
+  core 100%-spec COMPLETE. Last SHA **02965aa6** (ADR-0177 runners→ReleaseSafe, Mac test-all green ~245s; ubuntu OK @9f39dde9; windows susp @9d832f1d).
 - **Atomics fully conformant @e6f3b0c0** — official corpus **294 pass, 0 SKIPPED** (D-301), incl. the JIT
   unaligned-atomic-trap fix D-303 (code-14 `unaligned_atomic_fixups` both arches, @5b0db8e1, 3-host).
 - **ALL bounded debt CLEARED**: ✅ D-301 · ✅ D-303 · ✅ D-231 (cross-x86 DCE gate wired @aac4fe2f) · ✅ D-302
