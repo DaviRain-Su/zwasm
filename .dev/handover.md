@@ -34,18 +34,18 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
 ## Active bundle
 
 - **Bundle-ID**: CM-B6-IT (single-component instantiate + invoke e2e)
-- **Cycles-remaining**: ~3
-- **Continuity-memo**: ADR-0172 decided the Zone split (orchestration → Zone 3 `api/component.zig`, consuming the
-  public Engine facade + Zone-1 canon). **LIFETIME HAZARD** (capture before coding IT-1): the facade `Module`/`Instance`
-  are self-referential (`Instance` holds `*Module`), so they CANNOT be moved into a returned struct by value — heap-stable
-  storage (allocate Module/Instance on the caller allocator + keep pointers) is required for a `ComponentInstance` handle.
-  Flat-scalar invoke (IT-1/IT-2) uses facade `zwasm.Value` directly, no canon. Canon trampolines + `cabi_realloc`-via-
-  `inst.invoke("cabi_realloc",…)` engage at IT-3 (string→string), where facade `zwasm.Value` ↔ internal `runtime.Value`
-  conversion is also needed.
-- **Exit-condition**: a string→string component runs via zwasm `api/component.zig` and returns the expected string
-  (generate the real fixture via `nix develop .#gen` wasm-tools/cargo-component on the Mac host).
-- **IT plan**: IT-1 instantiate embedded core module (heap-stable handle) + invoke a `()->i32` export → 42 · IT-2
-  multi-export / args · IT-3 canon trampoline + cabi_realloc + string→string (the exit).
+- **Cycles-remaining**: ~2
+- **IT-1 DONE @20132372**: `api/component.zig` (Zone 3, ADR-0172) — `instantiate()` decodes + compiles + instantiates
+  the first embedded core module via the Engine facade behind a heap-stable `ComponentInstance`; `invokeCore()` passes
+  flat-scalar facade Values through. A `run()->i32=42` component instantiates + invokes. (The feared facade self-ref
+  hazard was moot — facade structs hold c-api heap handles, not `*Module`; heap-allocated anyway for safety.)
+- **Continuity-memo**: NEXT = IT-2 (canon flat trampoline) — a typed component invoke that lowers component-level
+  `canon.Value` args → core values → `inst.invoke` → lifts results, for FLAT scalars only (no memory). KEY: canon
+  lower/lift use internal `runtime.Value` but the facade `invoke` wants `zwasm.Value` (`{i32,i64,f32:u32,f64:u64,…}`) —
+  need a bridge (check `src/zwasm/value_conv.zig`). Hand-craftable fixture: a component exporting `add(u32,u32)->u32`.
+  Then IT-3 = cabi_realloc wiring (`inst.invoke("cabi_realloc",…)`) + string→string trampoline (lift/lower over guest
+  memory) — the exit; needs a REAL fixture via `nix develop .#gen` wasm-tools/cargo-component (Mac host).
+- **Exit-condition**: a string→string component runs via `api/component.zig` and returns the expected string.
 
 ## Current state
 
