@@ -13,6 +13,16 @@ side: [`docs/handoff_cw_v1.md`](../docs/handoff_cw_v1.md). No release tagged
 (ADR-0156: tag/publish/`main`-cutover are manual, user-only). The autonomous
 loop is **NOT re-armed** while paused.
 
+**Demand-driven fix 2026-06-08 (cljw handoff §A1–A4)**: musl portability fixed
+— `x86_64-linux-musl` ReleaseSafe `-Dwasm` now links (cljw's #1 edge-deploy
+blocker). `src/platform/stack_limit.zig` glibc `pthread_getattr_np` path is
+`comptime`-gated behind `builtin.abi.isGnu()`; musl fallback = `/proc/self/maps`
+top − `RLIMIT_STACK` (glibc/sanitizer method), runtime-verified on real Linux
+musl-static (ADR-0178). Also: README CM-status staleness fixed; consumer doc
+[`docs/handoff_cw_v1.md`](../docs/handoff_cw_v1.md) gained teardown/lifetime
+(§A4) + CM-embedding-API stability (§A2) sections. A3 (clean checkpoint) = this
+commit. Still paused after this; loop NOT re-armed.
+
 ## State at pause
 
 - **Core Wasm 1.0/2.0/3.0**: 100% spec, 0 skip, 3-host green. **v0.2 features**

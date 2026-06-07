@@ -16,6 +16,19 @@
 //! - Linux (glibc): `pthread_getattr_np` + `pthread_attr_getstack`.
 //!   Returns `(low-end, size)` directly. `pthread_attr_destroy`
 //!   releases the attr struct.
+//! - Linux (musl / other libc): `pthread_getattr_np` is a glibc `_np`
+//!   extension that does not reliably link on musl (it broke ClojureWasm's
+//!   `x86_64-linux-musl` ReleaseSafe edge-deploy link, 2026-06-08). The
+//!   glibc path is therefore `comptime`-gated behind `builtin.abi.isGnu()`
+//!   so the `_np` symbol is never referenced — hence never linked — on
+//!   non-glibc Linux. The fallback derives the main-thread stack top from
+//!   `/proc/self/maps` (`[stack]` mapping) and the overflow low-end as
+//!   `top - RLIMIT_STACK` (the grow-limit glibc itself reports), via raw
+//!   `std.os.linux.*` syscalls (off the ADR-0070 libc boundary). It is
+//!   precise for the main thread — the realistic single-static-binary edge
+//!   case — and degrades to the `disabled` sentinel when `/proc` is absent
+//!   or the stack rlimit is unbounded. This is the same approach glibc and
+//!   the LLVM sanitizers use for main-thread stack bounds.
 //! - Windows: `GetCurrentThreadStackLimits(low, high)` (Win 8+).
 //!   Returns the low and high stack bounds for the current thread.
 //!
@@ -113,8 +126,73 @@ fn computeMacos(headroom: usize) usize {
 }
 
 // ============================================================
-// Linux (glibc)
+// Linux (glibc + musl/other fallback)
 // ============================================================
+
+const StackBounds = struct { low: usize, high: usize };
+
+/// Parse the `[stack]` mapping from `/proc/self/maps` for the current
+/// process. The kernel labels only the MAIN thread's stack `[stack]`, so
+/// this is precise for the main thread (the single-static-binary edge case
+/// cljw ships) and returns `null` for non-main musl threads — the callers
+/// then degrade to the `disabled`/`0` sentinel. Used as the non-glibc Linux
+/// fallback because `pthread_getattr_np` is glibc-only (see file header).
+/// Uses raw `std.os.linux.*` syscalls (no allocator, no `std.Io` — Zig 0.16
+/// routes file IO through `std.Io` which a leaf query cannot take; these
+/// wrappers are off the ADR-0070 libc boundary) so it stays valid here.
+fn procStackBounds() ?StackBounds {
+    const linux = std.os.linux;
+    const open_rc = linux.openat(linux.AT.FDCWD, "/proc/self/maps", .{ .ACCMODE = .RDONLY }, 0);
+    if (@as(isize, @bitCast(open_rc)) < 0) return null;
+    const fd: linux.fd_t = @intCast(open_rc);
+    defer _ = linux.close(fd);
+    // The `[stack]` entry sits at the high end of the address space, so it is
+    // the last mapping; 64 KiB comfortably holds a static binary's whole map.
+    var buf: [64 * 1024]u8 = undefined;
+    var len: usize = 0;
+    while (len < buf.len) {
+        const rc = linux.read(fd, buf[len..].ptr, buf.len - len);
+        const sr = @as(isize, @bitCast(rc));
+        if (sr < 0) return null;
+        if (sr == 0) break;
+        len += @intCast(sr);
+    }
+    return parseProcMapsStack(buf[0..len]);
+}
+
+/// Pure parse of `/proc/self/maps` text: find the `[stack]` mapping and return
+/// its `low-high` address range. Split out from the syscall reader so it is
+/// host-independent and unit-testable. A maps line is
+/// `low-high perms offset dev inode  pathname`; `[stack]` is the pathname.
+fn parseProcMapsStack(content: []const u8) ?StackBounds {
+    const idx = std.mem.findLast(u8, content, "[stack]") orelse return null;
+    const line_start = if (std.mem.findScalarLast(u8, content[0..idx], '\n')) |nl| nl + 1 else 0;
+    const line = content[line_start..idx];
+    const dash = std.mem.findScalar(u8, line, '-') orelse return null;
+    const low = std.fmt.parseInt(usize, line[0..dash], 16) catch return null;
+    const rest = line[dash + 1 ..];
+    const sp = std.mem.findScalar(u8, rest, ' ') orelse return null;
+    const high = std.fmt.parseInt(usize, rest[0..sp], 16) catch return null;
+    if (high <= low) return null;
+    return .{ .low = low, .high = high };
+}
+
+/// Soft `RLIMIT_STACK` for the current process, or `null` if unbounded
+/// (`RLIM_INFINITY`) or the query fails. The main-thread stack grows on
+/// demand DOWN to this limit, so the true overflow low-end is
+/// `stack_top - RLIMIT_STACK` — NOT the currently-mapped `[stack]` low,
+/// which only reflects pages faulted in so far. This mirrors what glibc's
+/// own `pthread_getattr_np` computes for the main thread (top minus the
+/// stack rlimit); using the live mapping low instead would trap valid deep
+/// recursion prematurely.
+fn linuxStackRlimit() ?usize {
+    const linux = std.os.linux;
+    var rl: linux.rlimit = undefined;
+    const rc = linux.getrlimit(.STACK, &rl);
+    if (@as(isize, @bitCast(rc)) < 0) return null;
+    if (rl.cur == linux.RLIM.INFINITY or rl.cur == 0) return null;
+    return @intCast(rl.cur);
+}
 
 const PthreadAttr = extern struct {
     // glibc pthread_attr_t is opaque-by-size (56 bytes on
@@ -129,6 +207,15 @@ extern "c" fn pthread_attr_getstack(attr: *const PthreadAttr, stackaddr: *?*anyo
 extern "c" fn pthread_attr_destroy(attr: *PthreadAttr) c_int;
 
 fn computeLinux(headroom: usize) usize {
+    if (comptime !builtin.abi.isGnu()) {
+        // musl / non-glibc: top from /proc, true low = top - RLIMIT_STACK
+        // (the grow-limit glibc would report). Disabled if either is
+        // unavailable — the prologue then relies on the OS guard page.
+        const b = procStackBounds() orelse return disabled;
+        const rlimit = linuxStackRlimit() orelse return disabled;
+        if (rlimit >= b.high) return disabled;
+        return b.high - rlimit + headroom;
+    }
     var attr: PthreadAttr = .{ ._opaque = [_]u8{0} ** 64 };
     if (pthread_getattr_np(std.c.pthread_self(), &attr) != 0) return disabled;
     defer _ = pthread_attr_destroy(&attr);
@@ -174,6 +261,10 @@ pub fn nativeStackHigh() usize {
         const high_opt = pthread_get_stackaddr_np(std.c.pthread_self());
         return @intFromPtr(high_opt orelse return 0);
     } else if (comptime builtin.os.tag == .linux) {
+        if (comptime !builtin.abi.isGnu()) {
+            const b = procStackBounds() orelse return 0;
+            return b.high;
+        }
         var attr: PthreadAttr = .{ ._opaque = [_]u8{0} ** 64 };
         if (pthread_getattr_np(std.c.pthread_self(), &attr) != 0) return 0;
         defer _ = pthread_attr_destroy(&attr);
@@ -291,6 +382,23 @@ test "computeStackLimit: returns non-zero on supported hosts (Mac / Linux / Wind
 test "STACK_GUARD_HEADROOM: 16 KiB per ADR-0105 D6 initial value (1 MiB on Win64 per R3 cycle 6)" {
     const expected: usize = if (builtin.os.tag == .windows) 1024 * 1024 else 16 * 1024;
     try testing.expectEqual(expected, STACK_GUARD_HEADROOM);
+}
+
+test "parseProcMapsStack: extracts the [stack] range (musl/non-glibc Linux fallback)" {
+    // Abridged real `/proc/self/maps`; `[stack]` is the last mapping.
+    const maps =
+        \\55a3e6a00000-55a3e6a01000 r--p 00000000 fe:01 12345  /app/bin
+        \\7ffd2c3e0000-7ffd2c401000 rw-p 00000000 00:00 0     [stack]
+        \\
+    ;
+    const b = parseProcMapsStack(maps) orelse return error.NoStackMapping;
+    try testing.expectEqual(@as(usize, 0x7ffd2c3e0000), b.low);
+    try testing.expectEqual(@as(usize, 0x7ffd2c401000), b.high);
+}
+
+test "parseProcMapsStack: returns null when no [stack] mapping is present" {
+    const maps = "55a3e6a00000-55a3e6a01000 r--p 00000000 fe:01 12345  /app/bin\n";
+    try testing.expectEqual(@as(?StackBounds, null), parseProcMapsStack(maps));
 }
 
 test "nativeStackHigh: top-of-stack is above the current frame on supported hosts" {

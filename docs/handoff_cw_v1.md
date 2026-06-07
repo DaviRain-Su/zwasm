@@ -2,12 +2,26 @@
 
 > **Doc-state**: ACTIVE
 >
-> zwasm v2 development is **intentionally paused** at commit `1c542a84`
-> (branch `zwasm-from-scratch`), verified green on Mac aarch64 + ubuntu
-> x86_64. The runtime is feature-complete for ClojureWasm v1's needs; further
-> zwasm work is **demand-driven** — resume only when cw v1 development surfaces
-> a concrete requirement (see "Resuming zwasm" below). No release is tagged
-> (ADR-0156: tag/publish/`main`-cutover are manual, user-only).
+> zwasm v2 development is **intentionally paused** (branch `zwasm-from-scratch`),
+> verified green on Mac aarch64 + ubuntu x86_64. The runtime is feature-complete
+> for ClojureWasm v1's needs; further zwasm work is **demand-driven** — resume
+> only when cw v1 development surfaces a concrete requirement (see "Resuming
+> zwasm" below). No release is tagged (ADR-0156: tag/publish/`main`-cutover are
+> manual, user-only).
+
+### Demand-driven updates since the pause
+
+- **2026-06-08 — musl portability fixed (handoff §A1).** `x86_64-linux-musl`
+  ReleaseSafe `-Dwasm` builds now link: the Linux thread-stack query no longer
+  hard-depends on the glibc `pthread_getattr_np` `_np` extension. It is
+  `comptime`-gated behind `builtin.abi.isGnu()`, with a portable musl fallback
+  that derives the main-thread stack bounds from `/proc/self/maps` +
+  `RLIMIT_STACK` (the same method glibc and the LLVM sanitizers use). Verified:
+  cljw's exact failing build links, and the fallback is runtime-checked on a
+  real Linux musl-static binary. **This unblocks the single-static-binary edge
+  deploy with `-Dwasm`.** (ADR-0178.) The leftover `'x86-64' is not a recognized
+  processor` line under `-mcpu baseline` is a non-fatal zig/compiler-rt warning,
+  not a zwasm error.
 
 ## What zwasm v2 gives you (maturity)
 
@@ -39,6 +53,21 @@ Public Zig facade (`src/zwasm.zig`): `Engine`, `Module`, `Instance`,
 `Engine.init` → `engine.compile(wasm_bytes)` → `Linker`/`Instance` →
 `instance.invoke` / `TypedFunc`.
 
+**Teardown / ownership (handoff §A4).** Lifetimes are caller-owned and
+explicit — there is no GC finaliser, so deinit in reverse construction order:
+
+- `Engine.init(alloc, .{})` → `engine.deinit()`. The `Engine` owns engine-level
+  state and **outlives every `Module`/`Instance`/`ComponentInstance` made from
+  it** — it is *borrowed* by them, never freed by their deinit. Deinit the
+  engine **last**.
+- `Module` / `Instance`: each has its own `deinit()`; free instances before the
+  module, the module before the engine.
+- `ComponentInstance.deinit()` / `ComponentGraph.deinit()` free their own core
+  module + instance + decoded/type state, **but not** the borrowed `Engine`.
+  So cw v1's `(wasm/load …)` finaliser should hold `{engine, instance}` and, on
+  finalisation, call `instance.deinit()` then `engine.deinit()` (cw-side D-259
+  leak: wire the finaliser to this pair).
+
 **C host.** Link `libzwasm.a` + the vendored `include/wasm.h` (standard
 wasm-c-api). Drop-in for hosts already targeting that interface.
 
@@ -55,6 +84,17 @@ See also: `docs/tutorial.md`, `docs/migration_v1_to_v2.md` (v1→v2 surface map)
 
 ## Long-tail / known gaps (only matter if cw v1 hits them)
 
+- **Component Model embedding API (handoff §A2)**: the surface cljw uses lives
+  in `src/api/component.zig` — `component.instantiate(engine, alloc, bytes)
+  → ComponentInstance`, `ComponentInstance.invokeStringExport` / `.invokeFlat`,
+  and `component.instantiateGraph → ComponentGraph` (cross-component). These
+  signatures are functional and the e2e path is proven. The `IT-1/2/3` labels in
+  that file's comments/test names are **campaign stage-markers, not signature
+  churn**. Execution is functional (real component e2e), but the embedding API
+  is **not yet frozen** (opt-in `-Dcomponent`): it may still change when the
+  deeper-conformance thread resumes. Recommendation:
+  pin core-Wasm FFI now (stable); treat the CM embedding surface as a spike until
+  it's frozen. Demand a freeze when cw v1 commits to a CM spike.
 - **Component Model deeper conformance**: structural validation done (4 rules);
   *deep* validation (name kebab-case/extern-name — fixtures need binary
   extraction from the official `.wast`; full subtyping; canon-ABI lowering

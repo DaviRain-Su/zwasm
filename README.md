@@ -38,10 +38,10 @@ out of scope for v0.1.0.
 
 ### WASI
 
-| Spec                                 | Status               | Notes                                                              |
-|--------------------------------------|----------------------|--------------------------------------------------------------------|
-| WASI 0.1 (preview1)                  | ✅ functional        | interpreter: args / env / preopened dirs / clock / random / fd I/O |
-| WASI 0.2 (preview2, Component Model) | 📋 deferred to v0.2.0 |                                                                    |
+| Spec                                 | Status                               | Notes                                                                                                                                                                     |
+|--------------------------------------|--------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| WASI 0.1 (preview1)                  | ✅ functional                        | interpreter: args / env / preopened dirs / clock / random / fd I/O                                                                                                        |
+| WASI 0.2 (preview2, Component Model) | 🚧 functional, opt-in (`-Dcomponent`) | a real `wasm32-wasip2` component runs e2e; structural validation rules 1-4; embedding API not yet frozen + deeper conformance parked (see `.dev/component_model_plan.md`) |
 
 All three execution paths do full WASI I/O — the interpreter, the JIT
 (`--engine jit`, D-244), and AOT (`.cwasm`, D-251). The JIT additionally
@@ -121,6 +121,7 @@ host-setup is the hand-authored [`include/wasi.h`](include/wasi.h). See
 -Dwasm=3.0|2.0|1.0          # default 3.0; lower levels omit later proposals
 -Dwasi=p1|p2|both|none      # default p1 (v0.1.0)
 -Dengine=both|jit|interp    # default both
+-Dcomponent=true|false      # default false; opt-in Component Model + WASI-P2 (functional, API not yet frozen; ADR-0170)
 -Dstrip=true|false          # default false
 ```
 
