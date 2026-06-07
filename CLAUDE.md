@@ -78,7 +78,12 @@ text or code identifiers.
   on windows** — kick it in the background when the batch fires, keep
   chaining, verify its verdict at the next Step 0.7. windowsmini
   phase-boundary reconcile remains the strict A13-merge gate. OrbStack
-  retired per ADR-0067 (D-134); scratch only.
+  retired per ADR-0067 (D-134); scratch only. **SUSPENDABLE (ADR-0174,
+  user-directed 2026-06-07)**: after a windowsmini-hardening campaign
+  reaches full green, `should_gate_windows.sh --suspend` (sentinel
+  `.dev/windows_gate_suspended`) drops the inner loop to a **2-host gate
+  (Mac+ubuntu)**; `--resume` before any `main` merge / Win64-risk diff.
+  A13 strict-3-host merge gate UNCHANGED.
 - **Context budget**: the **1M** window is in effect (the prior 200K pin
   `CLAUDE_CODE_DISABLE_1M_CONTEXT=1` was removed 2026-05-31 — it made the
   window hit 100% fast and the squeeze, not the working set, was the felt

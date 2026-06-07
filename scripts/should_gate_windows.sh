@@ -41,6 +41,28 @@ if [ "${1:-}" = '--record' ]; then
     exit 0
 fi
 
+# Suspend switch (ADR-0174, user-directed 2026-06-07). After the
+# windowsmini-hardening campaign reaches full, verifiable green, windows
+# gating is SUSPENDED so Mac+ubuntu iterate FAST (the windowsmini
+# verification load was conflicting with the user's ClojureWasmFromScratch
+# work). Suspension is a deliberate, user-sanctioned 2-host mode — NOT a
+# silent skip. Re-enable before any `main` merge / when Win64-risk returns.
+SUSPEND_FILE='.dev/windows_gate_suspended'
+if [ "${1:-}" = '--suspend' ]; then
+    git rev-parse HEAD > "$SUSPEND_FILE"
+    echo "[should_gate_windows] SUSPENDED windowsmini gating at $(git rev-parse --short HEAD) (ADR-0174); Mac+ubuntu only. --resume to re-enable"
+    exit 0
+fi
+if [ "${1:-}" = '--resume' ]; then
+    rm -f "$SUSPEND_FILE"
+    echo "[should_gate_windows] RESUMED windowsmini gating"
+    exit 0
+fi
+if [ -f "$SUSPEND_FILE" ]; then
+    echo "gate-suspended: windowsmini gating OFF since $(cut -c1-12 "$SUSPEND_FILE" 2>/dev/null) (ADR-0174, user-directed); Mac+ubuntu only — '--resume' to re-enable"
+    exit 1
+fi
+
 # ABI / calling-convention / frame-layout file paths. Diff hitting
 # any of these → run windowsmini this chunk (Win64 vs SysV ABI
 # divergence may surface).

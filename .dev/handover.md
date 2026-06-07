@@ -3,15 +3,26 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## NEVER-IDLE PROTOCOL (read first — user-directed 2026-06-06)
+## ⚑ NEW DIRECTIVE — windowsmini hardening THEN gate suspension (user-directed 2026-06-07, ADR-0174)
 
-The loop **NEVER idles.** v0.2/v0.3 feature work is UNBLOCKED ("AIが思いのほか早いのでどんどんやろう"). **No
-release/tag EVER** (ADR-0156; user reconfirmed "タグは切らない"). **Work priority each resume:**
-1. **THE ACTIVE CAMPAIGN below** (Component Model + WASI-P2) — the primary forward track. Drive it via the plan doc.
-2. Between chunks OR campaign-gated → sweep `.dev/remaining_sweep.md` / 完成形 polish — never idle.
-3. **D-279 DISCHARGED @c287d39c** — Win64 heisenbug root-caused (H7: always-on `d-163-jit` dump floods Win64 stdout →
-   abort; decisive A/B @cb90da90), mitigated (dump env-gated off), streak 5/5 over 5 SHAs. Row deleted; trail in lesson
-   `2026-06-07-always-on-debug-dump-was-the-heisenbug`. No further action.
+**Read first. This supersedes the routine loop priority.** The user is shutting down all 3 hosts after this commit; the
+windowsmini verification load was conflicting with their separate ClojureWasmFromScratch work. **Two-phase plan:**
+
+1. **FIRST — windowsmini-hardening campaign (immediate priority next session).** Run windowsmini intensively
+   (low/zero batch threshold) and get it **fully, verifiably green** — real spec-assert pass counts matching ubuntu,
+   not a MATCH-only `OK`. **First lead** (captured @87635409, /tmp/win.log): windows `[run_remote_windows] OK` but the
+   spec-assert phase shows **`pass=0` across EVERY category** (assert_return pass=0/fail=0; assert_invalid
+   pass=0/fail=194; some trap/malformed fails) while ubuntunote on the SAME commit passes all with real counts ⇒ a
+   **windows-side spec-runner execution/reporting failure masked by the OK verdict** (the verdict keys off realworld
+   MATCH only). Root-cause this FIRST (investigation-discipline hypothesis list); then any remaining real Win64
+   divergence. Open a campaign/bundle for it.
+2. **THEN — suspend windows gating** so Mac+ubuntu iterate FAST: `bash scripts/should_gate_windows.sh --suspend`
+   (writes `.dev/windows_gate_suspended`; the gate then always defers → **2-host gate Mac+ubuntu**). `--resume` before
+   any `main` merge / Win64-risk diff / on user request. A13 strict-3-host merge gate (`gate_merge.sh`) is UNCHANGED.
+
+**Then** resume normal loop: the CM+WASI-P2 campaign below (Phase D3/E). The loop NEVER idles; **No release/tag EVER**
+(ADR-0156). D-279 stays discharged (lesson `2026-06-07-always-on-debug-dump-was-the-heisenbug`) — but note the pass=0
+anomaly above is a DISTINCT, NEW windows signal, not a D-279 reopen.
 
 ## Active campaign — Component Model + WASI Preview 2 (ADR-0170, user-directed 2026-06-07)
 
@@ -75,18 +86,20 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
 **Blocked / parked**: 31 blocked-by (call_ref §10.R / D-177 / D-178 / future proposals). **D-290** = 3 distillers
 direction-gated. 
 
-## Step 0.7 (next resume) — verify remote logs
+## Step 0.7 (next resume) — hosts were SHUT DOWN; first windows run = the campaign
 
-- **ubuntu**: re-kicked each turn (D6). Verify `[run_remote_ubuntu] OK`. Last GREEN @9f5ce2db. Red → auto-revert
-  (D3; first-resume + non-code-gap exceptions).
-- **windows**: BATCHED (D8). Last GREEN @9f5ce2db; next batch ≥12 / ABI-risk. A Win64 exit-3 WITHOUT the dump would
-  re-open D-279 (not expected). NOT auto-revert (D7).
-- **Gate note**: `OK` = green. EXPECTED non-failures: `zig-host-hello` exit-42, `--__selftest-crash` exit-70,
-  sha256 `verify: FAIL` (fixture-wrong-constant FALSE lead).
+- **All 3 hosts powered off** after @87635409 (user). `/tmp/ubuntu.log` last verdict was OK @87635409;
+  `/tmp/win.log` shows the **pass=0 spec-assert anomaly** (see NEW DIRECTIVE #1 — the campaign's first lead). On a
+  fresh boot, `/tmp/*.log` are stale — re-kick both as the first campaign step; the windows run IS the investigation.
+- **ubuntu**: re-kicked each turn (D6). Red → auto-revert (D3; first-resume exception). **windows**: NOT auto-revert
+  (D7); the campaign is actively hunting Win64 bugs, so a red windows is the SIGNAL, not a flake-to-dismiss.
+- **Gate note**: realworld `OK` can MASK a broken spec-assert phase (the pass=0 anomaly). EXPECTED non-failures:
+  `zig-host-hello` exit-42, `--__selftest-crash` exit-70, sha256 `verify: FAIL` (fixture-wrong-constant FALSE lead).
 
 ## Key refs
 
 - **ADR-0170** (CM full campaign) + [`component_model_plan.md`](component_model_plan.md) +
   [`component_model_survey.md`](component_model_survey.md) — the active campaign.
-- **ADR-0156** (no release) · **ADR-0076** (3-host cadence) · **ADR-0168** (Phase 17) · **ADR-0023** (subsystem
-  slots) · `no_copy_from_v1` · `single_slot_dual_meaning` · `.dev/proposal_watch.md`.
+- **ADR-0174** (windowsmini hardening → gate suspension; switch = `scripts/should_gate_windows.sh --suspend|--resume`,
+  sentinel `.dev/windows_gate_suspended`) · **ADR-0156** (no release) · **ADR-0076** (3-host cadence) · **ADR-0168**
+  (Phase 17) · **ADR-0023** (subsystem slots) · `no_copy_from_v1` · `single_slot_dual_meaning` · `.dev/proposal_watch.md`.
