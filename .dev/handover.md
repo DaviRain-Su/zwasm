@@ -23,11 +23,13 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
 - **Step 0 survey is DONE** — do NOT re-survey. Read `.dev/component_model_survey.md` (architecture, 4 hard pieces,
   module breakdown) + the plan's "Reference chains" (spec `~/Documents/OSS/WebAssembly/component-model/`; v1
   textbook `~/Documents/MyProducts/zwasm/src/{component,wit,wit_parser,canon_abi}.zig`; wasmtime/wasm-tools refs).
-- **A1 @6c51c89b** (decode.zig: discriminator + section walk + `-Dcomponent` gate) · **A2 @8d70230d** (types.zig:
-  ValType/FuncType/DefType model + index space + import/export via negative-SLEB128) · **A3 @ce62e4c5** (wit/lexer.zig
-  + wit/parser.zig: kebab-ident lexer + AST for package/interface/func/world primitive subset; parses 10_greet/11_math;
-  richer surface defers via typed ParseError). **NEXT = chunk A4** (WIT resolver — `wit/resolve.zig`: resolve type refs,
-  build resolved WIT type model = canon ABI input; red = resolved model for a multi-interface world). A4 = Tier 0 done.
+- **Tier 0 COMPLETE (A1–A4)**: A1 @6c51c89b (decode: discriminator + section walk + `-Dcomponent` gate) · A2 @8d70230d
+  (types: ValType/FuncType/DefType model + index space + import/export) · A3 @ce62e4c5 (wit lexer+parser: package/
+  interface/func/world primitive subset, parses 10_greet/11_math) · A4 @04f39205 (wit resolver: ResolvedModel,
+  world→interface binding, dup/unresolved rejected). All `-Dcomponent` Zone-2, no core change; richer forms defer via
+  typed errors. **NEXT = chunk B1** (Tier-1 core): `canon.zig` CanonContext + `cabi_realloc` callback — the ONE core
+  coupling (lift/lower call back into the guest via a `Runtime.invoke`-style cb). **B1 is ADR-grade** (the core touch;
+  note ADR in commit per plan). Red = lower→lift an i32 round-trips through a trivial component func.
 - **Discipline**: Zone-2 new layer, NO core-VM change (consume `runtime/instance/*` + memory + `Runtime.invoke` as
   black box); component-value type DISTINCT from `runtime.Value`; TDD + boundary fixtures + spec-citation; no-copy;
   3-host gate; no tag. Full discipline list in the plan doc.

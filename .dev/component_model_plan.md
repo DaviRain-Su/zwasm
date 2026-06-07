@@ -83,7 +83,7 @@ design forks. Update this doc's `[x]` + handover NEXT each chunk.
   v1 `wit_parser.zig`; v1 `src/testdata/10_greet.wit`/`11_math.wit`. **Red**:
   parse a `10_greet`-class `.wit` to an AST. **Exit**: AST for the primitive
   subset.
-- [ ] **A4 — WIT resolver + type model.** `wit/resolve.zig`: resolve type refs,
+- [x] **A4 — WIT resolver + type model.** `wit/resolve.zig`: resolve type refs,
   build the resolved WIT type model (the canon ABI's input). **Refs**: wasm-tools
   `wit-parser` resolve; v1 `wit.zig`. **Red**: resolved model for a multi-interface
   world. **Exit**: Tier 0 complete — decode + WIT parse/validate green.
