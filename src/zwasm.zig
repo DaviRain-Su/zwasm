@@ -249,6 +249,8 @@ pub const wasi = struct {
     pub const clocks = @import("wasi/clocks.zig");
     pub const proc = @import("wasi/proc.zig");
     pub const jit_dispatch = @import("wasi/jit_dispatch.zig");
+    /// WASI Preview 2 → Preview 1 adapter (ADR-0170 Phase D; `-Dwasi=preview2`).
+    pub const adapter = @import("wasi/adapter.zig");
 };
 
 // Zone 3
@@ -384,6 +386,7 @@ test {
     _ = @import("wasi/path.zig");
     _ = @import("wasi/clocks.zig");
     _ = @import("wasi/jit_dispatch.zig");
+    _ = @import("wasi/adapter.zig");
     _ = @import("cli/run.zig");
     _ = @import("cli/invoke_args.zig");
     _ = @import("feature/component/decode.zig");
