@@ -31,21 +31,25 @@ directives; fixture `type_index_oob/oob.wasm` (authored via `wasm-tools parse`, 
 E2 remainder (Go/tinygo cross-toolchain proof) is opportunistic — toolchain-gated, not the blocker.
 **Resume routing**: `## Active bundle` (1b) supersedes the plan's E3 row; `/continue` resumes the next validation rule.
 
-## Active bundle
+## Active bundle — ReleaseSafe-JIT-hardening (D-311, user-flagged 2026-06-08)
 
-- **Bundle-ID**: E3-CM-validation (ADR-0176)
-- **Cycles-remaining**: ~1 (CLOSE) — structural rule set DONE: ✅1 type-index @cfdb07be ✅2 Canon @6224a7e7
-  ✅3 alias @5374dca7 ✅4 ExternDesc @d72c1b44 (each + a corpus `assert_invalid` fixture). **NEXT = close: add skip-impl
-  manifest documenting deferred categories** (alias export-NAME existence, outer-alias nesting-depth, core-module-index
-  bounds, **name validation** [fixtures need binary extraction — WIT text parser rejects bad names], deep canon-ABI/
-  subtyping) — truthful per D-301 — then `check_bundle_active --close` + remove this section.
-- **Continuity-memo**: `validate.zig` walks the decoded `TypeInfo` (no re-parse) post-`decodeTypeInfo`, pre-instantiate,
-  at instantiate/instantiateGraph/runWasiP2Main. KEY: bounds-check against the TRUE index-space size, not a list `.len`
-  (rule 1 needed `TypeInfo.type_space_len` = type defs + type aliases + type imports + type exports; `deftypes.len`
-  false-positives on aliased interface types). Runner `assert_invalid`/`assert_malformed` directives decode→typeinfo→
-  validate. Fixtures: numeric-OOB `.wat` → `wasm-tools parse` (encodes WITHOUT validating) → `test/spec/component-model-assert/<rule>/`.
-- **Exit-condition**: structural rule set (1–4) landed, each with ≥1 corpus-derived `assert_invalid` fixture passing in
-  `test-component-spec`; deep canonical-ABI / subtyping cases enumerated as `skip-impl` with specific reasons.
+- **Bundle-ID**: ReleaseSafe-JIT-hardening (ADR-0177 pending)
+- **Cycles-remaining**: ~3 — `zig build test-all -Doptimize=ReleaseSafe` (Mac) = **4 fail + 4 crash** (Debug green).
+  Real ReleaseSafe-only JIT-ABI bugs (undefined-memory `0xaaaa…` reads + `union i32 while f32 active`) in the
+  **multi-result entry-buffer + wrapper-thunk return unpack**. Per-test table + plan: `.dev/releasesafe_jit_failures.md`.
+- **Continuity-memo**: likely 1–2 root causes — (a) entry_buffer_write result-write path (expected-N-found-0) and
+  (b) Value-union tagging in multi-result unpack (runner.zig:680). Use `debug_jit_auto`. Reproduce per-test from the
+  table. The Debug build masks these (different undefined-fill). Precedent: D-245 / `scripts/check_jit_releasesafe.sh`.
+- **Exit-condition**: `zig build test-all -Doptimize=ReleaseSafe` GREEN on Mac+ubuntu, THEN flip the per-chunk gates
+  (`mac_gate.sh` test-all + `run_remote_{ubuntu,windows}.sh`) to `-Doptimize=ReleaseSafe` (unit `test` stays Debug;
+  `gate_merge.sh` keeps Debug test-all). Discharge D-311.
+
+### CM-validation (ADR-0176) — structural rules DONE, parked
+
+E3-CM-validation rules ✅1 type-index @cfdb07be ✅2 Canon @6224a7e7 ✅3 alias @5374dca7 ✅4 ExternDesc @d72c1b44
+(each + a `test/spec/component-model-assert/<rule>/` fixture; validator walks decoded `TypeInfo` post-decode,
+pre-instantiate; bounds vs TRUE index-space size — `type_space_len`, not list `.len`). **Deferred** (resume after D-311):
+skip-impl manifest for deep cases + name validation (fixtures need binary extraction — WIT text parser rejects bad names).
 
 ## Active campaign — Component Model + WASI Preview 2 (ADR-0170, user-directed 2026-06-07)
 
@@ -57,12 +61,9 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
   Follow the first unchecked chunk; each chunk recipe = goal · files · refs · red test · exit.
 - **Step 0 survey DONE** — do NOT re-survey. Refs: `.dev/component_model_survey.md` + plan "Reference chains" (spec
   `~/Documents/OSS/WebAssembly/component-model/`; v1 `~/Documents/MyProducts/zwasm/src/`; wasmtime/wasm-tools).
-- **Tier 0 (A1–A4) + Tier-1 (B1–B6) COMPLETE — "COMPONENT MODEL WORKS".** decode/types/wit (A1–A4) · canon value
-  machinery (B1–B5: flat-scalar/enum/flags/string/list/record/variant over guest memory) · **B6 single-component
-  instantiate+invoke e2e** (IT-1 @20132372 instantiate+invoke · IT-2 @41e50658 flat trampoline + Value bridge · IT-3a
-  @6e784d5c cabi_realloc-via-guest seam · IT-3b-1 @9024d4bb canon-section decode · IT-3b-2 @cff26592 real fixture decodes
-  · **IT-3b-3 @e0e7c9f5 a REAL wasm-tools string→string component RUNS e2e** — `greet("zwasm")`⇒`"Hello, zwasm!"`).
-  ADR-0171 (cabi_realloc seam) + ADR-0172 (Zone split). **Bundle CM-B6-IT CLOSED** (exit met @e0e7c9f5).
+- **Tier 0 (A1–A4) + Tier-1 (B1–B6) COMPLETE — "COMPONENT MODEL WORKS".** decode/types/wit + canon value machinery
+  (flat-scalar/enum/flags/string/list/record/variant) + B6 single-component instantiate+invoke e2e (a REAL wasm-tools
+  string→string component RUNS @e0e7c9f5: `greet("zwasm")`⇒`"Hello, zwasm!"`). ADR-0171 + ADR-0172.
 - **Discipline**: pure logic Zone 1 (`feature/component/`), orchestration Zone 3 (`api/component.zig`); component-value
   DISTINCT from `runtime.Value`; TDD; no-copy; 3-host gate; **no tag**.
 - **Phase C COMPLETE (Tier-1 done): resources + multi-component linking.** C1 @11043031 (`resource_table.zig`:
@@ -79,7 +80,7 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
   random · D3-5 stdin · **D3-6 fs descriptor** @43909eba (read/sync/stat/get-type + flush; **D-307 DISCHARGED**
   @beb887c6) · **D3-7 wasi:io/poll** @3a128a01 (pollable + subscribe + ready/block/poll). **D-309 DONE** @ccdee2fa —
   WASI-P2 trampolines extracted to `api/component_wasi_p2.zig` (component.zig 1922→1250).
-- **NOW = E3-CM-validation bundle** (validator rules ✅1 type-index ✅2 Canon ✅3 alias ✅4 ExternDesc @d72c1b44 — structural set DONE; close pending skip-impl doc). Deferred: D3-8 sockets.
+- **NOW = ReleaseSafe-JIT-hardening (D-311)** — fix 8 ReleaseSafe-only JIT-ABI failures, THEN switch gates to ReleaseSafe (user-flagged speed). CM-validation rules 1-4 DONE+parked. Deferred: D3-8 sockets.
   Cross-component aggregate → D-305. **D-308 DISCHARGED @82d63d27** — unknown-wasi-import errors cleanly (no signal);
   ADR-0175 engine's per-instance cleanup is sound; adversarial guard `wasi_p2_unknown_import.wasm` (E3 edge case).
 
@@ -92,9 +93,8 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
   unaligned-atomic-trap fix D-303 (code-14 `unaligned_atomic_fixups` both arches, @5b0db8e1, 3-host).
 - **ALL bounded debt CLEARED**: ✅ D-301 · ✅ D-303 · ✅ D-231 (cross-x86 DCE gate wired @aac4fe2f) · ✅ D-302
   (branch-hint custom-section verified @dcc8d71c) · ✅ **D-279 DISCHARGED @c287d39c**.
-- Debt ledger **52 entries** (D-307/D-309/D-310/D-308 discharged). `now` = D-299 only
-  (env-constrained). **Correctly DEFERRED (do NOT clear)**: D-209
-  (hot-path), D-259 (W54-ABI-risk), D-300 stack-switching (Phase-3 unstable), D-299 (x86_64 W^X).
+- Debt ledger **53 entries**. `now` = **D-311** (ReleaseSafe-JIT, active bundle) + D-299 (env-constrained x86_64 W^X).
+  **Correctly DEFERRED**: D-209 (hot-path), D-259 (W54-ABI-risk), D-300 stack-switching (Phase-3 unstable).
 - 完成形 v0.1 surface COMPLETE: CLI D-295 (~85%, intentionally lean) · C-API ZERO gaps (293/293) · Zig-API
   COMPLETE · memory-safety all-areas SOUND (D-296/D-297). Dogfooding D-264 DONE (cw v1 side).
 
