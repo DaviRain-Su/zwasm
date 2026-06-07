@@ -55,6 +55,26 @@ build_one() {
     > "$prefix/build.log" 2>&1
 }
 
+# D-231: the host-native build on an arm64 Mac exercises only the arm64
+# codegen's DCE; x86_64 codegen DCE drift (e.g. a legacy-switch arm calling
+# `wasm_3_0` op.emit() without a `comptime wasm_v3_plus` guard, the live leak
+# fixed @96fcdf9f) is INVISIBLE to it. Cross-compile to x86_64-linux so the
+# x86 codegen is compiled + its dead symbols are observable to nm. nix `nm`
+# (llvm-nm via the clang wrapper) reads cross ELF fine.
+XBUILD_TARGET="x86_64-linux-gnu"
+build_one_x86() {
+  local wasm="$1" wasi="$2"
+  local prefix="$OUT_BASE/x86_${wasm}_${wasi}"
+  rm -rf "$prefix"
+  mkdir -p "$prefix"
+  zig build \
+    "-Dtarget=$XBUILD_TARGET" \
+    "-Dwasm=$wasm" "-Dwasi=$wasi" \
+    "-Doptimize=ReleaseSafe" \
+    "-p" "$prefix" \
+    > "$prefix/build.log" 2>&1
+}
+
 forbidden_set_for() {
   local wasm="$1" wasi="$2"
   local out=""
@@ -127,6 +147,24 @@ for entry in "${MATRIX[@]}"; do
     printf '%-6s %-4s %-10s %-12s %-12s\n' "$wasm" "$wasi" "OK" "$text" "clean"
   else
     printf '%-6s %-4s %-10s %-12s %-12s\n' "$wasm" "$wasi" "OK" "$text" "FAIL"
+    fail=1
+  fi
+
+  # D-231: cross-x86 DCE check (forbidden-symbol nm-grep only; no size/
+  # monotonic — host `size` may not read cross ELF, but nm does).
+  if ! build_one_x86 "$wasm" "$wasi"; then
+    printf '%-6s %-4s %-10s %-12s %-12s\n' "$wasm" "$wasi" "x86:FAIL" "build" "-"
+    tail -10 "$OUT_BASE/x86_${wasm}_${wasi}/build.log" 2>/dev/null | sed 's/^/    /'
+    fail=1
+    continue
+  fi
+  xbin=$(find "$OUT_BASE/x86_${wasm}_${wasi}/bin" -type f 2>/dev/null | head -1)
+  if [ -z "$xbin" ]; then
+    printf '%-6s %-4s %-10s %-12s %-12s\n' "$wasm" "$wasi" "x86:OK" "no-bin" "?"
+  elif check_forbidden "$xbin" "$wasm" "$wasi"; then
+    printf '%-6s %-4s %-10s %-12s %-12s\n' "$wasm" "$wasi" "x86:OK" "-" "clean"
+  else
+    printf '%-6s %-4s %-10s %-12s %-12s\n' "$wasm" "$wasi" "x86:OK" "-" "FAIL"
     fail=1
   fi
 done
