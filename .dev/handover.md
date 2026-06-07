@@ -20,14 +20,12 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
 ## Active bundle
 
 - **Bundle-ID**: D-303-jit-unaligned-atomic-trap
-- **Cycles-remaining**: ~2
-- **Continuity-memo**: add `unaligned_atomic_fixups` (trap_kind=14) on BOTH arches mirroring
-  `divzero_fixups` (ctx.zig field + emit.zig create/defer/wire + `EmitCindStub.emit(..,14,..)`); at op_memory
-  atomic load/store (access_size>1) emit `ea & (size-1)` test → branch-if-nonzero to stub, BEFORE bounds check.
-  NEEDS new encoders: arm64 TST/ANDS-bitmask-imm (masks 1/3/7) + B.NE; x86_64 TEST r,imm + JNE. Interp is the
-  reference (memory.zig:202). Full plan in D-303 debt row refs.
-- **Exit-condition**: distiller flips load/store back to real `assert_trap` + threads-assert corpus +10
-  (292 pass, 0 D303-skip) on Mac AND ubuntu AND Win64; edge fixtures under test/edge_cases/p17/atomics per width.
+- **Cycles-remaining**: ~1 (IV implementation DONE @5b0db8e1; awaiting remote confirm + V retrospective)
+- **Continuity-memo**: FIX LANDED both arches (`unaligned_atomic_fixups` code-14 stub mirroring divzero;
+  arm64 `encTstImmLowBitsW`+B.NE, x86 `encTestRImm32`+JNE; injected BEFORE bounds at op_memory atomic
+  load/store access_size>1). Mac arm64 + x86_64-Rosetta GREEN (292 corpus, 0 D303-skip; edge fixtures pass).
+- **Exit-condition**: threads-assert corpus 292 pass / 0 D303-skip on **ubuntu AND Win64** (Mac ✓). At next
+  Step 0.7: ubuntu+win green → discharge D-303, close bundle (V retrospective). Red → forward-fix (NOT revert).
 
 ## Current state
 
@@ -46,9 +44,9 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
 - **atomics assert_trap un-skipped @aa6e1a76 (D-301) → found D-303** — the distiller blanket-skipped ALL atomic
   assert_trap with a FALSE reason ("argparse"). Un-skipped: added `(i32,i64,i64)` arm to nonSimdRunAssertTrap +
   emit real directives. **247 → 282 pass** (+35 RMW/cmpxchg unaligned-traps now live). The un-skip EXPOSED a REAL
-  JIT bug **D-303**: inline `*.atomic.load*`/`*.atomic.store*` codegen does NOT trap on unaligned ea (interp
-  CORRECT @memory.zig:202; RMW/cmpxchg/wait/notify CORRECT via jit_abi trap_kind=14). 10 load/store skipped with
-  truthful `jit-unaligned-trap-gap-D303` until the 2-arch JIT fix (next bundle). 2 wait skips = nonshared-scratch.
+  JIT bug **D-303** (now FIXED @5b0db8e1, both arches — see Active bundle): inline atomic load/store omitted the
+  unaligned-trap check the interp has. corpus now **292 pass / 0 D303-skip** (Mac arm64 + x86_64-Rosetta); the 10
+  load/store assert_trap run live. 2 wait skips remain = nonshared-scratch (D-301 residual #2).
 - **D-231 leak FIXED @96fcdf9f** — running check_build_dce's nm-grep on a cross-compiled x86_64 v1_0 binary
   found 3 dead `wasm_3_0` codegen symbols surviving DCE (x86 legacy-switch br_on_null cohort lacked the
   `if (comptime wasm_v3_plus)` guard arm64 had). Fixed; v1_0 x86 wasm_3_0 3→0. REMAINING D-231 = wire the gate
@@ -62,14 +60,14 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
   already a no-op skip — quick verify); (3) **multi-memory JIT** = §14-deferred allowlist (~458 skips;
   parse/interp done).
 - **NEXT — ordered (correctness-first)**:
-  1. **D-303 (now, real JIT bug — the Active bundle below)** fix JIT unaligned-atomic-load/store trap, 2 arches.
+  1. **D-303** JIT unaligned-atomic-trap FIXED @5b0db8e1 (both arches, Mac✓); discharge at next Step 0.7 if remote green.
   2. **D-301 residual** mark scratch shared for wait32/64 (2 nonshared skips) — `base.growable_memory` shared flag.
   3. **D-231** wire cross-nm x86 DCE gate into `check_build_dce.sh` (mechanism validated; ELF-nm in nix).
   4. **D-302** verify a `metadata.code.branch_hint` module parses+runs on v2 (custom-section skip path).
   Then the BIG forward track = **Component Model / WASI-P2 survey** (the real v1-parity completion + v0.2 entry).
   **Correctly DEFERRED (do NOT clear)**: D-209 (hot-path/exotic), D-259 (W54-ABI-risk/zero-perf), D-300
   stack-switching (Phase-3 unstable). **D-299** (inline atomic misalign-trap, x86_64 W^X) env-constrained. No tag.
-- Debt ledger: **55 entries** (+D-303 JIT unaligned-atomic-trap, now). D-303 + D-299 are `now`. Never idle.
+- Debt ledger: **55 entries**. D-303 fixed (note, remote-pending), D-299 `now`. Never idle.
 - **D-279 BREAKTHROUGH @92cf7979** — the decisive Win64 RED finally landed (@16fc1bb3, the run the user cut off):
   `zwasm-spec-wasm-2-0-assert` exit-3 with the `[d-279-veh] STACK-OVERFLOW` diagnostic PRESENT but NOT firing →
   **H3 REFUTED**. `[W4 DIR]` raw-beacon pinned crash module = **`address.2.wasm` (NON-SIMD i32/i64 load/store)** in
@@ -99,11 +97,10 @@ diagnostic landed @`92cf7979` to pin the RIP on the next Win64 RED. Full enumera
 
 - **ubuntu**: re-kicked each turn (D6 always). Verify `[run_remote_ubuntu] OK` in `/tmp/ubuntu.log`. Red →
   auto-revert (D3; first-resume + non-code-gap exceptions apply).
-- **windows**: BATCHED (D8). **GREEN @e0efec97** (H6 diagnostic present, did NOT fire = no crash this run;
-  heisenbug intermittent — `silent` streak=1). Gate recorded @aa6e1a76 (next batch ≥12 / ABI-risk). The H6
-  UNARMED-FATAL diagnostic is ARMED: the NEXT Win64 RED self-IDs — `[d-279-veh] UNARMED-FATAL code=0x.. rip=0x..`
-  → H6 confirmed (RIP pins compile/runtime/interp); still NO `[d-279-veh]` + exit-3 → H5 (non-exception abort).
-  NOT auto-revert (D7).
+- **windows**: BATCHED (D8). RE-KICKED this turn @5b0db8e1 to confirm D-303 (new codegen) on Win64 + keep
+  hunting D-279. Verify `/tmp/win.log`: threads-assert **292 pass / 0 D303-skip** = D-303 confirmed (discharge);
+  any `did not trap` = real Win64 D-303 gap (forward-fix). D-279: `[d-279-veh] UNARMED-FATAL code=0x.. rip=0x..`
+  → H6 confirmed; still NO `[d-279-veh]` + exit-3 → H5. NOT auto-revert (D7). (Prior: GREEN @e0efec97, silent=1.)
 - **Gate note**: `OK` = green; `Build Summary: N failed` (no OK) = RED. EXPECTED non-failures: `zig-host-hello`
   exit-42, `--__selftest-crash` exit-70, sha256 `verify: FAIL` (fixture-wrong-constant FALSE lead).
 

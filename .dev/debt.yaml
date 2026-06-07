@@ -1225,9 +1225,16 @@ entries:
     refs: ~/Documents/MyProducts/zwasm/src/cli.zig:2032; src/parse/sections.zig; .dev/proposal_watch.md
   - id: D-303
     layer: code
-    status: now
+    status: note
     description: |-
-      now (real JIT spec-compliance bug, found 2026-06-07 by D-301 atomics corpus un-skip).
+      **FIXED @5b0db8e1** (2026-06-07, both arches). Added a demuxed `unaligned_atomic_fixups`
+      trap stub (code 14) on arm64 + x86_64 mirroring `divzero_fixups`: at the atomic load/store
+      path (access_size>1), BEFORE the bounds check, test ea's low log2(size) bits and branch to
+      the stub on nonzero. New arm64 encoder `encTstImmLowBitsW`; x86 reuses `encTestRImm32`+JNE.
+      Distiller flipped → threads-assert corpus 282→292 pass (0 D303-skip). Edge fixtures
+      atomic_{load,store}_unaligned_traps added. Verified GREEN Mac arm64 + x86_64 (Rosetta);
+      ubuntu + Win64 confirm pending (remote kicks). Discharge fully at next Step 0.7 if remote green.
+      ORIGINAL (found 2026-06-07 by D-301 atomics corpus un-skip):
       **JIT inline `*.atomic.load*` / `*.atomic.store*` codegen does NOT trap on unaligned
       effective address** — the spec requires every atomic access to trap (`ea mod size ≠ 0`,
       exec step 8, BEFORE the bounds check). The INTERP is CORRECT (`memory.zig:202`
