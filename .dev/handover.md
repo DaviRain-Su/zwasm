@@ -32,9 +32,14 @@ that decodes+instantiates+invokes over `test/spec/component-model-assert/`, buil
 `zwasm` module (`core_comp` in build.zig), wired into `test-all`. First corpus = greet (string→string) + adder graph
 (cross-module i32): 4 pass, 0 skip. ADR-0174 lesson: missing corpus root = hard `exit(1)`. Fixtures reuse `test/component/`.
 
-**NEXT = E3** (plan §Phase E, the next `[ ]`): WASI-P2 conformance + edge cases — AND grow the E1 corpus by distilling
-official `WebAssembly/component-model` + wasm-tools `.wat` fixtures → committed `.wasm` on Mac, with truthful skips for
-unsupported features. E2 remainder (Go/tinygo cross-toolchain proof + io/error trampoline) is opportunistic —
+**NEXT = E3** (plan §Phase E, the next `[ ]`): WASI-P2 conformance + edge cases — AND grow the E1 corpus.
+**Survey finding (@279b7fb3)**: `~/Documents/OSS/WebAssembly/component-model/test/wasm-tools/*.wast` = **365
+`assert_invalid` + 17 `assert_malformed`, ZERO invoke tests** — negative decode/VALIDATE tests. Our `decode.zig` is
+decode-only (no component validation), so most would FALSELY pass → honest ingestion needs **component-validation
+depth (ADR-grade: how much §-by-§ component validation to implement) + a `.wast`→corpus distill script + `assert_invalid`/
+`assert_malformed` runner directives**. That makes E3 a multi-cycle BUNDLE, not a quick chain — open it with a Step 0
+survey + an ADR on validation scope. Positive-decode fixtures (bare `(component …)` forms) are the cheaper first slice.
+E2 remainder (Go/tinygo cross-toolchain proof + io/error trampoline) is opportunistic —
 toolchain-gated (wit-bindgen-go not in the gen shell), do it when convenient, not the blocker.
 **Resume routing**: handover §Active campaign DRIVER → `component_model_plan.md` §Work sequence (close-plan-override);
 ROADMAP §17 row also redirects there. Follow the plan's first `[ ]` (= E3). `/continue` alone resumes correctly.
