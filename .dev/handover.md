@@ -61,21 +61,25 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
 ## Active bundle
 
 - **Bundle-ID**: CM-D2-fs (resource-modeled WASI-P2 filesystem — the plan §Phase D *red*: "resource-typed P2 fs handle ops")
-- **Cycles-remaining**: ~3
-- **Continuity-memo**: Adapter already CLASSIFIES descriptor ops (D2-1 @e9e12834); classified wiring works
-  (D-306 @dde03160). Next: Step-0 survey wasi-filesystem 0.2 `descriptor` (read/write at offset → P1 fd_pread/pwrite;
-  drop → close) + preopens `get-directories`. Add a DESCRIPTOR resource-type to `WasiP2Ctx` (rep = P1 fd, distinct from
-  OUTPUT_STREAM_RT), trampolines for the fd-mapping subset, and wire `get-directories` to surface a preopened dir
-  handle. Needs a fs fixture (component with a preopen) as same-cycle caller. Stream-via methods (mint streams) +
-  sockets defer (D3). Check `src/wasi/{fd,path,host}.zig` for the P1 preopen/fd plumbing to reuse.
-- **Exit-condition**: a real WASI-P2 component opens a preopened descriptor + reads or writes a file via the descriptor
-  resource e2e (zwasm run / runWasiP2Main), asserted on captured output or file content.
+- **Cycles-remaining**: ~2
+- **Continuity-memo**: Survey DONE (digest: descriptor.write = flat ABI no-realloc → easiest; read/get-directories
+  return lists → need cabi_realloc return-area). **descriptor.write DONE @b766c583**: `WasiP2Ctx.resources` table keyed
+  by RT id (OUTPUT_STREAM_RT=1, DESCRIPTOR_RT=2); `p2DescriptorWrite`/`p2DescriptorDrop` + `fd.pwriteSlice`; unit-tested
+  via injected handle + tmpfile. NEXT (the exit work): a REAL component entry needs `preopens.get-directories` →
+  returns `list<tuple<own<descriptor>,string>>` → host must ALLOCATE guest memory via `cabi_realloc` + write the
+  return-area (the lift/return direction — study `api/component.zig invokeString`/`canonContext`/`reallocViaGuest` +
+  `feature/component/canon.zig` for the realloc seam). THEN a fs fixture (component with a preopen) that gets a dir
+  descriptor, opens/writes a file, e2e. Also: `classifyCoreExport` maps ALL `resource_drop`→`out_stream_drop` (shortcut)
+  — the full-component fs path needs per-type resolution (resource.drop typeidx → which interface's resource). Stream-via
+  methods + sockets defer (D3).
+- **Exit-condition**: a real WASI-P2 component obtains a descriptor via `get-directories` + writes/reads a file via the
+  descriptor resource e2e (runWasiP2Main), asserted on file content.
 
 ## Current state
 
 - **Phase 17 (v0.2) IN-PROGRESS** (ADR-0168). DONE+3-host: atomics @9eb84833 · wide-arith @231d4536 ·
   custom-page-sizes @cd0de2dd · relaxed-SIMD @08342ec5 (+official corpus @8ef2e752, 13420 pass arm64+x86). Wasm-3.0
-  core 100%-spec COMPLETE. Last SHA **1f5474d5** (WASI-P2 stderr — get-stderr mints an fd-2 output-stream, D2).
+  core 100%-spec COMPLETE. Last SHA **b766c583** (WASI-P2 descriptor.write — file write via the descriptor resource).
 - **Atomics fully conformant @e6f3b0c0** — official corpus **294 pass, 0 SKIPPED** (D-301), incl. the JIT
   unaligned-atomic-trap fix D-303 (code-14 `unaligned_atomic_fixups` both arches, @5b0db8e1, 3-host).
 - **ALL bounded debt CLEARED**: ✅ D-301 · ✅ D-303 · ✅ D-231 (cross-x86 DCE gate wired @aac4fe2f) · ✅ D-302
