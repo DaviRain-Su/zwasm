@@ -168,6 +168,7 @@ pub const feature = struct {
         struct {
             pub const decode = @import("feature/component/decode.zig");
             pub const types = @import("feature/component/types.zig");
+            pub const canon = @import("feature/component/canon.zig");
             pub const wit = struct {
                 pub const lexer = @import("feature/component/wit/lexer.zig");
                 pub const parser = @import("feature/component/wit/parser.zig");
@@ -387,6 +388,7 @@ test {
     _ = @import("feature/component/wit/lexer.zig");
     _ = @import("feature/component/wit/parser.zig");
     _ = @import("feature/component/wit/resolve.zig");
+    _ = @import("feature/component/canon.zig");
 }
 
 // ============================================================
