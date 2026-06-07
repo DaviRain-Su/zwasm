@@ -211,12 +211,52 @@ pub const Canon = union(enum) {
     resource_rep: u32, // 0x04 typeidx
 };
 
+/// `core:instantiatearg ::= name 0x12 instanceidx` — a `with` argument
+/// supplying an imported instance to a core instantiation.
+pub const CoreInstantiateArg = struct {
+    name: []const u8,
+    instance: u32,
+};
+
+/// `core:inlineexport ::= name core:sortidx`.
+pub const CoreInlineExport = struct {
+    name: []const u8,
+    sort: CoreSort,
+    index: u32,
+};
+
+/// One `core:instance` (`Binary.md` §Instance): instantiate a core module, or
+/// a synthetic instance of inline exports.
+pub const CoreInstance = union(enum) {
+    instantiate: struct { module: u32, args: []const CoreInstantiateArg },
+    inline_exports: []const CoreInlineExport,
+};
+
+/// `aliastarget` (`Binary.md` §Alias): the source an alias pulls a definition
+/// from.
+pub const AliasTarget = union(enum) {
+    /// 0x00 — an export of a (component) instance.
+    component_export: struct { instance: u32, name: []const u8 },
+    /// 0x01 — an export of a CORE instance (what canon-lift core funcs use).
+    core_export: struct { instance: u32, name: []const u8 },
+    /// 0x02 — an `outer` alias `ct` levels up at index `idx`.
+    outer: struct { count: u32, index: u32 },
+};
+
+/// `alias ::= sort aliastarget` — introduces a new index in `sort`'s space.
+pub const Alias = struct {
+    sort: Sort,
+    target: AliasTarget,
+};
+
 pub const TypeInfo = struct {
     arena: std.heap.ArenaAllocator,
     deftypes: std.ArrayList(DefType),
     imports: std.ArrayList(Import),
     exports: std.ArrayList(Export),
     canons: std.ArrayList(Canon),
+    core_instances: std.ArrayList(CoreInstance),
+    aliases: std.ArrayList(Alias),
 
     pub fn deinit(self: *TypeInfo) void {
         self.arena.deinit();
@@ -240,6 +280,9 @@ pub const Error = error{
     InvalidSort,
     /// A malformed `canon` definition / `canonopt`.
     InvalidCanon,
+    /// A malformed `core:instance` / `alias` definition.
+    InvalidInstance,
+    InvalidAlias,
     /// A `canon` builtin not yet decoded (async / stream / future / thread).
     UnsupportedCanon,
     /// `enum` with zero labels (spec requires `> 0`).
@@ -454,11 +497,13 @@ fn decodeDefType(arena: Allocator, body: []const u8, pos: *usize) Error!DefType 
     };
 }
 
-fn decodeSortIdx(body: []const u8, pos: *usize) Error!struct { sort: Sort, index: u32 } {
+/// `sort ::= 0x00 core:sort | 0x01 func | 0x02 value | 0x03 type | 0x04
+/// component | 0x05 instance`.
+fn decodeSort(body: []const u8, pos: *usize) Error!Sort {
     if (pos.* >= body.len) return Error.Truncated;
     const sort_byte = body[pos.*];
     pos.* += 1;
-    const sort: Sort = switch (sort_byte) {
+    return switch (sort_byte) {
         0x00 => blk: {
             if (pos.* >= body.len) return Error.Truncated;
             const cs = body[pos.*];
@@ -470,10 +515,13 @@ fn decodeSortIdx(body: []const u8, pos: *usize) Error!struct { sort: Sort, index
         0x03 => .type,
         0x04 => .component,
         0x05 => .instance,
-        else => return Error.InvalidSort,
+        else => Error.InvalidSort,
     };
-    const index = try leb128.readUleb128(u32, body, pos);
-    return .{ .sort = sort, .index = index };
+}
+
+fn decodeSortIdx(body: []const u8, pos: *usize) Error!struct { sort: Sort, index: u32 } {
+    const sort = try decodeSort(body, pos);
+    return .{ .sort = sort, .index = try leb128.readUleb128(u32, body, pos) };
 }
 
 fn decodeExternDesc(body: []const u8, pos: *usize) Error!ExternDesc {
@@ -599,6 +647,83 @@ fn decodeCanonSection(arena: Allocator, out: *std.ArrayList(Canon), body: []cons
     if (pos != body.len) return Error.TrailingBytes;
 }
 
+fn decodeCoreSortIdx(body: []const u8, pos: *usize) Error!struct { sort: CoreSort, index: u32 } {
+    if (pos.* >= body.len) return Error.Truncated;
+    const cs: CoreSort = @enumFromInt(body[pos.*]);
+    pos.* += 1;
+    return .{ .sort = cs, .index = try leb128.readUleb128(u32, body, pos) };
+}
+
+/// `core:instance` section (id 2) = `vec(core:instance)`.
+fn decodeCoreInstanceSection(arena: Allocator, out: *std.ArrayList(CoreInstance), body: []const u8) Error!void {
+    var pos: usize = 0;
+    const count = try leb128.readUleb128(u32, body, &pos);
+    var i: u32 = 0;
+    while (i < count) : (i += 1) {
+        if (pos >= body.len) return Error.Truncated;
+        const tag = body[pos];
+        pos += 1;
+        switch (tag) {
+            0x00 => { // instantiate moduleidx vec(instantiatearg)
+                const module = try leb128.readUleb128(u32, body, &pos);
+                const argc = try leb128.readUleb128(u32, body, &pos);
+                var args: std.ArrayList(CoreInstantiateArg) = .empty;
+                var j: u32 = 0;
+                while (j < argc) : (j += 1) {
+                    const name = try decodeLabel(body, &pos);
+                    if (pos >= body.len or body[pos] != 0x12) return Error.InvalidInstance;
+                    pos += 1; // 0x12 = instance sort tag
+                    try args.append(arena, .{ .name = name, .instance = try leb128.readUleb128(u32, body, &pos) });
+                }
+                try out.append(arena, .{ .instantiate = .{ .module = module, .args = try args.toOwnedSlice(arena) } });
+            },
+            0x01 => { // vec(core:inlineexport)
+                const ec = try leb128.readUleb128(u32, body, &pos);
+                var exps: std.ArrayList(CoreInlineExport) = .empty;
+                var j: u32 = 0;
+                while (j < ec) : (j += 1) {
+                    const name = try decodeLabel(body, &pos);
+                    const si = try decodeCoreSortIdx(body, &pos);
+                    try exps.append(arena, .{ .name = name, .sort = si.sort, .index = si.index });
+                }
+                try out.append(arena, .{ .inline_exports = try exps.toOwnedSlice(arena) });
+            },
+            else => return Error.InvalidInstance,
+        }
+    }
+    if (pos != body.len) return Error.TrailingBytes;
+}
+
+/// `alias` section (id 6) = `vec(alias)`; `alias ::= sort aliastarget`.
+fn decodeAliasSection(arena: Allocator, out: *std.ArrayList(Alias), body: []const u8) Error!void {
+    var pos: usize = 0;
+    const count = try leb128.readUleb128(u32, body, &pos);
+    var i: u32 = 0;
+    while (i < count) : (i += 1) {
+        const sort = try decodeSort(body, &pos);
+        if (pos >= body.len) return Error.Truncated;
+        const tt = body[pos];
+        pos += 1;
+        const target: AliasTarget = switch (tt) {
+            0x00 => blk: {
+                const inst = try leb128.readUleb128(u32, body, &pos);
+                break :blk .{ .component_export = .{ .instance = inst, .name = try decodeLabel(body, &pos) } };
+            },
+            0x01 => blk: {
+                const inst = try leb128.readUleb128(u32, body, &pos);
+                break :blk .{ .core_export = .{ .instance = inst, .name = try decodeLabel(body, &pos) } };
+            },
+            0x02 => blk: {
+                const ct = try leb128.readUleb128(u32, body, &pos);
+                break :blk .{ .outer = .{ .count = ct, .index = try leb128.readUleb128(u32, body, &pos) } };
+            },
+            else => return Error.InvalidAlias,
+        };
+        try out.append(arena, .{ .sort = sort, .target = target });
+    }
+    if (pos != body.len) return Error.TrailingBytes;
+}
+
 /// Decode the type index space + imports/exports + canon defs of an
 /// already-walked component (`decode.decode`). The returned `TypeInfo` owns its
 /// allocations (`deinit`) but borrows `name` slices from the component input.
@@ -611,6 +736,8 @@ pub fn decodeTypeInfo(parent: Allocator, component: *const decode.Component) Err
     var imports: std.ArrayList(Import) = .empty;
     var exports: std.ArrayList(Export) = .empty;
     var canons: std.ArrayList(Canon) = .empty;
+    var core_instances: std.ArrayList(CoreInstance) = .empty;
+    var aliases: std.ArrayList(Alias) = .empty;
 
     for (component.sections.items) |sec| {
         switch (sec.id) {
@@ -618,11 +745,21 @@ pub fn decodeTypeInfo(parent: Allocator, component: *const decode.Component) Err
             .import => try decodeImportSection(a, &imports, sec.body),
             .@"export" => try decodeExportSection(a, &exports, sec.body),
             .canon => try decodeCanonSection(a, &canons, sec.body),
+            .core_instance => try decodeCoreInstanceSection(a, &core_instances, sec.body),
+            .alias => try decodeAliasSection(a, &aliases, sec.body),
             else => {}, // other sections decoded in later chunks
         }
     }
 
-    return .{ .arena = arena, .deftypes = deftypes, .imports = imports, .exports = exports, .canons = canons };
+    return .{
+        .arena = arena,
+        .deftypes = deftypes,
+        .imports = imports,
+        .exports = exports,
+        .canons = canons,
+        .core_instances = core_instances,
+        .aliases = aliases,
+    };
 }
 
 // ============================================================
@@ -848,6 +985,37 @@ test "canon section: resource builtins decode" {
     var info = try decodeBoth(bytes);
     defer info.deinit();
     try testing.expectEqual(@as(u32, 5), info.canons.items[0].resource_new);
+}
+
+test "core-instance decode: instantiate + inline exports" {
+    const body = [_]u8{
+        0x02,
+        0x00, 0x00, 0x00, // [0] instantiate module 0, 0 args
+        0x01, 0x01, 0x01, 'm', 0x02, 0x00, // [1] inline: export "m" → core mem 0
+    };
+    const bytes = comptime buildComponent(&.{.{ 2, &body }});
+    var info = try decodeBoth(bytes);
+    defer info.deinit();
+    try testing.expectEqual(@as(usize, 2), info.core_instances.items.len);
+    try testing.expectEqual(@as(u32, 0), info.core_instances.items[0].instantiate.module);
+    try testing.expectEqualStrings("m", info.core_instances.items[1].inline_exports[0].name);
+    try testing.expectEqual(CoreSort.memory, info.core_instances.items[1].inline_exports[0].sort);
+}
+
+test "alias decode: core export + outer" {
+    const body = [_]u8{
+        0x02,
+        0x00, 0x00, 0x01, 0x00, 0x05, 'g', 'r', 'e', 'e', 't', // (core func) core export inst 0 "greet"
+        0x03, 0x02, 0x02, 0x03, // (type) outer ct 2 idx 3
+    };
+    const bytes = comptime buildComponent(&.{.{ 6, &body }});
+    var info = try decodeBoth(bytes);
+    defer info.deinit();
+    try testing.expectEqual(@as(usize, 2), info.aliases.items.len);
+    try testing.expectEqualStrings("greet", info.aliases.items[0].target.core_export.name);
+    try testing.expectEqual(@as(u32, 0), info.aliases.items[0].target.core_export.instance);
+    try testing.expectEqual(@as(u32, 2), info.aliases.items[1].target.outer.count);
+    try testing.expectEqual(@as(u32, 3), info.aliases.items[1].target.outer.index);
 }
 
 test "canon: async opt + async builtin defer UnsupportedCanon" {
