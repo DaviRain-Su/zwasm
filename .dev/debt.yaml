@@ -1074,8 +1074,9 @@ entries:
       (instance-import alias resolution) to name each lowered import, then
       adapter-classified trampoline selection, covering the full P2 stdio subset.
       Lands at plan §Phase D2 (resource-modeled P2 interfaces) / D3 (broader
-      native host). Also: wire `runWasiP2Main` into the `zwasm run` CLI (D1 exit
-      mentions "through the CLI"; the API run path is proven).
+      native host). ~~CLI run path~~ DONE @161236db (`zwasm run <component.wasm>`
+      routes to `runComponentWasi` → prints "hello"; the broader interface
+      coverage + adapter classification remain).
     first_raised: "2026-06-07"
     last_reviewed: "2026-06-07"
     refs: src/api/component.zig (runWasiP2Main, defineWasiP2Io); src/wasi/adapter.zig (classifyImport); .dev/component_model_plan.md (Phase D2/D3)
