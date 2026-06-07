@@ -35,16 +35,17 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
 
 - **Bundle-ID**: CM-B6-IT (single-component instantiate + invoke e2e)
 - **Cycles-remaining**: ~2
-- **IT-1 DONE @20132372**: `api/component.zig` (Zone 3, ADR-0172) — `instantiate()` decodes + compiles + instantiates
-  the first embedded core module via the Engine facade behind a heap-stable `ComponentInstance`; `invokeCore()` passes
-  flat-scalar facade Values through. A `run()->i32=42` component instantiates + invokes. (The feared facade self-ref
-  hazard was moot — facade structs hold c-api heap handles, not `*Module`; heap-allocated anyway for safety.)
-- **Continuity-memo**: NEXT = IT-2 (canon flat trampoline) — a typed component invoke that lowers component-level
-  `canon.Value` args → core values → `inst.invoke` → lifts results, for FLAT scalars only (no memory). KEY: canon
-  lower/lift use internal `runtime.Value` but the facade `invoke` wants `zwasm.Value` (`{i32,i64,f32:u32,f64:u64,…}`) —
-  need a bridge (check `src/zwasm/value_conv.zig`). Hand-craftable fixture: a component exporting `add(u32,u32)->u32`.
-  Then IT-3 = cabi_realloc wiring (`inst.invoke("cabi_realloc",…)`) + string→string trampoline (lift/lower over guest
-  memory) — the exit; needs a REAL fixture via `nix develop .#gen` wasm-tools/cargo-component (Mac host).
+- **IT-1 @20132372** (instantiate embedded core module + invoke `run()->i32=42`) · **IT-2 @41e50658** (canon flat
+  trampoline `invokeFlat`: lower canon.Value args → `coreToFacade` bridge → core invoke → `value_conv.zwasmToRuntime`
+  + `canon.lift`; add(u32,u32)/s32 round-trip). The Value bridge (`runtime.Value`↔`zwasm.Value`) is now proven.
+- **Continuity-memo**: NEXT = IT-3a (cabi_realloc-via-guest, HAND-CRAFTABLE) — build a CanonContext whose `realloc_fn`
+  invokes the guest's `cabi_realloc` export (`ci.core.invoke("cabi_realloc",{old,old_sz,align,new_sz})`); fixture = a
+  core module exporting a wasm bump-allocator `cabi_realloc(i32,i32,i32,i32)->i32` + a `memory`. Test: `canon.lowerString`
+  a host string THROUGH the guest allocator, read back via `canon.liftString` over `ci.core.memory().slice()`. This proves
+  ADR-0171's core seam end-to-end WITHOUT the indirect-return complexity. Then IT-3b (the EXIT) = full string→string
+  component export: the core sig is `(ptr,len)->i32` with the string RESULT (2 flat values > MAX_FLAT_RESULTS=1) returned
+  via an INDIRECT return-area pointer (read `CanonicalABI.md` `canon_lift`/`flatten_functype` carefully) — needs a REAL
+  fixture via `nix develop .#gen` wasm-tools/cargo-component (Mac host; verify toolchain first).
 - **Exit-condition**: a string→string component runs via `api/component.zig` and returns the expected string.
 
 ## Current state
