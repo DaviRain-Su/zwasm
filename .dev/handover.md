@@ -53,16 +53,29 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
   `runWasiP2Main` now binds each host-wasi export by its COMPONENT interface (`adapter.classifyImport`), not the core
   import name. PROOF: `wasi_p2_hello_renamed.wasm` (opaque p0/p1/p2 core names) prints "hello". Unknown import →
   `error.UnsupportedWasiImport` (no silent skip).
-- **NEXT (D2 remaining)** — broaden the trampoline set now that wiring is name-independent: (a) stderr (`p2GetStderr`
-  rep=2; write path already fd-from-rep) + a stderr fixture; (b) clocks/random free-func trampolines; (c) the
-  **descriptor resource-type in `WasiP2Ctx`** + fs e2e fixture (the "resource-modeled fs" core of D2). Each needs a
-  fixture as the same-cycle caller (atom-rhythm guard). Plus cross-component aggregate args → D-305.
+- **D2 stderr DONE @1f5474d5** — `p2GetStderr` mints an fd-2 output-stream (write/drop shared, fd-from-rep);
+  `wasi_p2_stderr.wasm` prints "oops" to `host.stderr_buffer` via classified dispatch. Remaining D2: clocks/random
+  free-func trampolines (awkward observability — need a "write bytes to stdout" fixture; lower value) + the fs
+  descriptor resource (bundle below — the plan's actual D2 *red*). Cross-component aggregate args → D-305.
+
+## Active bundle
+
+- **Bundle-ID**: CM-D2-fs (resource-modeled WASI-P2 filesystem — the plan §Phase D *red*: "resource-typed P2 fs handle ops")
+- **Cycles-remaining**: ~3
+- **Continuity-memo**: Adapter already CLASSIFIES descriptor ops (D2-1 @e9e12834); classified wiring works
+  (D-306 @dde03160). Next: Step-0 survey wasi-filesystem 0.2 `descriptor` (read/write at offset → P1 fd_pread/pwrite;
+  drop → close) + preopens `get-directories`. Add a DESCRIPTOR resource-type to `WasiP2Ctx` (rep = P1 fd, distinct from
+  OUTPUT_STREAM_RT), trampolines for the fd-mapping subset, and wire `get-directories` to surface a preopened dir
+  handle. Needs a fs fixture (component with a preopen) as same-cycle caller. Stream-via methods (mint streams) +
+  sockets defer (D3). Check `src/wasi/{fd,path,host}.zig` for the P1 preopen/fd plumbing to reuse.
+- **Exit-condition**: a real WASI-P2 component opens a preopened descriptor + reads or writes a file via the descriptor
+  resource e2e (zwasm run / runWasiP2Main), asserted on captured output or file content.
 
 ## Current state
 
 - **Phase 17 (v0.2) IN-PROGRESS** (ADR-0168). DONE+3-host: atomics @9eb84833 · wide-arith @231d4536 ·
   custom-page-sizes @cd0de2dd · relaxed-SIMD @08342ec5 (+official corpus @8ef2e752, 13420 pass arm64+x86). Wasm-3.0
-  core 100%-spec COMPLETE. Last SHA **dde03160** (classified WASI-P2 host wiring — trampoline by interface, D-306).
+  core 100%-spec COMPLETE. Last SHA **1f5474d5** (WASI-P2 stderr — get-stderr mints an fd-2 output-stream, D2).
 - **Atomics fully conformant @e6f3b0c0** — official corpus **294 pass, 0 SKIPPED** (D-301), incl. the JIT
   unaligned-atomic-trap fix D-303 (code-14 `unaligned_atomic_fixups` both arches, @5b0db8e1, 3-host).
 - **ALL bounded debt CLEARED**: ✅ D-301 · ✅ D-303 · ✅ D-231 (cross-x86 DCE gate wired @aac4fe2f) · ✅ D-302
