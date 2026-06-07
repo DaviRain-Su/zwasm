@@ -34,10 +34,22 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
 - **C1 DONE @11043031** (Phase C resources): `resource_table.zig` (Zone 1) — the handles table (dense slots + free list,
   index 0 sentinel) of `ResourceHandle{rt,rep,own,num_lends}`; new/rep/drop/newBorrow/endLend; double-drop +
   use-after-drop + type-mismatch + still-lent guards. dtor-invoke + borrow_scope/Task lifetime defer.
-- **NEXT = chunk C2** (multi-component linking / instance graph + adapters). Red = a 2-component graph (one imports the
-  other's interface) links + runs. This ALSO discharges **D-304** (it needs the core-instance §2 + alias §6 section
-  decode → the component core-func index space → resolves canon-lift.core_func to the real core export, dropping B6's
-  invoke-by-name shortcut). Plan doc §Phase C is authoritative. (C2 likely a multi-cycle bundle.)
+- **C2 IN PROGRESS** (multi-component linking; plan doc §Phase C authoritative). See the Active bundle below.
+
+## Active bundle
+
+- **Bundle-ID**: CM-C2 (multi-component linking + index-space resolution)
+- **Cycles-remaining**: ~3
+- **Continuity-memo**: C2-1 DONE @a105289f (core-instance §2 + alias §6 decode → `TypeInfo.core_instances` + `.aliases`;
+  `decodeSort` extracted). NEXT = **C2-2 (discharge D-304)**: build the component's CORE index spaces (func/memory/…)
+  from core-instance instantiate (a module's exports populate the spaces) + aliases (core_export pulls instance export
+  N into the func space), then resolve `Canon.lift.core_func` (a core-func index) → the underlying core export NAME, so
+  `api/component.zig` `invokeString`/`canonContext` invoke the RESOLVED export instead of hard-coded "greet"/"cabi_realloc"/
+  "cabi_post_greet". Re-run the greet fixture via the resolved path; then delete D-304. The greet structure: core-module
+  → core-instance[0]=instantiate(module 0) → aliases pull memory/greet/cabi_realloc/cabi_post_greet from core-instance 0;
+  canon-lift core_func=the greet alias; opts.memory/realloc reference the aliased memory/cabi_realloc. Then **C2-3** =
+  the actual multi-component graph (nested `component` section + cross-instance import/export wiring) — the bundle EXIT.
+- **Exit-condition**: a 2-component graph (one imports the other's interface) links + runs via `api/component.zig`.
 
 ## Current state
 
