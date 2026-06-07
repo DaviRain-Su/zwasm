@@ -497,6 +497,14 @@ fn p2ResourceDrop(caller: *Caller, self_handle: u32) WasiP2Error!void {
     if (try ctx.resources.dropAny(self_handle)) |fd| _ = wasi_fd.fdClose(ctx.host, @intCast(fd));
 }
 
+/// True if `inst` exports a function named `name`.
+fn instanceExportsFunc(inst: *Instance, name: []const u8) bool {
+    for (inst.handle.exports_storage) |e| {
+        if (e.kind == .func and std.mem.eql(u8, e.name, name)) return true;
+    }
+    return false;
+}
+
 /// The WASI fd of the preopen rooted at host-OS fd `host_fd` (its `.dir`
 /// fd-table slot), or null if not found.
 fn preopenWasiFd(host: *wasi_host.Host, host_fd: std.posix.fd_t) ?wasi_p1.Fd {
@@ -745,6 +753,12 @@ pub fn runWasiP2Main(engine: *Engine, alloc: Allocator, bytes: []const u8, host:
                 if (imp.kind == .memory) {
                     const rt = sub_inst.handle.runtime orelse return error.ImportUnsatisfied;
                     try lk.defineMemoryInstance(imp.module, imp.name, rt.memories[0]);
+                }
+                // A sub-instance exporting cabi_realloc is the allocator the fs
+                // list/string return-area trampolines (get-directories/open-at)
+                // call via a nested invoke.
+                if (ctx.realloc_instance == null and instanceExportsFunc(sub_inst, ctx.realloc_name)) {
+                    ctx.realloc_instance = sub_inst;
                 }
             },
         }
@@ -1230,6 +1244,37 @@ test "D2: a WASI-P2 component prints to STDERR via get-stderr (fd 2 stream)" {
     try runWasiP2Main(&eng, testing.allocator, bytes, &host);
     try testing.expectEqualStrings("oops\n", cap_err.items); // wrote to fd 2
     try testing.expectEqualStrings("", cap_out.items); // NOT stdout
+}
+
+test "D2 (EXIT): a WASI-P2 fs component writes a file via get-directories+open-at+write e2e" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/wasi_p2_fs.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+    host.io = io;
+    const dirfd = try host.addPreopen(tmp.dir.handle, "/sandbox");
+
+    // Drives get-directories (realloc list area) → open-at "out.txt" → write "DATA42" → drop, all
+    // through the classified fs trampolines + the guest's cabi_realloc (nested invoke).
+    try runWasiP2Main(&eng, testing.allocator, bytes, &host);
+
+    // Read the written file back through the still-open preopen dir.
+    var pmem: [128]u8 = @splat(0);
+    @memcpy(pmem[0..7], "out.txt");
+    try testing.expectEqual(wasi_p1.Errno.success, wasi_fd.pathOpen(&host, &pmem, dirfd, 0, 0, 7, 0, wasi_p1.RIGHTS_FD_READ, 0, 0, 96));
+    const rfd = std.mem.readInt(u32, pmem[96..100], .little);
+    std.mem.writeInt(u32, pmem[16..20], 32, .little);
+    std.mem.writeInt(u32, pmem[20..24], 6, .little);
+    try testing.expectEqual(wasi_p1.Errno.success, wasi_fd.fdPread(&host, &pmem, rfd, 16, 1, 0, 64));
+    try testing.expectEqualStrings("DATA42", pmem[32..38]);
 }
 
 test "D2: WASI-P2 get-directories returns a preopen descriptor list (realloc from trampoline)" {
