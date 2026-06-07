@@ -9,8 +9,10 @@ The loop **NEVER idles.** v0.2/v0.3 feature work is UNBLOCKED ("AIが思いの�
 release/tag EVER** (ADR-0156; user reconfirmed "タグは切らない"). **Work priority each resume:**
 1. **THE ACTIVE CAMPAIGN below** (Component Model + WASI-P2) — the primary forward track. Drive it via the plan doc.
 2. Between chunks OR campaign-gated → sweep `.dev/remaining_sweep.md` / 完成形 polish — never idle.
-3. **D-279 + similar NEVER "left alone"** — verify the remote signal every Step 0.7 (D-279 is now root-caused +
-   mitigated; just confirm clean Win64 runs build its discharge streak).
+3. **D-279 DISCHARGE-READY @9f5ce2db** — root-caused (always-on debug dump) + mitigated; the Win64-green streak hit **≥5
+   over ≥3 SHAs** this session (`track_heisenbug.sh d-279 --status` to confirm; heisenbug_discharge.md gate met). FIRST
+   action a fresh session can take: finalize the discharge (it has no open `now`/`blocked-by` debt row — it's `note` +
+   lesson `2026-06-07-always-on-debug-dump-was-the-heisenbug`; just stop tracking / note closure). Then drive the campaign.
 
 ## Active campaign — Component Model + WASI Preview 2 (ADR-0170, user-directed 2026-06-07)
 
