@@ -395,6 +395,12 @@ pub const WasiP2Ctx = struct {
     /// One handle table keyed by resource-type id; each P2 resource the host
     /// models gets a distinct id (output-stream rep = P1 fd, descriptor rep = P1 fd).
     resources: resource_table.ResourceTable,
+    /// Instance exporting `cabi_realloc` (set AFTER instantiation) — lets a
+    /// trampoline allocate guest memory for list/string results (e.g.
+    /// `get-directories`) via a nested invoke. See lesson
+    /// `2026-06-07-engine-invoke-is-reentrant-stack-disciplined`.
+    realloc_instance: ?*Instance = null,
+    realloc_name: []const u8 = "cabi_realloc",
 
     /// Resource-type ids for the P2 resources the host models.
     const OUTPUT_STREAM_RT: u32 = 1;
@@ -407,9 +413,21 @@ pub const WasiP2Ctx = struct {
     pub fn deinit(self: *WasiP2Ctx) void {
         self.resources.deinit();
     }
+
+    /// Allocate `size` bytes of fresh guest memory via the guest's
+    /// `cabi_realloc` (old_ptr=0). Used to build list/string return areas.
+    fn reallocGuest(self: *WasiP2Ctx, size: u32, alignment: u32) WasiP2Error!u32 {
+        const inst = self.realloc_instance orelse return WasiP2Error.NoRealloc;
+        var args = [_]Value{ .{ .i32 = 0 }, .{ .i32 = 0 }, .{ .i32 = @bitCast(alignment) }, .{ .i32 = @bitCast(size) } };
+        var res = [_]Value{.{ .i32 = 0 }};
+        inst.invoke(self.realloc_name, &args, &res) catch return WasiP2Error.ReallocFailed;
+        const ptr: u32 = @bitCast(res[0].i32);
+        if (ptr == 0 and size != 0) return WasiP2Error.ReallocFailed;
+        return ptr;
+    }
 };
 
-pub const WasiP2Error = error{ NoMemory, OutOfBounds, WriteFailed } ||
+pub const WasiP2Error = error{ NoMemory, OutOfBounds, WriteFailed, NoRealloc, ReallocFailed } ||
     resource_table.Error || Memory.Error;
 
 const Memory = @import("../zwasm/memory.zig").Memory;
@@ -469,6 +487,42 @@ fn p2DescriptorDrop(caller: *Caller, self_handle: u32) WasiP2Error!void {
     _ = try ctx.resources.drop(WasiP2Ctx.DESCRIPTOR_RT, self_handle);
 }
 
+/// The WASI fd of the preopen rooted at host-OS fd `host_fd` (its `.dir`
+/// fd-table slot), or null if not found.
+fn preopenWasiFd(host: *wasi_host.Host, host_fd: std.posix.fd_t) ?wasi_p1.Fd {
+    for (host.fd_table.items, 0..) |slot, i| {
+        if (slot.kind == .dir and slot.host_handle == host_fd) return @intCast(i);
+    }
+    return null;
+}
+
+/// `wasi:filesystem/preopens` `get-directories` (retptr): build a
+/// `list<tuple<own<descriptor>, string>>` of the host's preopened dirs in a
+/// freshly `cabi_realloc`'d backing (each entry mints a descriptor resource
+/// bound to the preopen's WASI fd), then store `(list_ptr, list_len)` at
+/// `retptr`. The list/string allocation is the nested-invoke realloc path.
+fn p2GetDirectories(caller: *Caller, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    const preopens = ctx.host.preopens;
+    const n: u32 = @intCast(preopens.len);
+    // Each list element is a tuple (descriptor handle i32, str_ptr i32, str_len i32) = 12 bytes.
+    const list_ptr: u32 = if (n == 0) 0 else try ctx.reallocGuest(n * 12, 4);
+    for (preopens, 0..) |p, i| {
+        const wfd = preopenWasiFd(ctx.host, p.host_fd) orelse return WasiP2Error.WriteFailed;
+        const handle = try ctx.resources.new(WasiP2Ctx.DESCRIPTOR_RT, wfd);
+        const path_len: u32 = @intCast(p.guest_path.len);
+        const str_ptr = try ctx.reallocGuest(path_len, 1);
+        @memcpy(mem.sliceAt(str_ptr, path_len) catch return WasiP2Error.OutOfBounds, p.guest_path);
+        const tup = list_ptr + @as(u32, @intCast(i)) * 12;
+        try mem.write(tup, handle);
+        try mem.write(tup + 4, str_ptr);
+        try mem.write(tup + 8, path_len);
+    }
+    try mem.write(retptr, list_ptr);
+    try mem.write(retptr + 4, n);
+}
+
 /// Classify a host-wasi core-instance export (a core-func index) by its
 /// COMPONENT interface — resolve a `canon lower` back to its imported interface
 /// + func and run it through `wasi/adapter`, so trampoline selection does NOT
@@ -499,6 +553,7 @@ fn defineClassifiedFunc(lk: *Linker, module: []const u8, name: []const u8, op: a
         .out_stream_drop => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!void, p2OutStreamDrop),
         .fs_descriptor_write => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32, u32, u64, u32) WasiP2Error!void, p2DescriptorWrite),
         .fs_descriptor_drop => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!void, p2DescriptorDrop),
+        .fs_get_directories => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!void, p2GetDirectories),
         // Classified but not yet trampolined (stdin/exit/clocks/random + the rest
         // of the fs descriptor subset) — honest hard error, no silent skip. These
         // land as their own D2 chunks once a fixture exercises each.
@@ -515,7 +570,6 @@ fn defineClassifiedFunc(lk: *Linker, module: []const u8, name: []const u8, op: a
         .fs_descriptor_sync,
         .fs_descriptor_stat,
         .fs_descriptor_get_type,
-        .fs_get_directories,
         => return error.UnsupportedWasiP2Op,
     }
 }
@@ -1139,6 +1193,49 @@ test "D2: a WASI-P2 component prints to STDERR via get-stderr (fd 2 stream)" {
     try runWasiP2Main(&eng, testing.allocator, bytes, &host);
     try testing.expectEqualStrings("oops\n", cap_err.items); // wrote to fd 2
     try testing.expectEqualStrings("", cap_out.items); // NOT stdout
+}
+
+test "D2: WASI-P2 get-directories returns a preopen descriptor list (realloc from trampoline)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+    host.io = io;
+    const dirfd = try host.addPreopen(tmp.dir.handle, "/sandbox");
+
+    const core_bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/get_directories_core.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(core_bytes);
+    var mod = try eng.compile(core_bytes);
+    defer mod.deinit();
+
+    var ctx = try WasiP2Ctx.init(testing.allocator, &host);
+    defer ctx.deinit();
+
+    var lk = eng.linker();
+    defer lk.deinit();
+    try lk.defineFuncCtx("fs", "get-directories", &ctx, fn (*Caller, u32) WasiP2Error!void, p2GetDirectories);
+
+    var inst = try lk.instantiate(&mod);
+    defer inst.deinit();
+    ctx.realloc_instance = &inst; // allocate the return area via the guest's cabi_realloc (nested invoke)
+
+    var res = [_]Value{.{ .i32 = 0 }};
+    try inst.invoke("run", &.{}, &res);
+    try testing.expectEqual(@as(i32, 1008), res[0].i32); // list_len=1 ×1000 + str_len=8
+
+    // The minted descriptor handle (tuple[0]) resolves to the preopen dir fd; the path string round-trips.
+    const mem = inst.memory().?;
+    const list_ptr = try mem.read(u32, 16);
+    const handle = try mem.read(u32, list_ptr);
+    const str_ptr = try mem.read(u32, list_ptr + 4);
+    try testing.expectEqual(dirfd, @as(wasi_p1.Fd, @intCast(try ctx.resources.rep(WasiP2Ctx.DESCRIPTOR_RT, handle))));
+    try testing.expectEqualStrings("/sandbox", try mem.sliceAt(str_ptr, 8));
 }
 
 test "D2: WASI-P2 descriptor.write writes a file via the descriptor resource (fd from handle)" {
