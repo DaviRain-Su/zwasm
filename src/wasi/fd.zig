@@ -178,19 +178,25 @@ pub fn fdRead(
         const buf_len = readU32LE(mem, entry_off + 4) orelse return .fault;
         const dst = sliceMem(mem, buf, buf_len) orelse return .fault;
 
-        if (host.stdin_bytes) |src| {
-            const remaining = src.len - host.stdin_pos;
-            const n = @min(remaining, dst.len);
-            if (n == 0) break;
-            @memcpy(dst[0..n], src[host.stdin_pos .. host.stdin_pos + n]);
-            host.stdin_pos += n;
-            total += @intCast(n);
-            if (n < dst.len) break; // short read; spec lets us stop
-        } else {
-            break; // no stdin source = EOF
-        }
+        const n = readStdinSlice(host, dst);
+        if (n == 0) break; // EOF or no stdin source
+        total += @intCast(n);
+        if (n < dst.len) break; // short read; spec lets us stop
     }
     return writeU32LE(mem, nread_ptr, total);
+}
+
+/// Read up to `dest.len` bytes from `host.stdin_bytes` into `dest`, advancing
+/// `stdin_pos`. Returns the count read (0 = EOF / no source). Factored from
+/// `fdRead` so the WASI-P2 `input-stream.read` trampoline reuses the same source
+/// (it reads into a cabi_realloc'd guest buffer rather than iovecs).
+pub fn readStdinSlice(host: *Host, dest: []u8) usize {
+    const src = host.stdin_bytes orelse return 0;
+    const remaining = src.len - host.stdin_pos;
+    const n = @min(remaining, dest.len);
+    @memcpy(dest[0..n], src[host.stdin_pos .. host.stdin_pos + n]);
+    host.stdin_pos += n;
+    return n;
 }
 
 /// Scatter-read a file fd into the iovecs at the file's cursor via

@@ -407,6 +407,7 @@ pub const WasiP2Ctx = struct {
     /// Resource-type ids for the P2 resources the host models.
     const OUTPUT_STREAM_RT: u32 = 1;
     const DESCRIPTOR_RT: u32 = 2;
+    const INPUT_STREAM_RT: u32 = 3;
 
     pub fn init(alloc: Allocator, host: *wasi_host.Host) !WasiP2Ctx {
         return .{ .host = host, .resources = try resource_table.ResourceTable.init(alloc) };
@@ -480,6 +481,34 @@ fn p2WallNow(caller: *Caller, retptr: u32) WasiP2Error!void {
         @panic("WASI-P2 wall-clock.now: host clock unavailable (host.io unset)");
     try mem.write(retptr, @as(u64, ns / std.time.ns_per_s));
     try mem.write(retptr + 8, @as(u32, @intCast(ns % std.time.ns_per_s)));
+}
+
+/// `wasi:cli/stdin` `get-stdin` → mint an input-stream handle bound to fd 0.
+fn p2GetStdin(caller: *Caller) WasiP2Error!u32 {
+    const ctx = caller.data(WasiP2Ctx);
+    return ctx.resources.new(WasiP2Ctx.INPUT_STREAM_RT, 0);
+}
+
+/// `wasi:io/streams` `[method]input-stream.read(self, len) -> result<list<u8>,
+/// stream-error>` (self, len, retptr): read up to `len` bytes from the fd bound
+/// to `self` (stdin) into a cabi_realloc'd buffer. Writes the `result` at
+/// `retptr`: disc@0 (0=ok / 1=err), and on ok (data_ptr@4, len@8); on EOF the
+/// stream is closed → err(stream-error::closed) (err disc@0=1, variant case@4=1).
+fn p2InStreamRead(caller: *Caller, self_handle: u32, len: u64, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    _ = try ctx.resources.rep(WasiP2Ctx.INPUT_STREAM_RT, self_handle); // validate handle (rep = fd 0)
+    const n: u32 = @intCast(@min(len, std.math.maxInt(u32)));
+    const data_ptr: u32 = if (n == 0) 0 else try ctx.reallocGuest(n, 1);
+    const got: u32 = if (n == 0) 0 else @intCast(wasi_fd.readStdinSlice(ctx.host, mem.sliceAt(data_ptr, n) catch return WasiP2Error.OutOfBounds));
+    if (got == 0 and n != 0) {
+        try mem.write(retptr, @as(u8, 1)); // err disc
+        try mem.write(retptr + 4, @as(u8, 1)); // stream-error::closed (variant case 1)
+    } else {
+        try mem.write(retptr, @as(u8, 0)); // ok disc
+        try mem.write(retptr + 4, data_ptr); // list data ptr
+        try mem.write(retptr + 8, got); // list length
+    }
 }
 
 /// `wasi:random/random` `get-random-bytes(len: u64) -> list<u8>`. Allocates
@@ -650,7 +679,9 @@ fn defineClassifiedFunc(lk: *Linker, module: []const u8, name: []const u8, op: a
         // Any classified `canon resource.drop` (classifyCoreExport returns
         // out_stream_drop for all) routes to the generic drop — correct for both
         // output-stream and descriptor handles (both rep = a P1 fd).
-        .out_stream_drop, .fs_descriptor_drop => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!void, p2ResourceDrop),
+        .out_stream_drop, .fs_descriptor_drop, .in_stream_drop => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!void, p2ResourceDrop),
+        .cli_get_stdin => try lk.defineFuncCtx(module, name, ctx, fn (*Caller) WasiP2Error!u32, p2GetStdin),
+        .in_stream_read, .in_stream_blocking_read => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u64, u32) WasiP2Error!void, p2InStreamRead),
         .fs_descriptor_write => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32, u32, u64, u32) WasiP2Error!void, p2DescriptorWrite),
         .fs_get_directories => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!void, p2GetDirectories),
         .fs_descriptor_open_at => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32, u32, u32, u32, u32, u32) WasiP2Error!void, p2DescriptorOpenAt),
@@ -658,14 +689,10 @@ fn defineClassifiedFunc(lk: *Linker, module: []const u8, name: []const u8, op: a
         .clocks_monotonic_now => try lk.defineFuncCtx(module, name, ctx, fn (*Caller) WasiP2Error!i64, p2MonotonicNow),
         .clocks_wall_now => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!void, p2WallNow),
         .random_get_bytes => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u64, u32) WasiP2Error!void, p2RandomGetBytes),
-        // Classified but not yet trampolined (stdin input-stream + the rest of the
+        // Classified but not yet trampolined (out-stream flush + the rest of the
         // fs descriptor subset) — honest hard error, no silent skip. These land as
         // their own D3 chunks once a fixture exercises each.
-        .cli_get_stdin,
         .out_stream_blocking_flush,
-        .in_stream_read,
-        .in_stream_blocking_read,
-        .in_stream_drop,
         .fs_descriptor_read,
         .fs_descriptor_sync,
         .fs_descriptor_stat,
@@ -1381,6 +1408,26 @@ test "D3: a WASI-P2 component calls random.get-random-bytes(16) — list realloc
     // run() calls get-random-bytes(16) — the trampoline allocates 16 bytes via the
     // guest cabi_realloc, fills with secure random, returns (ptr,len); run ORs the
     // bytes and exit(0) iff len==16 and some byte is nonzero.
+    try runWasiP2Main(&eng, testing.allocator, bytes, &host);
+    try testing.expectEqual(@as(u32, 0), host.exit_code.?);
+}
+
+test "D3: a WASI-P2 component reads stdin via get-stdin+input-stream.read — echo check → exit 0" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/wasi_p2_stdin.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+    host.io = io;
+    host.stdin_bytes = "zwasm";
+
+    // run() mints an input-stream (get-stdin), read(16) returns ok(list) with the
+    // 5 fed bytes via cabi_realloc; run checks len==5 + 'z'../'m' → exit 0.
     try runWasiP2Main(&eng, testing.allocator, bytes, &host);
     try testing.expectEqual(@as(u32, 0), host.exit_code.?);
 }
