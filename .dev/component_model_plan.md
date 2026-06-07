@@ -77,7 +77,7 @@ design forks. Update this doc's `[x]` + handover NEXT each chunk.
   `Binary.md` §type, v1 `component.zig`. **Red**: a component declaring an
   imported+exported func type round-trips to the type model. **Exit**: type
   index space resolves.
-- [ ] **A3 — WIT lexer + parser (primitive subset).** `wit/lexer.zig` +
+- [x] **A3 — WIT lexer + parser (primitive subset).** `wit/lexer.zig` +
   `wit/parser.zig`: tokenize + parse package/world/interface/func with
   primitive params/results (no resources/handles yet). **Refs**: spec `WIT.md`;
   v1 `wit_parser.zig`; v1 `src/testdata/10_greet.wit`/`11_math.wit`. **Red**:
