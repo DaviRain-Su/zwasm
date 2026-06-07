@@ -40,15 +40,16 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
 
 - **Bundle-ID**: CM-C2 (multi-component linking + index-space resolution)
 - **Cycles-remaining**: ~2
-- **Continuity-memo**: C2-1 @a105289f (core-instance/alias decode) · C2-2 @46745b1e (export resolution, D-304 closed) ·
-  **C2-3a @0f09a46c** (component-instance §5 decode → `TypeInfo.component_instances`: instantiate(componentidx, with-args)
-  | inline exports). NEXT = **C2-3b (bundle EXIT)** = the multi-component graph linking + run. Child component bytes (§4)
-  are already section bodies in `decode.Component.sections` (`.component`) — recursively `decode.decode` them. The
-  `instance` instantiate's `with` args (name → sortidx) satisfy a child's IMPORT from the parent's index spaces; wire
-  them. Red = a 2-component graph (A imports B's interface) runs via `api/component.zig`. **First step: generate a REAL
-  2-component fixture** (subagent + wasm-tools: component B exports an interface, component A imports it + re-exports a
-  func that calls B; `wasm-tools component new`/compose). Inspect its §4/§5/alias structure, then wire the linking in
-  `api/component.zig` (instantiate children, route imports). Likely large — may split fixture / linking.
+- **Continuity-memo**: C2-1 @a105289f · C2-2 @46745b1e (D-304 closed) · C2-3a @0f09a46c (component-instance §5) ·
+  **C2-3b-1 @2dfe3f71** (real 2-component fixture `test/component/adder_graph.wasm` decodes: 2 nested §4 components,
+  2 §5 instances + cross-wiring, recursive child decode). NEXT = **C2-3b-2 (bundle EXIT)** = instantiate+link+RUN the
+  graph: recursively decode each §4 child component → instantiate each child's core module; evaluate the §5 instance
+  graph IN ORDER (instantiate B → B has core "adder"; instantiate A `with "adder"=B's adder`); A's core module IMPORTS
+  `"deps" "adder"` so wire it via the facade **Linker.defineFunc** to forward to B's "adder". KEY CHALLENGE: the host
+  func must capture B's `*Instance` but `Linker.defineFunc(module,name,comptime Sig,fn_ptr)` takes a bare fn pointer —
+  check `src/zwasm/linker.zig` for a context/`Caller`/closure mechanism (the wasi host injection + `Caller.memory()` in
+  zwasm.zig T1.10/T1.12 tests are the precedent). For flat u32 the cross-call is direct (no canon). Red = `add-five(10)`
+  via `api/component.zig` returns 15. Likely 1-2 cycles (Linker wiring is the meat).
 - **Exit-condition**: a 2-component graph (one imports the other's interface) links + runs via `api/component.zig`.
 
 ## Current state
