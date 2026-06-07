@@ -505,6 +505,38 @@ fn p2Poll(caller: *Caller, in_ptr: u32, in_len: u32, retptr: u32) WasiP2Error!vo
     try mem.write(retptr + 4, in_len); // list length
 }
 
+// ---- wasi:cli/environment + terminal-* + output-stream.check-write (E2) ----
+//
+// A sandboxed, non-tty, always-writable host. get-environment / get-arguments
+// return the empty list; initial-cwd + get-terminal-* return `none`;
+// check-write reports a large byte permit so the guest proceeds to write.
+
+/// `wasi:cli/environment` `get-environment`/`get-arguments` → the empty list:
+/// write `(data_ptr=0, len=0)` to the return area at `retptr`.
+fn p2EmptyList(caller: *Caller, retptr: u32) WasiP2Error!void {
+    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    try mem.write(retptr, @as(u32, 0)); // list data ptr
+    try mem.write(retptr + 4, @as(u32, 0)); // list length
+}
+
+/// An `option<...>` host query with no value (`initial-cwd`, `get-terminal-*`)
+/// → `none`: write the option discriminant 0 at `retptr`.
+fn p2ReturnNone(caller: *Caller, retptr: u32) WasiP2Error!void {
+    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    try mem.write(retptr, @as(u8, 0)); // option disc: none
+}
+
+/// `wasi:io/streams` `[method]output-stream.check-write` (self, retptr) ->
+/// `result<u64, stream-error>`: an always-writable sync host reports a large
+/// permit. Writes disc 0 (ok) + the u64 permit at `retptr+8` (align 8).
+fn p2CheckWrite(caller: *Caller, self_handle: u32, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    _ = try ctx.resources.rep(WasiP2Ctx.OUTPUT_STREAM_RT, self_handle); // validate handle
+    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    try mem.write(retptr, @as(u8, 0)); // result disc: ok
+    try mem.write(retptr + 8, @as(u64, 4096)); // bytes the guest may write now
+}
+
 /// Classify a host-wasi core-instance export (a core-func index) by its
 /// COMPONENT interface — resolve a `canon lower` back to its imported interface
 /// + func and run it through `wasi/adapter`, so trampoline selection does NOT
@@ -555,6 +587,9 @@ fn defineClassifiedFunc(lk: *Linker, module: []const u8, name: []const u8, op: a
         .poll_poll => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32, u32) WasiP2Error!void, p2Poll),
         .in_stream_subscribe, .out_stream_subscribe => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!u32, p2Subscribe),
         .clocks_subscribe_instant, .clocks_subscribe_duration => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u64) WasiP2Error!u32, p2SubscribeClock),
+        .cli_get_environment, .cli_get_arguments => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!void, p2EmptyList),
+        .cli_initial_cwd, .cli_get_terminal_stdin, .cli_get_terminal_stdout, .cli_get_terminal_stderr => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!void, p2ReturnNone),
+        .out_stream_check_write => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32) WasiP2Error!void, p2CheckWrite),
     }
 }
 

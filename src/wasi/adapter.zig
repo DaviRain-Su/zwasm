@@ -137,6 +137,18 @@ pub const P2Op = enum {
     out_stream_subscribe,
     clocks_subscribe_instant,
     clocks_subscribe_duration,
+    // wasi:cli/environment — a sandboxed host reports an empty environment /
+    // argv and no initial cwd.
+    cli_get_environment,
+    cli_get_arguments,
+    cli_initial_cwd,
+    // wasi:cli/terminal-* — a non-tty host returns `none` (no terminal).
+    cli_get_terminal_stdin,
+    cli_get_terminal_stdout,
+    cli_get_terminal_stderr,
+    // wasi:io/streams — output-stream.check-write: an always-writable sync host
+    // returns a large byte permit.
+    out_stream_check_write,
 };
 
 /// What P1 facility a `P2Op` ultimately drives (so the D1-2 integration maps
@@ -199,6 +211,13 @@ pub fn p1Target(op: P2Op) P1Target {
         .out_stream_subscribe,
         .clocks_subscribe_instant,
         .clocks_subscribe_duration,
+        .cli_get_environment,
+        .cli_get_arguments,
+        .cli_initial_cwd,
+        .cli_get_terminal_stdin,
+        .cli_get_terminal_stdout,
+        .cli_get_terminal_stderr,
+        .out_stream_check_write,
         => .noop,
     };
 }
@@ -245,6 +264,13 @@ const table = [_]Entry{
     .{ .iface = "wasi:io/streams", .func = "[method]output-stream.subscribe", .op = .out_stream_subscribe },
     .{ .iface = "wasi:clocks/monotonic-clock", .func = "subscribe-instant", .op = .clocks_subscribe_instant },
     .{ .iface = "wasi:clocks/monotonic-clock", .func = "subscribe-duration", .op = .clocks_subscribe_duration },
+    .{ .iface = "wasi:cli/environment", .func = "get-environment", .op = .cli_get_environment },
+    .{ .iface = "wasi:cli/environment", .func = "get-arguments", .op = .cli_get_arguments },
+    .{ .iface = "wasi:cli/environment", .func = "initial-cwd", .op = .cli_initial_cwd },
+    .{ .iface = "wasi:cli/terminal-stdin", .func = "get-terminal-stdin", .op = .cli_get_terminal_stdin },
+    .{ .iface = "wasi:cli/terminal-stdout", .func = "get-terminal-stdout", .op = .cli_get_terminal_stdout },
+    .{ .iface = "wasi:cli/terminal-stderr", .func = "get-terminal-stderr", .op = .cli_get_terminal_stderr },
+    .{ .iface = "wasi:io/streams", .func = "[method]output-stream.check-write", .op = .out_stream_check_write },
 };
 
 /// Classify a P2 import `(interface, func)` → the `P2Op` it maps to, or null if
@@ -291,6 +317,14 @@ test "classify: wasi:io/poll + subscribe methods" {
     try testing.expectEqual(P2Op.in_stream_subscribe, classifyImport("wasi:io/streams", "[method]input-stream.subscribe").?);
     try testing.expectEqual(P2Op.clocks_subscribe_duration, classifyImport("wasi:clocks/monotonic-clock", "subscribe-duration").?);
     try testing.expectEqual(P1Target.noop, p1Target(.poll_poll));
+}
+
+test "classify: cli/environment + terminal + check-write (E2)" {
+    try testing.expectEqual(P2Op.cli_get_environment, classifyImport("wasi:cli/environment", "get-environment").?);
+    try testing.expectEqual(P2Op.cli_initial_cwd, classifyImport("wasi:cli/environment", "initial-cwd").?);
+    try testing.expectEqual(P2Op.cli_get_terminal_stdout, classifyImport("wasi:cli/terminal-stdout", "get-terminal-stdout").?);
+    try testing.expectEqual(P2Op.out_stream_check_write, classifyImport("wasi:io/streams", "[method]output-stream.check-write").?);
+    try testing.expectEqual(P1Target.noop, p1Target(.cli_get_environment));
 }
 
 test "D-307: errno → P2 filesystem error-code ordinals" {

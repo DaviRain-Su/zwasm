@@ -1058,6 +1058,24 @@ test "D3-7: a WASI-P2 component drives wasi:io/poll (subscribe + poll + ready/bl
     try runWasiP2Main(&eng, testing.allocator, bytes, &host);
 }
 
+test "E2: WASI-P2 cli/environment + terminal + check-write (sandboxed non-tty host)" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/wasi_p2_cli_env.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+    host.io = io;
+
+    // get-environment/get-arguments empty, initial-cwd + get-terminal-stdout none,
+    // check-write reports a permit. The guest asserts each + traps on mismatch.
+    try runWasiP2Main(&eng, testing.allocator, bytes, &host);
+}
+
 test "D2: WASI-P2 get-directories returns a preopen descriptor list (realloc from trampoline)" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
