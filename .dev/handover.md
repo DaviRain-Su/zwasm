@@ -18,6 +18,22 @@ skip" lesson made a gate. Findings: [`windows_hardening_findings.md`](windows_ha
 user request. A13 strict-3-host merge gate (`gate_merge.sh`) UNCHANGED. **Now resume the CM+WASI-P2 campaign below
 (Phase D3/E).** Loop NEVER idles; **No release/tag EVER** (ADR-0156).
 
+## Active bundle — E2 real Rust wasip2 component (Phase E2)
+
+- **Bundle-ID**: E2-real-rust-component
+- **Cycles-remaining**: ~3
+- **Continuity-memo**: `rustc --target wasm32-wasip2` emits a real component (flake gen shell has the target
+  @THIS-CYCLE). `private/spikes/e2-rust-component/` has the built `hello.component.wasm` + findings README. The
+  gap is wit-bindgen's **shim / fixup-table indirection**: host funcs needing memory/realloc (output-stream.write,
+  get-environment, get-terminal-*) reach `$main` as `.alias` core funcs into the shim `$imports` table —
+  classifyCoreExport (src/api/component_wasi_p2.zig) returns null on `.alias`. Direct lowers already run.
+- **Work**: (1) shim indirect-lowering (populate `$imports` table post-`$main`-instantiate in runWasiP2Main);
+  (2) classifyCoreExport follows `.alias`→shim-export→underlying `canon lower`; (3) trampolines for
+  wasi:cli/environment (empty env/args, none cwd) + terminal-* (none) + io/error (resource+to-debug-string) +
+  output-stream.check-write (large permit).
+- **Exit-condition**: `zwasm run hello.component.wasm` prints "hello from a real rust wasip2 component" + exit 0;
+  then committed as a realworld fixture. (Go/tinygo = follow-on after Rust proves the path.)
+
 ## Active campaign — Component Model + WASI Preview 2 (ADR-0170, user-directed 2026-06-07)
 
 **Goal**: full **wasmtime-equivalent** CM + WASI-P2, the zwasm-v2 way (spec/test-referenced NOT copied;
@@ -59,19 +75,12 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
   **EXIT @85bcb5a5**: `wasi_p2_fs.wasm` runs e2e through `runWasiP2Main` (get-directories → open-at "out.txt" → write
   "DATA42" → drop), file content asserted. Fixture uses minimal WIT flags/enum (zwasm classifies by interface+core-sig,
   so it runs; full real-WASI-type conformance is the Phase E2 toolchain proof).
-- **Phase D3 IN-PROGRESS** (plan §Phase D3; adapter P2Op/classify complete — trampolines at `api/component.zig`
-  `defineClassifiedFunc`). Wiring map: `private/notes/p17-D3-trampoline-map.md`. Done: **D3-1 cli_exit** (procExit;
-  noreturn via `InvokeError.ProcExit`) · **D3-2/3 clocks** monotonic `()->i64` + wall `()->datetime` 12B · **D3-4
-  random_get_bytes** (list via cabi_realloc) · **D3-5 stdin** (INPUT_STREAM_RT; input-stream.read) · **D3-6 fs
-  descriptor completion** @43909eba — `read`(iovec→fdPread)/`sync`/`stat`(canonical descriptor-stat)/`get-type` +
-  `out-stream.blocking-flush`; **D-307 DISCHARGED** @beb887c6 (`adapter.errnoToP2ErrorCode`). Fixtures `wasi_p2_fs_full`
-  + `wasi_p2_fs_err` · **D3-7 wasi:io/poll** @3a128a01 — pollable (POLLABLE_RT) + subscribe + ready/block/poll
-  (synchronous always-ready host); `dropAny` returns the typed handle (skip fd_close for non-fd). Fixture `wasi_p2_poll`.
-- **D-309 DONE** @ccdee2fa — WASI-P2 trampolines + runWasiP2Main extracted to `api/component_wasi_p2.zig` (component.zig
-  1922→1250 LOC; behavior-preserving). New WASI-P2 chunks land in that module.
-- **NEXT = D3-8** = **sockets** (tcp/udp, spike-first) OR **Phase E** (E1 conformance corpus + E2 Rust/Go real-toolchain
-  proof — the wasmtime-equivalent existence proof). Cross-component aggregate → D-305. **D-308**: runWasiP2Main
-  error-cleanup SEGVs on a failed-import wire (unknown-interface error path only).
+- **Phase D3 DONE** (hand-authored-fixture native host; detail in plan §Phase D3). D3-1 exit · D3-2/3 clocks · D3-4
+  random · D3-5 stdin · **D3-6 fs descriptor** @43909eba (read/sync/stat/get-type + flush; **D-307 DISCHARGED**
+  @beb887c6) · **D3-7 wasi:io/poll** @3a128a01 (pollable + subscribe + ready/block/poll). **D-309 DONE** @ccdee2fa —
+  WASI-P2 trampolines extracted to `api/component_wasi_p2.zig` (component.zig 1922→1250).
+- **NOW = E2 bundle above** (real Rust component). Deferred: D3-8 sockets (spike-first), E1 conformance corpus.
+  Cross-component aggregate → D-305. **D-308**: runWasiP2Main error-cleanup SEGVs on a failed-import wire (error path).
 
 ## Current state
 

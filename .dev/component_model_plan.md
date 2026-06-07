@@ -182,10 +182,19 @@ design forks. Update this doc's `[x]` + handover NEXT each chunk.
   `WebAssembly/component-model` + wasm-tools component tests into a runner
   (mirror `test/spec/spec_assert_runner_*`), wired into `test-all`. Track
   pass/skip with truthful reasons (no blanket skips — the D-301 lesson).
-- [ ] **E2 — Rust + Go sample-project proof.** Build a Rust (cargo-component)
-  AND a Go (tinygo + wit-bindgen-go) component on the Mac `nix develop .#gen`
-  host; commit the `.wasm`; run via the zwasm CLI in the realworld runner
-  asserting output. The "CM actually works, cross-toolchain" existence proof.
+- [ ] **E2 — Rust + Go sample-project proof.** **IN PROGRESS (bundle).** Path
+  found: `rustc --target wasm32-wasip2` emits a real component directly (no
+  cargo-component/adapter) — flake `gen` shell gains the wasip2 target. A real
+  Rust `println!` component built + validates (2.4 MB). **Gap (spike
+  `private/spikes/e2-rust-component/README.md`)**: wit-bindgen uses a **shim /
+  fixup-table indirection** for host funcs whose canon-lower needs memory/realloc
+  (output-stream.write, get-environment, get-terminal-*) — they reach `$main` as
+  `.alias` core funcs into the shim's `$imports` table, classifyCoreExport returns
+  null. Direct lowers (exit/get-std*/pollable.block) already work. **Bundle work**:
+  (1) shim indirect-lowering (populate `$imports` table post-main-instantiate);
+  (2) classifyCoreExport follows `.alias`→shim→lower; (3) missing interfaces
+  wasi:cli/environment + terminal-* + io/error + output-stream.check-write.
+  Exit: `zwasm run hello.component.wasm` prints its line + exit 0. Then add Go (tinygo).
 - [ ] **E3 — WASI-P2 conformance + edge cases.** P2 test corpus + boundary
   fixtures; close the gap to wasmtime where "beyond is satisfiable" (ADR-0170).
 

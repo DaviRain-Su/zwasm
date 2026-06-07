@@ -34,7 +34,9 @@
         # `.minimal` = rustc + cargo + rust-std only (no docs/clippy/rustfmt,
         # which build from source and aren't needed to compile wasm fixtures).
         rustWasm = genPkgs.rust-bin.stable.latest.minimal.override {
-          targets = [ "wasm32-unknown-unknown" "wasm32-wasip1" ];
+          # wasip2 emits a real Component-Model component directly (no
+          # cargo-component / adapter) — the Phase E2 real-component proof.
+          targets = [ "wasm32-unknown-unknown" "wasm32-wasip1" "wasm32-wasip2" ];
         };
         # Native rustc (host target only, no wasm-std) for the §13.5
         # `rust_host` embedder example — a Rust program linking `libzwasm.a`
