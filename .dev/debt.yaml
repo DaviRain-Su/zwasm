@@ -1070,6 +1070,24 @@ entries:
     first_raised: "2026-06-07"
     last_reviewed: "2026-06-07"
     refs: src/api/component.zig (runWasiP2Main defer cleanup; defineClassifiedFunc error arm); .dev/component_model_plan.md (Phase D3)
+  - id: "D-310"
+    layer: "code"
+    status: "now"
+    description: |-
+      now (E2 blocker). An imported HOST/WASI func (defineFuncCtx binding) is NOT representable as a funcref:
+      `runtime/instance/instantiate.zig:~1330` leaves a PLACEHOLDER FuncEntity for the `.wasi` import source
+      (`entities[i] = {runtime: rt, func_idx: i}` with no real sig/typeidx) where `.cross_module` sets a proper one.
+      So when a core `elem` segment stores an imported host func into a table and the guest `call_indirect`s it, the
+      FuncEntity dispatches to `rt.funcs[i]` with a default `()->()` sig → IndirectCallTypeMismatch (confirmed: shim
+      table slot 0, callee p=0 r=0 vs expected p=2 r=0). Blocks E2: wit-bindgen's `$fixup` elem fills the shim
+      `$imports` table with the memory-needing host lowers that the shim trampolines call_indirect. Fix: the `.wasi`
+      arm must set the FuncEntity's typeidx/raw_typeidx from the import's declared sig + ensure `funcs[i].sig` carries
+      it, so call_indirect → invoke routes to `host_calls[i]` (the direct-call host-dispatch path already works; only
+      the funcref/table path is broken). Add a focused fixture: a core module importing a host func, placing it in a
+      table via elem, and call_indirect-ing it.
+    first_raised: "2026-06-07"
+    last_reviewed: "2026-06-07"
+    refs: src/runtime/instance/instantiate.zig (~1330 .wasi import arm; func_entities); src/interp/mvp.zig (callIndirectOp sigEq); .dev/decisions/0175_general_component_instantiation.md
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.

@@ -537,25 +537,6 @@ fn p2CheckWrite(caller: *Caller, self_handle: u32, retptr: u32) WasiP2Error!void
     try mem.write(retptr + 8, @as(u64, 4096)); // bytes the guest may write now
 }
 
-/// Classify a host-wasi core-instance export (a core-func index) by its
-/// COMPONENT interface — resolve a `canon lower` back to its imported interface
-/// + func and run it through `wasi/adapter`, so trampoline selection does NOT
-/// depend on the core module's hand-chosen import names. Returns null when the
-/// export is not a host-classifiable WASI op.
-fn classifyCoreExport(info: *const ctypes.TypeInfo, core_func_idx: u32) ?adapter.P2Op {
-    return switch (info.coreFunc(core_func_idx) orelse return null) {
-        .lower => |component_func| blk: {
-            const ref = info.resolveComponentImport(component_func) orelse break :blk null;
-            break :blk adapter.classifyImport(ref.interface, ref.func);
-        },
-        // A `canon resource.drop` core func: the stdio subset drops the
-        // output-stream resource. Per-resource-type classification (fs
-        // descriptors etc.) generalizes in a later D2 chunk.
-        .resource_drop => .out_stream_drop,
-        else => null,
-    };
-}
-
 /// Bind the trampoline for `op` under the core import `name` in namespace
 /// `module`. The name is whatever the core module imports; the trampoline is
 /// chosen by the classified `op`, not by the name.
@@ -624,29 +605,110 @@ fn firstLiftCoreExport(info: *const ctypes.TypeInfo) ?ctypes.TypeInfo.CoreExport
 /// N-interface, adapter-classified wiring (resolve each `.lower` → its
 /// component import → `adapter.classifyImport` → the matching trampoline, and
 /// arbitrary cross-instance funcs) is the D2/D3 follow-up.
+// ============================================================
+// General component instantiation engine (ADR-0175)
+// ============================================================
+//
+// A component's core-instance index space is built in definition order
+// (each `.instantiate`'s `with` args reference earlier instances). A guest
+// instance is a real `*Instance`; a synthetic (`.inline_exports`) instance is a
+// name→`Def` table where `Def` is a host WASI trampoline, a re-exported guest
+// func, or a re-exported guest table. This subsumes the hand-authored fixtures
+// (main + libc + host-wasi inline_exports) AND real wit-bindgen output (a
+// `$shim` guest module exporting `call_indirect` trampolines + a table, the
+// memory-needing lowers materialised as host funcs, and a `$fixup` whose active
+// `elem` fills the shim table — built like any other instance).
+
+/// What a synthetic instance's export resolves to when poured into an importer.
+const Def = union(enum) {
+    host_op: adapter.P2Op,
+    guest_func: struct { inst: *Instance, name: []const u8 },
+    guest_table: struct { inst: *Instance, name: []const u8 },
+};
+const SynthExport = struct { name: []const u8, def: Def };
+const Built = union(enum) { guest: *Instance, synthetic: []const SynthExport };
+
+/// Resolve one `core:inlineexport` to the `Def` an importer should bind, or
+/// null when it is not a host-relevant export (skipped). `built` holds the
+/// already-constructed earlier instances (aliases only reference those).
+fn synthDef(info: *const ctypes.TypeInfo, built: []const ?Built, ex: ctypes.CoreInlineExport) !?Def {
+    switch (ex.sort) {
+        .func => switch (info.coreFunc(ex.index) orelse return null) {
+            .lower => |cfn| {
+                const ref = info.resolveComponentImport(cfn) orelse return null;
+                const op = adapter.classifyImport(ref.interface, ref.func) orelse return error.UnsupportedWasiImport;
+                return .{ .host_op = op };
+            },
+            // Any classified `canon resource.drop` routes to the generic drop.
+            .resource_drop => return .{ .host_op = .out_stream_drop },
+            .alias => |t| switch (t) {
+                .core_export => |ce| {
+                    const prov = built[ce.instance] orelse return error.ImportUnsatisfied;
+                    switch (prov) {
+                        .guest => |gi| return .{ .guest_func = .{ .inst = gi, .name = ce.name } },
+                        .synthetic => |se| {
+                            for (se) |e| if (std.mem.eql(u8, e.name, ce.name)) return e.def;
+                            return null;
+                        },
+                    }
+                },
+                else => return null,
+            },
+            else => return null,
+        },
+        .table => {
+            const ref = info.resolveCoreTableExport(ex.index) orelse return null;
+            const prov = built[ref.instance] orelse return error.ImportUnsatisfied;
+            return switch (prov) {
+                .guest => |gi| .{ .guest_table = .{ .inst = gi, .name = ref.name } },
+                .synthetic => null,
+            };
+        },
+        else => return null, // memory/global inline exports: not yet needed
+    }
+}
+
+/// Pour one synthetic export into `lk` under namespace `ns` as import `e.name`.
+fn defineSynth(lk: *Linker, ns: []const u8, e: SynthExport, ctx: *WasiP2Ctx) !void {
+    switch (e.def) {
+        .host_op => |op| try defineClassifiedFunc(lk, ns, e.name, op, ctx),
+        .guest_func => |g| try lk.defineCrossModuleFunc(ns, e.name, g.inst, g.name),
+        .guest_table => |g| {
+            const rt = g.inst.handle.runtime orelse return error.ImportUnsatisfied;
+            for (g.inst.handle.exports_storage) |exp| {
+                if (exp.kind == .table and std.mem.eql(u8, exp.name, g.name)) {
+                    try lk.defineTable(ns, e.name, rt.tables[exp.idx]);
+                    return;
+                }
+            }
+            return error.ImportUnsatisfied;
+        },
+    }
+}
+
+/// Run a single-component WASI-P2 program end-to-end. Decodes the component,
+/// builds every core instance in definition order (ADR-0175 general engine),
+/// then invokes the lowered `run`. Captured output lands in `host`.
 pub fn runWasiP2Main(engine: *Engine, alloc: Allocator, bytes: []const u8, host: *wasi_host.Host) anyerror!void {
     var decoded = try decode.decode(alloc, bytes);
     defer decoded.deinit(alloc);
     var info = try ctypes.decodeTypeInfo(alloc, &decoded);
     defer info.deinit();
 
-    // Main core instance + its `run` export: the canon lift → core-func alias.
     const run_ref = firstLiftCoreExport(&info) orelse return error.NoRunExport;
     const cis = info.core_instances.items;
     if (run_ref.instance >= cis.len) return error.NoRunExport;
-    const m_inst = switch (cis[run_ref.instance]) {
-        .instantiate => |it| it,
-        .inline_exports => return error.NoRunExport,
-    };
 
     var ctx = try WasiP2Ctx.init(alloc, host);
     defer ctx.deinit();
 
-    // Heap-stable holders (instances reference each other; a Linker must
-    // outlive its instance — file-header lifetime contract).
+    // Heap-stable holders (a Linker must outlive its instance; instances
+    // reference each other). A synthetic-export arena outlives the build loop.
     var modules: std.ArrayList(*Module) = .empty;
     var instances: std.ArrayList(*Instance) = .empty;
     var linkers: std.ArrayList(*Linker) = .empty;
+    var synth_arena = std.heap.ArenaAllocator.init(alloc);
+    defer synth_arena.deinit();
     defer {
         for (instances.items) |p| {
             p.deinit();
@@ -665,87 +727,63 @@ pub fn runWasiP2Main(engine: *Engine, alloc: Allocator, bytes: []const u8, host:
         modules.deinit(alloc);
     }
 
-    // Compile $M and resolve its imports against the `with` args.
-    const m_bytes = nthCoreModule(&decoded, m_inst.module) orelse return error.NoCoreModule;
-    const m_mod = try alloc.create(Module);
-    m_mod.* = try engine.compile(m_bytes);
-    try modules.append(alloc, m_mod);
-    var m_imports = try m_mod.imports(alloc);
-    defer m_imports.deinit();
+    const built = try alloc.alloc(?Built, cis.len);
+    defer alloc.free(built);
+    @memset(built, null);
 
-    const lk = try alloc.create(Linker);
-    lk.* = engine.linker();
-    try linkers.append(alloc, lk);
+    for (cis, 0..) |ci, i| {
+        built[i] = switch (ci) {
+            .inline_exports => |exps| blk: {
+                const list = try synth_arena.allocator().alloc(SynthExport, exps.len);
+                var n: usize = 0;
+                for (exps) |ex| {
+                    const def = (try synthDef(&info, built, ex)) orelse continue;
+                    list[n] = .{ .name = ex.name, .def = def };
+                    n += 1;
+                }
+                break :blk .{ .synthetic = list[0..n] };
+            },
+            .instantiate => |it| blk: {
+                const mb = nthCoreModule(&decoded, it.module) orelse return error.NoCoreModule;
+                const mod = try alloc.create(Module);
+                mod.* = try engine.compile(mb);
+                try modules.append(alloc, mod);
 
-    // Cache sub-instances (e.g. $libc) by core-instance index so a namespace
-    // referenced by several imports instantiates once; track host-wasi
-    // namespaces already wired so `defineWasiP2Io` runs once each.
-    var sub_cache: std.ArrayList(struct { idx: u32, inst: *Instance }) = .empty;
-    defer sub_cache.deinit(alloc);
-    var wired: std.ArrayList([]const u8) = .empty;
-    defer wired.deinit(alloc);
+                const lk = try alloc.create(Linker);
+                lk.* = engine.linker();
+                try linkers.append(alloc, lk);
 
-    for (m_imports.items) |imp| {
-        const arg = for (m_inst.args) |a| {
-            if (std.mem.eql(u8, a.name, imp.module)) break a;
-        } else return error.ImportUnsatisfied;
-        if (arg.instance >= cis.len) return error.ImportUnsatisfied;
-
-        switch (cis[arg.instance]) {
-            // Host-wasi namespace: the supplying instance re-exports
-            // canon-lowered / resource-builtin core funcs the host implements.
-            // Classify each by its COMPONENT interface and bind the matching
-            // trampoline under the core import name (name-independent wiring).
-            .inline_exports => |exps| {
-                const already = for (wired.items) |w| {
-                    if (std.mem.eql(u8, w, imp.module)) break true;
-                } else false;
-                if (!already) {
-                    for (exps) |ex| {
-                        if (ex.sort != .func) continue;
-                        const op = classifyCoreExport(&info, ex.index) orelse return error.UnsupportedWasiImport;
-                        try defineClassifiedFunc(lk, imp.module, ex.name, op, &ctx);
+                // Pour each `with` argument's instance into the linker under its
+                // namespace, satisfying this module's imports.
+                for (it.args) |arg| {
+                    if (arg.instance >= cis.len) return error.ImportUnsatisfied;
+                    const provider = built[arg.instance] orelse return error.ImportUnsatisfied;
+                    switch (provider) {
+                        .guest => |gi| try lk.defineInstance(arg.name, gi),
+                        .synthetic => |se| for (se) |e| try defineSynth(lk, arg.name, e, &ctx),
                     }
-                    try wired.append(alloc, imp.module);
                 }
+
+                const gi = try alloc.create(Instance);
+                gi.* = try lk.instantiate(mod);
+                try instances.append(alloc, gi);
+                // The instance exporting cabi_realloc is the list/string
+                // return-area allocator the trampolines call via nested invoke.
+                if (ctx.realloc_instance == null and instanceExportsFunc(gi, ctx.realloc_name))
+                    ctx.realloc_instance = gi;
+                break :blk .{ .guest = gi };
             },
-            // A real sub-module (e.g. $libc): instantiate once + alias its
-            // export (memory) cross-instance into $M.
-            .instantiate => |sub| {
-                const sub_inst = blk: {
-                    for (sub_cache.items) |e| if (e.idx == arg.instance) break :blk e.inst;
-                    const sb = nthCoreModule(&decoded, sub.module) orelse return error.NoCoreModule;
-                    const sm = try alloc.create(Module);
-                    sm.* = try engine.compile(sb);
-                    try modules.append(alloc, sm);
-                    const si = try alloc.create(Instance);
-                    si.* = try sm.instantiate(.{});
-                    try instances.append(alloc, si);
-                    try sub_cache.append(alloc, .{ .idx = arg.instance, .inst = si });
-                    break :blk si;
-                };
-                if (imp.kind == .memory) {
-                    const rt = sub_inst.handle.runtime orelse return error.ImportUnsatisfied;
-                    try lk.defineMemoryInstance(imp.module, imp.name, rt.memories[0]);
-                }
-                // A sub-instance exporting cabi_realloc is the allocator the fs
-                // list/string return-area trampolines (get-directories/open-at)
-                // call via a nested invoke.
-                if (ctx.realloc_instance == null and instanceExportsFunc(sub_inst, ctx.realloc_name)) {
-                    ctx.realloc_instance = sub_inst;
-                }
-            },
-        }
+        };
     }
 
-    const m = try alloc.create(Instance);
-    m.* = try lk.instantiate(m_mod);
-    try instances.append(alloc, m);
-
+    const main_inst = switch (built[run_ref.instance].?) {
+        .guest => |gi| gi,
+        .synthetic => return error.NoRunExport,
+    };
     var results = [_]Value{.{ .i32 = 0 }};
-    m.invoke(run_ref.name, &.{}, &results) catch |err| {
-        // A guest that called wasi:cli/exit unwinds with ProcExit (noreturn)
-        // after recording host.exit_code — a clean termination, not a failure.
+    main_inst.invoke(run_ref.name, &.{}, &results) catch |err| {
+        // wasi:cli/exit unwinds with ProcExit after recording host.exit_code —
+        // a clean termination, not a failure.
         if (err == error.ProcExit) return;
         return err;
     };
