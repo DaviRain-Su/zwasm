@@ -33,6 +33,25 @@ pub fn validate(info: *const TypeInfo) Error!void {
     for (info.deftypes.items) |dt| {
         try checkDefTypeIndices(dt, type_space_len);
     }
+    try checkCanons(info, type_space_len);
+}
+
+/// Rule 2: bounds-check every index a `canon` definition references against its
+/// index space — `lift` (core-func + component-func type), `lower` (component
+/// func), and the resource builtins (type). The core-/component-func lists ARE
+/// their index spaces (every minting form appends), so `.items.len` is exact
+/// here (unlike `deftypes.len` for the type space — see rule 1).
+fn checkCanons(info: *const TypeInfo, type_space_len: u32) Error!void {
+    const core_func_len: u32 = @intCast(info.core_funcs.items.len);
+    const comp_func_len: u32 = @intCast(info.component_funcs.items.len);
+    for (info.canons.items) |c| switch (c) {
+        .lift => |l| {
+            if (l.core_func >= core_func_len) return Error.InvalidCanon;
+            if (l.type_index >= type_space_len) return Error.InvalidTypeIndex;
+        },
+        .lower => |l| if (l.func >= comp_func_len) return Error.InvalidCanon,
+        .resource_new, .resource_drop, .resource_rep => |t| if (t >= type_space_len) return Error.InvalidTypeIndex,
+    };
 }
 
 /// Rule 1: bounds-check every type-index a top-level deftype references against

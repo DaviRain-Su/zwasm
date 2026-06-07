@@ -1,0 +1,2 @@
+# Official corpus rule: "function index out of bounds" (ADR-0176 validator rule 2: Canon index bounds).
+assert_invalid test/spec/component-model-assert/canon_index_oob/oob.wasm
