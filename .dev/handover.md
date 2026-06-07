@@ -40,14 +40,15 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
 
 - **Bundle-ID**: CM-C2 (multi-component linking + index-space resolution)
 - **Cycles-remaining**: ~2
-- **Continuity-memo**: C2-1 @a105289f (core-instance §2 + alias §6 decode) + **C2-2 @46745b1e (D-304 CLOSED)**:
-  `types.resolveCoreFuncExport`/`resolveLiftedFunc` (export → canon-lift → resolved core_func/realloc/post-return) +
-  `api/component.zig` `invokeStringExport(component_export_name, arg)` — the greet component runs via the RESOLVED path,
-  no hard-coded core names. NEXT = **C2-3 (bundle EXIT)** = the multi-component graph: a nested `component` section
-  (decode the child component bytes from section id 4) + an `instance` (component-instance, section id 5) that wires one
-  component's import to another's export, then link + run. Red = a 2-component graph (A imports B's interface) runs via
-  `api/component.zig`. Needs: decode `component` (4) + `instance` (5) sections; build the component/instance index
-  spaces; wire the import→export across instances. May be large — split A=child-component decode, B=instance-graph wiring.
+- **Continuity-memo**: C2-1 @a105289f (core-instance/alias decode) · C2-2 @46745b1e (export resolution, D-304 closed) ·
+  **C2-3a @0f09a46c** (component-instance §5 decode → `TypeInfo.component_instances`: instantiate(componentidx, with-args)
+  | inline exports). NEXT = **C2-3b (bundle EXIT)** = the multi-component graph linking + run. Child component bytes (§4)
+  are already section bodies in `decode.Component.sections` (`.component`) — recursively `decode.decode` them. The
+  `instance` instantiate's `with` args (name → sortidx) satisfy a child's IMPORT from the parent's index spaces; wire
+  them. Red = a 2-component graph (A imports B's interface) runs via `api/component.zig`. **First step: generate a REAL
+  2-component fixture** (subagent + wasm-tools: component B exports an interface, component A imports it + re-exports a
+  func that calls B; `wasm-tools component new`/compose). Inspect its §4/§5/alias structure, then wire the linking in
+  `api/component.zig` (instantiate children, route imports). Likely large — may split fixture / linking.
 - **Exit-condition**: a 2-component graph (one imports the other's interface) links + runs via `api/component.zig`.
 
 ## Current state
