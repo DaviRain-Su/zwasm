@@ -34,6 +34,24 @@ pub fn validate(info: *const TypeInfo) Error!void {
         try checkDefTypeIndices(dt, type_space_len);
     }
     try checkCanons(info, type_space_len);
+    try checkAliases(info);
+}
+
+/// Rule 3: an `alias` of an instance export must name an in-bounds instance.
+/// `core_export` → core-instance space (`core_instances`), `component_export` →
+/// component-instance space (`instance_origins`). Bounds are the final space
+/// size — a gross OOB (the corpus "instance index out of bounds" category) is
+/// caught; definition-order forward-reference refinement + export-name existence
+/// are deferred (a false-negative at worst, never a false-positive). `outer`
+/// aliases need nesting-depth tracking and are deferred likewise.
+fn checkAliases(info: *const TypeInfo) Error!void {
+    const core_inst_len: u32 = @intCast(info.core_instances.items.len);
+    const comp_inst_len: u32 = @intCast(info.instance_origins.items.len);
+    for (info.aliases.items) |al| switch (al.target) {
+        .core_export => |ce| if (ce.instance >= core_inst_len) return Error.InvalidAlias,
+        .component_export => |ce| if (ce.instance >= comp_inst_len) return Error.InvalidAlias,
+        .outer => {}, // needs nesting-depth tracking — deferred rule
+    };
 }
 
 /// Rule 2: bounds-check every index a `canon` definition references against its

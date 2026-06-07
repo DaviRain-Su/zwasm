@@ -1,0 +1,2 @@
+# Official corpus rule: "instance index out of bounds" (ADR-0176 validator rule 3: alias instance-index bounds).
+assert_invalid test/spec/component-model-assert/alias_index_oob/oob.wasm
