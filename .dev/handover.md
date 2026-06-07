@@ -34,12 +34,15 @@ E2 remainder (Go/tinygo cross-toolchain proof) is opportunistic — toolchain-ga
 ## Active bundle
 
 - **Bundle-ID**: E3-CM-validation (ADR-0176)
-- **Cycles-remaining**: ~4 — rules in frequency order: ✅1 type-index bounds · 2 names (kebab-case + valid
-  extern/import names) · 3 outer-alias count + alias-target existence · 4 export-type-validity / index-space bounds.
+- **Cycles-remaining**: ~4 — **NEXT = rule 2 = SEMANTIC index bounds** (func/component/instance index-space + alias
+  target existence + outer-alias count) — pick a rule whose invalid fixture is LEXICALLY valid (numeric OOB), authorable
+  via `wasm-tools parse`. **Name validation (kebab/extern-name) is LAST**: a bad name is rejected by the WIT *text*
+  parser, so its fixture is NOT authorable via `wasm-tools parse` — needs binary extraction from the official `.wast`.
 - **Continuity-memo**: `validate.zig` walks the decoded `TypeInfo` (no re-parse) post-`decodeTypeInfo`, pre-instantiate,
-  at instantiate/instantiateGraph/runWasiP2Main. Runner `assert_invalid`/`assert_malformed` directives decode→typeinfo
-  →validate, expect error. Fixtures: hand-author invalid `.wat` (numeric OOB / bad names) → `wasm-tools parse` (encodes
-  WITHOUT validating) → commit `.wasm` under `test/spec/component-model-assert/<rule>/`. Deferred deep-type = truthful `skip-impl`.
+  at instantiate/instantiateGraph/runWasiP2Main. KEY: bounds-check against the TRUE index-space size, not a list `.len`
+  (rule 1 needed `TypeInfo.type_space_len` = type defs + type aliases + type imports + type exports; `deftypes.len`
+  false-positives on aliased interface types). Runner `assert_invalid`/`assert_malformed` directives decode→typeinfo→
+  validate. Fixtures: numeric-OOB `.wat` → `wasm-tools parse` (encodes WITHOUT validating) → `test/spec/component-model-assert/<rule>/`.
 - **Exit-condition**: structural rule set (1–4) landed, each with ≥1 corpus-derived `assert_invalid` fixture passing in
   `test-component-spec`; deep canonical-ABI / subtyping cases enumerated as `skip-impl` with specific reasons.
 
