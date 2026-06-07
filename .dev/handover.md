@@ -59,19 +59,20 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
   **EXIT @85bcb5a5**: `wasi_p2_fs.wasm` runs e2e through `runWasiP2Main` (get-directories → open-at "out.txt" → write
   "DATA42" → drop), file content asserted. Fixture uses minimal WIT flags/enum (zwasm classifies by interface+core-sig,
   so it runs; full real-WASI-type conformance is the Phase E2 toolchain proof).
-- **NEXT = Phase D3** (plan §Phase D3). **First chunk** (vertical slice, recipe + wiring map in
-  `private/notes/p17-D3-trampoline-map.md`): extend `P2Op`+`classifyImport` (`wasi/adapter.zig`) + the exhaustive
-  `defineClassifiedFunc` switch (`api/component.zig:590`) for **exit `(i32)->()` + monotonic-clock.now `()->i64` +
-  random.get-random-u64 `()->i64`** (scalar free-funcs → existing P1 `procExit`/`clockTimeGet`/`randomGet`); hand-author
-  a component fixture mirroring `test/component/wasi_p2_fs.wat` (+`_core`), assemble via `nix develop .#gen` wasm-tools,
-  e2e via the runWasiP2Main harness. get-random-bytes/wall-clock(12B)/stdin+input-stream.read (list realloc) + P1→P2
-  error-code (**D-307**) = follow-ups. OR Phase E (conformance corpus + Rust/Go proof). Cross-component aggregate → D-305.
+- **Phase D3 IN-PROGRESS** (plan §Phase D3; adapter P2Op/classify already complete — the gap is the trampolines at
+  `api/component.zig` `defineClassifiedFunc`). **D3-1 DONE: cli_exit** — `wasi:cli/exit.exit(result)` `(i32)->()`
+  trampoline → P1 `procExit`; noreturn via new `InvokeError.ProcExit` (instance.zig: unwind variant, NOT a wasm Trap;
+  `mapDispatchErr` arm) caught in `runWasiP2Main` → clean exit. Fixture `test/component/wasi_p2_exit.{wat,wasm}` (hand-
+  authored, wasm-tools), e2e asserts host.exit_code==1. Wiring map: `private/notes/p17-D3-trampoline-map.md`.
+- **NEXT = D3-2**: monotonic-clock.now `()->i64` + random.get-random-bytes (list via cabi_realloc, reuse D2
+  reallocViaGuest) + stdin/input-stream.read; wall-clock.now (12B struct retptr). P1→P2 error-code = **D-307**; sockets
+  spike-first (last). OR Phase E (conformance corpus + Rust/Go proof). Cross-component aggregate → D-305.
 
 ## Current state
 
 - **Phase 17 (v0.2) IN-PROGRESS** (ADR-0168). DONE+3-host: atomics @9eb84833 · wide-arith @231d4536 ·
   custom-page-sizes @cd0de2dd · relaxed-SIMD @08342ec5 (+official corpus @8ef2e752, 13420 pass arm64+x86). Wasm-3.0
-  core 100%-spec COMPLETE. Last SHA **85bcb5a5** (WASI-P2 fs component runs e2e — CM-D2-fs bundle EXIT).
+  core 100%-spec COMPLETE. Last SHA **9ce02433** (WASI-P2 cli/exit trampoline e2e — D3-1; windows gating suspended @9d832f1d).
 - **Atomics fully conformant @e6f3b0c0** — official corpus **294 pass, 0 SKIPPED** (D-301), incl. the JIT
   unaligned-atomic-trap fix D-303 (code-14 `unaligned_atomic_fixups` both arches, @5b0db8e1, 3-host).
 - **ALL bounded debt CLEARED**: ✅ D-301 · ✅ D-303 · ✅ D-231 (cross-x86 DCE gate wired @aac4fe2f) · ✅ D-302
