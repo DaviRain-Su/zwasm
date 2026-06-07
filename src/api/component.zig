@@ -392,17 +392,20 @@ pub fn instantiate(engine: *Engine, alloc: Allocator, bytes: []const u8) Error!C
 /// trampoline via `Caller.data`.
 pub const WasiP2Ctx = struct {
     host: *wasi_host.Host,
-    streams: resource_table.ResourceTable,
+    /// One handle table keyed by resource-type id; each P2 resource the host
+    /// models gets a distinct id (output-stream rep = P1 fd, descriptor rep = P1 fd).
+    resources: resource_table.ResourceTable,
 
-    /// Single resource-type id for output-stream handles (P2 stdio subset).
+    /// Resource-type ids for the P2 resources the host models.
     const OUTPUT_STREAM_RT: u32 = 1;
+    const DESCRIPTOR_RT: u32 = 2;
 
     pub fn init(alloc: Allocator, host: *wasi_host.Host) !WasiP2Ctx {
-        return .{ .host = host, .streams = try resource_table.ResourceTable.init(alloc) };
+        return .{ .host = host, .resources = try resource_table.ResourceTable.init(alloc) };
     }
 
     pub fn deinit(self: *WasiP2Ctx) void {
-        self.streams.deinit();
+        self.resources.deinit();
     }
 };
 
@@ -414,14 +417,14 @@ const Memory = @import("../zwasm/memory.zig").Memory;
 /// `wasi:cli/stdout` `get-stdout` → mint an output-stream handle bound to fd 1.
 fn p2GetStdout(caller: *Caller) WasiP2Error!u32 {
     const ctx = caller.data(WasiP2Ctx);
-    return ctx.streams.new(WasiP2Ctx.OUTPUT_STREAM_RT, 1);
+    return ctx.resources.new(WasiP2Ctx.OUTPUT_STREAM_RT, 1);
 }
 
 /// `wasi:cli/stderr` `get-stderr` → mint an output-stream handle bound to fd 2.
 /// The write/drop trampolines are shared (they resolve the fd from the handle).
 fn p2GetStderr(caller: *Caller) WasiP2Error!u32 {
     const ctx = caller.data(WasiP2Ctx);
-    return ctx.streams.new(WasiP2Ctx.OUTPUT_STREAM_RT, 2);
+    return ctx.resources.new(WasiP2Ctx.OUTPUT_STREAM_RT, 2);
 }
 
 /// `wasi:io/streams` `[method]output-stream.blocking-write-and-flush`
@@ -430,7 +433,7 @@ fn p2GetStderr(caller: *Caller) WasiP2Error!u32 {
 /// (0) at `retptr`.
 fn p2OutStreamWrite(caller: *Caller, self_handle: u32, ptr: u32, len: u32, retptr: u32) WasiP2Error!void {
     const ctx = caller.data(WasiP2Ctx);
-    const fd: wasi_p1.Fd = @intCast(try ctx.streams.rep(WasiP2Ctx.OUTPUT_STREAM_RT, self_handle));
+    const fd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.OUTPUT_STREAM_RT, self_handle));
     const mem = caller.memory() orelse return WasiP2Error.NoMemory;
     const bytes = mem.sliceAt(ptr, len) catch return WasiP2Error.OutOfBounds;
     if (wasi_fd.writeSlice(ctx.host, fd, bytes) != .success) return WasiP2Error.WriteFailed;
@@ -440,7 +443,30 @@ fn p2OutStreamWrite(caller: *Caller, self_handle: u32, ptr: u32, len: u32, retpt
 /// `wasi:io/streams` `[resource-drop]output-stream` (self): drop the handle.
 fn p2OutStreamDrop(caller: *Caller, self_handle: u32) WasiP2Error!void {
     const ctx = caller.data(WasiP2Ctx);
-    _ = try ctx.streams.drop(WasiP2Ctx.OUTPUT_STREAM_RT, self_handle);
+    _ = try ctx.resources.drop(WasiP2Ctx.OUTPUT_STREAM_RT, self_handle);
+}
+
+/// `wasi:filesystem/types` `[method]descriptor.write` (self, buf_ptr, buf_len,
+/// offset, retptr): positionally write the flat `list<u8>` at `(buf_ptr,
+/// buf_len)` to the fd bound to the `descriptor` handle, then store the
+/// `result<filesize, error-code>` (disc 0 = ok, u64 filesize at +8) at `retptr`.
+fn p2DescriptorWrite(caller: *Caller, self_handle: u32, buf_ptr: u32, buf_len: u32, offset: u64, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const fd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.DESCRIPTOR_RT, self_handle));
+    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    const bytes = mem.sliceAt(buf_ptr, buf_len) catch return WasiP2Error.OutOfBounds;
+    if (wasi_fd.pwriteSlice(ctx.host, fd, bytes, offset) != .success) return WasiP2Error.WriteFailed;
+    try mem.write(retptr, @as(u8, 0)); // result disc: ok
+    try mem.write(retptr + 8, @as(u64, buf_len)); // filesize written
+}
+
+/// `wasi:filesystem/types` `[resource-drop]descriptor` (self): drop the handle
+/// (closes the underlying fd via P1 `fd_close`).
+fn p2DescriptorDrop(caller: *Caller, self_handle: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const fd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.DESCRIPTOR_RT, self_handle));
+    _ = wasi_fd.fdClose(ctx.host, fd);
+    _ = try ctx.resources.drop(WasiP2Ctx.DESCRIPTOR_RT, self_handle);
 }
 
 /// Classify a host-wasi core-instance export (a core-func index) by its
@@ -471,9 +497,11 @@ fn defineClassifiedFunc(lk: *Linker, module: []const u8, name: []const u8, op: a
         .cli_get_stderr => try lk.defineFuncCtx(module, name, ctx, fn (*Caller) WasiP2Error!u32, p2GetStderr),
         .out_stream_write, .out_stream_blocking_write_and_flush => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32, u32, u32) WasiP2Error!void, p2OutStreamWrite),
         .out_stream_drop => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!void, p2OutStreamDrop),
-        // Classified but not yet trampolined (stdin/exit/clocks/random + the fs
-        // descriptor subset) — honest hard error, no silent skip. These land as
-        // their own D2 chunks once a fixture exercises each.
+        .fs_descriptor_write => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32, u32, u64, u32) WasiP2Error!void, p2DescriptorWrite),
+        .fs_descriptor_drop => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!void, p2DescriptorDrop),
+        // Classified but not yet trampolined (stdin/exit/clocks/random + the rest
+        // of the fs descriptor subset) — honest hard error, no silent skip. These
+        // land as their own D2 chunks once a fixture exercises each.
         .cli_get_stdin,
         .out_stream_blocking_flush,
         .in_stream_read,
@@ -484,11 +512,9 @@ fn defineClassifiedFunc(lk: *Linker, module: []const u8, name: []const u8, op: a
         .clocks_monotonic_now,
         .random_get_bytes,
         .fs_descriptor_read,
-        .fs_descriptor_write,
         .fs_descriptor_sync,
         .fs_descriptor_stat,
         .fs_descriptor_get_type,
-        .fs_descriptor_drop,
         .fs_get_directories,
         => return error.UnsupportedWasiP2Op,
     }
@@ -1113,6 +1139,57 @@ test "D2: a WASI-P2 component prints to STDERR via get-stderr (fd 2 stream)" {
     try runWasiP2Main(&eng, testing.allocator, bytes, &host);
     try testing.expectEqualStrings("oops\n", cap_err.items); // wrote to fd 2
     try testing.expectEqualStrings("", cap_out.items); // NOT stdout
+}
+
+test "D2: WASI-P2 descriptor.write writes a file via the descriptor resource (fd from handle)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+    host.io = io;
+    const dirfd = try host.addPreopen(tmp.dir.handle, "/sandbox");
+
+    // Create "out.txt" in the preopen + mint a descriptor resource bound to its fd.
+    var pmem: [128]u8 = @splat(0);
+    @memcpy(pmem[0..8], "out.txt\x00");
+    try testing.expectEqual(wasi_p1.Errno.success, wasi_fd.pathOpen(&host, &pmem, dirfd, 0, 0, 7, wasi_p1.OFLAGS_CREAT, wasi_p1.RIGHTS_FD_WRITE | wasi_p1.RIGHTS_FD_READ, 0, 0, 96));
+    const wfd = std.mem.readInt(u32, pmem[96..100], .little);
+
+    var ctx = try WasiP2Ctx.init(testing.allocator, &host);
+    defer ctx.deinit();
+    const handle = try ctx.resources.new(WasiP2Ctx.DESCRIPTOR_RT, wfd);
+
+    const core_bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/descriptor_write_core.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(core_bytes);
+    var mod = try eng.compile(core_bytes);
+    defer mod.deinit();
+
+    var lk = eng.linker();
+    defer lk.deinit();
+    try lk.defineFuncCtx("fs", "write", &ctx, fn (*Caller, u32, u32, u32, u64, u32) WasiP2Error!void, p2DescriptorWrite);
+    try lk.defineFuncCtx("fs", "drop", &ctx, fn (*Caller, u32) WasiP2Error!void, p2DescriptorDrop);
+
+    var inst = try lk.instantiate(&mod);
+    defer inst.deinit();
+    var noret = [_]Value{};
+    try inst.invoke("run", &.{.{ .i32 = @bitCast(handle) }}, &noret); // write + drop
+
+    // Re-open the file (the descriptor was dropped → its fd closed) and read it back.
+    @memset(pmem[0..128], 0);
+    @memcpy(pmem[0..8], "out.txt\x00");
+    try testing.expectEqual(wasi_p1.Errno.success, wasi_fd.pathOpen(&host, &pmem, dirfd, 0, 0, 7, 0, wasi_p1.RIGHTS_FD_READ, 0, 0, 96));
+    const rfd = std.mem.readInt(u32, pmem[96..100], .little);
+    std.mem.writeInt(u32, pmem[16..20], 32, .little); // iovec: buf=32, len=8
+    std.mem.writeInt(u32, pmem[20..24], 8, .little);
+    try testing.expectEqual(wasi_p1.Errno.success, wasi_fd.fdPread(&host, &pmem, rfd, 16, 1, 0, 64));
+    try testing.expectEqual(@as(u32, 8), std.mem.readInt(u32, pmem[64..68], .little));
+    try testing.expectEqualStrings("HELLO-FS", pmem[32..40]);
 }
 
 test "D-306 (EXIT): a component with renamed core imports runs via classified wiring" {
