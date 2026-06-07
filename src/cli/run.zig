@@ -86,6 +86,50 @@ pub fn runWasmJit(
     return 0;
 }
 
+/// `zwasm run <component.wasm>` (CM campaign D1-2 / D-306): run a WASI Preview 2
+/// **component** from the CLI. Routes a component-layer module (preamble version
+/// `0x0d`, layer 1) to the component host (`api/component.zig runWasiP2Main`),
+/// wiring real stdout via the WASI host (`io` set, no capture buffer → the
+/// trampolines' `fd.writeSlice` routes fd 1 to the process stdout). Returns the
+/// guest exit code (0 on clean run). SCOPE: the `wasi:cli/run` stdio subset (the
+/// general P2 host is D-306).
+pub fn runComponentWasi(
+    alloc: std.mem.Allocator,
+    io: std.Io,
+    bytes: []const u8,
+    argv: []const []const u8,
+) !u8 {
+    return runComponentCaptured(alloc, io, bytes, argv, null);
+}
+
+/// `runComponentWasi` with an optional stdout capture buffer (tests assert on
+/// guest output; `null` → real process stdout).
+pub fn runComponentCaptured(
+    alloc: std.mem.Allocator,
+    io: std.Io,
+    bytes: []const u8,
+    argv: []const []const u8,
+    stdout_capture: ?*std.ArrayList(u8),
+) !u8 {
+    const component = @import("../api/component.zig");
+    const Engine = @import("../zwasm/engine.zig").Engine;
+    var eng = try Engine.init(alloc, .{});
+    defer eng.deinit();
+
+    var host = try wasi_host.Host.init(alloc);
+    defer host.deinit();
+    host.io = io;
+    if (stdout_capture) |b| host.stdout_buffer = b;
+    if (argv.len > 0) try host.setArgs(argv);
+
+    component.runWasiP2Main(&eng, alloc, bytes, &host) catch |err| {
+        if (host.exit_code) |code| return @intCast(@min(code, std.math.maxInt(u8)));
+        return err;
+    };
+    if (host.exit_code) |code| return @intCast(@min(code, std.math.maxInt(u8)));
+    return 0;
+}
+
 /// `zwasm run <file.cwasm>` (§12.1): load + execute a pre-compiled AOT
 /// artefact directly — NO parse / validate / compile (the point of AOT).
 /// Resolves the entry via the serialised v0.2 export table (ADR-0138):
@@ -488,6 +532,18 @@ test "runWasm: proc_exit_42 fixture returns exit code 42" {
 // threadlocal diagnostic is set to the boundary classification
 // the CLI render pipeline expects. Locks v1 → v2 parity recovery.
 const malformed_magic_wasm = [_]u8{ 0x00, 0x61, 0x73, 0x6d, 0xff, 0xff, 0xff, 0xff };
+
+test "runComponentWasi: a real WASI-P2 component runs from the CLI path + prints" {
+    // The CLI routes a component-layer module to the component host; the
+    // wasi:cli/run hello-world prints "hello\n" through the P2 trampolines.
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(testing.io, "test/component/wasi_p2_hello.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+    var capture: std.ArrayList(u8) = .empty;
+    defer capture.deinit(testing.allocator);
+    const code = try runComponentCaptured(testing.allocator, testing.io, bytes, &.{}, &capture);
+    try testing.expectEqual(@as(u8, 0), code);
+    try testing.expectEqualStrings("hello\n", capture.items);
+}
 
 test "runWasm: malformed wasm produces an instantiate-phase diagnostic" {
     const result = runWasm(testing.allocator, testing.io, &malformed_magic_wasm, &.{});

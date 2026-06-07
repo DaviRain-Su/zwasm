@@ -240,6 +240,19 @@ pub fn main(init: std.process.Init) !void {
                 std.process.exit(code);
             }
 
+            // CM campaign D1-2 / D-306 — a component-layer module (preamble
+            // version 0x0d, layer byte = 0x01) routes to the component host
+            // (`runWasiP2Main`), not the core-module runner. stdio subset.
+            if (bytes.len >= 8 and std.mem.eql(u8, bytes[0..4], "\x00asm") and bytes[6] == 0x01) {
+                const code = cli_run.runComponentWasi(gpa, io, bytes, argv_list.items) catch |err| {
+                    var buf: [256]u8 = undefined;
+                    const msg = std.fmt.bufPrint(&buf, "zwasm run: cannot run component '{s}': {s}", .{ path, @errorName(err) }) catch "zwasm run: component run failed";
+                    try printlnErr(io, msg);
+                    std.process.exit(1);
+                };
+                std.process.exit(code);
+            }
+
             // D-244 — `--engine=jit` now does real WASI (incl. `--dir` preopens).
             const code = (if (engine_jit)
                 cli_run.runWasmJit(gpa, io, bytes, invoke_name, argv_list.items, preopen_list.items, env_keys.items, env_vals.items)
