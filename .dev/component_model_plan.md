@@ -96,7 +96,7 @@ design forks. Update this doc's `[x]` + handover NEXT each chunk.
   **Refs**: spec `CanonicalABI.md` (flattening); v1 `canon_abi.zig` +
   `types.zig` `cabiRealloc`. **ADR**: the `cabi_realloc`/CanonContext core touch.
   **Red**: lower→lift an i32 round-trips through a trivial component func.
-- [ ] **B2 — canon primitives + flags** (bool/ints/floats/char/enum/flags;
+- [x] **B2 — canon primitives + flags** (bool/ints/floats/char/enum/flags;
   size/align/discriminant). Boundary fixtures per type. **Red**: each primitive
   round-trips; flag bit-packing matches spec.
 - [ ] **B3 — canon string** (utf8 first; utf16/latin1 next) over linear memory

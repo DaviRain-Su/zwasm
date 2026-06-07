@@ -26,9 +26,11 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
 - **Tier 0 COMPLETE (A1–A4)**: decode @6c51c89b · types @8d70230d · wit lexer+parser @ce62e4c5 · wit resolver @04f39205.
   ubuntu+windows GREEN through Tier 0. **B1 DONE @8724f038** (ADR-0171): `canon.zig` — component `Value` (distinct from
   runtime.Value) + flat-scalar lower/lift (bool/s8..u64/f32/f64/char round-trip) + `CanonContext` with an INJECTED
-  `cabi_realloc` callback (vtable; B6 wires it to the guest export — the one core coupling, first feature→runtime import,
-  zone-clean). **NEXT = chunk B2** (canon primitives + flags): size/align/discriminant machinery + enum + flags
-  bit-packing (≤32 inline / >32 memory); boundary fixtures per type (`test_discipline §1`). Then B3 string → B6 invoke.
+  `cabi_realloc` callback (vtable; B6 wires it to the guest export). **B2 DONE @6a223a6e**: enum (0x6d) + flags (0x6e) decode in types.zig;
+  canon `DespecType` + sizeOf/alignmentOf (prim 1/2/4/8, discriminant ≤256/≤65536 flips, flags ≤8/≤16 flips) + enum/
+  flags lift/lower (one i32) with range/extra-bit validation; boundary tests. **NEXT = chunk B3** (canon string): UTF-8
+  lift/lower over guest linear memory via the realloc callback (`store_string_into_range` / `load_string`); utf16/
+  latin1 next. Red = a string round-trips guest↔host (mock realloc + a `[]u8` memory). Then B4 list+record → B6 invoke.
 - **Discipline**: Zone-2 new layer, NO core-VM change (consume `runtime/instance/*` + memory + `Runtime.invoke` as
   black box); component-value type DISTINCT from `runtime.Value`; TDD + boundary fixtures + spec-citation; no-copy;
   3-host gate; no tag. Full discipline list in the plan doc.
