@@ -179,6 +179,22 @@ const impl = if (builtin.os.tag == .windows) struct {
         );
     }
 
+    /// D-279 H6 primitive (2026-06-07). A fatal-class exception while recovery
+    /// is NOT armed previously CONTINUE_SEARCHed silently → Win64 exit-3 with no
+    /// log (the @16fc1bb3 `address.2.wasm` NON-SIMD crash signature: zero
+    /// `[d-279-veh]` output despite all three armed/overflow diagnostics being
+    /// present). Logs code + RIP so the next Win64 RED pins whether the fault is
+    /// in JIT compilation (the `[d-163-jit]` codegen path), the spec runner, or
+    /// the interpreter — NONE of which arm VEH. The process is about to die via
+    /// the default handler (CONTINUE_SEARCH), so a best-effort `std.debug.print`
+    /// is safe (no recovery to corrupt), mirroring `diagUnrecovered`.
+    fn diagUnarmedFatal(code: u32, rip: usize) void {
+        std.debug.print(
+            "[d-279-veh] UNARMED-FATAL: code=0x{x} rip=0x{x} — no recovery armed; default handler will crash (exit 3)\n",
+            .{ code, rip },
+        );
+    }
+
     fn vehHandler(exception_info: *win.EXCEPTION_POINTERS) callconv(.winapi) c_long {
         // D-279 H3: catch a stack overflow BEFORE the armed-check — it may
         // fire outside an arm()-guarded JIT region (the spec-runner / interp /
@@ -189,6 +205,28 @@ const impl = if (builtin.os.tag == .windows) struct {
             return win.EXCEPTION_CONTINUE_SEARCH;
         }
         if (!@atomicLoad(bool, &recovery.active, .acquire)) {
+            // D-279 H6 (2026-06-07): a fatal exception while recovery is NOT
+            // armed was previously CONTINUE_SEARCHed SILENTLY → the default
+            // handler crashes the process (Win64 exit 3) with no log. The
+            // H3-refuting @16fc1bb3 crash (zwasm-spec-wasm-2-0-assert /
+            // address.2.wasm, NON-SIMD, at JIT-compile time) emitted NO
+            // [d-279-veh] line → it took exactly this path. Log fatal-class
+            // codes only (the codes the armed branch handles) so normal
+            // guard-page stack growth (0x80000001) and breakpoints are not
+            // logged. Diagnostic only — still CONTINUE_SEARCH, no recovery,
+            // so a genuine unrelated SEH consumer downstream is unaffected
+            // (this VEH is at the back of the chain, First=0).
+            switch (exception_info.ExceptionRecord.ExceptionCode) {
+                win.EXCEPTION_ACCESS_VIOLATION,
+                win.EXCEPTION_ILLEGAL_INSTRUCTION,
+                EXCEPTION_INT_DIVIDE_BY_ZERO,
+                EXCEPTION_INT_OVERFLOW,
+                => diagUnarmedFatal(
+                    exception_info.ExceptionRecord.ExceptionCode,
+                    exception_info.ContextRecord.Rip,
+                ),
+                else => {},
+            }
             return win.EXCEPTION_CONTINUE_SEARCH;
         }
         const code = exception_info.ExceptionRecord.ExceptionCode;

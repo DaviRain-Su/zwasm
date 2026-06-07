@@ -924,6 +924,45 @@ entries:
       — NOT a missing guard in the obvious places. The `[d-279-veh] STACK-OVERFLOW` diagnostic distinguishes
       "stack overflow at all" (H3 true → then chase probe-firing) from "not a stack overflow" (H3 false). No
       further Mac-side progress without the Win64 crash signal; the diagnostic + the next Win64 RED are decisive.
+      ~~H3 (Win64 1 MB stack overflow)~~ → **REFUTED 2026-06-07 @16fc1bb3** (the decisive next-Win64-RED the
+      diagnostic was waiting for). Win64 `test-all` crashed `zwasm-spec-wasm-2-0-assert.exe` exit-3 with the
+      `b86ac7fc` `[d-279-veh] STACK-OVERFLOW` diagnostic PRESENT in the binary and it did **NOT** fire (grep of
+      `/tmp/win.log` for `d-279-veh`/`STACK-OVERFLOW` = empty), yet exit-3 recurred → per the row's own decision
+      rule ("marker does NOT print but exit-3 recurs → H3 refuted"), the crash is **neither VEH-fault nor
+      panic-with-message nor stack-overflow**. The atomics corpus (247 pass) + ALL relaxed_simd PASSED earlier in
+      the SAME run; ubuntu x86_64 GREEN on the identical source. `track_heisenbug win64-testall segv` (streak 4→0).
+      RE-OPENED hypothesis enumeration (post-H1/H2/H3):
+      H4 — **NOT SIMD-specific. CONFIRMED, not inferred.** The crash exe `zwasm-spec-wasm-2-0-assert` is the
+      **NON-SIMD scalar runner** (`spec_assert_runner_non_simd.zig`, build.zig:453-466 "Wasm 2.0 non-SIMD scalar
+      spec assertion runner"), and the existing per-directive `[W4 DIR]` beacon (raw `write(2)` to fd 2,
+      UNBUFFERED — `spec_assert_runner_base.zig:3068`, so the last line is reliable, no buffering caveat) printed
+      `[W4 DIR] address : module address.2.wasm` as the LAST directive before the `[d-163-jit]` dumps + exit-3.
+      `address.2.wasm` is `address.wast` — pure i32/i64 `load{8,16,32}_{s,u}` at offsets (the dumped funcs are
+      `movzx 0fb6`/`movsx 0fbe`, scalar GPR loads), NOT a SIMD op. So the 12-month "SIMD JIT heisenbug" FRAMING IS
+      WRONG: this is a broader Win64 JIT/runtime heisenbug that the SIMD suites merely also hit. (Earlier reports
+      cited `zwasm-spec-simd.exe` too, but `wasm-2-0-assert` crashing settles that the crash class is not gated on
+      v128 codegen.)
+      H6 (new leading hypothesis) — **UNARMED fault path.** Key inference from the ZERO `[d-279-veh]` output:
+      the VEH already has THREE diagnostics — `diagStackOverflow` (any stack overflow, armed or not),
+      `diagUnrecovered("unfiltered-code")` (armed + non-recoverable code), `diagUnrecovered("rip-outside-jit")`
+      (armed + filtered AV but RIP outside JIT = the D-180/D-245 FP-walk/trap-recovery lineage). NONE fired →
+      the crash is **NOT stack overflow AND NOT any ARMED path** (so the trap-recovery/FP-walk lineage is itself
+      weakened — if an OOB load faulted while `runUnderVeh` was armed, `rip-outside-jit` would have logged it).
+      That leaves the **unarmed** branch (`windows_traphandler.zig:191` — `if (!recovery.active) return
+      CONTINUE_SEARCH`), which is **SILENT**: a fatal exception (AV/illegal/div0/ovf) fired in a path NOT guarded
+      by `runUnderVeh` → default handler crashes (exit 3) with no log. address.2.wasm sits exactly at JIT-COMPILE
+      time (the `[d-163-jit]` dump is per-func at codegen, base.zig:3163; compilation is NOT arm()-guarded) — so
+      the prime suspect is an **AV during the JIT codegen of the scalar load funcs** (or in the spec-runner /
+      interp, also unguarded). Win64-only-ish + intermittent fits an uninitialised-scratch / stale-pointer in the
+      emit path that only faults on some runs. Distinguishing probe (this cycle, extended_challenge §Step5
+      PERMANENT primitive): instrument the UNARMED branch to log `[d-279-veh] UNARMED-FATAL code=0x.. rip=0x..`
+      for fatal-class codes (filtered so normal guard-page `0x80000001` stack growth is not logged) before
+      CONTINUE_SEARCH — converts the silent exit-3 into a self-identifying RIP. Next Win64 RED then pins
+      compile-vs-runtime-vs-interp by the RIP. H5 (abort-class from a non-flushed Zig panic / CRT heap-corruption,
+      which does NOT go through VEH at all) stays the fallback if the new UNARMED-FATAL beacon ALSO stays silent
+      on the next RED — that would prove the exit-3 is not a hardware exception at all.
+      NEXT: land the UNARMED-FATAL VEH diagnostic (windows_traphandler.zig:191 branch) so the next Win64 batch
+      pins the faulting RIP (or proves it is non-exception abort-class → H5).
       Prior streak note (2026-06-06, superseded): reached 5/5 then 6 `silent` (7e46c054 → e707fd31) before the
       first resurfacing. Original report below.
       Surfaced 2026-06-05
