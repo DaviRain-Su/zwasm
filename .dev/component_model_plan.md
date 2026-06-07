@@ -204,8 +204,12 @@ design forks. Update this doc's `[x]` + handover NEXT each chunk.
   (wit-bindgen-go not in the gen shell; needs self-provision per
   `extended_challenge`); io/error trampoline (not yet exercised — a clean run
   never errors). **Resume rule: the next `[ ]` chunk is E1, not this `[~]`.**
-- [ ] **E3 — WASI-P2 conformance + edge cases.** P2 test corpus + boundary
+- [~] **E3 — WASI-P2 conformance + edge cases.** P2 test corpus + boundary
   fixtures; close the gap to wasmtime where "beyond is satisfiable" (ADR-0170).
+  **Started**: D-308 adversarial edge case @82d63d27 — an unknown wasi import
+  (`wasi:sockets/tcp`) errors cleanly (no signal); fixture `wasi_p2_unknown_import.wasm`.
+  Remaining: more WASI-P2 boundary fixtures (trap/handle-invalid paths) + grow the
+  E1 component-model corpus (official `.wast` ingestion needs component-validation depth — ADR-grade, see handover).
 
 ## Retrospective (fill at campaign close)
 

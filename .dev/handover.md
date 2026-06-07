@@ -77,19 +77,20 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
   random · D3-5 stdin · **D3-6 fs descriptor** @43909eba (read/sync/stat/get-type + flush; **D-307 DISCHARGED**
   @beb887c6) · **D3-7 wasi:io/poll** @3a128a01 (pollable + subscribe + ready/block/poll). **D-309 DONE** @ccdee2fa —
   WASI-P2 trampolines extracted to `api/component_wasi_p2.zig` (component.zig 1922→1250).
-- **NOW = E3** (conformance + corpus growth; E1 runner DONE). Deferred: D3-8 sockets (spike-first).
-  Cross-component aggregate → D-305. **D-308**: runWasiP2Main error-cleanup SEGVs on a failed-import wire (error path).
+- **NOW = E3** (conformance + corpus growth; E1 runner DONE; D-308 edge case discharged @82d63d27). Deferred: D3-8 sockets (spike-first).
+  Cross-component aggregate → D-305. **D-308 DISCHARGED @82d63d27** — unknown-wasi-import errors cleanly (no signal);
+  ADR-0175 engine's per-instance cleanup is sound; adversarial guard `wasi_p2_unknown_import.wasm` (E3 edge case).
 
 ## Current state
 
 - **Phase 17 (v0.2) IN-PROGRESS** (ADR-0168). DONE+3-host: atomics @9eb84833 · wide-arith @231d4536 ·
   custom-page-sizes @cd0de2dd · relaxed-SIMD @08342ec5 (+official corpus @8ef2e752, 13420 pass arm64+x86). Wasm-3.0
-  core 100%-spec COMPLETE. Last SHA **3660a85b** (E2 done + edge-fixture gate enforcement; ubuntu OK; windows susp @9d832f1d).
+  core 100%-spec COMPLETE. Last SHA **82d63d27** (E1 spec-corpus runner + E3 D-308 adversarial guard; ubuntu OK @07a11798; windows susp @9d832f1d).
 - **Atomics fully conformant @e6f3b0c0** — official corpus **294 pass, 0 SKIPPED** (D-301), incl. the JIT
   unaligned-atomic-trap fix D-303 (code-14 `unaligned_atomic_fixups` both arches, @5b0db8e1, 3-host).
 - **ALL bounded debt CLEARED**: ✅ D-301 · ✅ D-303 · ✅ D-231 (cross-x86 DCE gate wired @aac4fe2f) · ✅ D-302
   (branch-hint custom-section verified @dcc8d71c) · ✅ **D-279 DISCHARGED @c287d39c**.
-- Debt ledger **53 entries** (D-307/D-309/D-310 discharged). `now` = D-299 only
+- Debt ledger **52 entries** (D-307/D-309/D-310/D-308 discharged). `now` = D-299 only
   (env-constrained). **Correctly DEFERRED (do NOT clear)**: D-209
   (hot-path), D-259 (W54-ABI-risk), D-300 stack-switching (Phase-3 unstable), D-299 (x86_64 W^X).
 - 完成形 v0.1 surface COMPLETE: CLI D-295 (~85%, intentionally lean) · C-API ZERO gaps (293/293) · Zig-API
