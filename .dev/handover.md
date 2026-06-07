@@ -39,16 +39,15 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
 ## Active bundle
 
 - **Bundle-ID**: CM-C2 (multi-component linking + index-space resolution)
-- **Cycles-remaining**: ~3
-- **Continuity-memo**: C2-1 DONE @a105289f (core-instance §2 + alias §6 decode → `TypeInfo.core_instances` + `.aliases`;
-  `decodeSort` extracted). NEXT = **C2-2 (discharge D-304)**: build the component's CORE index spaces (func/memory/…)
-  from core-instance instantiate (a module's exports populate the spaces) + aliases (core_export pulls instance export
-  N into the func space), then resolve `Canon.lift.core_func` (a core-func index) → the underlying core export NAME, so
-  `api/component.zig` `invokeString`/`canonContext` invoke the RESOLVED export instead of hard-coded "greet"/"cabi_realloc"/
-  "cabi_post_greet". Re-run the greet fixture via the resolved path; then delete D-304. The greet structure: core-module
-  → core-instance[0]=instantiate(module 0) → aliases pull memory/greet/cabi_realloc/cabi_post_greet from core-instance 0;
-  canon-lift core_func=the greet alias; opts.memory/realloc reference the aliased memory/cabi_realloc. Then **C2-3** =
-  the actual multi-component graph (nested `component` section + cross-instance import/export wiring) — the bundle EXIT.
+- **Cycles-remaining**: ~2
+- **Continuity-memo**: C2-1 @a105289f (core-instance §2 + alias §6 decode) + **C2-2 @46745b1e (D-304 CLOSED)**:
+  `types.resolveCoreFuncExport`/`resolveLiftedFunc` (export → canon-lift → resolved core_func/realloc/post-return) +
+  `api/component.zig` `invokeStringExport(component_export_name, arg)` — the greet component runs via the RESOLVED path,
+  no hard-coded core names. NEXT = **C2-3 (bundle EXIT)** = the multi-component graph: a nested `component` section
+  (decode the child component bytes from section id 4) + an `instance` (component-instance, section id 5) that wires one
+  component's import to another's export, then link + run. Red = a 2-component graph (A imports B's interface) runs via
+  `api/component.zig`. Needs: decode `component` (4) + `instance` (5) sections; build the component/instance index
+  spaces; wire the import→export across instances. May be large — split A=child-component decode, B=instance-graph wiring.
 - **Exit-condition**: a 2-component graph (one imports the other's interface) links + runs via `api/component.zig`.
 
 ## Current state

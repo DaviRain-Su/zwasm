@@ -1233,27 +1233,6 @@ entries:
     first_raised: "2026-06-07"
     last_reviewed: "2026-06-07"
     refs: scripts/regen_spec_threads_assert.sh; test/spec/spec_assert_runner_non_simd.zig; engine/codegen/shared/entry.zig
-  - id: D-304
-    layer: code
-    status: blocked-by
-    description: |-
-      Status: blocked-by: the component-instance / alias / core-instance
-      section decoders (component binary sections 2 + 6) are not yet
-      implemented, so a component export cannot be mechanically resolved to
-      its underlying core export. CM-B6 IT-3b-3 (`api/component.zig`
-      `invokeString`) RUNS a real string→string component end-to-end, but
-      addresses the core exports by their NAME ("greet" / "cabi_realloc" /
-      "cabi_post_greet") rather than via the canon-lift's `core_func` index →
-      alias → core-instance export resolution. Works for wasm-tools output
-      (core export name == component func name) but is not general.
-      Discharge: decode the core-instance (id 2) + alias (id 6) sections,
-      build the component's core-func index space, and resolve
-      `types.Canon.lift.core_func` → the actual core export to invoke (drop
-      the name shortcut). Lands naturally with C2 (multi-component linking),
-      which needs the instance graph anyway.
-    first_raised: "2026-06-07"
-    last_reviewed: "2026-06-07"
-    refs: src/api/component.zig (invokeString); src/feature/component/types.zig (Canon.lift); .dev/component_model_plan.md (C2)
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.
