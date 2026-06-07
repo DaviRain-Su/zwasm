@@ -46,14 +46,17 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
 
 - **Bundle-ID**: CM-D1-2 (run a WASI-P2 hello-world via the adapter)
 - **Cycles-remaining**: ~3
-- **Continuity-memo**: D1-2a @f70cc573 DONE (own 0x69 / borrow 0x68 + externdesc type-bound 0x03 / value-bound 0x02 —
-  prerequisites). NEXT sub-steps to RUN `wasi_p2_hello.wasm` (prints 'hello'):
-  **(a) INSTANCE-TYPE decode** — decode `instancetype ::= 0x42 vec(instancedecl)` + `componenttype ::= 0x41
-  vec(componentdecl)` in `decodeDefType` (mutual recursion). `instancedecl = 0x00 core:type | 0x01 type(→decodeDefType)
-  | 0x02 alias(→decodeAlias-shape) | 0x04 exportdecl(name+externdesc)`; `componentdecl = 0x03 importdecl | instancedecl`.
-  Capture exportdecls (interface func names). The 0x00 core:type needs a minimal core:rectype consumer (CHECK if the
-  fixture uses it — likely not; the wasi instance types use 0x01 type / 0x02 alias / 0x04 exportdecl per the .wat). Then
-  `decodeTypeInfo(wasi_p2_hello.wasm)` succeeds (test: it imports 3 wasi instances). **(b) HOST TRAMPOLINES** — the
+- **Continuity-memo**: D1-2a @f70cc573 (own/borrow/typebound) + **D1-2b @39abfab9** (instancetype 0x42 / componenttype
+  0x41 decode; `decodeTypeInfo(wasi_p2_hello.wasm)` NOW SUCCEEDS — 3 wasi instance imports + canon decode). NEXT = the
+  HOST-TRAMPOLINE INTEGRATION to RUN it + print 'hello': the core module ($M) imports `io/get-stdout`(→i32),
+  `io/write`(self,ptr,len,retptr), `io/drop-os`(self), and `libc/memory` (from the $libc core-instance). Build a P2-run
+  path (extend `instantiateGraph` or a new `runComponentMain`): instantiate $libc + $M, wire $M's `io/*` imports via
+  `Linker.defineFunc` (host fn takes `*Caller`) to adapter trampolines — get-stdout mints an output-stream resource
+  (`resource_table.zig`) bound to fd 1; write reads `list<u8>` at (ptr,len) from `Caller.memory()`, builds a ciovec,
+  calls `wasi/fd.zig fdWrite(host, mem, 1, …)`, writes result discriminant 0 at retptr; drop-os drops the handle; wire
+  `libc/memory` cross-instance ($libc's exported memory → $M's import) like C2. Need a `wasi.Host` (check
+  `wasi/host.zig` init + `stdout_buffer` for the test assert). Invoke the lowered core `run`. Assert stdout == "hello".
+  Adapter (D1-1) `classifyImport`/`p1Target` classifies. Likely 1-2 cycles. **(b) HOST TRAMPOLINES** — the
   core module imports `io/get-stdout`(→i32 handle), `io/write`(self,ptr,len,retptr), `io/drop-os`(self), `libc/memory`.
   Wire via `Linker.defineFunc` (host fn takes `*Caller`): get-stdout mints an output-stream resource (via
   `resource_table.zig`) bound to fd 1; write reads the `list<u8>` at (ptr,len) from `Caller.memory()` and calls
