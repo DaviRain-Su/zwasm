@@ -23,13 +23,12 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
 - **Step 0 survey is DONE** — do NOT re-survey. Read `.dev/component_model_survey.md` (architecture, 4 hard pieces,
   module breakdown) + the plan's "Reference chains" (spec `~/Documents/OSS/WebAssembly/component-model/`; v1
   textbook `~/Documents/MyProducts/zwasm/src/{component,wit,wit_parser,canon_abi}.zig`; wasmtime/wasm-tools refs).
-- **Tier 0 COMPLETE (A1–A4)**: A1 @6c51c89b (decode: discriminator + section walk + `-Dcomponent` gate) · A2 @8d70230d
-  (types: ValType/FuncType/DefType model + index space + import/export) · A3 @ce62e4c5 (wit lexer+parser: package/
-  interface/func/world primitive subset, parses 10_greet/11_math) · A4 @04f39205 (wit resolver: ResolvedModel,
-  world→interface binding, dup/unresolved rejected). All `-Dcomponent` Zone-2, no core change; richer forms defer via
-  typed errors. **NEXT = chunk B1** (Tier-1 core): `canon.zig` CanonContext + `cabi_realloc` callback — the ONE core
-  coupling (lift/lower call back into the guest via a `Runtime.invoke`-style cb). **B1 is ADR-grade** (the core touch;
-  note ADR in commit per plan). Red = lower→lift an i32 round-trips through a trivial component func.
+- **Tier 0 COMPLETE (A1–A4)**: decode @6c51c89b · types @8d70230d · wit lexer+parser @ce62e4c5 · wit resolver @04f39205.
+  ubuntu+windows GREEN through Tier 0. **B1 DONE @8724f038** (ADR-0171): `canon.zig` — component `Value` (distinct from
+  runtime.Value) + flat-scalar lower/lift (bool/s8..u64/f32/f64/char round-trip) + `CanonContext` with an INJECTED
+  `cabi_realloc` callback (vtable; B6 wires it to the guest export — the one core coupling, first feature→runtime import,
+  zone-clean). **NEXT = chunk B2** (canon primitives + flags): size/align/discriminant machinery + enum + flags
+  bit-packing (≤32 inline / >32 memory); boundary fixtures per type (`test_discipline §1`). Then B3 string → B6 invoke.
 - **Discipline**: Zone-2 new layer, NO core-VM change (consume `runtime/instance/*` + memory + `Runtime.invoke` as
   black box); component-value type DISTINCT from `runtime.Value`; TDD + boundary fixtures + spec-citation; no-copy;
   3-host gate; no tag. Full discipline list in the plan doc.

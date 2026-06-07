@@ -90,7 +90,7 @@ design forks. Update this doc's `[x]` + handover NEXT each chunk.
 
 ### Phase B — Canonical ABI + single-component execution (Tier 1 core)
 
-- [ ] **B1 — CanonContext + `cabi_realloc` callback.** `canon.zig`: the one core
+- [x] **B1 — CanonContext + `cabi_realloc` callback.** `canon.zig`: the one core
   coupling — lift/lower call back into the guest to allocate via a
   `Runtime.invoke`-style callback. Scaffolding for register-passed primitives.
   **Refs**: spec `CanonicalABI.md` (flattening); v1 `canon_abi.zig` +
