@@ -65,13 +65,17 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
 - **Continuity-memo**: Survey DONE (digest: descriptor.write = flat ABI no-realloc → easiest; read/get-directories
   return lists → need cabi_realloc return-area). **descriptor.write DONE @b766c583**: `WasiP2Ctx.resources` table keyed
   by RT id (OUTPUT_STREAM_RT=1, DESCRIPTOR_RT=2); `p2DescriptorWrite`/`p2DescriptorDrop` + `fd.pwriteSlice`; unit-tested
-  via injected handle + tmpfile. NEXT (the exit work): a REAL component entry needs `preopens.get-directories` →
-  returns `list<tuple<own<descriptor>,string>>` → host must ALLOCATE guest memory via `cabi_realloc` + write the
-  return-area (the lift/return direction — study `api/component.zig invokeString`/`canonContext`/`reallocViaGuest` +
-  `feature/component/canon.zig` for the realloc seam). THEN a fs fixture (component with a preopen) that gets a dir
-  descriptor, opens/writes a file, e2e. Also: `classifyCoreExport` maps ALL `resource_drop`→`out_stream_drop` (shortcut)
-  — the full-component fs path needs per-type resolution (resource.drop typeidx → which interface's resource). Stream-via
-  methods + sockets defer (D3).
+  via injected handle + tmpfile. RE-ENTRANCY RESOLVED (lesson `2026-06-07-engine-invoke-is-reentrant-stack-disciplined`): `Instance.invoke` is
+  stack-disciplined (op_base save/restore + per-call locals) → a trampoline CAN call `cabi_realloc` via nested
+  `m.invoke` mid-guest-call, NO engine change. **get-directories plan** (next, ~1-2 cyc): (1) thread a realloc cap into
+  `WasiP2Ctx` — set the instance ptr after `lk.instantiate(m_mod)`, before `m.invoke("run")`; trampoline calls
+  `m.invoke(realloc_name,...)` (mirror `reallocViaGuest`). (2) `p2GetDirectories(retptr)`: for the single preopen,
+  realloc a 12B tuple `(descr_handle i32, str_ptr i32, str_len i32)` + realloc+copy the path string + mint
+  `resources.new(DESCRIPTOR_RT, preopen_fd)`; write `(list_ptr, list_len=1)` to retptr. (3) fixture: a `$libc` core
+  exporting a real bump `cabi_realloc` (current stub = memory only) + a component importing `wasi:filesystem/{preopens,
+  types}` that calls get-directories → descriptor → descriptor.write → e2e file content. Also: `classifyCoreExport` maps
+  ALL `resource_drop`→`out_stream_drop` (shortcut) — full-component fs needs per-type resolution (resource.drop typeidx
+  → interface's resource). Stream-via methods + sockets defer (D3).
 - **Exit-condition**: a real WASI-P2 component obtains a descriptor via `get-directories` + writes/reads a file via the
   descriptor resource e2e (runWasiP2Main), asserted on file content.
 
