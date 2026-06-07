@@ -23,35 +23,18 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
 - **Step 0 survey is DONE** — do NOT re-survey. Read `.dev/component_model_survey.md` (architecture, 4 hard pieces,
   module breakdown) + the plan's "Reference chains" (spec `~/Documents/OSS/WebAssembly/component-model/`; v1
   textbook `~/Documents/MyProducts/zwasm/src/{component,wit,wit_parser,canon_abi}.zig`; wasmtime/wasm-tools refs).
-- **Tier 0 (A1–A4) + Tier-1 canon value machinery (B1–B5) COMPLETE** (per-chunk SHAs + recipes in the plan doc's `[x]`
-  rows): decode/types/wit (A1–A4) · canon flat-scalar (B1, ADR-0171) · enum/flags+size/align (B2) · utf8 string (B3) ·
-  recursive list/record store/load (B4) · variant/option/result/tuple decode + canon variant (B5). ubuntu GREEN through
-  B4; the canon module lifts/lowers/stores/loads every Tier-1 value type over guest memory via the injected realloc cb.
-- **Discipline**: pure component logic = Zone 1 (`feature/component/`), host orchestration = **Zone 3** (`api/component.zig`,
-  ADR-0172); NO core-VM change (drive `Engine`/`Instance` facade as black box); component-value DISTINCT from
-  `runtime.Value`; TDD + boundary fixtures + spec-citation; no-copy; 3-host gate; no tag.
-
-## Active bundle
-
-- **Bundle-ID**: CM-B6-IT (single-component instantiate + invoke e2e)
-- **Cycles-remaining**: ~3 (IT-3b grew — it needs canon-section decode + full export path + a real fixture)
-- **IT-1 @20132372** (instantiate + invoke `run()->i32=42`) · **IT-2 @41e50658** (canon flat trampoline `invokeFlat`;
-  `runtime.Value`↔`zwasm.Value` bridge proven) · **IT-3a @6e784d5c** (cabi_realloc-via-guest: `canonContext()` +
-  `reallocViaGuest` invokes the guest's `cabi_realloc` export; a host string lowers THROUGH the guest allocator into
-  guest memory + lifts back — ADR-0171's core seam proven e2e with a hand-crafted bump-allocator module).
-- **Continuity-memo**: IT-3b-1 @9024d4bb (canon decode) + IT-3b-2 @cff26592 (REAL fixture `test/edge_cases/p17/component/
-  greet_component.wasm` `greet(string)->string`⇒`"Hello, "++name++"!"` + a test decoding it through the full pipeline).
-  **NEXT = IT-3b-3 (TRAMPOLINE = the EXIT)** — `api/component.zig` `invokeString(name, arg)->result`. GROUND TRUTH from
-  the fixture: core `greet(name_ptr:i32, name_len:i32) -> i32`; the i32 result is a RETURN-AREA POINTER — the guest wrote
-  `[out_ptr:i32 @ret+0, out_len:i32 @ret+4]` there. Sequence: (1) `canonContext()` (have it); (2) `canon.lowerString(cx,
-  arg)` → (ptr,len) via guest cabi_realloc; (3) `ci.core.invoke("greet", {ptr,len}, {retptr})`; (4) read out_ptr=loadInt
-  (retptr,4), out_len=loadInt(retptr+4,4) — RE-FETCH `ci.core.memory().slice()` first (realloc may have grown it);
-  (5) `canon.liftString(cx2, out_ptr, out_len)` → dup the bytes (host-owned, guest mem reused); (6) call post-return
-  `ci.core.invoke("cabi_post_greet", {retptr}, {})`. SHORTCUT ok for now: invoke core exports by name ("greet"/
-  "cabi_realloc"/"cabi_post_greet") — full canon-lift→core-func via alias/core-instance decode (§sections 2,6) is the
-  general follow-up. EXIT assert: result == "Hello, zwasm!". `canon` may need a `loadInt`-style helper exposed (it's
-  private in canon.zig — add a tiny `readU32`/use store/load, or read the 8 bytes in api/component.zig directly).
-- **Exit-condition**: a string→string component runs via `api/component.zig` and returns the expected string.
+- **Tier 0 (A1–A4) + Tier-1 (B1–B6) COMPLETE — "COMPONENT MODEL WORKS".** decode/types/wit (A1–A4) · canon value
+  machinery (B1–B5: flat-scalar/enum/flags/string/list/record/variant over guest memory) · **B6 single-component
+  instantiate+invoke e2e** (IT-1 @20132372 instantiate+invoke · IT-2 @41e50658 flat trampoline + Value bridge · IT-3a
+  @6e784d5c cabi_realloc-via-guest seam · IT-3b-1 @9024d4bb canon-section decode · IT-3b-2 @cff26592 real fixture decodes
+  · **IT-3b-3 @e0e7c9f5 a REAL wasm-tools string→string component RUNS e2e** — `greet("zwasm")`⇒`"Hello, zwasm!"`).
+  ADR-0171 (cabi_realloc seam) + ADR-0172 (Zone split). **Bundle CM-B6-IT CLOSED** (exit met @e0e7c9f5).
+- **Discipline**: pure logic Zone 1 (`feature/component/`), orchestration Zone 3 (`api/component.zig`); component-value
+  DISTINCT from `runtime.Value`; TDD; no-copy; 3-host gate; **no tag**.
+- **NEXT = chunk C1** (Phase C, resources): `resource_table.zig` — own/borrow, `resource.new/drop/rep`, parent/child
+  ownership + tombstones (the live handle table is the hard part). Refs: wasmtime `resource_table.rs`; spec resources.
+  Red = own/borrow lifecycle + double-drop trap. Then C2 (multi-component linking — also discharges **D-304**, the B6
+  alias/core-instance export-resolution shortcut). Plan doc §Phase C is authoritative.
 
 ## Current state
 

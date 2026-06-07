@@ -106,7 +106,7 @@ design forks. Update this doc's `[x]` + handover NEXT each chunk.
   `list<u32>` + a record round-trip.
 - [x] **B5 — canon variant/option/result/tuple** (discriminant + payload align).
   **Red**: option/result/variant round-trip.
-- [ ] **B6 — single-component instantiate + invoke end-to-end.** Embed core
+- [x] **B6 — single-component instantiate + invoke end-to-end.** Embed core
   module(s) → `instantiate.zig` per module → wire canon trampolines → invoke an
   export. **Red**: a real wasm-tools/cargo-component component exporting a
   `string→string` func runs via zwasm and returns the expected string. **Exit**:
