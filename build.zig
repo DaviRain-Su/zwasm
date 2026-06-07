@@ -90,6 +90,14 @@ pub fn build(b: *std.Build) void {
     // module-construction code paths.
     const enable_gc = b.option(bool, "gc", "Enable WasmGC heap+collector compile-in (default: false; per ADR-0115 §3)") orelse false;
 
+    // ADR-0170 — `-Dcomponent=true` opens the Component Model + WASI-P2
+    // subsystem (`src/feature/component/`). Default false so the production
+    // CLI/lib emit zero component code (the slot was build-rejected until
+    // campaign chunk A1). The decoder + WIT/canon layers are a Zone-2 new
+    // layer consuming the core runtime as a black box; future chunks wire the
+    // CLI entry behind `build_options.enable_component`.
+    const enable_component = b.option(bool, "component", "Enable Component Model + WASI Preview 2 compile-in (default: false; ADR-0170)") orelse false;
+
     const options = b.addOptions();
     options.addOption(WasmLevel, "wasm_level", wasm_level);
     options.addOption(WasiLevel, "wasi_level", wasi_level);
@@ -97,6 +105,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "trace_ringbuffer", trace_ringbuffer);
     options.addOption(bool, "trace_stackprobe", trace_stackprobe);
     options.addOption(bool, "enable_gc", enable_gc);
+    options.addOption(bool, "enable_component", enable_component);
 
     // Build_options as a single shared module so both `core` and
     // `exe_mod` (and any other consumer) reference the same Module.

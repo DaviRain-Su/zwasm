@@ -160,6 +160,16 @@ pub const feature = struct {
     pub const tail_call = @import("feature/tail_call/register.zig");
     pub const function_references = @import("feature/function_references/register.zig");
     pub const memory64 = @import("feature/memory64/register.zig");
+    // Component Model + WASI Preview 2 (ADR-0170). Exposed on the public
+    // surface only under `-Dcomponent`; the default build emits zero
+    // component code. Unit tests reference `decode.zig` directly (test
+    // loader below), so coverage runs regardless of the gate.
+    pub const component = if (@import("build_options").enable_component)
+        struct {
+            pub const decode = @import("feature/component/decode.zig");
+        }
+    else
+        struct {};
 };
 
 // Zone 2
@@ -366,6 +376,7 @@ test {
     _ = @import("wasi/jit_dispatch.zig");
     _ = @import("cli/run.zig");
     _ = @import("cli/invoke_args.zig");
+    _ = @import("feature/component/decode.zig");
 }
 
 // ============================================================
