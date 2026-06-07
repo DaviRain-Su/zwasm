@@ -123,10 +123,13 @@ design forks. Update this doc's `[x]` + handover NEXT each chunk.
 
 ### Phase D — WASI Preview 2 (Tier 1 → 2)
 
-- [ ] **D1 — P2 worlds + P2→P1 adapter (CLI subset).** `wasi_p2_adapter.zig`:
-  name-map `wasi:cli/*`, `wasi:clocks/*`, … onto the existing preview1 impl
-  (reuse wholesale, per survey). **Red**: a P2 `wasi:cli` component prints via
-  the adapter. **Exit**: a P2 hello-world component runs through the zwasm CLI.
+- [x] **D1 — P2 worlds + P2→P1 adapter (CLI subset).** `wasi/adapter.zig`
+  name-map (D1-1 @b35a683e) + host trampolines (host-ctx seam `Caller.data` /
+  `Linker.defineFuncCtx`, ADR-0173; @2d099ff1) + unified core-func index-space
+  (`CoreFuncDef`, @27eb59b8) + `runWasiP2Main` (@96edb868) + `zwasm run`
+  component dispatch (@161236db). **Exit MET**: `zwasm run
+  test/component/wasi_p2_hello.wasm` prints "hello". Broader interface coverage
+  (stderr/stdin/clocks/random/exit) + adapter-classified wiring → **D-306**.
 - [ ] **D2 — resource-modeled P2 interfaces** (stdio/clocks/random/filesystem
   as resources, not just name-map). **Red**: resource-typed P2 fs handle ops.
 - [ ] **D3 — broader native P2 host** (full fs/poll; sockets last, where the
