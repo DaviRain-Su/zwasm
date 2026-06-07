@@ -649,6 +649,135 @@ fn p2GetDirectories(caller: *Caller, retptr: u32) WasiP2Error!void {
     try mem.write(retptr + 4, n);
 }
 
+/// `wasi:io/streams` `[method]output-stream.blocking-flush` (self, retptr):
+/// store `result<_, stream-error>` ok (disc 0) at `retptr`. The host writes
+/// directly to the underlying fd (nothing is buffered at this layer), so a
+/// flush is always an immediate success once the handle is valid.
+fn p2OutStreamFlush(caller: *Caller, self_handle: u32, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    _ = try ctx.resources.rep(WasiP2Ctx.OUTPUT_STREAM_RT, self_handle); // validate handle
+    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    try mem.write(retptr, @as(u8, 0)); // result disc: ok
+}
+
+/// `wasi:filesystem/types` `[method]descriptor.sync` (self, retptr): flush the
+/// fd to disk via P1 `fd_sync`, then store `result<_, error-code>` at `retptr`
+/// (disc 0 = ok; on a P1 error, disc 1 + the D-307 error-code ordinal at +1).
+fn p2DescriptorSync(caller: *Caller, self_handle: u32, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const fd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.DESCRIPTOR_RT, self_handle));
+    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    const errno = wasi_fd.fdSync(ctx.host, fd);
+    if (errno == .success) {
+        try mem.write(retptr, @as(u8, 0));
+    } else {
+        try mem.write(retptr, @as(u8, 1)); // result disc: err
+        try mem.write(retptr + 1, @intFromEnum(adapter.errnoToP2ErrorCode(errno)));
+    }
+}
+
+/// Map a P1 `Filetype` onto the P2 `descriptor-type` enum ordinal (the two
+/// enums diverge in case order — fifo/socket are P2-only at 4/7).
+fn filetypeToDescriptorType(ft: wasi_p1.Filetype) u8 {
+    return switch (ft) {
+        .unknown => 0,
+        .block_device => 1,
+        .character_device => 2,
+        .directory => 3,
+        .regular_file => 6,
+        .socket_dgram, .socket_stream => 7,
+        .symbolic_link => 5,
+        _ => 0,
+    };
+}
+
+/// Stat the fd bound to `self` via P1 `fd_filestat_get` into a scratch buffer,
+/// returning the raw `Filestat` (the shared P1→P2 front-half for stat/get-type).
+fn descriptorFilestat(ctx: *WasiP2Ctx, mem: Memory, fd: wasi_p1.Fd) WasiP2Error!union(enum) { ok: wasi_p1.Filestat, err: wasi_p1.Errno } {
+    const scratch = try ctx.reallocGuest(@sizeOf(wasi_p1.Filestat), 8);
+    const errno = wasi_fd.fdFilestatGet(ctx.host, mem.slice(), fd, scratch);
+    if (errno != .success) return .{ .err = errno };
+    const bytes = mem.sliceAt(scratch, @sizeOf(wasi_p1.Filestat)) catch return WasiP2Error.OutOfBounds;
+    return .{ .ok = std.mem.bytesToValue(wasi_p1.Filestat, bytes) };
+}
+
+/// `wasi:filesystem/types` `[method]descriptor.get-type` (self, retptr): store
+/// `result<descriptor-type, error-code>` at `retptr` (disc@0; payload@1).
+fn p2DescriptorGetType(caller: *Caller, self_handle: u32, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const fd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.DESCRIPTOR_RT, self_handle));
+    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    switch (try descriptorFilestat(ctx, mem, fd)) {
+        .ok => |fs| {
+            try mem.write(retptr, @as(u8, 0)); // result disc: ok
+            try mem.write(retptr + 1, filetypeToDescriptorType(fs.filetype));
+        },
+        .err => |errno| {
+            try mem.write(retptr, @as(u8, 1));
+            try mem.write(retptr + 1, @intFromEnum(adapter.errnoToP2ErrorCode(errno)));
+        },
+    }
+}
+
+/// `wasi:filesystem/types` `[method]descriptor.stat` (self, retptr): store
+/// `result<descriptor-stat, error-code>` at `retptr`. The `descriptor-stat`
+/// record (align 8) lands at the result payload offset +8; its canonical layout
+/// is `%type@0, link-count@8, size@16` then three `option<datetime>` (24 bytes
+/// each: disc@0, datetime{seconds u64@8, nanoseconds u32@16}) at +24/+48/+72.
+fn p2DescriptorStat(caller: *Caller, self_handle: u32, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const fd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.DESCRIPTOR_RT, self_handle));
+    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    switch (try descriptorFilestat(ctx, mem, fd)) {
+        .ok => |fs| {
+            try mem.write(retptr, @as(u8, 0)); // result disc: ok
+            const base = retptr + 8; // descriptor-stat align-8 payload
+            try mem.write(base, filetypeToDescriptorType(fs.filetype));
+            try mem.write(base + 8, @as(u64, fs.nlink));
+            try mem.write(base + 16, @as(u64, fs.size));
+            // Three Some(datetime) timestamps: access / modification / change.
+            inline for (.{ .{ base + 24, fs.atim }, .{ base + 48, fs.mtim }, .{ base + 72, fs.ctim } }) |t| {
+                try mem.write(t[0], @as(u8, 1)); // option disc: some
+                try mem.write(t[0] + 8, @as(u64, t[1] / std.time.ns_per_s));
+                try mem.write(t[0] + 16, @as(u32, @intCast(t[1] % std.time.ns_per_s)));
+            }
+        },
+        .err => |errno| {
+            try mem.write(retptr, @as(u8, 1));
+            try mem.write(retptr + 8, @intFromEnum(adapter.errnoToP2ErrorCode(errno)));
+        },
+    }
+}
+
+/// `wasi:filesystem/types` `[method]descriptor.read` (self, length, offset,
+/// retptr): positionally read up to `length` bytes at `offset` into a
+/// `cabi_realloc`'d buffer via P1 `fd_pread`, then store `result<tuple<list<u8>,
+/// bool>, error-code>` at `retptr` (align 4 → payload@+4): on ok, list
+/// (data_ptr@+4, len@+8) + EOF bool@+12; on a P1 error, disc 1 + error-code@+4.
+fn p2DescriptorRead(caller: *Caller, self_handle: u32, length: u64, offset: u64, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const fd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.DESCRIPTOR_RT, self_handle));
+    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    const n: u32 = @intCast(@min(length, std.math.maxInt(u32)));
+    const data_ptr: u32 = if (n == 0) 0 else try ctx.reallocGuest(n, 1);
+    // A single-entry iovec + nread slot in a fresh scratch area (P1 fd_pread is
+    // iovec-based; reuse it wholesale rather than duplicate the read loop).
+    const scratch = try ctx.reallocGuest(12, 4);
+    try mem.write(scratch, data_ptr); // iovec[0].buf
+    try mem.write(scratch + 4, n); // iovec[0].buf_len
+    const errno = wasi_fd.fdPread(ctx.host, mem.slice(), fd, scratch, 1, offset, scratch + 8);
+    if (errno != .success) {
+        try mem.write(retptr, @as(u8, 1)); // result disc: err
+        try mem.write(retptr + 4, @intFromEnum(adapter.errnoToP2ErrorCode(errno)));
+        return;
+    }
+    const nread = try mem.read(u32, scratch + 8);
+    try mem.write(retptr, @as(u8, 0)); // result disc: ok
+    try mem.write(retptr + 4, data_ptr); // tuple.0 list data ptr
+    try mem.write(retptr + 8, nread); // tuple.0 list length
+    try mem.write(retptr + 12, @as(u8, if (nread < n) 1 else 0)); // tuple.1 eof bool
+}
+
 /// Classify a host-wasi core-instance export (a core-func index) by its
 /// COMPONENT interface — resolve a `canon lower` back to its imported interface
 /// + func and run it through `wasi/adapter`, so trampoline selection does NOT
@@ -689,15 +818,11 @@ fn defineClassifiedFunc(lk: *Linker, module: []const u8, name: []const u8, op: a
         .clocks_monotonic_now => try lk.defineFuncCtx(module, name, ctx, fn (*Caller) WasiP2Error!i64, p2MonotonicNow),
         .clocks_wall_now => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!void, p2WallNow),
         .random_get_bytes => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u64, u32) WasiP2Error!void, p2RandomGetBytes),
-        // Classified but not yet trampolined (out-stream flush + the rest of the
-        // fs descriptor subset) — honest hard error, no silent skip. These land as
-        // their own D3 chunks once a fixture exercises each.
-        .out_stream_blocking_flush,
-        .fs_descriptor_read,
-        .fs_descriptor_sync,
-        .fs_descriptor_stat,
-        .fs_descriptor_get_type,
-        => return error.UnsupportedWasiP2Op,
+        .out_stream_blocking_flush => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32) WasiP2Error!void, p2OutStreamFlush),
+        .fs_descriptor_read => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u64, u64, u32) WasiP2Error!void, p2DescriptorRead),
+        .fs_descriptor_sync => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32) WasiP2Error!void, p2DescriptorSync),
+        .fs_descriptor_stat => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32) WasiP2Error!void, p2DescriptorStat),
+        .fs_descriptor_get_type => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32) WasiP2Error!void, p2DescriptorGetType),
     }
 }
 
@@ -1461,6 +1586,29 @@ test "D2 (EXIT): a WASI-P2 fs component writes a file via get-directories+open-a
     std.mem.writeInt(u32, pmem[20..24], 6, .little);
     try testing.expectEqual(wasi_p1.Errno.success, wasi_fd.fdPread(&host, &pmem, rfd, 16, 1, 0, 64));
     try testing.expectEqualStrings("DATA42", pmem[32..38]);
+}
+
+test "D3-6: a WASI-P2 fs component drives sync/stat/get-type/read + stdout flush e2e" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/wasi_p2_fs_full.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+    host.io = io;
+    _ = try host.addPreopen(tmp.dir.handle, "/sandbox");
+
+    // The guest asserts every descriptor result (sync ok, stat size==6 +
+    // regular-file, get-type regular-file, read "DATA42"+eof, flush ok) and
+    // traps (unreachable) on any mismatch — a clean return proves all five
+    // D3-6 trampolines returned correct data.
+    try runWasiP2Main(&eng, testing.allocator, bytes, &host);
 }
 
 test "D2: WASI-P2 get-directories returns a preopen descriptor list (realloc from trampoline)" {

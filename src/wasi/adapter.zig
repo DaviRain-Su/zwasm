@@ -15,6 +15,82 @@
 //! re-parsing.
 
 const std = @import("std");
+const p1 = @import("preview1.zig");
+
+/// The canonical `wasi:filesystem/types` `error-code` enum ordinals (0.2.x),
+/// in declaration order (the value an `enum` lowers to in the Canonical ABI).
+/// Only the members the P1 errnos below actually map onto are named.
+pub const P2ErrorCode = enum(u8) {
+    access = 0,
+    would_block = 1,
+    already = 2,
+    bad_descriptor = 3,
+    busy = 4,
+    exist = 7,
+    file_too_large = 8,
+    illegal_byte_sequence = 9,
+    in_progress = 10,
+    interrupted = 11,
+    invalid = 12,
+    io = 13,
+    is_directory = 14,
+    loop = 15,
+    too_many_links = 16,
+    message_size = 17,
+    name_too_long = 18,
+    no_device = 19,
+    no_entry = 20,
+    insufficient_memory = 23,
+    insufficient_space = 24,
+    not_directory = 25,
+    not_empty = 26,
+    unsupported = 28,
+    overflow = 31,
+    not_permitted = 32,
+    pipe = 33,
+    read_only = 34,
+    invalid_seek = 35,
+    cross_device = 37,
+};
+
+/// D-307: map a Preview-1 `errno` onto the canonical Preview-2
+/// `wasi:filesystem/types` `error-code` ordinal, so a P2 trampoline can write
+/// `result.err(error-code)` instead of trapping on a P1 failure. Errnos with no
+/// P2 counterpart (the network/STREAM-only ones) fall back to `io`.
+pub fn errnoToP2ErrorCode(errno: p1.Errno) P2ErrorCode {
+    return switch (errno) {
+        .acces => .access,
+        .again => .would_block,
+        .already => .already,
+        .badf => .bad_descriptor,
+        .busy => .busy,
+        .exist => .exist,
+        .fbig => .file_too_large,
+        .ilseq => .illegal_byte_sequence,
+        .inprogress => .in_progress,
+        .intr => .interrupted,
+        .inval => .invalid,
+        .isdir => .is_directory,
+        .loop => .loop,
+        .mlink => .too_many_links,
+        .msgsize => .message_size,
+        .nametoolong => .name_too_long,
+        .nodev => .no_device,
+        .noent => .no_entry,
+        .nomem => .insufficient_memory,
+        .nospc => .insufficient_space,
+        .notdir => .not_directory,
+        .notempty => .not_empty,
+        .notsup => .unsupported,
+        .overflow => .overflow,
+        .perm => .not_permitted,
+        .pipe => .pipe,
+        .rofs => .read_only,
+        .spipe => .invalid_seek,
+        .xdev => .cross_device,
+        else => .io,
+    };
+}
 
 /// The CLI-subset P2 operations the adapter recognises. The richer P2 surface
 /// (full filesystem / poll / sockets) extends this in later chunks.
@@ -180,6 +256,19 @@ test "p1Target: clocks + random" {
     try testing.expectEqual(@as(u32, 0), p1Target(.clocks_wall_now).clock_time_get);
     try testing.expectEqual(@as(u32, 1), p1Target(.clocks_monotonic_now).clock_time_get);
     try testing.expectEqual(P1Target.random_get, p1Target(.random_get_bytes));
+}
+
+test "D-307: errno → P2 filesystem error-code ordinals" {
+    // Spec-pinned ordinals (wasi:filesystem/types error-code declaration order).
+    try testing.expectEqual(P2ErrorCode.no_entry, errnoToP2ErrorCode(.noent));
+    try testing.expectEqual(@as(u8, 20), @intFromEnum(errnoToP2ErrorCode(.noent)));
+    try testing.expectEqual(P2ErrorCode.access, errnoToP2ErrorCode(.acces));
+    try testing.expectEqual(P2ErrorCode.bad_descriptor, errnoToP2ErrorCode(.badf));
+    try testing.expectEqual(P2ErrorCode.exist, errnoToP2ErrorCode(.exist));
+    try testing.expectEqual(P2ErrorCode.is_directory, errnoToP2ErrorCode(.isdir));
+    try testing.expectEqual(P2ErrorCode.not_directory, errnoToP2ErrorCode(.notdir));
+    // Errnos with no P2 counterpart fall back to `io`.
+    try testing.expectEqual(P2ErrorCode.io, errnoToP2ErrorCode(.connreset));
 }
 
 test "classify: filesystem descriptor resource ops (wasi:filesystem/types)" {
