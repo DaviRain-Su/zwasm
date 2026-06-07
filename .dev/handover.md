@@ -17,16 +17,6 @@ v0.3 feature work** (2026-06-06) — "AIが思いのほか早いのでどんど�
    hunted; verify the signal at every Step 0.7.
 Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE** (cw v1 side succeeded).
 
-## Active bundle
-
-- **Bundle-ID**: D-303-jit-unaligned-atomic-trap
-- **Cycles-remaining**: ~1 (IV implementation DONE @5b0db8e1; awaiting remote confirm + V retrospective)
-- **Continuity-memo**: FIX LANDED both arches (`unaligned_atomic_fixups` code-14 stub mirroring divzero;
-  arm64 `encTstImmLowBitsW`+B.NE, x86 `encTestRImm32`+JNE; injected BEFORE bounds at op_memory atomic
-  load/store access_size>1). Mac arm64 + x86_64-Rosetta GREEN (292 corpus, 0 D303-skip; edge fixtures pass).
-- **Exit-condition**: threads-assert corpus 292 pass / 0 D303-skip on **ubuntu AND Win64** (Mac ✓). At next
-  Step 0.7: ubuntu+win green → discharge D-303, close bundle (V retrospective). Red → forward-fix (NOT revert).
-
 ## Current state
 
 - **Phase 17 (v0.2) IN-PROGRESS** (ADR-0168). DONE+**3-host-confirmed**: **17.1-atomics @9eb84833** ·
@@ -44,9 +34,10 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
 - **atomics assert_trap un-skipped @aa6e1a76 (D-301) → found D-303** — the distiller blanket-skipped ALL atomic
   assert_trap with a FALSE reason ("argparse"). Un-skipped: added `(i32,i64,i64)` arm to nonSimdRunAssertTrap +
   emit real directives. **247 → 282 pass** (+35 RMW/cmpxchg unaligned-traps now live). The un-skip EXPOSED a REAL
-  JIT bug **D-303** (now FIXED @5b0db8e1, both arches — see Active bundle): inline atomic load/store omitted the
-  unaligned-trap check the interp has. corpus now **292 pass / 0 D303-skip** (Mac arm64 + x86_64-Rosetta); the 10
-  load/store assert_trap run live. 2 wait skips remain = nonshared-scratch (D-301 residual #2).
+  JIT bug **D-303 FIXED + DISCHARGED @5b0db8e1**: inline atomic load/store omitted the unaligned-trap check the
+  interp has; added a code-14 `unaligned_atomic_fixups` stub both arches. corpus **292 pass / 0 D303-skip**,
+  3-host confirmed (arm64 Mac + x86_64 Rosetta + **x86_64 ubuntu @fac174b5**); Win64 codegen-confirmed (TEST/JNE
+  bytes in dump, 0 did-not-trap) — its 292 summary blocked only by the unrelated D-279 crash. 2 wait skips remain.
 - **D-231 leak FIXED @96fcdf9f** — running check_build_dce's nm-grep on a cross-compiled x86_64 v1_0 binary
   found 3 dead `wasm_3_0` codegen symbols surviving DCE (x86 legacy-switch br_on_null cohort lacked the
   `if (comptime wasm_v3_plus)` guard arm64 had). Fixed; v1_0 x86 wasm_3_0 3→0. REMAINING D-231 = wire the gate
@@ -60,14 +51,16 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
   already a no-op skip — quick verify); (3) **multi-memory JIT** = §14-deferred allowlist (~458 skips;
   parse/interp done).
 - **NEXT — ordered (correctness-first)**:
-  1. **D-303** JIT unaligned-atomic-trap FIXED @5b0db8e1 (both arches, Mac✓); discharge at next Step 0.7 if remote green.
+  1. **d-163-jit dump cleanup (this turn)** — D-163 is CLOSED (not in ledger) but `spec_assert_runner_base.zig:3160`
+     still `if (true)` dumps every compiled func's bytes on EVERY test-all (huge noise + the only D-279 lead).
+     Env-gate it → removes noise AND probes whether D-279 persists without the dump (decisive isolation).
   2. **D-301 residual** mark scratch shared for wait32/64 (2 nonshared skips) — `base.growable_memory` shared flag.
   3. **D-231** wire cross-nm x86 DCE gate into `check_build_dce.sh` (mechanism validated; ELF-nm in nix).
   4. **D-302** verify a `metadata.code.branch_hint` module parses+runs on v2 (custom-section skip path).
   Then the BIG forward track = **Component Model / WASI-P2 survey** (the real v1-parity completion + v0.2 entry).
   **Correctly DEFERRED (do NOT clear)**: D-209 (hot-path/exotic), D-259 (W54-ABI-risk/zero-perf), D-300
   stack-switching (Phase-3 unstable). **D-299** (inline atomic misalign-trap, x86_64 W^X) env-constrained. No tag.
-- Debt ledger: **55 entries**. D-303 fixed (note, remote-pending), D-299 `now`. Never idle.
+- Debt ledger: **54 entries** (D-303 discharged @5b0db8e1). D-299 `now`. Never idle.
 - **D-279 BREAKTHROUGH @92cf7979** — the decisive Win64 RED finally landed (@16fc1bb3, the run the user cut off):
   `zwasm-spec-wasm-2-0-assert` exit-3 with the `[d-279-veh] STACK-OVERFLOW` diagnostic PRESENT but NOT firing →
   **H3 REFUTED**. `[W4 DIR]` raw-beacon pinned crash module = **`address.2.wasm` (NON-SIMD i32/i64 load/store)** in
@@ -86,9 +79,11 @@ All three surface audits DONE: CLI→**D-295** (~85% + intentionally lean, decli
 → discipline: always adversarially verify audit criticals; lesson `fd0a1914`). v0.2 tractable features all DONE
 (atomics/wide-arith/custom-page/relaxed-SIMD); forward track = remaining_sweep + completeness (NEVER-IDLE above).
 
-**D-279 (Win64 JIT heisenbug — NO LONGER "SIMD")**: H1(align)/H2(FP-walk)/H3(stack-overflow) all REFUTED.
-Confirmed NON-SIMD (crash module `address.2.wasm`). Leading H6 = silent unarmed-fault path; UNARMED-FATAL
-diagnostic landed @`92cf7979` to pin the RIP on the next Win64 RED. Full enumeration in the D-279 debt row.
+**D-279 (Win64 JIT heisenbug — NO LONGER "SIMD")**: H1/H2/H3 REFUTED; NON-SIMD. NEW @fac174b5: crashed BOTH
+threads-assert AND wasm-2-0-assert (exit-3, 0 did-not-trap, NO `[d-279-veh]` despite UNARMED-FATAL armed) →
+**crash is at JIT-COMPILE/d-163-jit-DUMP time, NOT execution** (all VEH diagnostics are execution-path → can't
+see it). H7 = the always-on `[d-163-jit]` `std.debug.print` dump (base.zig:3160 `if(true)`, D-163 closed) is the
+suspect — env-gating it (next) isolates dump-I/O-trigger vs real compile crash. streak→0 (segv). Full row.
 
 **Blocked / parked**: 31 blocked-by (call_ref §10.R / D-177 WASI-config / D-178 Global-Memory / future proposals).
 **D-290** = 3 distillers direction-gated (wasm-tools↔wabt divergence; wabt stays). **D-264** dogfooding gated.
@@ -97,10 +92,10 @@ diagnostic landed @`92cf7979` to pin the RIP on the next Win64 RED. Full enumera
 
 - **ubuntu**: re-kicked each turn (D6 always). Verify `[run_remote_ubuntu] OK` in `/tmp/ubuntu.log`. Red →
   auto-revert (D3; first-resume + non-code-gap exceptions apply).
-- **windows**: BATCHED (D8). RE-KICKED this turn @5b0db8e1 to confirm D-303 (new codegen) on Win64 + keep
-  hunting D-279. Verify `/tmp/win.log`: threads-assert **292 pass / 0 D303-skip** = D-303 confirmed (discharge);
-  any `did not trap` = real Win64 D-303 gap (forward-fix). D-279: `[d-279-veh] UNARMED-FATAL code=0x.. rip=0x..`
-  → H6 confirmed; still NO `[d-279-veh]` + exit-3 → H5. NOT auto-revert (D7). (Prior: GREEN @e0efec97, silent=1.)
+- **windows**: BATCHED (D8). @fac174b5 RED = D-279 crash (threads + wasm-2-0-assert exit-3, 0 did-not-trap →
+  D-303 NOT regressed; recorded segv, NOT reverted per D7). After the d-163-jit-dump env-gate lands, re-kick:
+  if exit-3 persists WITHOUT the dump → D-279 is a real compile/execution crash (not dump I/O); if it stops →
+  dump I/O was the trigger. threads-assert **292 pass** on Win64 still the D-303 Win64-summary confirmation.
 - **Gate note**: `OK` = green; `Build Summary: N failed` (no OK) = RED. EXPECTED non-failures: `zig-host-hello`
   exit-42, `--__selftest-crash` exit-70, sha256 `verify: FAIL` (fixture-wrong-constant FALSE lead).
 

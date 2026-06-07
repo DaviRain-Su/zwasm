@@ -961,8 +961,21 @@ entries:
       compile-vs-runtime-vs-interp by the RIP. H5 (abort-class from a non-flushed Zig panic / CRT heap-corruption,
       which does NOT go through VEH at all) stays the fallback if the new UNARMED-FATAL beacon ALSO stays silent
       on the next RED — that would prove the exit-3 is not a hardware exception at all.
-      NEXT: land the UNARMED-FATAL VEH diagnostic (windows_traphandler.zig:191 branch) so the next Win64 batch
-      pins the faulting RIP (or proves it is non-exception abort-class → H5).
+      UPDATE @fac174b5 (2026-06-07) — UNARMED-FATAL was present + ARMED, crash recurred (exit-3 on BOTH
+      threads-assert AND wasm-2-0-assert, 0 did-not-trap), yet **NO `[d-279-veh]` of ANY kind fired**. Decisive:
+      ALL existing diagnostics (diagStackOverflow / diagUnrecovered / UNARMED-FATAL) are in the VEH, which only
+      sees faults during JIT EXECUTION (the `runUnderVeh`/`callJitOrTrap` window). The crash recurs WITHOUT any
+      VEH hit → the fault is **NOT in wasm execution** but at **JIT-COMPILE time** (the `[d-163-jit]` per-func
+      `std.debug.print` dump truncates mid-func right before exit-3, every occurrence) or in the runner/print I/O
+      itself. NEW leading **H7**: the always-on `[d-163-jit]` dump (`spec_assert_runner_base.zig:3160` `if(true)`,
+      stale — its D-163 closed and the ledger no longer carries D-163; comment says "revert when D-163 closes")
+      emits a std.debug.print per compiled func of the FULL byte stream → enormous Win64 stdout volume; the crash
+      may be in that print path (Win64 stdio under load), NOT zwasm codegen. PROBE (this cycle): env-gate the
+      dump OFF by default. Re-kick Win64: exit-3 GONE → H7 confirmed (dump I/O was the trigger; D-279 was never a
+      codegen bug); exit-3 PERSISTS without the dump → H7 refuted, the crash is a real compile-time fault (chase
+      the codegen/compile path, NOT execution — all VEH instruments are then proven irrelevant). Either way the
+      env-gate removes the noise the dump injects into every test-all log. NOTE: the dump has been "the lead" for
+      D-279 — keep it ENV-reachable (not deleted) so it can be re-enabled for investigation.
       Prior streak note (2026-06-06, superseded): reached 5/5 then 6 `silent` (7e46c054 → e707fd31) before the
       first resurfacing. Original report below.
       Surfaced 2026-06-05
@@ -1223,47 +1236,6 @@ entries:
     first_raised: "2026-06-07"
     last_reviewed: "2026-06-07"
     refs: ~/Documents/MyProducts/zwasm/src/cli.zig:2032; src/parse/sections.zig; .dev/proposal_watch.md
-  - id: D-303
-    layer: code
-    status: note
-    description: |-
-      **FIXED @5b0db8e1** (2026-06-07, both arches). Added a demuxed `unaligned_atomic_fixups`
-      trap stub (code 14) on arm64 + x86_64 mirroring `divzero_fixups`: at the atomic load/store
-      path (access_size>1), BEFORE the bounds check, test ea's low log2(size) bits and branch to
-      the stub on nonzero. New arm64 encoder `encTstImmLowBitsW`; x86 reuses `encTestRImm32`+JNE.
-      Distiller flipped → threads-assert corpus 282→292 pass (0 D303-skip). Edge fixtures
-      atomic_{load,store}_unaligned_traps added. Verified GREEN Mac arm64 + x86_64 (Rosetta);
-      ubuntu + Win64 confirm pending (remote kicks). Discharge fully at next Step 0.7 if remote green.
-      ORIGINAL (found 2026-06-07 by D-301 atomics corpus un-skip):
-      **JIT inline `*.atomic.load*` / `*.atomic.store*` codegen does NOT trap on unaligned
-      effective address** — the spec requires every atomic access to trap (`ea mod size ≠ 0`,
-      exec step 8, BEFORE the bounds check). The INTERP is CORRECT (`memory.zig:202`
-      `if (ea & 3 != 0) return Trap.UnalignedAtomic`); the bug is JIT-ONLY and arch-agnostic
-      (both arm64 + x86_64 `op_memory.zig` route atomic load/store through the SAME inline
-      path as plain load/store, which omits the alignment check). RMW / cmpxchg / wait / notify
-      are FINE — they go through the `jit_abi.zig` helper fns that already set `trap_kind = 14`
-      (jit_abi.zig:546/656/711/732). Discovered by un-skipping the official atomics assert_trap
-      corpus (D-301): 35 RMW/cmpxchg trap correctly; 10 load/store "did not trap" → real failure.
-      Those 10 are currently `skip-impl jit-unaligned-trap-gap-D303` in the threads-assert
-      manifest (truthful skip, distiller `regen_spec_threads_assert.sh`), the 35 RMW now run live.
-      FIX (bundle, next cycle): add an `unaligned_atomic_fixups` list (trap_kind=14) mirroring the
-      `divzero_fixups`/`overflow_fixups` demuxed-trap-stub pattern (ctx.zig field + emit.zig
-      create/defer/wire + `EmitCindStub.emit(..., 14, frame_bytes)`), and at the op_memory atomic
-      load/store path (access_size>1) emit, BEFORE the bounds check, an `ea & (access_size-1)`
-      test → branch-if-nonzero to the stub. NEEDS NEW ENCODERS: arm64 TST/ANDS-bitmask-immediate
-      (masks 1/3/7) + B.NE (have encBCond); x86_64 TEST r,imm + JNE. Add edge fixtures under
-      test/edge_cases/p17/atomics for each width × load/store. Then flip the distiller to emit the
-      real assert_trap for load/store too and re-bake → corpus +10. 3-host verify (incl. Win64).
-    first_raised: "2026-06-07"
-    last_reviewed: "2026-06-07"
-    refs: |-
-      src/engine/codegen/arm64/op_memory.zig (atomic load/store inline path, no align check)
-      src/engine/codegen/x86_64/op_memory.zig (same)
-      src/instruction/wasm_1_0/memory.zig:202 (interp CORRECT reference)
-      src/engine/codegen/shared/jit_abi.zig:546 (rmw align-check pattern, trap_kind=14)
-      src/engine/codegen/arm64/ctx.zig:120 (divzero_fixups demux template)
-      scripts/regen_spec_threads_assert.sh (distiller skip + future flip)
-      test/spec/threads-assert/atomic/manifest.txt (10 skip-impl jit-unaligned-trap-gap-D303)
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.
