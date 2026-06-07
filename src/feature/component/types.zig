@@ -83,14 +83,60 @@ pub const FlagsType = struct {
     labels: []const []const u8,
 };
 
-/// One `deftype` in the type index space. A2 modelled the primitive-`defvaltype`
-/// and `functype` forms; B2 adds `enum`/`flags`; record/variant/list etc. land
-/// in their B-chunks.
+/// `record` defvaltype (`Binary.md` 0x72): named, ordered fields.
+pub const RecordType = struct {
+    fields: []const NamedVal,
+};
+
+/// `list<T>` defvaltype (`Binary.md` 0x70 variable / 0x67 fixed-length).
+pub const ListType = struct {
+    element: *const ValType,
+    /// Fixed length (`0x67`), or null for a variable-length list (`0x70`).
+    fixed_length: ?u32,
+};
+
+/// `tuple` defvaltype (`Binary.md` 0x6f): positional, unnamed element types.
+pub const TupleType = struct {
+    types: []const ValType,
+};
+
+/// One `variant` case (`Binary.md` `case`): a label + optional payload type.
+pub const Case = struct {
+    name: []const u8,
+    payload: ?ValType,
+};
+
+/// `variant` defvaltype (`Binary.md` 0x71): a tagged union of cases.
+pub const VariantType = struct {
+    cases: []const Case,
+};
+
+/// `option<T>` defvaltype (`Binary.md` 0x6b) — sugar for `variant{none, some(T)}`.
+pub const OptionType = struct {
+    payload: *const ValType,
+};
+
+/// `result<T, E>` defvaltype (`Binary.md` 0x6a) — sugar for
+/// `variant{ok(T?), err(E?)}`; both payloads optional.
+pub const ResultType = struct {
+    ok: ?ValType,
+    err: ?ValType,
+};
+
+/// One `deftype` in the type index space. A2 modelled primitives + `functype`;
+/// B2 `enum`/`flags`; B5 the remaining compound value types. own/borrow +
+/// stream/future (resources / async) land in the C-chunks.
 pub const DefType = union(enum) {
     value: ValType,
     func: FuncType,
     enum_: EnumType,
     flags: FlagsType,
+    record: RecordType,
+    list: ListType,
+    tuple: TupleType,
+    variant: VariantType,
+    option: OptionType,
+    result: ResultType,
 };
 
 /// Component-level `sort` (`Binary.md`); `core` nests a `core:sort`.
@@ -268,6 +314,63 @@ fn decodeFuncType(arena: Allocator, body: []const u8, pos: *usize, is_async: boo
     return .{ .params = try params.toOwnedSlice(arena), .result = result, .is_async = is_async };
 }
 
+/// Store a `ValType` on the arena and return a stable pointer (for the
+/// recursive list/option element types).
+fn allocValType(arena: Allocator, ty: ValType) Error!*const ValType {
+    const p = try arena.create(ValType);
+    p.* = ty;
+    return p;
+}
+
+/// `vec(labelvaltype)` — record fields (named, typed).
+fn decodeNamedValVec(arena: Allocator, body: []const u8, pos: *usize) Error![]const NamedVal {
+    const count = try leb128.readUleb128(u32, body, pos);
+    var out: std.ArrayList(NamedVal) = .empty;
+    var i: u32 = 0;
+    while (i < count) : (i += 1) {
+        const name = try decodeLabel(body, pos);
+        try out.append(arena, .{ .name = name, .ty = try decodeValType(body, pos) });
+    }
+    return out.toOwnedSlice(arena);
+}
+
+/// `vec(valtype)` — tuple element types.
+fn decodeValTypeVec(arena: Allocator, body: []const u8, pos: *usize) Error![]const ValType {
+    const count = try leb128.readUleb128(u32, body, pos);
+    var out: std.ArrayList(ValType) = .empty;
+    var i: u32 = 0;
+    while (i < count) : (i += 1) try out.append(arena, try decodeValType(body, pos));
+    return out.toOwnedSlice(arena);
+}
+
+/// `<T>? ::= 0x00 | 0x01 T` — an optional valtype.
+fn decodeOptionalValType(body: []const u8, pos: *usize) Error!?ValType {
+    if (pos.* >= body.len) return Error.Truncated;
+    const tag = body[pos.*];
+    pos.* += 1;
+    return switch (tag) {
+        0x00 => null,
+        0x01 => try decodeValType(body, pos),
+        else => Error.InvalidDefType,
+    };
+}
+
+/// `vec(case)` — `case ::= label' valtype? 0x00` (the trailing `0x00` is the
+/// retired `refines` field, required to be zero in the current spec).
+fn decodeCaseVec(arena: Allocator, body: []const u8, pos: *usize) Error![]const Case {
+    const count = try leb128.readUleb128(u32, body, pos);
+    var out: std.ArrayList(Case) = .empty;
+    var i: u32 = 0;
+    while (i < count) : (i += 1) {
+        const name = try decodeLabel(body, pos);
+        const payload = try decodeOptionalValType(body, pos);
+        if (pos.* >= body.len or body[pos.*] != 0x00) return Error.InvalidDefType;
+        pos.* += 1;
+        try out.append(arena, .{ .name = name, .payload = payload });
+    }
+    return out.toOwnedSlice(arena);
+}
+
 fn decodeDefType(arena: Allocator, body: []const u8, pos: *usize) Error!DefType {
     const v = try leb128.readSleb128(i64, body, pos);
     if (v >= 0) return Error.InvalidDefType; // a deftype is never a bare typeidx
@@ -286,10 +389,34 @@ fn decodeDefType(arena: Allocator, body: []const u8, pos: *usize) Error!DefType 
             if (labels.len == 0 or labels.len > 32) break :blk Error.InvalidFlagsCount;
             break :blk .{ .flags = .{ .labels = labels } };
         },
-        // TODO(p17/CM-B*): remaining compound defvaltype (record 0x72 /
-        // variant 0x71 / list 0x70,0x67 / tuple 0x6f / option 0x6b /
-        // result 0x6a / own 0x69 / borrow 0x68 / stream 0x66 / future 0x65).
-        0x72, 0x71, 0x70, 0x67, 0x6f, 0x6b, 0x6a, 0x69, 0x68, 0x66, 0x65 => Error.UnsupportedTypeForm,
+        0x72 => blk: { // record: vec(labelvaltype), >0 fields
+            const fields = try decodeNamedValVec(arena, body, pos);
+            if (fields.len == 0) break :blk Error.InvalidDefType;
+            break :blk .{ .record = .{ .fields = fields } };
+        },
+        0x71 => blk: { // variant: vec(case), >0 cases
+            const cases = try decodeCaseVec(arena, body, pos);
+            if (cases.len == 0) break :blk Error.InvalidDefType;
+            break :blk .{ .variant = .{ .cases = cases } };
+        },
+        0x70 => .{ .list = .{ .element = try allocValType(arena, try decodeValType(body, pos)), .fixed_length = null } },
+        0x67 => blk: { // fixed-length list: valtype len:u32
+            const elem = try allocValType(arena, try decodeValType(body, pos));
+            break :blk .{ .list = .{ .element = elem, .fixed_length = try leb128.readUleb128(u32, body, pos) } };
+        },
+        0x6f => blk: { // tuple: vec(valtype), >0
+            const tys = try decodeValTypeVec(arena, body, pos);
+            if (tys.len == 0) break :blk Error.InvalidDefType;
+            break :blk .{ .tuple = .{ .types = tys } };
+        },
+        0x6b => .{ .option = .{ .payload = try allocValType(arena, try decodeValType(body, pos)) } },
+        0x6a => blk: { // result: ok? err?
+            const ok = try decodeOptionalValType(body, pos);
+            break :blk .{ .result = .{ .ok = ok, .err = try decodeOptionalValType(body, pos) } };
+        },
+        // TODO(p17/CM-C*): own 0x69 / borrow 0x68 (resources) / stream 0x66 /
+        // future 0x65 (async) — decoded with their runtime machinery.
+        0x69, 0x68, 0x66, 0x65 => Error.UnsupportedTypeForm,
         // TODO(p17/CM-C*): componenttype 0x41 / instancetype 0x42 /
         // resourcetype 0x3f,0x3e (recurse into the declarator tree).
         0x41, 0x42, 0x3f, 0x3e => Error.UnsupportedTypeForm,
@@ -533,8 +660,64 @@ test "core-module externdesc (0x00 0x11)" {
     try testing.expectEqual(@as(u32, 3), info.imports.items[0].desc.core_module);
 }
 
-test "compound defvaltype defers with UnsupportedTypeForm (record 0x72)" {
-    const bytes = comptime buildComponent(&.{.{ 7, &[_]u8{ 0x01, 0x72 } }});
+test "record decode: 0x72 named fields" {
+    // record { x: u32, y: string }: 0x72 count=2, "x" u32(0x79), "y" string(0x73)
+    const body = [_]u8{ 0x01, 0x72, 0x02, 0x01, 'x', 0x79, 0x01, 'y', 0x73 };
+    const bytes = comptime buildComponent(&.{.{ 7, &body }});
+    var info = try decodeBoth(bytes);
+    defer info.deinit();
+    const r = info.deftypes.items[0].record;
+    try testing.expectEqual(@as(usize, 2), r.fields.len);
+    try testing.expectEqualStrings("x", r.fields[0].name);
+    try testing.expectEqual(PrimValType.u32, r.fields[0].ty.primitive);
+    try testing.expectEqual(PrimValType.string, r.fields[1].ty.primitive);
+}
+
+test "list decode: variable (0x70) and fixed (0x67)" {
+    // type[0] = list<u8>, type[1] = list<u8, 4>
+    const body = [_]u8{ 0x02, 0x70, 0x7d, 0x67, 0x7d, 0x04 };
+    const bytes = comptime buildComponent(&.{.{ 7, &body }});
+    var info = try decodeBoth(bytes);
+    defer info.deinit();
+    try testing.expectEqual(@as(?u32, null), info.deftypes.items[0].list.fixed_length);
+    try testing.expectEqual(PrimValType.u8, info.deftypes.items[0].list.element.primitive);
+    try testing.expectEqual(@as(?u32, 4), info.deftypes.items[1].list.fixed_length);
+}
+
+test "variant/option/result decode" {
+    // variant { "a", "b"(u32) } : 0x71 count=2; "a" none 0x00; "b" some(u32) 0x00
+    const variant_body = [_]u8{ 0x01, 0x71, 0x02, 0x01, 'a', 0x00, 0x00, 0x01, 'b', 0x01, 0x79, 0x00 };
+    var v = try decodeBoth(comptime buildComponent(&.{.{ 7, &variant_body }}));
+    defer v.deinit();
+    const variant = v.deftypes.items[0].variant;
+    try testing.expectEqual(@as(usize, 2), variant.cases.len);
+    try testing.expectEqual(@as(?ValType, null), variant.cases[0].payload);
+    try testing.expectEqual(PrimValType.u32, variant.cases[1].payload.?.primitive);
+
+    // option<string>: 0x6b string
+    var o = try decodeBoth(comptime buildComponent(&.{.{ 7, &[_]u8{ 0x01, 0x6b, 0x73 } }}));
+    defer o.deinit();
+    try testing.expectEqual(PrimValType.string, o.deftypes.items[0].option.payload.primitive);
+
+    // result<u32, string>: 0x6a 0x01 u32 0x01 string
+    var r = try decodeBoth(comptime buildComponent(&.{.{ 7, &[_]u8{ 0x01, 0x6a, 0x01, 0x79, 0x01, 0x73 } }}));
+    defer r.deinit();
+    try testing.expectEqual(PrimValType.u32, r.deftypes.items[0].result.ok.?.primitive);
+    try testing.expectEqual(PrimValType.string, r.deftypes.items[0].result.err.?.primitive);
+}
+
+test "tuple decode + empty record rejected" {
+    // tuple<u32, f64>: 0x6f count=2
+    var t = try decodeBoth(comptime buildComponent(&.{.{ 7, &[_]u8{ 0x01, 0x6f, 0x02, 0x79, 0x75 } }}));
+    defer t.deinit();
+    try testing.expectEqual(@as(usize, 2), t.deftypes.items[0].tuple.types.len);
+
+    // empty record (count 0) is malformed.
+    try testing.expectError(Error.InvalidDefType, decodeBoth(comptime buildComponent(&.{.{ 7, &[_]u8{ 0x01, 0x72, 0x00 } }})));
+}
+
+test "own/borrow still defer with UnsupportedTypeForm (0x69)" {
+    const bytes = comptime buildComponent(&.{.{ 7, &[_]u8{ 0x01, 0x69, 0x00 } }});
     try testing.expectError(Error.UnsupportedTypeForm, decodeBoth(bytes));
 }
 

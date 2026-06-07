@@ -49,6 +49,14 @@ pub const Value = union(enum) {
     list: []const Value,
     /// `record` fields, positional (parallel to the `CanonType.record` fields).
     record: []const Value,
+    /// `variant` value: the selected case index + its optional payload.
+    variant: VariantValue,
+};
+
+/// A `variant`/`option`/`result` value: which case, and the (optional) payload.
+pub const VariantValue = struct {
+    case: u32,
+    payload: ?*const Value,
 };
 
 /// The despecialized value type the canonical ABI computes layout over. B2:
@@ -63,10 +71,17 @@ pub const CanonType = union(enum) {
     /// variable-length list of an element type.
     list: *const CanonType,
     record: []const Field,
+    /// tagged union of cases (option/result/tuple despecialize to this/record).
+    variant: []const VCase,
 
     pub const Field = struct {
         name: []const u8,
         ty: CanonType,
+    };
+
+    pub const VCase = struct {
+        name: []const u8,
+        payload: ?CanonType,
     };
 };
 
@@ -126,6 +141,16 @@ pub fn alignTo(ptr: usize, a: usize) usize {
     return (ptr + a - 1) / a * a;
 }
 
+/// Max alignment over a variant's case payloads (`max_case_alignment`); 1 if
+/// no case carries a payload.
+fn maxCaseAlignment(cases: []const CanonType.VCase) usize {
+    var a: usize = 1;
+    for (cases) |c| {
+        if (c.payload) |p| a = @max(a, alignmentOf(p));
+    }
+    return a;
+}
+
 /// In-memory alignment of a value type (recursive).
 pub fn alignmentOf(t: CanonType) usize {
     return switch (t) {
@@ -138,6 +163,7 @@ pub fn alignmentOf(t: CanonType) usize {
             for (fields) |f| a = @max(a, alignmentOf(f.ty));
             break :blk a;
         },
+        .variant => |cases| @max(discriminantSize(@intCast(cases.len)), maxCaseAlignment(cases)),
     };
 }
 
@@ -155,6 +181,15 @@ pub fn sizeOf(t: CanonType) usize {
                 s += sizeOf(f.ty);
             }
             break :blk alignTo(s, alignmentOf(t));
+        },
+        .variant => |cases| blk: {
+            var s = discriminantSize(@intCast(cases.len));
+            s = alignTo(s, maxCaseAlignment(cases));
+            var cs: usize = 0;
+            for (cases) |c| {
+                if (c.payload) |p| cs = @max(cs, sizeOf(p));
+            }
+            break :blk alignTo(s + cs, alignmentOf(t));
         },
     };
 }
@@ -262,7 +297,7 @@ pub fn lower(value: Value) LowerError!CoreValue {
         // enum + flags both flatten to a single i32 (discriminant / bit-set).
         .enum_value => |idx| CoreValue.fromI32(@bitCast(idx)),
         .flags => |bits| CoreValue.fromI32(@bitCast(bits)),
-        .string, .list, .record => LowerError.NotFlatScalar,
+        .string, .list, .record, .variant => LowerError.NotFlatScalar,
     };
 }
 
@@ -306,7 +341,7 @@ pub fn liftTyped(c: CoreValue, t: CanonType) LiftError!Value {
             if (n < 32 and (bits >> @intCast(n)) != 0) return LiftError.InvalidFlags;
             break :blk .{ .flags = bits };
         },
-        .list, .record => LiftError.NotFlatScalar,
+        .list, .record, .variant => LiftError.NotFlatScalar,
     };
 }
 
@@ -375,6 +410,17 @@ pub fn store(cx: CanonContext, value: Value, ty: CanonType, ptr: u32) StoreError
                 off += @intCast(sizeOf(f.ty));
             }
         },
+        .variant => |cases| {
+            const vv = if (value == .variant) value.variant else return StoreError.ValueTypeMismatch;
+            if (vv.case >= cases.len) return StoreError.ValueTypeMismatch;
+            const disc_size = discriminantSize(@intCast(cases.len));
+            try storeInt(cx, vv.case, ptr, disc_size);
+            if (cases[vv.case].payload) |pt| {
+                const poff: u32 = @intCast(alignTo(@as(usize, ptr) + disc_size, maxCaseAlignment(cases)));
+                const pv = vv.payload orelse return StoreError.ValueTypeMismatch;
+                try store(cx, pv.*, pt, poff);
+            }
+        },
     }
 }
 
@@ -415,6 +461,18 @@ pub fn load(cx: CanonContext, arena: std.mem.Allocator, ty: CanonType, ptr: u32)
                 off += @intCast(sizeOf(f.ty));
             }
             return .{ .record = out };
+        },
+        .variant => |cases| {
+            const disc_size = discriminantSize(@intCast(cases.len));
+            const case_index: u32 = @intCast(try loadInt(cx, ptr, disc_size));
+            if (case_index >= cases.len) return LoadError.ValueTypeMismatch;
+            if (cases[case_index].payload) |pt| {
+                const poff: u32 = @intCast(alignTo(@as(usize, ptr) + disc_size, maxCaseAlignment(cases)));
+                const pv = try arena.create(Value);
+                pv.* = try load(cx, arena, pt, poff);
+                return .{ .variant = .{ .case = case_index, .payload = pv } };
+            }
+            return .{ .variant = .{ .case = case_index, .payload = null } };
         },
     }
 }
@@ -689,6 +747,76 @@ test "store: value/type mismatch rejected" {
 
 test "lower: aggregate value has no flat scalar form" {
     try testing.expectError(LowerError.NotFlatScalar, lower(.{ .string = "x" }));
+}
+
+test "store/load round-trip: variant (option<u32> shape, some case)" {
+    var mem = [_]u8{0} ** 64;
+    var bump = Bump{ .next = 0 };
+    const cx = CanonContext{ .memory = &mem, .realloc_ctx = @ptrCast(&bump), .realloc_fn = Bump.realloc };
+    const cases = [_]CanonType.VCase{
+        .{ .name = "none", .payload = null },
+        .{ .name = "some", .payload = .{ .prim = .u32 } },
+    };
+    const ty = CanonType{ .variant = &cases };
+    // disc 1 → align(1,4)=4 + payload 4 = 8 → align(8,4)=8
+    try testing.expectEqual(@as(usize, 8), sizeOf(ty));
+    try testing.expectEqual(@as(usize, 4), alignmentOf(ty));
+
+    const payload = Value{ .u32 = 42 };
+    try store(cx, .{ .variant = .{ .case = 1, .payload = &payload } }, ty, 0);
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const back = try load(cx, arena.allocator(), ty, 0);
+    try testing.expectEqual(@as(u32, 1), back.variant.case);
+    try testing.expectEqual(@as(u32, 42), back.variant.payload.?.u32);
+}
+
+test "store/load round-trip: variant none case (no payload)" {
+    var mem = [_]u8{0} ** 16;
+    var bump = Bump{ .next = 0 };
+    const cx = CanonContext{ .memory = &mem, .realloc_ctx = @ptrCast(&bump), .realloc_fn = Bump.realloc };
+    const cases = [_]CanonType.VCase{
+        .{ .name = "none", .payload = null },
+        .{ .name = "some", .payload = .{ .prim = .u32 } },
+    };
+    try store(cx, .{ .variant = .{ .case = 0, .payload = null } }, .{ .variant = &cases }, 0);
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const back = try load(cx, arena.allocator(), .{ .variant = &cases }, 0);
+    try testing.expectEqual(@as(u32, 0), back.variant.case);
+    try testing.expectEqual(@as(?*const Value, null), back.variant.payload);
+}
+
+test "store/load round-trip: result<u32, string> (err case)" {
+    var mem = [_]u8{0} ** 128;
+    var bump = Bump{ .next = 16 };
+    const cx = CanonContext{ .memory = &mem, .realloc_ctx = @ptrCast(&bump), .realloc_fn = Bump.realloc };
+    const cases = [_]CanonType.VCase{
+        .{ .name = "ok", .payload = .{ .prim = .u32 } },
+        .{ .name = "err", .payload = .{ .prim = .string } },
+    };
+    const ty = CanonType{ .variant = &cases };
+    try testing.expectEqual(@as(usize, 12), sizeOf(ty)); // disc→4 + max(4,8)=8
+
+    const payload = Value{ .string = "oops" };
+    try store(cx, .{ .variant = .{ .case = 1, .payload = &payload } }, ty, 0);
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const back = try load(cx, arena.allocator(), ty, 0);
+    try testing.expectEqual(@as(u32, 1), back.variant.case);
+    try testing.expectEqualStrings("oops", back.variant.payload.?.string);
+}
+
+test "variant: out-of-range case index on load rejected" {
+    var mem = [_]u8{0} ** 16;
+    mem[0] = 5; // disc says case 5, but only 2 cases
+    var bump = Bump{ .next = 0 };
+    const cx = CanonContext{ .memory = &mem, .realloc_ctx = @ptrCast(&bump), .realloc_fn = Bump.realloc };
+    const cases = [_]CanonType.VCase{ .{ .name = "a", .payload = null }, .{ .name = "b", .payload = null } };
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    try testing.expectError(LoadError.ValueTypeMismatch, load(cx, arena.allocator(), .{ .variant = &cases }, 0));
 }
 
 test "CanonContext.realloc delegates to the injected callback" {
