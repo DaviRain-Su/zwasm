@@ -557,7 +557,12 @@ fn p2DescriptorWrite(caller: *Caller, self_handle: u32, buf_ptr: u32, buf_len: u
     const fd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.DESCRIPTOR_RT, self_handle));
     const mem = caller.memory() orelse return WasiP2Error.NoMemory;
     const bytes = mem.sliceAt(buf_ptr, buf_len) catch return WasiP2Error.OutOfBounds;
-    if (wasi_fd.pwriteSlice(ctx.host, fd, bytes, offset) != .success) return WasiP2Error.WriteFailed;
+    const errno = wasi_fd.pwriteSlice(ctx.host, fd, bytes, offset);
+    if (errno != .success) {
+        try mem.write(retptr, @as(u8, 1)); // result disc: err
+        try mem.write(retptr + 8, @intFromEnum(adapter.errnoToP2ErrorCode(errno))); // error-code (align 8)
+        return;
+    }
     try mem.write(retptr, @as(u8, 0)); // result disc: ok
     try mem.write(retptr + 8, @as(u64, buf_len)); // filesize written
 }
@@ -603,8 +608,8 @@ fn preopenWasiFd(host: *wasi_host.Host, host_fd: std.posix.fd_t) ?wasi_p1.Fd {
 /// relative to the directory descriptor `self`, mint a descriptor resource for
 /// the opened fd, and store `result<own<descriptor>, error-code>` (disc 0 = ok,
 /// handle at +4) at `retptr`. P2 open-flags bits map 1:1 onto P1 oflags
-/// (create/directory/exclusive/truncate = 0x1/2/4/8). Graceful P1→P2
-/// error-code result mapping is deferred (D-307); a P1 error currently traps.
+/// (create/directory/exclusive/truncate = 0x1/2/4/8). A P1 error becomes
+/// `result.err(error-code)` via the D-307 errno map (no trap).
 fn p2DescriptorOpenAt(caller: *Caller, self_handle: u32, path_flags: u32, path_ptr: u32, path_len: u32, open_flags: u32, descriptor_flags: u32, retptr: u32) WasiP2Error!void {
     _ = path_flags;
     _ = descriptor_flags;
@@ -615,7 +620,11 @@ fn p2DescriptorOpenAt(caller: *Caller, self_handle: u32, path_flags: u32, path_p
     const rights = wasi_p1.RIGHTS_FD_READ | wasi_p1.RIGHTS_FD_WRITE;
     // pathOpen writes the opened fd to retptr+4; reuse that slot for the result payload.
     const errno = wasi_fd.pathOpen(ctx.host, mem.slice(), dirfd, 0, path_ptr, path_len, oflags, rights, rights, 0, retptr + 4);
-    if (errno != .success) return WasiP2Error.WriteFailed; // D-307: map to result.err(error-code)
+    if (errno != .success) {
+        try mem.write(retptr, @as(u8, 1)); // result disc: err
+        try mem.write(retptr + 4, @intFromEnum(adapter.errnoToP2ErrorCode(errno))); // D-307: error-code
+        return;
+    }
     const opened_fd = try mem.read(u32, retptr + 4);
     const handle = try ctx.resources.new(WasiP2Ctx.DESCRIPTOR_RT, opened_fd);
     try mem.write(retptr, @as(u8, 0)); // result disc: ok
@@ -1608,6 +1617,28 @@ test "D3-6: a WASI-P2 fs component drives sync/stat/get-type/read + stdout flush
     // regular-file, get-type regular-file, read "DATA42"+eof, flush ok) and
     // traps (unreachable) on any mismatch — a clean return proves all five
     // D3-6 trampolines returned correct data.
+    try runWasiP2Main(&eng, testing.allocator, bytes, &host);
+}
+
+test "D-307: a failing descriptor.open-at returns result.err(no-entry), not a trap" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/wasi_p2_fs_err.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+    host.io = io;
+    _ = try host.addPreopen(tmp.dir.handle, "/sandbox");
+
+    // open-at "nope.txt" without the create flag → P1 noent → the trampoline
+    // writes result.err(error-code::no-entry); the guest asserts disc==err +
+    // code==20 and traps on mismatch, so a clean return proves the D-307 map.
     try runWasiP2Main(&eng, testing.allocator, bytes, &host);
 }
 
