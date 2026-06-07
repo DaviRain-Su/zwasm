@@ -46,8 +46,9 @@ philosophy-maintained; proven by Rust+Go sample components). Decision + rational
   cabi_realloc-via-guest CanonContext; lift host string args → lower into guest → invoke; the string RESULT (2 flat
   values > MAX_FLAT_RESULTS=1) returns via an INDIRECT return-area pointer (read `CanonicalABI.md` `canon_lift` /
   `flatten_functype` / `lower_heap`); also handle memory-grow invalidating the captured slice (re-fetch after realloc).
-  **(b-3)** a REAL string→string fixture via `nix develop .#gen` (cargo-component / wasm-tools, Mac host) + the exit
-  assertion. CHECK the gen toolchain availability first (extended_challenge Step 1).
+  **(b-3)** a REAL string→string fixture + exit assertion. TOOLCHAIN CHECKED (this session): nix + `wasm-tools` present
+  in `.#gen`, but **NO cargo-component** — build a core module (rustWasm/clang/wat) then `wasm-tools component embed
+  <wit> core.wasm` + `wasm-tools component new` to wrap it (canon section). Start with b-1 (pure Zig, no toolchain).
 - **Exit-condition**: a string→string component runs via `api/component.zig` and returns the expected string.
 
 ## Current state
