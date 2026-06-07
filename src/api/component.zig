@@ -417,6 +417,13 @@ fn p2GetStdout(caller: *Caller) WasiP2Error!u32 {
     return ctx.streams.new(WasiP2Ctx.OUTPUT_STREAM_RT, 1);
 }
 
+/// `wasi:cli/stderr` `get-stderr` → mint an output-stream handle bound to fd 2.
+/// The write/drop trampolines are shared (they resolve the fd from the handle).
+fn p2GetStderr(caller: *Caller) WasiP2Error!u32 {
+    const ctx = caller.data(WasiP2Ctx);
+    return ctx.streams.new(WasiP2Ctx.OUTPUT_STREAM_RT, 2);
+}
+
 /// `wasi:io/streams` `[method]output-stream.blocking-write-and-flush`
 /// (self, ptr, len, retptr): write the flat `list<u8>` at `(ptr, len)` to the
 /// fd bound to `self`, then store the `result<_, stream-error>` ok-discriminant
@@ -461,12 +468,12 @@ fn classifyCoreExport(info: *const ctypes.TypeInfo, core_func_idx: u32) ?adapter
 fn defineClassifiedFunc(lk: *Linker, module: []const u8, name: []const u8, op: adapter.P2Op, ctx: *WasiP2Ctx) !void {
     switch (op) {
         .cli_get_stdout => try lk.defineFuncCtx(module, name, ctx, fn (*Caller) WasiP2Error!u32, p2GetStdout),
+        .cli_get_stderr => try lk.defineFuncCtx(module, name, ctx, fn (*Caller) WasiP2Error!u32, p2GetStderr),
         .out_stream_write, .out_stream_blocking_write_and_flush => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32, u32, u32) WasiP2Error!void, p2OutStreamWrite),
         .out_stream_drop => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!void, p2OutStreamDrop),
-        // Classified but not yet trampolined (stderr/stdin/exit/clocks/random +
-        // the fs descriptor subset) — honest hard error, no silent skip. These
-        // land as their own D2 chunks once a fixture exercises each.
-        .cli_get_stderr,
+        // Classified but not yet trampolined (stdin/exit/clocks/random + the fs
+        // descriptor subset) — honest hard error, no silent skip. These land as
+        // their own D2 chunks once a fixture exercises each.
         .cli_get_stdin,
         .out_stream_blocking_flush,
         .in_stream_read,
@@ -1083,6 +1090,29 @@ test "D1-2 (EXIT): a real WASI-P2 hello-world component runs + prints via the ad
     // runs through the canon-lowered wasi imports → the P2 trampolines.
     try runWasiP2Main(&eng, testing.allocator, bytes, &host);
     try testing.expectEqualStrings("hello\n", capture.items);
+}
+
+test "D2: a WASI-P2 component prints to STDERR via get-stderr (fd 2 stream)" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/wasi_p2_stderr.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+    var cap_err: std.ArrayList(u8) = .empty;
+    defer cap_err.deinit(testing.allocator);
+    var cap_out: std.ArrayList(u8) = .empty;
+    defer cap_out.deinit(testing.allocator);
+    host.stderr_buffer = &cap_err;
+    host.stdout_buffer = &cap_out;
+
+    try runWasiP2Main(&eng, testing.allocator, bytes, &host);
+    try testing.expectEqualStrings("oops\n", cap_err.items); // wrote to fd 2
+    try testing.expectEqualStrings("", cap_out.items); // NOT stdout
 }
 
 test "D-306 (EXIT): a component with renamed core imports runs via classified wiring" {
