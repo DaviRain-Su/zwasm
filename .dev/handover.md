@@ -17,6 +17,28 @@ v0.3 feature work** (2026-06-06) — "AIが思いのほか早いのでどんど�
    hunted; verify the signal at every Step 0.7.
 Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE** (cw v1 side succeeded).
 
+## Active bundle (ADR-0118 D6) — atomics official spec corpus (conformance for 17.1)
+
+- **Bundle-ID**: atomics-spec-corpus
+- **Goal**: run the official `proposals/threads/atomic.wast` through a spec runner — official conformance for
+  17.1 atomics (complements the p17/atomics edge fixtures). The relaxed-SIMD corpus caught 2 real x86 bugs;
+  atomics (complex rmw/cmpxchg/wait) is the next-most-likely to surface latent bugs. Same value pattern.
+- **Continuity-memo**: SCOUTED this cycle — `wast2json --enable-threads proposals/threads/atomic.wast` → 142
+  assert_return + 45 assert_trap + 48 assert_invalid + 59 standalone `action` (3 modules). All shapes **scalar**
+  (i32.atomic.load: [i32]→[i32]); NO `(either)`. **Runner choice is the open Q**: simd_assert_runner = v128-
+  focused; wasm_3_0 runner EXECUTES but has narrow JIT-eligibility (SKIPS arg-taking asserts — atomic.load takes
+  an i32 arg → would skip); `spec_assert_runner_non_simd` has broad arg-taking scalar exec (25437 assertions) →
+  likely the right host BUT must verify it (a) handles a **shared-memory** module + (b) the 59 `action` commands
+  (store-side; distiller currently `skip-impl directive-action` → loads may read uninit — check if atomic tests
+  are self-contained or need action-execution).
+- **Plan**: chunk1 = pick+verify host runner (compile one atomic module through it, confirm shared-mem + an
+  arg-taking atomic.load assert executes); chunk2 = regen atomic.wast → corpus dir + wire (mirror relaxed-SIMD
+  baker pattern; `--enable-threads`); chunk3 = run, fix any surfaced bug (relaxed-corpus precedent), 3-host.
+  If `action`-commands matter, teach the distiller to emit them as side-effecting invokes.
+- **Exit-condition**: atomic.wast assert_returns execute (not skip) + pass in a runner, 0 fail, 3-host; any
+  surfaced bug fixed.
+- **Cycles-remaining**: ~3-4. No tag (ADR-0156).
+
 ## Current state
 
 - **Phase 17 (v0.2) IN-PROGRESS** (ADR-0168). DONE+**3-host-confirmed**: **17.1-atomics @9eb84833** ·
