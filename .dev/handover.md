@@ -26,9 +26,11 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
   recorded; D-279 silent streak=3; 1-failed=D-028 IPC flake, 0 assertions). **Wasm-3.0 100%-spec is COMPLETE —
   no lurking reserved-but-unimpl Phase-5 ops** (audited zir_ops enum 2026-06-07; only stack-switching/
   memory-control stubs remain = Phase-3).
-- **relaxed-SIMD official spec corpus DONE @8ef2e752** — 7 upstream `.wast` wired into simd_assert_runner with
-  `(either)` 2-outcome support (ADR-0169); 13351→**13420 passed** (+69), 0 fail, 33 manifests, Mac (ubuntu+win
-  confirm pending = the cross-arch `(either)` payoff: x86 NaN/±0 outcomes differ from arm64, both accepted).
+- **relaxed-SIMD official spec corpus DONE @8ef2e752 + x86 dot fix @b8c1c31d** — 7 upstream `.wast` in
+  simd_assert_runner with `(either)` support (ADR-0169); **13420 passed, 0 fail** on arm64 AND x86_64 (Rosetta-
+  verified). The corpus caught a REAL x86 bug (relaxed_dot passed `a` as PMADDUBSW's unsigned operand → wrong for
+  a<0; fixed by swapping → b=unsigned/a=signed). ubuntu was RED@5d098216 (3 fail) → forward-fixed (impl bug, not
+  revert). dot_s_neg edge fixture guards the sign boundary. ubuntu re-confirm pending @b8c1c31d.
 - **NEXT = sweep/completeness** (`.dev/remaining_sweep.md` Bucket B/C: D-231 build-DCE gate, D-209 memory64
   >4GiB memarg, D-259 spillBytes measure-first). **NOT new-proposal features** — stack-switching **DEFERRED
   @D-300** (survey 2026-06-07: Phase-3 unstable format + 3 architecture ADRs + ~25-35cyc — re-survey Phase 4). compact-import/
