@@ -469,6 +469,19 @@ fn p2MonotonicNow(caller: *Caller) WasiP2Error!i64 {
     return @bitCast(ns);
 }
 
+/// `wasi:clocks/wall-clock` `now()` → datetime{seconds: u64, nanoseconds: u32}.
+/// Splits the host realtime clock (P1 clock id 0) into seconds + sub-second ns
+/// and writes the 12-byte record to the return area at `retptr` (seconds @ 0,
+/// nanoseconds @ 8). Reuses clockTimeNs; no realloc (the guest supplies retptr).
+fn p2WallNow(caller: *Caller, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const mem = caller.memory() orelse return WasiP2Error.NoMemory;
+    const ns = wasi_clocks.clockTimeNs(ctx.host, 0) catch
+        @panic("WASI-P2 wall-clock.now: host clock unavailable (host.io unset)");
+    try mem.write(retptr, @as(u64, ns / std.time.ns_per_s));
+    try mem.write(retptr + 8, @as(u32, @intCast(ns % std.time.ns_per_s)));
+}
+
 /// `wasi:io/streams` `[method]output-stream.blocking-write-and-flush`
 /// (self, ptr, len, retptr): write the flat `list<u8>` at `(ptr, len)` to the
 /// fd bound to `self`, then store the `result<_, stream-error>` ok-discriminant
@@ -625,15 +638,15 @@ fn defineClassifiedFunc(lk: *Linker, module: []const u8, name: []const u8, op: a
         .fs_descriptor_open_at => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32, u32, u32, u32, u32, u32) WasiP2Error!void, p2DescriptorOpenAt),
         .cli_exit => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!void, p2Exit),
         .clocks_monotonic_now => try lk.defineFuncCtx(module, name, ctx, fn (*Caller) WasiP2Error!i64, p2MonotonicNow),
-        // Classified but not yet trampolined (stdin/wall-clock/random + the rest
-        // of the fs descriptor subset) — honest hard error, no silent skip. These
-        // land as their own D3 chunks once a fixture exercises each.
+        .clocks_wall_now => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!void, p2WallNow),
+        // Classified but not yet trampolined (stdin/random list + the rest of the
+        // fs descriptor subset) — honest hard error, no silent skip. These land as
+        // their own D3 chunks once a fixture exercises each.
         .cli_get_stdin,
         .out_stream_blocking_flush,
         .in_stream_read,
         .in_stream_blocking_read,
         .in_stream_drop,
-        .clocks_wall_now,
         .random_get_bytes,
         .fs_descriptor_read,
         .fs_descriptor_sync,
@@ -1310,6 +1323,26 @@ test "D3: a WASI-P2 component reads monotonic-clock.now() — sane + monotonic �
 
     // run() reads now() twice; exit(0) iff first>0 and second>=first (the
     // clocks_monotonic_now trampoline forwards to the host monotonic clock).
+    try runWasiP2Main(&eng, testing.allocator, bytes, &host);
+    try testing.expectEqual(@as(u32, 0), host.exit_code.?);
+}
+
+test "D3: a WASI-P2 component reads wall-clock.now() — realtime past 2017 → exit 0" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/wasi_p2_wallclock.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+    host.io = io;
+
+    // run() reads wall-clock.now() into a 12-byte datetime record at retptr and
+    // exit(0) iff seconds>1.5e9 (the clocks_wall_now trampoline writes seconds@0,
+    // nanoseconds@8 to guest memory; realtime clock id 0).
     try runWasiP2Main(&eng, testing.allocator, bytes, &host);
     try testing.expectEqual(@as(u32, 0), host.exit_code.?);
 }
