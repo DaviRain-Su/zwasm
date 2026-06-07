@@ -141,6 +141,40 @@ pub const DefType = union(enum) {
     own: u32,
     /// `borrow<i>` (0x68) — a borrowed handle to resource type `i`.
     borrow: u32,
+    /// `instancetype` (0x42) — a component instance type (a WASI interface
+    /// type is one of these).
+    instance_type: InstanceType,
+    /// `componenttype` (0x41) — a component type.
+    component_type: ComponentType,
+};
+
+/// One `instancedecl` (`Binary.md`): a declaration inside an `instancetype`.
+pub const InstanceDecl = union(enum) {
+    /// 0x01 — a nested component `type` definition.
+    type_def: *const DefType,
+    /// 0x02 — an alias.
+    alias: Alias,
+    /// 0x04 — `exportdecl ::= exportname' externdesc`.
+    export_decl: ImportExportDecl,
+};
+
+pub const ImportExportDecl = struct {
+    name: []const u8,
+    desc: ExternDesc,
+};
+
+pub const InstanceType = struct {
+    decls: []const InstanceDecl,
+};
+
+/// One `componentdecl` (`Binary.md`): `0x03 importdecl` or an `instancedecl`.
+pub const ComponentDecl = union(enum) {
+    import_decl: ImportExportDecl,
+    instance_decl: InstanceDecl,
+};
+
+pub const ComponentType = struct {
+    decls: []const ComponentDecl,
 };
 
 /// Component-level `sort` (`Binary.md`); `core` nests a `core:sort`.
@@ -603,11 +637,87 @@ fn decodeDefType(arena: Allocator, body: []const u8, pos: *usize) Error!DefType 
         // TODO(p17/CM): stream 0x66 / future 0x65 (async) — decoded with their
         // runtime machinery.
         0x66, 0x65 => Error.UnsupportedTypeForm,
-        // TODO(p17/CM-C*): componenttype 0x41 / instancetype 0x42 /
-        // resourcetype 0x3f,0x3e (recurse into the declarator tree).
-        0x41, 0x42, 0x3f, 0x3e => Error.UnsupportedTypeForm,
+        0x41 => .{ .component_type = try decodeComponentType(arena, body, pos) },
+        0x42 => .{ .instance_type = try decodeInstanceType(arena, body, pos) },
+        // TODO(p17/CM): resourcetype definitions (0x3f sync / 0x3e async) — the
+        // P2-CLI fixture uses `(sub resource)` type-bounds, not these defs.
+        0x3f, 0x3e => Error.UnsupportedTypeForm,
         else => Error.InvalidDefType,
     };
+}
+
+/// `alias ::= sort aliastarget` (shared by the alias section + instancedecls).
+fn decodeAlias(body: []const u8, pos: *usize) Error!Alias {
+    const sort = try decodeSort(body, pos);
+    if (pos.* >= body.len) return Error.Truncated;
+    const tt = body[pos.*];
+    pos.* += 1;
+    const target: AliasTarget = switch (tt) {
+        0x00 => blk: {
+            const inst = try leb128.readUleb128(u32, body, pos);
+            break :blk .{ .component_export = .{ .instance = inst, .name = try decodeLabel(body, pos) } };
+        },
+        0x01 => blk: {
+            const inst = try leb128.readUleb128(u32, body, pos);
+            break :blk .{ .core_export = .{ .instance = inst, .name = try decodeLabel(body, pos) } };
+        },
+        0x02 => blk: {
+            const ct = try leb128.readUleb128(u32, body, pos);
+            break :blk .{ .outer = .{ .count = ct, .index = try leb128.readUleb128(u32, body, pos) } };
+        },
+        else => return Error.InvalidAlias,
+    };
+    return .{ .sort = sort, .target = target };
+}
+
+/// `instancedecl ::= 0x00 core:type | 0x01 type | 0x02 alias | 0x04 exportdecl`.
+fn decodeInstanceDecl(arena: Allocator, body: []const u8, pos: *usize) Error!InstanceDecl {
+    if (pos.* >= body.len) return Error.Truncated;
+    const tag = body[pos.*];
+    pos.* += 1;
+    return switch (tag) {
+        // core:type inside an instancetype — not used by the P2-CLI WASI types.
+        0x00 => Error.UnsupportedTypeForm,
+        0x01 => blk: {
+            const dt = try arena.create(DefType);
+            dt.* = try decodeDefType(arena, body, pos);
+            break :blk .{ .type_def = dt };
+        },
+        0x02 => .{ .alias = try decodeAlias(body, pos) },
+        0x04 => blk: {
+            const name = try decodeImportExportName(body, pos);
+            break :blk .{ .export_decl = .{ .name = name, .desc = try decodeExternDesc(body, pos) } };
+        },
+        else => Error.InvalidInstance,
+    };
+}
+
+/// `instancetype ::= 0x42 vec(instancedecl)`.
+fn decodeInstanceType(arena: Allocator, body: []const u8, pos: *usize) Error!InstanceType {
+    const count = try leb128.readUleb128(u32, body, pos);
+    var decls: std.ArrayList(InstanceDecl) = .empty;
+    var i: u32 = 0;
+    while (i < count) : (i += 1) try decls.append(arena, try decodeInstanceDecl(arena, body, pos));
+    return .{ .decls = try decls.toOwnedSlice(arena) };
+}
+
+/// `componenttype ::= 0x41 vec(componentdecl)`;
+/// `componentdecl ::= 0x03 importdecl | instancedecl`.
+fn decodeComponentType(arena: Allocator, body: []const u8, pos: *usize) Error!ComponentType {
+    const count = try leb128.readUleb128(u32, body, pos);
+    var decls: std.ArrayList(ComponentDecl) = .empty;
+    var i: u32 = 0;
+    while (i < count) : (i += 1) {
+        if (pos.* >= body.len) return Error.Truncated;
+        if (body[pos.*] == 0x03) {
+            pos.* += 1;
+            const name = try decodeImportExportName(body, pos);
+            try decls.append(arena, .{ .import_decl = .{ .name = name, .desc = try decodeExternDesc(body, pos) } });
+        } else {
+            try decls.append(arena, .{ .instance_decl = try decodeInstanceDecl(arena, body, pos) });
+        }
+    }
+    return .{ .decls = try decls.toOwnedSlice(arena) };
 }
 
 /// `sort ::= 0x00 core:sort | 0x01 func | 0x02 value | 0x03 type | 0x04
@@ -872,28 +982,7 @@ fn decodeAliasSection(arena: Allocator, out: *std.ArrayList(Alias), body: []cons
     var pos: usize = 0;
     const count = try leb128.readUleb128(u32, body, &pos);
     var i: u32 = 0;
-    while (i < count) : (i += 1) {
-        const sort = try decodeSort(body, &pos);
-        if (pos >= body.len) return Error.Truncated;
-        const tt = body[pos];
-        pos += 1;
-        const target: AliasTarget = switch (tt) {
-            0x00 => blk: {
-                const inst = try leb128.readUleb128(u32, body, &pos);
-                break :blk .{ .component_export = .{ .instance = inst, .name = try decodeLabel(body, &pos) } };
-            },
-            0x01 => blk: {
-                const inst = try leb128.readUleb128(u32, body, &pos);
-                break :blk .{ .core_export = .{ .instance = inst, .name = try decodeLabel(body, &pos) } };
-            },
-            0x02 => blk: {
-                const ct = try leb128.readUleb128(u32, body, &pos);
-                break :blk .{ .outer = .{ .count = ct, .index = try leb128.readUleb128(u32, body, &pos) } };
-            },
-            else => return Error.InvalidAlias,
-        };
-        try out.append(arena, .{ .sort = sort, .target = target });
-    }
+    while (i < count) : (i += 1) try out.append(arena, try decodeAlias(body, &pos));
     if (pos != body.len) return Error.TrailingBytes;
 }
 
@@ -1272,9 +1361,42 @@ test "enum with zero labels is rejected" {
     try testing.expectError(Error.EmptyEnum, decodeBoth(bytes));
 }
 
-test "componenttype defers with UnsupportedTypeForm (0x41)" {
-    const bytes = comptime buildComponent(&.{.{ 7, &[_]u8{ 0x01, 0x41 } }});
-    try testing.expectError(Error.UnsupportedTypeForm, decodeBoth(bytes));
+test "instancetype decode: an interface type with an exported func + own type" {
+    // type[0] = instance { (export "f" (func (type 0))); (type own<0>) }
+    //   0x42 count=2 | 0x04 exportname'("f") externdesc(0x01 func 0) | 0x01 own<0>(0x69 0x00)
+    const body = [_]u8{
+        0x01, 0x42, 0x02,
+        0x04, 0x00, 0x01, 'f', 0x01, 0x00, // exportdecl "f" → func type 0
+        0x01, 0x69, 0x00, // type def: own<0>
+    };
+    const bytes = comptime buildComponent(&.{.{ 7, &body }});
+    var info = try decodeBoth(bytes);
+    defer info.deinit();
+    const it = info.deftypes.items[0].instance_type;
+    try testing.expectEqual(@as(usize, 2), it.decls.len);
+    try testing.expectEqualStrings("f", it.decls[0].export_decl.name);
+    try testing.expectEqual(@as(u32, 0), it.decls[0].export_decl.desc.func);
+    try testing.expectEqual(@as(u32, 0), it.decls[1].type_def.own);
+}
+
+test "componenttype decode: an import + a nested instance type" {
+    // type[0] = component { (import "i" (instance (type 0))); 0x42 instance{} }
+    //   0x41 count=2 | 0x03 importname'("i") externdesc(0x05 instance 0) | <instancedecl 0x42? no>
+    // componentdecl: 0x03 importdecl | instancedecl. Use 0x03 import + a 0x04 export instancedecl.
+    const body = [_]u8{
+        0x01, 0x41, 0x02,
+        0x03, 0x00, 0x01, 'i', 0x05, 0x00, // importdecl "i" → instance type 0
+        0x04, 0x00, 0x01, 'e', 0x03, 0x01, // instancedecl exportdecl "e" → (type (sub resource))
+    };
+    const bytes = comptime buildComponent(&.{.{ 7, &body }});
+    var info = try decodeBoth(bytes);
+    defer info.deinit();
+    const ct = info.deftypes.items[0].component_type;
+    try testing.expectEqual(@as(usize, 2), ct.decls.len);
+    try testing.expectEqualStrings("i", ct.decls[0].import_decl.name);
+    try testing.expectEqual(@as(u32, 0), ct.decls[0].import_decl.desc.instance);
+    try testing.expectEqualStrings("e", ct.decls[1].instance_decl.export_decl.name);
+    try testing.expectEqual(TypeBound.sub_resource, ct.decls[1].instance_decl.export_decl.desc.type_bound);
 }
 
 test "deftype cannot be a bare typeidx" {

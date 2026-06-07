@@ -598,9 +598,21 @@ test "D1-2: WASI-P2 hello-world component decodes structurally (imports wasi:cli
     try testing.expect(has_import and has_core_module and has_canon);
 
     // It imports the WASI P2 CLI-print interfaces (the adapter D1-1 name-maps).
-    // (Full type-info decode needs instance-type decode — D1-2 bundle.)
     try testing.expect(std.mem.find(u8, bytes, "wasi:cli/stdout") != null);
     try testing.expect(std.mem.find(u8, bytes, "wasi:io/streams") != null);
+
+    // Full type-info decode now succeeds (instance-type decode landed): the
+    // component imports the 3 wasi instances + has a canon section.
+    var info = try ctypes.decodeTypeInfo(testing.allocator, &comp);
+    defer info.deinit();
+    try testing.expectEqual(@as(usize, 3), info.imports.items.len);
+    var has_stdout = false;
+    for (info.imports.items) |imp| {
+        if (std.mem.find(u8, imp.name, "wasi:cli/stdout") != null) has_stdout = true;
+        try testing.expect(imp.desc == .instance); // each wasi import is an instance
+    }
+    try testing.expect(has_stdout);
+    try testing.expect(info.canons.items.len > 0);
 }
 
 test "C2-3b-2 (EXIT): a 2-component graph links + runs (A calls B across components)" {
