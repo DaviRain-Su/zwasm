@@ -90,3 +90,10 @@ Text Encoding Builtins` (skip).
   `~/zwasm/private/v2-investigation/surveys/wasm-proposal-status.md`.
 - **2026-05-03** — added "Toolchain proposals" section tracking
   ziglang/zig#22822 as the ADR-0009 sunset trigger.
+- **2026-06-07** — **branch-hinting** (`metadata.code.branch_hint` custom
+  section): v1 advertised COMPLETE; the proposal is an advisory QoI hint with
+  NO conformance effect. v2 accepts it via the generic custom-section skip
+  (verified @dcc8d71c, fixture `edge_cases/p17/branch_hint`, hints ignored) —
+  this satisfies "a conformant runtime may ignore it." OPTIONAL future QoI:
+  consume the hints to bias JIT branch layout (likely/unlikely). Not scheduled
+  (no behaviour/conformance gain); revisit only if a perf campaign wants it.

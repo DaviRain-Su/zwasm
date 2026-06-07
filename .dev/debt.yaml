@@ -470,15 +470,6 @@ entries:
     last_reviewed: "2026-06-03"
     refs: |-
       `test/spec/spec_assert_runner_wasm_3_0.zig` (assert_trap jit branch — D-233 fix); `src/engine/codegen/arm64/op_memory.zig` + `src/engine/codegen/x86_64/op_memory.zig` (JIT memory bounds-check emit — suspect 64-bit address handling); `test/spec/wasm-3.0-assert/memory64/raw/memory_trap64.wast`; `test/spec/wasm-3.0-assert/gc/raw/type-subtyping.wast`; D-233; D-198; ADR-0128 §10
-  - id: "D-231"
-    layer: "infra"
-    status: "note"
-    description: |-
-      note (PROGRESS 2026-06-07): the x86_64 build-DCE coverage gap is REAL + caught a live leak. Running check_build_dce nm-grep against a cross-compiled `-Dtarget=x86_64-linux-gnu -Doptimize=ReleaseSafe -Dwasm=v1_0` binary found `engine.codegen.x86_64.ops.wasm_3_0.{br_on_null,br_on_non_null,ref_as_non_null}.emit` SURVIVING (3 dead wasm_3_0 symbols); arm64 prunes them (0). Root cause: x86 legacy-switch arms called op.emit() directly (no comptime guard); arm64 guards with `if (comptime wasm_v3_plus)`. FIXED @96fcdf9f (added build_options+wasm_v3_plus+guards to x86 emit.zig; v1_0 x86 wasm_3_0 3→0; v3 still green). REMAINING = wire the gate: extend `scripts/check_build_dce.sh` to ALSO cross-compile each combo for x86_64-linux + nm-grep (mechanism validated: nix `nm` = clang-wrapper llvm-nm reads ELF; cross-build works). Then it catches future x86 DCE drift. Refs: scripts/check_build_dce.sh, scripts/gate_merge.sh:50, src/engine/codegen/x86_64/emit.zig.
-    first_raised: "2026-06-02"
-    last_reviewed: "2026-06-07"
-    refs: |-
-      `scripts/check_build_dce.sh` (host-native build); `scripts/gate_merge.sh` (Mac-only --gate); `scripts/run_remote_ubuntu.sh`; `src/engine/codegen/x86_64/emit.zig` (collector-routed, DCE-clean); ADR-0130; D-230
   - id: "D-026"
     layer: "code"
     status: "blocked-by"
@@ -1242,13 +1233,6 @@ entries:
     first_raised: "2026-06-07"
     last_reviewed: "2026-06-07"
     refs: scripts/regen_spec_threads_assert.sh; test/spec/spec_assert_runner_non_simd.zig; engine/codegen/shared/entry.zig
-  - id: D-302
-    layer: code
-    status: note
-    description: 'note (v1-parity claim gap, advisory; found 2026-06-07 v1-scope audit). zwasm **v1 advertised Branch Hinting COMPLETE** (cli.zig:2032 features list) but **v2 has ZERO support** — no ZirOp, no parse, not in proposal_watch. Branch Hinting = the `metadata.code.branch_hint` CUSTOM section (advisory likely/unlikely-taken hints for the JIT); purely a QoI optimizer hint, NO semantic/conformance effect (a conformant runtime may ignore it entirely). Quick clear for v1-parity-claim completeness: parse + skip the custom section gracefully (already the default for unknown custom sections, so likely a no-op already — VERIFY v2 doesnt reject it), optionally feed the hints to the JIT branch layout later. LOW priority (no behavior). Refs: ~/Documents/MyProducts/zwasm/src/cli.zig:2032 (v1 claim); v2 src/parse/sections.zig (custom-section skip path); .dev/proposal_watch.md (add row). DISCHARGE: a module with a metadata.code.branch_hint section parses+runs (hints ignored) on v2.'
-    first_raised: "2026-06-07"
-    last_reviewed: "2026-06-07"
-    refs: ~/Documents/MyProducts/zwasm/src/cli.zig:2032; src/parse/sections.zig; .dev/proposal_watch.md
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.

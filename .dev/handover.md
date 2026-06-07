@@ -48,18 +48,17 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
   needs survey+ADRs); (2) **branch-hinting** = D-302 (advisory custom-section, no conformance effect, likely
   already a no-op skip — quick verify); (3) **multi-memory JIT** = §14-deferred allowlist (~458 skips;
   parse/interp done).
-- **NEXT — ordered (correctness-first)**:
-  1. ✅ **d-163-jit dump env-gated @d9d525a4** (was always-on; D-163 closed) — noise gone, `ZWASM_DUMP_JIT=1`
-     re-enables. D-279 H7 probe ARMED: this turn's Win64 kick runs WITHOUT the dump → exit-3 persists = real
-     compile/exec fault (chase codegen); exit-3 gone = dump-I/O was the trigger. Verify at next Step 0.7.
-  2. ✅ **D-301 COMPLETE @e6f3b0c0** — atomics corpus **294 pass, 0 SKIPPED** (arm64 + x86 Rosetta). wait32/64
-     un-skipped via `base.extractMemory0Shared` → `mem0_shared` (wait non-blocking → 1; corpus `init` makes cur≠0).
-  3. **D-231** wire cross-nm x86 DCE gate into `check_build_dce.sh` (mechanism validated; ELF-nm in nix).
-  4. **D-302** verify a `metadata.code.branch_hint` module parses+runs on v2 (custom-section skip path).
-  Then the BIG forward track = **Component Model / WASI-P2 survey** (the real v1-parity completion + v0.2 entry).
+- **ALL bounded debt CLEARED this campaign** (the "clear in one go" plan is DONE): ✅ D-301 atomics corpus
+  294/0-skip @e6f3b0c0 · ✅ D-303 JIT unaligned-atomic-trap 2-arch @5b0db8e1 · ✅ D-231 cross-x86 DCE gate
+  wired @aac4fe2f · ✅ D-302 branch-hint custom-section verified @dcc8d71c · ✅ **D-279 ROOT-CAUSED** (the dump
+  itself; mitigation @d9d525a4, discharge on silent-streak). 
+- **NEXT (the BIG forward track) = Component Model + WASI Preview 2 survey** — the real v1-parity completion +
+  v0.2 entry (v1 advertised COMPLETE; v2 deferred). Multi-session campaign: survey (WIT / Canonical ABI / WASI-P2
+  adapter; v1's `~/Documents/MyProducts/zwasm/` as textbook + `~/Documents/OSS/` wasm-tools/wasmtime refs) →
+  sequence into ROADMAP §17 sub-rows + ADRs → TDD. Start with an Explore subagent textbook-survey (Step 0).
   **Correctly DEFERRED (do NOT clear)**: D-209 (hot-path/exotic), D-259 (W54-ABI-risk/zero-perf), D-300
   stack-switching (Phase-3 unstable). **D-299** (inline atomic misalign-trap, x86_64 W^X) env-constrained. No tag.
-- Debt ledger: **54 entries** (D-303 discharged @5b0db8e1). D-299 `now`. Never idle.
+- Debt ledger: **52 entries** (D-303/D-231/D-302 discharged). D-299 `now`. Never idle.
 - **D-279 BREAKTHROUGH @92cf7979** — the decisive Win64 RED finally landed (@16fc1bb3, the run the user cut off):
   `zwasm-spec-wasm-2-0-assert` exit-3 with the `[d-279-veh] STACK-OVERFLOW` diagnostic PRESENT but NOT firing →
   **H3 REFUTED**. `[W4 DIR]` raw-beacon pinned crash module = **`address.2.wasm` (NON-SIMD i32/i64 load/store)** in
