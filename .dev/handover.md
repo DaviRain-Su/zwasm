@@ -51,9 +51,9 @@ Idle/minimal turn is now a BUG, not a steady-state. Dogfooding (D-264) is **DONE
   already a no-op skip — quick verify); (3) **multi-memory JIT** = §14-deferred allowlist (~458 skips;
   parse/interp done).
 - **NEXT — ordered (correctness-first)**:
-  1. **d-163-jit dump cleanup (this turn)** — D-163 is CLOSED (not in ledger) but `spec_assert_runner_base.zig:3160`
-     still `if (true)` dumps every compiled func's bytes on EVERY test-all (huge noise + the only D-279 lead).
-     Env-gate it → removes noise AND probes whether D-279 persists without the dump (decisive isolation).
+  1. ✅ **d-163-jit dump env-gated @d9d525a4** (was always-on; D-163 closed) — noise gone, `ZWASM_DUMP_JIT=1`
+     re-enables. D-279 H7 probe ARMED: this turn's Win64 kick runs WITHOUT the dump → exit-3 persists = real
+     compile/exec fault (chase codegen); exit-3 gone = dump-I/O was the trigger. Verify at next Step 0.7.
   2. **D-301 residual** mark scratch shared for wait32/64 (2 nonshared skips) — `base.growable_memory` shared flag.
   3. **D-231** wire cross-nm x86 DCE gate into `check_build_dce.sh` (mechanism validated; ELF-nm in nix).
   4. **D-302** verify a `metadata.code.branch_hint` module parses+runs on v2 (custom-section skip path).
@@ -92,10 +92,10 @@ suspect — env-gating it (next) isolates dump-I/O-trigger vs real compile crash
 
 - **ubuntu**: re-kicked each turn (D6 always). Verify `[run_remote_ubuntu] OK` in `/tmp/ubuntu.log`. Red →
   auto-revert (D3; first-resume + non-code-gap exceptions apply).
-- **windows**: BATCHED (D8). @fac174b5 RED = D-279 crash (threads + wasm-2-0-assert exit-3, 0 did-not-trap →
-  D-303 NOT regressed; recorded segv, NOT reverted per D7). After the d-163-jit-dump env-gate lands, re-kick:
-  if exit-3 persists WITHOUT the dump → D-279 is a real compile/execution crash (not dump I/O); if it stops →
-  dump I/O was the trigger. threads-assert **292 pass** on Win64 still the D-303 Win64-summary confirmation.
+- **windows**: BATCHED (D8). RE-KICKED @d9d525a4 — the H7 probe: test-all now runs WITHOUT the d-163-jit dump.
+  Verify `/tmp/win.log`: **exit-3 GONE + threads-assert 292 pass** → H7 confirmed (dump-I/O was D-279's trigger,
+  never a codegen bug — huge; also = D-303 Win64-summary confirmed) AND discharge-track D-279. **exit-3 PERSISTS**
+  → H7 refuted, real compile/exec fault (`ZWASM_DUMP_JIT=1` re-kick to see the last func). NOT auto-revert (D7).
 - **Gate note**: `OK` = green; `Build Summary: N failed` (no OK) = RED. EXPECTED non-failures: `zig-host-hello`
   exit-42, `--__selftest-crash` exit-70, sha256 `verify: FAIL` (fixture-wrong-constant FALSE lead).
 
