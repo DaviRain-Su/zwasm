@@ -310,6 +310,28 @@ pub const AliasTarget = union(enum) {
     outer: struct { count: u32, index: u32 },
 };
 
+/// One entry in the component **func** index space (`Binary.md`: component
+/// funcs are minted, in definition order, by func `import`s, func `alias`es, and
+/// `canon lift`s — NOT by `canon lower`, which mints a CORE func). Recorded in
+/// section order so a `canon lower`'s `func` operand resolves to its origin (the
+/// host needs the imported interface a lowered WASI import came from).
+pub const ComponentFuncDef = union(enum) {
+    /// A func `import` (index into `imports`).
+    import: u32,
+    /// A func `alias` (an instance export, or an `outer` alias).
+    alias: AliasTarget,
+    /// A `canon lift` (index into `canons`).
+    lift: u32,
+};
+
+/// Where a component-instance index originates: an `import` (whose name is the
+/// WASI interface, e.g. `"wasi:cli/stdout@0.2.0"`) or any local definition
+/// (instantiate / alias). The host classifies only imported interfaces.
+pub const InstanceOrigin = union(enum) {
+    import: []const u8,
+    local,
+};
+
 /// `alias ::= sort aliastarget` — introduces a new index in `sort`'s space.
 pub const Alias = struct {
     sort: Sort,
@@ -350,6 +372,12 @@ pub const TypeInfo = struct {
     /// The core-func index space in definition order (`CoreFuncDef`) — the
     /// authoritative map for resolving a core-func index to its definition.
     core_funcs: std.ArrayList(CoreFuncDef),
+    /// The component-func index space in definition order (`ComponentFuncDef`) —
+    /// lets a `canon lower`'s `func` operand resolve to its origin interface.
+    component_funcs: std.ArrayList(ComponentFuncDef),
+    /// The component-instance index space, recording each index's origin so an
+    /// imported-instance alias resolves to its WASI interface name.
+    instance_origins: std.ArrayList(InstanceOrigin),
 
     pub fn deinit(self: *TypeInfo) void {
         self.arena.deinit();
@@ -389,6 +417,34 @@ pub const TypeInfo = struct {
             },
             else => null,
         };
+    }
+
+    /// An imported WASI interface + func name a lowered component func came from.
+    pub const ImportRef = struct { interface: []const u8, func: []const u8 };
+
+    /// Resolve a component **func** index (a `canon lower`'s `func` operand) back
+    /// to the imported interface + func name it aliases — so the host classifies
+    /// a lowered WASI import by its COMPONENT interface (`wasi/adapter`) instead
+    /// of the core module's hand-chosen import names. The `@version` suffix is
+    /// stripped to match the adapter's interface table. Returns null when the
+    /// func is not a func-alias of an imported instance (a direct func import, a
+    /// `canon lift`, or an alias of a locally-defined instance).
+    pub fn resolveComponentImport(self: *const TypeInfo, component_func_idx: u32) ?ImportRef {
+        if (component_func_idx >= self.component_funcs.items.len) return null;
+        const ce = switch (self.component_funcs.items[component_func_idx]) {
+            .alias => |t| switch (t) {
+                .component_export => |c| c,
+                else => return null,
+            },
+            else => return null,
+        };
+        if (ce.instance >= self.instance_origins.items.len) return null;
+        const full = switch (self.instance_origins.items[ce.instance]) {
+            .import => |name| name,
+            .local => return null,
+        };
+        const interface = if (std.mem.indexOfScalar(u8, full, '@')) |at| full[0..at] else full;
+        return .{ .interface = interface, .func = ce.name };
     }
 
     /// A component `func` export resolved to the core exports the host must
@@ -1022,14 +1078,19 @@ pub fn decodeTypeInfo(parent: Allocator, component: *const decode.Component) Err
     var component_instances: std.ArrayList(ComponentInstanceDef) = .empty;
     var aliases: std.ArrayList(Alias) = .empty;
     var core_funcs: std.ArrayList(CoreFuncDef) = .empty;
+    var component_funcs: std.ArrayList(ComponentFuncDef) = .empty;
+    var instance_origins: std.ArrayList(InstanceOrigin) = .empty;
 
     for (component.sections.items) |sec| {
-        // Track how many canons/aliases existed before this section so the
-        // newly-decoded ones can be appended to the core-func index space in
-        // binary (section) order — core funcs from a canon section and a later
-        // alias section must interleave by their true definition order.
+        // Track per-kind counts before this section so the newly-decoded entries
+        // append to the core-/component-func and instance index spaces in binary
+        // (section) order — entries from different sections must interleave by
+        // their true definition order (a lower's func operand and an instance
+        // alias both index spaces populated across several sections).
+        const imports_before = imports.items.len;
         const canons_before = canons.items.len;
         const aliases_before = aliases.items.len;
+        const cinst_before = component_instances.items.len;
         switch (sec.id) {
             .type => try decodeTypeSection(a, &deftypes, sec.body),
             .import => try decodeImportSection(a, &imports, sec.body),
@@ -1041,18 +1102,25 @@ pub fn decodeTypeInfo(parent: Allocator, component: *const decode.Component) Err
             else => {}, // other sections decoded in later chunks
         }
         switch (sec.id) {
-            .canon => for (canons.items[canons_before..]) |c| switch (c) {
+            .import => for (imports.items[imports_before..], imports_before..) |imp, abs| switch (imp.desc) {
+                .func => try component_funcs.append(a, .{ .import = @intCast(abs) }),
+                .instance => try instance_origins.append(a, .{ .import = imp.name }),
+                else => {},
+            },
+            .canon => for (canons.items[canons_before..], canons_before..) |c, abs| switch (c) {
                 .lower => |l| try core_funcs.append(a, .{ .lower = l.func }),
                 .resource_new => |t| try core_funcs.append(a, .{ .resource_new = t }),
                 .resource_drop => |t| try core_funcs.append(a, .{ .resource_drop = t }),
                 .resource_rep => |t| try core_funcs.append(a, .{ .resource_rep = t }),
-                .lift => {}, // mints a component func, not a core func
+                .lift => try component_funcs.append(a, .{ .lift = @intCast(abs) }),
             },
-            .alias => for (aliases.items[aliases_before..]) |al| {
-                if (al.sort == .core and al.sort.core == .func) {
-                    try core_funcs.append(a, .{ .alias = al.target });
-                }
+            .alias => for (aliases.items[aliases_before..]) |al| switch (al.sort) {
+                .core => |cs| if (cs == .func) try core_funcs.append(a, .{ .alias = al.target }),
+                .func => try component_funcs.append(a, .{ .alias = al.target }),
+                .instance => try instance_origins.append(a, .local),
+                else => {},
             },
+            .instance => for (component_instances.items[cinst_before..]) |_| try instance_origins.append(a, .local),
             else => {},
         }
     }
@@ -1067,6 +1135,8 @@ pub fn decodeTypeInfo(parent: Allocator, component: *const decode.Component) Err
         .component_instances = component_instances,
         .aliases = aliases,
         .core_funcs = core_funcs,
+        .component_funcs = component_funcs,
+        .instance_origins = instance_origins,
     };
 }
 

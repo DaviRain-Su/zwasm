@@ -1033,6 +1033,29 @@ test "D1-2 (EXIT): a real WASI-P2 hello-world component runs + prints via the ad
     try testing.expectEqualStrings("hello\n", capture.items);
 }
 
+test "D2/D-306: a lowered func resolves back to its WASI component interface + func" {
+    const io = testing.io;
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, wasi_p2_hello_path, testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+    var decoded = try decode.decode(testing.allocator, bytes);
+    defer decoded.deinit(testing.allocator);
+    var info = try ctypes.decodeTypeInfo(testing.allocator, &decoded);
+    defer info.deinit();
+
+    // canon lower[0] lowers component func 0 (a func alias of imported instance
+    // `wasi:cli/stdout`'s `get-stdout` export); the @version suffix is stripped
+    // so it matches the WASI adapter's interface table.
+    const r0 = info.resolveComponentImport(0).?;
+    try testing.expectEqualStrings("wasi:cli/stdout", r0.interface);
+    try testing.expectEqualStrings("get-stdout", r0.func);
+    // lower[1] → component func 1 → `wasi:io/streams` blocking-write-and-flush.
+    const r1 = info.resolveComponentImport(1).?;
+    try testing.expectEqualStrings("wasi:io/streams", r1.interface);
+    try testing.expectEqualStrings("[method]output-stream.blocking-write-and-flush", r1.func);
+    // A locally-defined / non-import func index does not resolve to an interface.
+    try testing.expectEqual(@as(?ctypes.TypeInfo.ImportRef, null), info.resolveComponentImport(99));
+}
+
 test "IT-1: a core module (not a component) is rejected as NotAComponent" {
     var eng = try Engine.init(testing.allocator, .{});
     defer eng.deinit();
