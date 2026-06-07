@@ -1055,21 +1055,6 @@ entries:
     first_raised: "2026-06-07"
     last_reviewed: "2026-06-07"
     refs: src/api/component.zig (instantiateGraph); test/component/adder_graph.wasm; .dev/component_model_plan.md (Phase C/D)
-  - id: "D-311"
-    layer: "code"
-    status: "now"
-    description: |-
-      Status: now. `zig build test-all -Doptimize=ReleaseSafe` (Mac aarch64 @c046f4a7) = 4 fail + 4 crash; Debug = green.
-      ReleaseSafe-only JIT-ABI bugs in the multi-result entry-buffer + wrapper-thunk return-value unpack: SEGV/Bus at
-      `0xaaaa…` (undefined-memory poison = uninitialized read) in linker.entryAddr / entry f32-local / return_call fixup,
-      result-not-written (expected N found 0) in entry_buffer_write invokeMultiResultNoArgs, and a `union field i32 while
-      f32 active` type-confusion at runner.zig:680 (multi-result Value tagging). Blocks switching the per-chunk gates to
-      ReleaseSafe (the iteration-speed win the user asked for 2026-06-08). Likely 1–2 root causes. Findings + per-test
-      table: `.dev/releasesafe_jit_failures.md`. Fix bundle: ReleaseSafe-JIT-hardening (ADR-0177). Reproduce:
-      `zig build test-all -Doptimize=ReleaseSafe`. These are real memory-safety defects (undefined reads), not test-only.
-    first_raised: "2026-06-08"
-    last_reviewed: "2026-06-08"
-    refs: .dev/releasesafe_jit_failures.md; src/engine/codegen/shared/{entry,entry_buffer_write,linker}.zig; src/engine/runner.zig (runner.zig:680); scripts/check_jit_releasesafe.sh (D-245 precedent)
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.

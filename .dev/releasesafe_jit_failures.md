@@ -49,7 +49,7 @@ f32 active` is a real type-confusion in the multi-result Value path.
 Reproduce: `zig build test-all -Doptimize=ReleaseSafe` (Mac). Full log
 captured at investigation time; per-test isolation via the named test.
 
-## Resolution (in progress)
+## Resolution (DONE @02965aa6 — D-311 discharged)
 
 **Root cause #1 (production, FIXED @a0069ce8)**: `invokeBufferWrite`
 (entry_buffer_write.zig) called the JIT `fn_ptr` DIRECTLY, bypassing the
