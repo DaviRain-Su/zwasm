@@ -75,6 +75,20 @@ Corollary to rule #1: the **exit code is authoritative**; a stray
 a full Step-0.7 re-investigation on the §13.5 zig_host resume — direct
 `./zwasm-zig-host-hello; echo $?` = 0 settled it.)
 
+## Update 2026-06-08 — codegen / trap / signal test-stderr noise removed
+
+`zig build test` previously also leaked ~10 lines of codegen diagnostics
+(`arm64/emit: unsupported op …`, `SlotOverflow`, `x86_64/op: UnsupportedOp`,
+`trap kind=unreachable`, `internal error — caught a fatal signal`) from
+negative/error-path tests. These were unconditional `std.debug.print` (66
+codegen sites → routed through the env-gated `support/dbg.zig` under module
+`"codegen"`, silent unless `ZWASM_DEBUG=codegen`) and the production CLI
+trap-surface (`cli/run.zig surfaceTrap`/`surfaceJitTrap`) + the internal-fault
+signal handler (`platform/signal.zig faultHandler`), now comptime-elided under
+`builtin.is_test` (no test asserts their text; production prints unchanged).
+After this, the ONLY residual line is the documented-benign `failed command:
+…--listen=-` above — exit code stays authoritative.
+
 ## Related
 
 - ADR-0076 D3 (3-host gate via ubuntu kick) — the kick was the

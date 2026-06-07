@@ -12,6 +12,7 @@
 //! Zone 2 (`src/engine/codegen/x86_64/`).
 
 const std = @import("std");
+const dbg = @import("../../../support/dbg.zig");
 
 const Allocator = std.mem.Allocator;
 
@@ -31,7 +32,7 @@ pub const Error = error{
 /// the spec_assert / test runner stderr can identify **which**
 /// structural path fired. Avoids per-file print scaffolding.
 pub fn rejectUnsupported(reason: []const u8, ctx: u32) Error {
-    std.debug.print("x86_64/op: UnsupportedOp[{s}] ctx={d}\n", .{ reason, ctx });
+    dbg.print("codegen", "x86_64/op: UnsupportedOp[{s}] ctx={d}\n", .{ reason, ctx });
     return Error.UnsupportedOp;
 }
 

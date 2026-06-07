@@ -19,6 +19,7 @@
 //! Zone 2 (`src/engine/codegen/x86_64/`).
 
 const std = @import("std");
+const dbg = @import("../../../support/dbg.zig");
 
 const zir = @import("../../../ir/zir.zig");
 const sections = @import("../../../parse/sections.zig");
@@ -395,7 +396,8 @@ pub const EmitCtx = struct {
         const result = self.next_vreg.*;
         self.next_vreg.* += 1;
         if (result >= self.alloc.slots.len) {
-            std.debug.print(
+            dbg.print(
+                "codegen",
                 "x86_64/ctx: popBinary SlotOverflow at func[{d}]: next_vreg={d} >= slots.len={d}\n",
                 .{ self.func_idx, result, self.alloc.slots.len },
             );
@@ -411,7 +413,8 @@ pub const EmitCtx = struct {
         const result = self.next_vreg.*;
         self.next_vreg.* += 1;
         if (result >= self.alloc.slots.len) {
-            std.debug.print(
+            dbg.print(
+                "codegen",
                 "x86_64/ctx: popUnary SlotOverflow at func[{d}]: next_vreg={d} >= slots.len={d}\n",
                 .{ self.func_idx, result, self.alloc.slots.len },
             );

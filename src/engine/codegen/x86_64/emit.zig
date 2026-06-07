@@ -41,6 +41,7 @@
 //! isolation).
 
 const std = @import("std");
+const dbg = @import("../../../support/dbg.zig");
 
 const zir = @import("../../../ir/zir.zig");
 const sections = @import("../../../parse/sections.zig");
@@ -1604,7 +1605,7 @@ pub fn compile(
                 } else return Error.UnsupportedOp;
             },
             else => {
-                std.debug.print("x86_64/emit: UnsupportedOp[body-op-{s}] (func_idx={d})\n", .{ @tagName(ins.op), func.func_idx });
+                dbg.print("codegen", "x86_64/emit: UnsupportedOp[body-op-{s}] (func_idx={d})\n", .{ @tagName(ins.op), func.func_idx });
                 return Error.UnsupportedOp;
             },
         }

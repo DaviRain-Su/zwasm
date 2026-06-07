@@ -44,7 +44,11 @@ const INTERNAL_ERROR_MSG =
 fn faultHandler(_: std.posix.SIG, _: *const std.posix.siginfo_t, _: ?*anyopaque) callconv(.c) void {
     // Async-signal-safe only: raw write(2) + `_exit` (skips atexit/stdio). No
     // allocation, no formatting, no recovery — always exits.
-    _ = write(2, INTERNAL_ERROR_MSG, INTERNAL_ERROR_MSG.len);
+    // The fork-recovery test below installs this handler in a child that
+    // deliberately faults; under `zig build test` the message would pollute the
+    // shared harness stderr (the test asserts the exit code, never the text), so
+    // it is comptime-elided in test builds. Production always prints.
+    if (!builtin.is_test) _ = write(2, INTERNAL_ERROR_MSG, INTERNAL_ERROR_MSG.len);
     std.c._exit(INTERNAL_ERROR_EXIT_CODE);
 }
 

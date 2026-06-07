@@ -36,6 +36,7 @@
 //! Zone 2 (`src/engine/codegen/arm64/`).
 
 const std = @import("std");
+const dbg = @import("../../../support/dbg.zig");
 const build_options = @import("build_options");
 
 const zir = @import("../../../ir/zir.zig");
@@ -283,7 +284,7 @@ pub fn emitMemOp(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         const result = ctx.next_vreg.*;
         ctx.next_vreg.* += 1;
         if (result >= ctx.alloc.slots.len) {
-            std.debug.print("arm64/op_memory: load SlotOverflow func[{d}] op={s} vreg={d} >= slots.len={d}\n", .{ ctx.func.func_idx, @tagName(ins.op), result, ctx.alloc.slots.len });
+            dbg.print("codegen", "arm64/op_memory: load SlotOverflow func[{d}] op={s} vreg={d} >= slots.len={d}\n", .{ ctx.func.func_idx, @tagName(ins.op), result, ctx.alloc.slots.len });
             return Error.SlotOverflow;
         }
         // D-034 spill-aware: FP result def uses fpDefSpilled (V29
@@ -504,7 +505,7 @@ fn emitMemOpI64(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         const result = ctx.next_vreg.*;
         ctx.next_vreg.* += 1;
         if (result >= ctx.alloc.slots.len) {
-            std.debug.print("arm64/op_memory: i64 load SlotOverflow func[{d}] op={s} vreg={d} >= slots.len={d}\n", .{ ctx.func.func_idx, @tagName(ins.op), result, ctx.alloc.slots.len });
+            dbg.print("codegen", "arm64/op_memory: i64 load SlotOverflow func[{d}] op={s} vreg={d} >= slots.len={d}\n", .{ ctx.func.func_idx, @tagName(ins.op), result, ctx.alloc.slots.len });
             return Error.SlotOverflow;
         }
         const wd: inst.Xn = if (is_fp_value)

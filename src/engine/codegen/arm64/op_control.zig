@@ -33,6 +33,7 @@
 //! Zone 2 (`src/engine/codegen/arm64/`).
 
 const std = @import("std");
+const dbg = @import("../../../support/dbg.zig");
 
 const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
@@ -544,7 +545,7 @@ pub fn emitElse(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
     if (ctx.labels.items.len == 0 or
         ctx.labels.items[ctx.labels.items.len - 1].kind != .if_then)
     {
-        std.debug.print("arm64/op_control: emitElse without matching if_then frame (labels.len={d}, func_idx={d})\n", .{ ctx.labels.items.len, ctx.func.func_idx });
+        dbg.print("codegen", "arm64/op_control: emitElse without matching if_then frame (labels.len={d}, func_idx={d})\n", .{ ctx.labels.items.len, ctx.func.func_idx });
         return Error.UnsupportedOp;
     }
     const lbl_idx = ctx.labels.items.len - 1;
@@ -731,7 +732,7 @@ pub fn emitEndIntra(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
             // shape, just without the "verify merge_base" check
             // (no phantom layer to verify against).
             if (ctx.pushed_vregs.items.len < arity) {
-                std.debug.print("arm64/op_control: emitEndIntra (param else_open) needs >={d} pushed_vregs, got {d} (func_idx={d})\n", .{ arity, ctx.pushed_vregs.items.len, ctx.func.func_idx });
+                dbg.print("codegen", "arm64/op_control: emitEndIntra (param else_open) needs >={d} pushed_vregs, got {d} (func_idx={d})\n", .{ arity, ctx.pushed_vregs.items.len, ctx.func.func_idx });
                 return Error.UnsupportedOp;
             }
             var i: u32 = arity;
@@ -748,7 +749,7 @@ pub fn emitEndIntra(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
                 try ctx.pushed_vregs.append(ctx.allocator, lbl.merge_top_vregs[j]);
             }
         } else if (ctx.pushed_vregs.items.len < 2 * arity) {
-            std.debug.print("arm64/op_control: emitEndIntra (else_open merge) needs >={d} pushed_vregs, got {d} (func_idx={d})\n", .{ 2 * arity, ctx.pushed_vregs.items.len, ctx.func.func_idx });
+            dbg.print("codegen", "arm64/op_control: emitEndIntra (else_open merge) needs >={d} pushed_vregs, got {d} (func_idx={d})\n", .{ 2 * arity, ctx.pushed_vregs.items.len, ctx.func.func_idx });
             return Error.UnsupportedOp;
         } else {
             // Verify the slot below the else-results is the
@@ -758,7 +759,7 @@ pub fn emitEndIntra(ctx: *EmitCtx, _: *const ZirInstr) Error!void {
             var v: u32 = 0;
             while (v < arity) : (v += 1) {
                 if (ctx.pushed_vregs.items[merge_base + v] != lbl.merge_top_vregs[v]) {
-                    std.debug.print("arm64/op_control: emitEndIntra merge mismatch at slot {d} — top vreg={d}, merge={d} (func_idx={d})\n", .{ v, ctx.pushed_vregs.items[merge_base + v], lbl.merge_top_vregs[v], ctx.func.func_idx });
+                    dbg.print("codegen", "arm64/op_control: emitEndIntra merge mismatch at slot {d} — top vreg={d}, merge={d} (func_idx={d})\n", .{ v, ctx.pushed_vregs.items[merge_base + v], lbl.merge_top_vregs[v], ctx.func.func_idx });
                     return Error.UnsupportedOp;
                 }
             }

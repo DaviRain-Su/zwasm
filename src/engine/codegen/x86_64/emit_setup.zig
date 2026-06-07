@@ -17,6 +17,7 @@
 //! isolation).
 
 const std = @import("std");
+const dbg = @import("../../../support/dbg.zig");
 
 const zir = @import("../../../ir/zir.zig");
 const abi = @import("abi.zig");
@@ -178,7 +179,7 @@ pub fn computeOutgoingMaxBytes(
 /// per-type stride is honoured.
 pub fn localDisp(idx: u32, total_locals: u32, uses_runtime_ptr: bool) Error!i32 {
     if (idx >= total_locals) {
-        std.debug.print("x86_64/emit: UnsupportedOp[localDisp-idx>=total_locals] (idx={d}, total={d})\n", .{ idx, total_locals });
+        dbg.print("codegen", "x86_64/emit: UnsupportedOp[localDisp-idx>=total_locals] (idx={d}, total={d})\n", .{ idx, total_locals });
         return Error.UnsupportedOp;
     }
     const base_off: i32 = if (uses_runtime_ptr) -8 else 0;

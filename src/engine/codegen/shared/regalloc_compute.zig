@@ -9,6 +9,7 @@
 //!   - ADR-0053 v128 spill-frame alignment (computeSpillOffsets)
 
 const std = @import("std");
+const dbg = @import("../../../support/dbg.zig");
 const zir = @import("../../../ir/zir.zig");
 const regalloc = @import("regalloc.zig");
 const shape_tags_mod = @import("regalloc_shape_tags.zig");
@@ -288,7 +289,7 @@ pub fn computeWith(
                 }
                 const s_u32: u32 = @as(u32, force_spill_threshold) + n_spill_minted;
                 if (s_u32 >= max_slots) {
-                    std.debug.print("regalloc: SlotOverflow (spill mint) at func[{d}] vreg={d} ranges.len={d}\n", .{ func.func_idx, vreg, live.ranges.len });
+                    dbg.print("codegen", "regalloc: SlotOverflow (spill mint) at func[{d}] vreg={d} ranges.len={d}\n", .{ func.func_idx, vreg, live.ranges.len });
                     return Error.SlotOverflow;
                 }
                 n_spill_minted += 1;
@@ -308,13 +309,13 @@ pub fn computeWith(
             }
             while (slotForbidden(forbidden, n_slots, force_spill_threshold)) {
                 if (n_slots >= max_slots) {
-                    std.debug.print("regalloc: SlotOverflow (mint past fence) at func[{d}] vreg={d} ranges.len={d}\n", .{ func.func_idx, vreg, live.ranges.len });
+                    dbg.print("codegen", "regalloc: SlotOverflow (mint past fence) at func[{d}] vreg={d} ranges.len={d}\n", .{ func.func_idx, vreg, live.ranges.len });
                     return Error.SlotOverflow;
                 }
                 n_slots += 1;
             }
             if (n_slots >= max_slots) {
-                std.debug.print("regalloc: SlotOverflow at func[{d}] vreg={d} ranges.len={d} (>{d} simultaneously live)\n", .{ func.func_idx, vreg, live.ranges.len, max_slots });
+                dbg.print("codegen", "regalloc: SlotOverflow at func[{d}] vreg={d} ranges.len={d} (>{d} simultaneously live)\n", .{ func.func_idx, vreg, live.ranges.len, max_slots });
                 return Error.SlotOverflow;
             }
             const new = n_slots;

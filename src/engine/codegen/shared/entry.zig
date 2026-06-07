@@ -17,6 +17,7 @@
 //! Zone 2 (`src/engine/codegen/shared/`).
 
 const std = @import("std");
+const dbg = @import("../../../support/dbg.zig");
 const builtin = @import("builtin");
 const build_options = @import("build_options");
 
@@ -230,7 +231,7 @@ inline fn invokeAndCheck(
     // D-165 trap-stub entry-count diagnostic, gated behind -Dtrace-stackprobe
     // (default false; ADR-0164 B / D-292) — a D-279 Win64 investigation primitive.
     if (comptime build_options.trace_stackprobe) {
-        if (rt.trap_kind == 4) std.debug.print("[d-165] kind=4 cumulative_trap_stub_entry_count={d}\n", .{rt.trap_stub_entry_count});
+        if (rt.trap_kind == 4) dbg.print("codegen", "[d-165] kind=4 cumulative_trap_stub_entry_count={d}\n", .{rt.trap_stub_entry_count});
     }
     return Error.Trap;
 }

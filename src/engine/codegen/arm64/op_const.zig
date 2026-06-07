@@ -18,6 +18,7 @@
 //! Zone 2 (`src/engine/codegen/arm64/`).
 
 const std = @import("std");
+const dbg = @import("../../../support/dbg.zig");
 
 const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
@@ -66,7 +67,7 @@ pub fn emitI32Const(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const vreg = ctx.next_vreg.*;
     ctx.next_vreg.* += 1;
     if (vreg >= ctx.alloc.slots.len) {
-        std.debug.print("arm64/op_const: i32.const SlotOverflow func[{d}] vreg={d} >= slots.len={d}\n", .{ ctx.func.func_idx, vreg, ctx.alloc.slots.len });
+        dbg.print("codegen", "arm64/op_const: i32.const SlotOverflow func[{d}] vreg={d} >= slots.len={d}\n", .{ ctx.func.func_idx, vreg, ctx.alloc.slots.len });
         return Error.SlotOverflow;
     }
     const xd = try gpr.gprDefSpilled(ctx.alloc, vreg, 0);
@@ -82,7 +83,7 @@ pub fn emitI64Const(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const vreg = ctx.next_vreg.*;
     ctx.next_vreg.* += 1;
     if (vreg >= ctx.alloc.slots.len) {
-        std.debug.print("arm64/op_const: i64.const SlotOverflow func[{d}] vreg={d} >= slots.len={d}\n", .{ ctx.func.func_idx, vreg, ctx.alloc.slots.len });
+        dbg.print("codegen", "arm64/op_const: i64.const SlotOverflow func[{d}] vreg={d} >= slots.len={d}\n", .{ ctx.func.func_idx, vreg, ctx.alloc.slots.len });
         return Error.SlotOverflow;
     }
     const xd = try gpr.gprDefSpilled(ctx.alloc, vreg, 0);

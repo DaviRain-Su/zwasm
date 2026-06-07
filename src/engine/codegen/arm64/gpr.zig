@@ -22,6 +22,7 @@
 //! Zone 2 (`src/engine/codegen/arm64/`).
 
 const std = @import("std");
+const dbg = @import("../../../support/dbg.zig");
 
 const inst = @import("inst.zig");
 const inst_neon = @import("inst_neon.zig");
@@ -152,14 +153,15 @@ pub fn resolveGpr(alloc: regalloc.Allocation, vreg: usize) Error!inst.Xn {
             // when `max_reg_slots_gpr` exceeds `slotToReg.len`
             // (config drift) or when class disagreement assigns a
             // GPR-bound id that's too high for the GPR pool.
-            std.debug.print("arm64/gpr: SlotOverflow resolveGpr vreg={d} slot_id={d}\n", .{ vreg, id });
+            dbg.print("codegen", "arm64/gpr: SlotOverflow resolveGpr vreg={d} slot_id={d}\n", .{ vreg, id });
             break :blk Error.SlotOverflow;
         },
         .spill => blk: {
             // §9.7 / 7.5-diag-spill: surface which vreg / spill
             // slot triggered the reject so the next chunk can
             // narrow scope (spill-aware handler vs pool extension).
-            std.debug.print(
+            dbg.print(
+                "codegen",
                 "arm64/gpr: resolveGpr rejected spilled vreg={d} (handler not spill-aware)\n",
                 .{vreg},
             );
@@ -187,14 +189,14 @@ pub fn gprLoadSpilled(
 ) Error!inst.Xn {
     return switch (alloc.slot(vreg, .gpr)) {
         .reg => |id| abi.slotToReg(id) orelse blk: {
-            std.debug.print("arm64/gpr: SlotOverflow gprLoadSpilled.reg vreg={d} slot_id={d}\n", .{ vreg, id });
+            dbg.print("codegen", "arm64/gpr: SlotOverflow gprLoadSpilled.reg vreg={d} slot_id={d}\n", .{ vreg, id });
             break :blk Error.SlotOverflow;
         },
         .spill => |off| blk: {
             const stage = abi.spill_stage_gprs[stage_idx];
             const abs_off = spill_base_off + off;
             if ((abs_off & 7) != 0) {
-                std.debug.print("arm64/gpr: SlotOverflow gprLoadSpilled.spill misaligned vreg={d} abs_off={d}\n", .{ vreg, abs_off });
+                dbg.print("codegen", "arm64/gpr: SlotOverflow gprLoadSpilled.spill misaligned vreg={d} abs_off={d}\n", .{ vreg, abs_off });
                 return Error.SlotOverflow;
             }
             // X-form LDR imm12 scales by 8; max byte offset is 8*4095 = 32760.
@@ -223,7 +225,7 @@ pub fn gprDefSpilled(
 ) Error!inst.Xn {
     return switch (alloc.slot(vreg, .gpr)) {
         .reg => |id| abi.slotToReg(id) orelse blk: {
-            std.debug.print("arm64/gpr: SlotOverflow gprDefSpilled.reg vreg={d} slot_id={d}\n", .{ vreg, id });
+            dbg.print("codegen", "arm64/gpr: SlotOverflow gprDefSpilled.reg vreg={d} slot_id={d}\n", .{ vreg, id });
             break :blk Error.SlotOverflow;
         },
         .spill => abi.spill_stage_gprs[stage_idx],
@@ -248,7 +250,7 @@ pub fn gprStoreSpilled(
             const stage = abi.spill_stage_gprs[stage_idx];
             const abs_off = spill_base_off + off;
             if ((abs_off & 7) != 0) {
-                std.debug.print("arm64/gpr: SlotOverflow gprStoreSpilled.spill misaligned vreg={d} abs_off={d}\n", .{ vreg, abs_off });
+                dbg.print("codegen", "arm64/gpr: SlotOverflow gprStoreSpilled.spill misaligned vreg={d} abs_off={d}\n", .{ vreg, abs_off });
                 return Error.SlotOverflow;
             }
             // D-289: store value occupies `stage`; materialise SP+abs_off into the
@@ -277,11 +279,12 @@ pub fn gprStoreSpilled(
 pub fn resolveFp(alloc: regalloc.Allocation, vreg: usize) Error!inst.Vn {
     return switch (alloc.slot(vreg, .fpr)) {
         .reg => |id| abi.fpSlotToReg(id) orelse blk: {
-            std.debug.print("arm64/gpr: SlotOverflow resolveFp vreg={d} slot_id={d}\n", .{ vreg, id });
+            dbg.print("codegen", "arm64/gpr: SlotOverflow resolveFp vreg={d} slot_id={d}\n", .{ vreg, id });
             break :blk Error.SlotOverflow;
         },
         .spill => |off| blk: {
-            std.debug.print(
+            dbg.print(
+                "codegen",
                 "arm64/gpr: resolveFp rejected spilled vreg={d} spill_off={d} (handler not FP-spill-aware)\n",
                 .{ vreg, off },
             );
@@ -313,7 +316,7 @@ pub fn fpLoadSpilled(
 ) Error!inst.Vn {
     return switch (alloc.slot(vreg, .fpr)) {
         .reg => |id| abi.fpSlotToReg(id) orelse blk: {
-            std.debug.print("arm64/gpr: SlotOverflow fpLoadSpilled.reg vreg={d} slot_id={d}\n", .{ vreg, id });
+            dbg.print("codegen", "arm64/gpr: SlotOverflow fpLoadSpilled.reg vreg={d} slot_id={d}\n", .{ vreg, id });
             break :blk Error.SlotOverflow;
         },
         .spill => |off| blk: {
@@ -321,7 +324,7 @@ pub fn fpLoadSpilled(
             const abs_off = spill_base_off + off;
             // D-form imm12 scales by 8; max byte offset is 8*4095 = 32760.
             if (abs_off > 32760 or (abs_off & 7) != 0) {
-                std.debug.print("arm64/gpr: SlotOverflow fpLoadSpilled.spill vreg={d} abs_off={d} (base={d}+off={d})\n", .{ vreg, abs_off, spill_base_off, off });
+                dbg.print("codegen", "arm64/gpr: SlotOverflow fpLoadSpilled.spill vreg={d} abs_off={d} (base={d}+off={d})\n", .{ vreg, abs_off, spill_base_off, off });
                 return Error.SlotOverflow;
             }
             try writeU32(allocator, buf, inst.encLdrDImm(stage, 31, @intCast(abs_off)));
@@ -341,7 +344,7 @@ pub fn fpDefSpilled(
 ) Error!inst.Vn {
     return switch (alloc.slot(vreg, .fpr)) {
         .reg => |id| abi.fpSlotToReg(id) orelse blk: {
-            std.debug.print("arm64/gpr: SlotOverflow fpDefSpilled.reg vreg={d} slot_id={d}\n", .{ vreg, id });
+            dbg.print("codegen", "arm64/gpr: SlotOverflow fpDefSpilled.reg vreg={d} slot_id={d}\n", .{ vreg, id });
             break :blk Error.SlotOverflow;
         },
         .spill => abi.fp_spill_stage_vregs[stage_idx],
@@ -366,7 +369,7 @@ pub fn fpStoreSpilled(
             const stage = abi.fp_spill_stage_vregs[stage_idx];
             const abs_off = spill_base_off + off;
             if (abs_off > 32760 or (abs_off & 7) != 0) {
-                std.debug.print("arm64/gpr: SlotOverflow fpStoreSpilled.spill vreg={d} abs_off={d} (base={d}+off={d})\n", .{ vreg, abs_off, spill_base_off, off });
+                dbg.print("codegen", "arm64/gpr: SlotOverflow fpStoreSpilled.spill vreg={d} abs_off={d} (base={d}+off={d})\n", .{ vreg, abs_off, spill_base_off, off });
                 return Error.SlotOverflow;
             }
             try writeU32(allocator, buf, inst.encStrDImm(stage, 31, @intCast(abs_off)));
@@ -400,7 +403,7 @@ pub fn qLoadSpilled(
 ) Error!inst.Vn {
     return switch (alloc.slot(vreg, .fpr)) {
         .reg => |id| abi.fpSlotToReg(id) orelse blk: {
-            std.debug.print("arm64/gpr: SlotOverflow qLoadSpilled.reg vreg={d} slot_id={d}\n", .{ vreg, id });
+            dbg.print("codegen", "arm64/gpr: SlotOverflow qLoadSpilled.reg vreg={d} slot_id={d}\n", .{ vreg, id });
             break :blk Error.SlotOverflow;
         },
         .spill => |off| blk: {
@@ -408,7 +411,7 @@ pub fn qLoadSpilled(
             const abs_off = spill_base_off + off;
             // Q-form imm12 scales by 16; max byte offset is 16*4095 = 65520.
             if (abs_off > 65520 or (abs_off & 0xF) != 0) {
-                std.debug.print("arm64/gpr: SlotOverflow qLoadSpilled.spill vreg={d} abs_off={d} (must be 16-byte aligned & ≤ 65520)\n", .{ vreg, abs_off });
+                dbg.print("codegen", "arm64/gpr: SlotOverflow qLoadSpilled.spill vreg={d} abs_off={d} (must be 16-byte aligned & ≤ 65520)\n", .{ vreg, abs_off });
                 return Error.SlotOverflow;
             }
             try writeU32(allocator, buf, inst_neon.encLdrQImm(stage, 31, @intCast(abs_off)));
@@ -428,7 +431,7 @@ pub fn qDefSpilled(
 ) Error!inst.Vn {
     return switch (alloc.slot(vreg, .fpr)) {
         .reg => |id| abi.fpSlotToReg(id) orelse blk: {
-            std.debug.print("arm64/gpr: SlotOverflow qDefSpilled.reg vreg={d} slot_id={d}\n", .{ vreg, id });
+            dbg.print("codegen", "arm64/gpr: SlotOverflow qDefSpilled.reg vreg={d} slot_id={d}\n", .{ vreg, id });
             break :blk Error.SlotOverflow;
         },
         .spill => abi.fp_spill_stage_vregs[stage_idx],
@@ -452,7 +455,7 @@ pub fn qStoreSpilled(
             const stage = abi.fp_spill_stage_vregs[stage_idx];
             const abs_off = spill_base_off + off;
             if (abs_off > 65520 or (abs_off & 0xF) != 0) {
-                std.debug.print("arm64/gpr: SlotOverflow qStoreSpilled vreg={d} abs_off={d}\n", .{ vreg, abs_off });
+                dbg.print("codegen", "arm64/gpr: SlotOverflow qStoreSpilled vreg={d} abs_off={d}\n", .{ vreg, abs_off });
                 return Error.SlotOverflow;
             }
             try writeU32(allocator, buf, inst_neon.encStrQImm(stage, 31, @intCast(abs_off)));

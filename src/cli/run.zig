@@ -452,6 +452,10 @@ fn writeResultText(io: std.Io, capture: ?*std.ArrayList(u8), alloc: std.mem.Allo
 /// meaningful to do beyond the caller's exit-code path — the print
 /// errors are intentionally swallowed.
 fn surfaceTrap(io: std.Io, trap: anytype) void {
+    // Production CLI diagnostic. Under `zig build test` this writes to the shared
+    // harness stderr (no test asserts the text; they check exit codes / trap
+    // kinds), so it is comptime-elided in test builds to keep output clean.
+    if (@import("builtin").is_test) return;
     var stderr_buf: [256]u8 = undefined;
     var sw = std.Io.File.stderr().writer(io, &stderr_buf);
     const w = &sw.interface;
@@ -476,6 +480,8 @@ fn surfaceTrap(io: std.Io, trap: anytype) void {
 /// interp-parity kind + message; the generic bucket (codes 0/1) honestly says
 /// the kind is not yet distinguished (D-292 codegen widening).
 fn surfaceJitTrap(io: std.Io, code: u32) void {
+    // See surfaceTrap: comptime-elided under test to keep harness stderr clean.
+    if (@import("builtin").is_test) return;
     var stderr_buf: [256]u8 = undefined;
     var sw = std.Io.File.stderr().writer(io, &stderr_buf);
     const w = &sw.interface;

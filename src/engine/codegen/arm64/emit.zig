@@ -40,6 +40,7 @@
 //! per ROADMAP §A3.
 
 const std = @import("std");
+const dbg = @import("../../../support/dbg.zig");
 const builtin = @import("builtin");
 
 const zir = @import("../../../ir/zir.zig");
@@ -830,7 +831,8 @@ pub fn compile(
         // tag + pc so the realworld_run_jit cap-removal regression
         // (D-053 + D-054) can localise to a specific opcode handler
         // instead of a generic `UnsupportedOp` at the runner.
-        errdefer std.debug.print(
+        errdefer dbg.print(
+            "codegen",
             "arm64/emit: failing op `{s}` at func[{d}] pc={d}\n",
             .{ @tagName(ins.op), func.func_idx, pc },
         );
@@ -963,7 +965,7 @@ pub fn compile(
                 const vreg = next_vreg;
                 next_vreg += 1;
                 if (vreg >= alloc.slots.len) {
-                    std.debug.print("arm64/emit: f32.const SlotOverflow func[{d}] vreg={d} >= slots.len={d}\n", .{ func.func_idx, vreg, alloc.slots.len });
+                    dbg.print("codegen", "arm64/emit: f32.const SlotOverflow func[{d}] vreg={d} >= slots.len={d}\n", .{ func.func_idx, vreg, alloc.slots.len });
                     return Error.SlotOverflow;
                 }
                 const vd = try gpr.fpDefSpilled(alloc, vreg, 0);
@@ -978,7 +980,7 @@ pub fn compile(
                 const vreg = next_vreg;
                 next_vreg += 1;
                 if (vreg >= alloc.slots.len) {
-                    std.debug.print("arm64/emit: f64.const SlotOverflow func[{d}] vreg={d} >= slots.len={d}\n", .{ func.func_idx, vreg, alloc.slots.len });
+                    dbg.print("codegen", "arm64/emit: f64.const SlotOverflow func[{d}] vreg={d} >= slots.len={d}\n", .{ func.func_idx, vreg, alloc.slots.len });
                     return Error.SlotOverflow;
                 }
                 const vd = try gpr.fpDefSpilled(alloc, vreg, 0);
@@ -1013,7 +1015,7 @@ pub fn compile(
                 const vreg = next_vreg;
                 next_vreg += 1;
                 if (vreg >= alloc.slots.len) {
-                    std.debug.print("arm64/emit: local.get SlotOverflow func[{d}] vreg={d} >= slots.len={d} local_idx={d}\n", .{ func.func_idx, vreg, alloc.slots.len, local_idx });
+                    dbg.print("codegen", "arm64/emit: local.get SlotOverflow func[{d}] vreg={d} >= slots.len={d} local_idx={d}\n", .{ func.func_idx, vreg, alloc.slots.len, local_idx });
                     return Error.SlotOverflow;
                 }
                 // ADR-0155 stage 1 — register-homed local: read the home
@@ -1195,7 +1197,7 @@ pub fn compile(
                 const result_v = next_vreg;
                 next_vreg += 1;
                 if (result_v >= alloc.slots.len) {
-                    std.debug.print("arm64/emit: select SlotOverflow func[{d}] vreg={d} >= slots.len={d}\n", .{ func.func_idx, result_v, alloc.slots.len });
+                    dbg.print("codegen", "arm64/emit: select SlotOverflow func[{d}] vreg={d} >= slots.len={d}\n", .{ func.func_idx, result_v, alloc.slots.len });
                     return Error.SlotOverflow;
                 }
                 // §9.9 / 9.9-d-5: dispatch on val1's shape_tag. v128
@@ -1370,7 +1372,7 @@ pub fn compile(
                 const result = next_vreg;
                 next_vreg += 1;
                 if (result >= alloc.slots.len) {
-                    std.debug.print("arm64/emit: memory.size SlotOverflow func[{d}] vreg={d} >= slots.len={d}\n", .{ func.func_idx, result, alloc.slots.len });
+                    dbg.print("codegen", "arm64/emit: memory.size SlotOverflow func[{d}] vreg={d} >= slots.len={d}\n", .{ func.func_idx, result, alloc.slots.len });
                     return Error.SlotOverflow;
                 }
                 const wd = try gpr.gprDefSpilled(alloc, result, 0);
@@ -1414,7 +1416,7 @@ pub fn compile(
                 const result = next_vreg;
                 next_vreg += 1;
                 if (result >= alloc.slots.len) {
-                    std.debug.print("arm64/emit: memory.grow SlotOverflow func[{d}] vreg={d} >= slots.len={d}\n", .{ func.func_idx, result, alloc.slots.len });
+                    dbg.print("codegen", "arm64/emit: memory.grow SlotOverflow func[{d}] vreg={d} >= slots.len={d}\n", .{ func.func_idx, result, alloc.slots.len });
                     return Error.SlotOverflow;
                 }
                 // memory64 grow yields an i64; sign-extend W0 so the -1
@@ -1425,7 +1427,7 @@ pub fn compile(
                 switch (alloc.slot(result, .gpr)) {
                     .reg => |id| {
                         const wd = abi.slotToReg(id) orelse {
-                            std.debug.print("arm64/emit: memory.grow capture SlotOverflow func[{d}] result_vreg={d} slot_id={d}\n", .{ func.func_idx, result, id });
+                            dbg.print("codegen", "arm64/emit: memory.grow capture SlotOverflow func[{d}] result_vreg={d} slot_id={d}\n", .{ func.func_idx, result, id });
                             return Error.SlotOverflow;
                         };
                         if (grow_is_mem64) {
@@ -1887,7 +1889,7 @@ pub fn compile(
                 // `simd_consts_base` as the boundary.
                 if (simd_const_fixups.items.len > 0) {
                     if (func.simd_consts == null and extra_consts.items.len == 0) {
-                        std.debug.print("arm64/emit: simd_const_fixups present but both simd_consts and extra_consts are empty\n", .{});
+                        dbg.print("codegen", "arm64/emit: simd_const_fixups present but both simd_consts and extra_consts are empty\n", .{});
                         return Error.AllocationMissing;
                     }
                     // Pad to 16-byte alignment.
@@ -2039,7 +2041,8 @@ pub fn compile(
                 // missing-op fixture reports the opaque
                 // `UnsupportedOp` and triaging requires hand
                 // bisecting the body.
-                std.debug.print(
+                dbg.print(
+                    "codegen",
                     "arm64/emit: unsupported op `{s}` (func_idx={d})\n",
                     .{ @tagName(ins.op), func.func_idx },
                 );

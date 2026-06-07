@@ -36,7 +36,7 @@
 //!
 //! Zone 2 (`src/engine/codegen/arm64/`).
 
-const std = @import("std");
+const dbg = @import("../../../support/dbg.zig");
 const builtin = @import("builtin");
 
 const zir = @import("../../../ir/zir.zig");
@@ -595,7 +595,7 @@ pub fn marshalCallArgs(ctx: *EmitCtx, callee_sig: FuncType) Error!void {
     const max_args: u32 = 128;
     var arg_vregs: [max_args]u32 = undefined;
     if (n_args > max_args) {
-        std.debug.print("arm64/op_call: marshal n_args={d} > {d}\n", .{ n_args, max_args });
+        dbg.print("codegen", "arm64/op_call: marshal n_args={d} > {d}\n", .{ n_args, max_args });
         return Error.UnsupportedOp;
     }
     var i: u32 = n_args;
@@ -854,7 +854,7 @@ fn captureCallResult(ctx: *EmitCtx, callee_sig: FuncType, memory_class: bool, bu
             .i32 => switch (ctx.alloc.slot(result, .gpr)) {
                 .reg => |id| {
                     const wd = abi.slotToReg(id) orelse {
-                        std.debug.print("arm64/op_call: captureCallResult.i32 SlotOverflow func[{d}] result_vreg={d} slot_id={d}\n", .{ ctx.func.func_idx, result, id });
+                        dbg.print("codegen", "arm64/op_call: captureCallResult.i32 SlotOverflow func[{d}] result_vreg={d} slot_id={d}\n", .{ ctx.func.func_idx, result, id });
                         return Error.SlotOverflow;
                     };
                     if (wd != src_reg) try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(wd, 31, src_reg));
@@ -868,7 +868,7 @@ fn captureCallResult(ctx: *EmitCtx, callee_sig: FuncType, memory_class: bool, bu
             .i64, .ref => switch (ctx.alloc.slot(result, .gpr)) {
                 .reg => |id| {
                     const xd = abi.slotToReg(id) orelse {
-                        std.debug.print("arm64/op_call: captureCallResult.i64 SlotOverflow func[{d}] result_vreg={d} slot_id={d}\n", .{ ctx.func.func_idx, result, id });
+                        dbg.print("codegen", "arm64/op_call: captureCallResult.i64 SlotOverflow func[{d}] result_vreg={d} slot_id={d}\n", .{ ctx.func.func_idx, result, id });
                         return Error.SlotOverflow;
                     };
                     if (xd != src_reg) try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(xd, 31, src_reg));
@@ -882,7 +882,7 @@ fn captureCallResult(ctx: *EmitCtx, callee_sig: FuncType, memory_class: bool, bu
             .f32 => switch (ctx.alloc.slot(result, .fpr)) {
                 .reg => |id| {
                     const vd = abi.fpSlotToReg(id) orelse {
-                        std.debug.print("arm64/op_call: captureCallResult.f32 SlotOverflow func[{d}] result_vreg={d} slot_id={d}\n", .{ ctx.func.func_idx, result, id });
+                        dbg.print("codegen", "arm64/op_call: captureCallResult.f32 SlotOverflow func[{d}] result_vreg={d} slot_id={d}\n", .{ ctx.func.func_idx, result, id });
                         return Error.SlotOverflow;
                     };
                     if (vd != src_reg) try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFmovSReg(vd, src_reg));
@@ -896,7 +896,7 @@ fn captureCallResult(ctx: *EmitCtx, callee_sig: FuncType, memory_class: bool, bu
             .f64 => switch (ctx.alloc.slot(result, .fpr)) {
                 .reg => |id| {
                     const vd = abi.fpSlotToReg(id) orelse {
-                        std.debug.print("arm64/op_call: captureCallResult.f64 SlotOverflow func[{d}] result_vreg={d} slot_id={d}\n", .{ ctx.func.func_idx, result, id });
+                        dbg.print("codegen", "arm64/op_call: captureCallResult.f64 SlotOverflow func[{d}] result_vreg={d} slot_id={d}\n", .{ ctx.func.func_idx, result, id });
                         return Error.SlotOverflow;
                     };
                     if (vd != src_reg) try gpr.writeU32(ctx.allocator, ctx.buf, inst_fp.encFmovDReg(vd, src_reg));
@@ -913,7 +913,7 @@ fn captureCallResult(ctx: *EmitCtx, callee_sig: FuncType, memory_class: bool, bu
             .v128 => switch (ctx.alloc.slot(result, .fpr)) {
                 .reg => |id| {
                     const vd = abi.fpSlotToReg(id) orelse {
-                        std.debug.print("arm64/op_call: captureCallResult.v128 SlotOverflow func[{d}] result_vreg={d} slot_id={d}\n", .{ ctx.func.func_idx, result, id });
+                        dbg.print("codegen", "arm64/op_call: captureCallResult.v128 SlotOverflow func[{d}] result_vreg={d} slot_id={d}\n", .{ ctx.func.func_idx, result, id });
                         return Error.SlotOverflow;
                     };
                     if (vd != src_reg) try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encMovV16B(vd, src_reg));

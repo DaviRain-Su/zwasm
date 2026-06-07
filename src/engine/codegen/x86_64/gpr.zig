@@ -32,6 +32,7 @@
 //! `src/engine/codegen/arm64/` per ROADMAP §A3.
 
 const std = @import("std");
+const dbg = @import("../../../support/dbg.zig");
 
 const inst = @import("inst.zig");
 const abi = @import("abi.zig");
@@ -109,7 +110,8 @@ pub fn resolveGpr(alloc: regalloc.Allocation, vreg: usize) Error!Gpr {
     return switch (alloc.slot(vreg, .gpr)) {
         .reg => |id| abi.slotToReg(id) orelse Error.SlotOverflow,
         .spill => blk: {
-            std.debug.print(
+            dbg.print(
+                "codegen",
                 "x86_64/gpr: resolveGpr rejected spilled vreg={d} (handler not spill-aware)\n",
                 .{vreg},
             );
@@ -191,7 +193,8 @@ pub fn resolveXmm(alloc: regalloc.Allocation, vreg: usize) Error!Xmm {
     return switch (alloc.slot(vreg, .fpr)) {
         .reg => |id| abi.fpSlotToReg(id) orelse Error.SlotOverflow,
         .spill => |off| blk: {
-            std.debug.print(
+            dbg.print(
+                "codegen",
                 "x86_64/gpr: resolveXmm rejected spilled vreg={d} spill_off={d} (handler not XMM-spill-aware)\n",
                 .{ vreg, off },
             );

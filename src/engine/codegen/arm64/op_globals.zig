@@ -21,7 +21,7 @@
 //!
 //! Zone 2 (`src/engine/codegen/arm64/`).
 
-const std = @import("std");
+const dbg = @import("../../../support/dbg.zig");
 
 const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
@@ -82,14 +82,14 @@ pub fn emitGlobalSet(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 fn emitI32GlobalGet(ctx: *EmitCtx, idx: u32, byte_off: u32) Error!void {
     // imm12 in W-form scales by 4 → max byte_offset = 4 * 4095 = 16380.
     if (byte_off > 16380) {
-        std.debug.print("arm64/op_globals: global.get SlotOverflow func[{d}] idx={d} byte_off={d}>16380\n", .{ ctx.func.func_idx, idx, byte_off });
+        dbg.print("codegen", "arm64/op_globals: global.get SlotOverflow func[{d}] idx={d} byte_off={d}>16380\n", .{ ctx.func.func_idx, idx, byte_off });
         return Error.SlotOverflow;
     }
 
     const result = ctx.next_vreg.*;
     ctx.next_vreg.* += 1;
     if (result >= ctx.alloc.slots.len) {
-        std.debug.print("arm64/op_globals: global.get SlotOverflow func[{d}] vreg={d} >= slots.len={d}\n", .{ ctx.func.func_idx, result, ctx.alloc.slots.len });
+        dbg.print("codegen", "arm64/op_globals: global.get SlotOverflow func[{d}] vreg={d} >= slots.len={d}\n", .{ ctx.func.func_idx, result, ctx.alloc.slots.len });
         return Error.SlotOverflow;
     }
     const wd = try gpr.gprDefSpilled(ctx.alloc, result, 0);
@@ -101,7 +101,7 @@ fn emitI32GlobalGet(ctx: *EmitCtx, idx: u32, byte_off: u32) Error!void {
 
 fn emitI32GlobalSet(ctx: *EmitCtx, idx: u32, byte_off: u32) Error!void {
     if (byte_off > 16380) {
-        std.debug.print("arm64/op_globals: global.set SlotOverflow func[{d}] idx={d} byte_off={d}>16380\n", .{ ctx.func.func_idx, idx, byte_off });
+        dbg.print("codegen", "arm64/op_globals: global.set SlotOverflow func[{d}] idx={d} byte_off={d}>16380\n", .{ ctx.func.func_idx, idx, byte_off });
         return Error.SlotOverflow;
     }
 
@@ -117,7 +117,7 @@ fn emitI32GlobalSet(ctx: *EmitCtx, idx: u32, byte_off: u32) Error!void {
 /// (≈4095 8-byte globals fit immediate-form addressing).
 fn emitI64GlobalGet(ctx: *EmitCtx, idx: u32, byte_off: u32) Error!void {
     if (byte_off > 32760 or (byte_off & 7) != 0) {
-        std.debug.print("arm64/op_globals: i64 global.get SlotOverflow func[{d}] idx={d} byte_off={d}\n", .{ ctx.func.func_idx, idx, byte_off });
+        dbg.print("codegen", "arm64/op_globals: i64 global.get SlotOverflow func[{d}] idx={d} byte_off={d}\n", .{ ctx.func.func_idx, idx, byte_off });
         return Error.SlotOverflow;
     }
 
@@ -133,7 +133,7 @@ fn emitI64GlobalGet(ctx: *EmitCtx, idx: u32, byte_off: u32) Error!void {
 
 fn emitI64GlobalSet(ctx: *EmitCtx, idx: u32, byte_off: u32) Error!void {
     if (byte_off > 32760 or (byte_off & 7) != 0) {
-        std.debug.print("arm64/op_globals: i64 global.set SlotOverflow func[{d}] idx={d} byte_off={d}\n", .{ ctx.func.func_idx, idx, byte_off });
+        dbg.print("codegen", "arm64/op_globals: i64 global.set SlotOverflow func[{d}] idx={d} byte_off={d}\n", .{ ctx.func.func_idx, idx, byte_off });
         return Error.SlotOverflow;
     }
 
@@ -150,7 +150,7 @@ fn emitI64GlobalSet(ctx: *EmitCtx, idx: u32, byte_off: u32) Error!void {
 /// downstream FP-op handlers (f32.add etc.) read it as FPR.
 fn emitF32GlobalGet(ctx: *EmitCtx, idx: u32, byte_off: u32) Error!void {
     if (byte_off > 16380 or (byte_off & 3) != 0) {
-        std.debug.print("arm64/op_globals: f32 global.get SlotOverflow func[{d}] idx={d} byte_off={d}\n", .{ ctx.func.func_idx, idx, byte_off });
+        dbg.print("codegen", "arm64/op_globals: f32 global.get SlotOverflow func[{d}] idx={d} byte_off={d}\n", .{ ctx.func.func_idx, idx, byte_off });
         return Error.SlotOverflow;
     }
 
@@ -166,7 +166,7 @@ fn emitF32GlobalGet(ctx: *EmitCtx, idx: u32, byte_off: u32) Error!void {
 
 fn emitF32GlobalSet(ctx: *EmitCtx, idx: u32, byte_off: u32) Error!void {
     if (byte_off > 16380 or (byte_off & 3) != 0) {
-        std.debug.print("arm64/op_globals: f32 global.set SlotOverflow func[{d}] idx={d} byte_off={d}\n", .{ ctx.func.func_idx, idx, byte_off });
+        dbg.print("codegen", "arm64/op_globals: f32 global.set SlotOverflow func[{d}] idx={d} byte_off={d}\n", .{ ctx.func.func_idx, idx, byte_off });
         return Error.SlotOverflow;
     }
 
@@ -181,7 +181,7 @@ fn emitF32GlobalSet(ctx: *EmitCtx, idx: u32, byte_off: u32) Error!void {
 /// imm12 scales by 8 (max 32760).
 fn emitF64GlobalGet(ctx: *EmitCtx, idx: u32, byte_off: u32) Error!void {
     if (byte_off > 32760 or (byte_off & 7) != 0) {
-        std.debug.print("arm64/op_globals: f64 global.get SlotOverflow func[{d}] idx={d} byte_off={d}\n", .{ ctx.func.func_idx, idx, byte_off });
+        dbg.print("codegen", "arm64/op_globals: f64 global.get SlotOverflow func[{d}] idx={d} byte_off={d}\n", .{ ctx.func.func_idx, idx, byte_off });
         return Error.SlotOverflow;
     }
 
@@ -197,7 +197,7 @@ fn emitF64GlobalGet(ctx: *EmitCtx, idx: u32, byte_off: u32) Error!void {
 
 fn emitF64GlobalSet(ctx: *EmitCtx, idx: u32, byte_off: u32) Error!void {
     if (byte_off > 32760 or (byte_off & 7) != 0) {
-        std.debug.print("arm64/op_globals: f64 global.set SlotOverflow func[{d}] idx={d} byte_off={d}\n", .{ ctx.func.func_idx, idx, byte_off });
+        dbg.print("codegen", "arm64/op_globals: f64 global.set SlotOverflow func[{d}] idx={d} byte_off={d}\n", .{ ctx.func.func_idx, idx, byte_off });
         return Error.SlotOverflow;
     }
 
@@ -215,12 +215,12 @@ fn emitF64GlobalSet(ctx: *EmitCtx, idx: u32, byte_off: u32) Error!void {
 /// that, escalation TBD).
 fn emitV128GlobalGet(ctx: *EmitCtx, idx: u32, byte_off: u32) Error!void {
     if (byte_off > 65520) {
-        std.debug.print("arm64/op_globals: v128 global.get SlotOverflow func[{d}] idx={d} byte_off={d}>65520\n", .{ ctx.func.func_idx, idx, byte_off });
+        dbg.print("codegen", "arm64/op_globals: v128 global.get SlotOverflow func[{d}] idx={d} byte_off={d}>65520\n", .{ ctx.func.func_idx, idx, byte_off });
         return Error.SlotOverflow;
     }
     if ((byte_off & 0xF) != 0) {
         // Q-form imm12 scales by 16; encoder shifts >> 4.
-        std.debug.print("arm64/op_globals: v128 global.get UnalignedOffset func[{d}] idx={d} byte_off={d}\n", .{ ctx.func.func_idx, idx, byte_off });
+        dbg.print("codegen", "arm64/op_globals: v128 global.get UnalignedOffset func[{d}] idx={d} byte_off={d}\n", .{ ctx.func.func_idx, idx, byte_off });
         return Error.UnsupportedOp;
     }
 
@@ -238,11 +238,11 @@ fn emitV128GlobalGet(ctx: *EmitCtx, idx: u32, byte_off: u32) Error!void {
 /// `[X23 + byte_off]` via `STR Q`.
 fn emitV128GlobalSet(ctx: *EmitCtx, idx: u32, byte_off: u32) Error!void {
     if (byte_off > 65520) {
-        std.debug.print("arm64/op_globals: v128 global.set SlotOverflow func[{d}] idx={d} byte_off={d}>65520\n", .{ ctx.func.func_idx, idx, byte_off });
+        dbg.print("codegen", "arm64/op_globals: v128 global.set SlotOverflow func[{d}] idx={d} byte_off={d}>65520\n", .{ ctx.func.func_idx, idx, byte_off });
         return Error.SlotOverflow;
     }
     if ((byte_off & 0xF) != 0) {
-        std.debug.print("arm64/op_globals: v128 global.set UnalignedOffset func[{d}] idx={d} byte_off={d}\n", .{ ctx.func.func_idx, idx, byte_off });
+        dbg.print("codegen", "arm64/op_globals: v128 global.set UnalignedOffset func[{d}] idx={d} byte_off={d}\n", .{ ctx.func.func_idx, idx, byte_off });
         return Error.UnsupportedOp;
     }
 
