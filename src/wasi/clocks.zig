@@ -65,19 +65,30 @@ pub fn clockTimeGet(
     time_ptr: u32,
 ) p1.Errno {
     _ = precision;
-    const io = host.io orelse return .nosys;
+    const ns_u = clockTimeNs(host, clock_id) catch |err| return switch (err) {
+        error.NoSys => .nosys,
+        error.Inval => .inval,
+    };
+    return writeU64LE(mem, time_ptr, ns_u);
+}
+
+/// Read a clock as a raw nanosecond `u64` — the value `clock_time_get` writes to
+/// guest memory. Factored out so the WASI-P2 `monotonic-clock.now()` trampoline
+/// can return the value directly (its lowered `()->i64`) instead of through
+/// guest memory. Same clock-id mapping as `clock_time_get`; requires `host.io`.
+pub fn clockTimeNs(host: *Host, clock_id: u32) error{ NoSys, Inval }!u64 {
+    const io = host.io orelse return error.NoSys;
     const clock: std.Io.Clock = switch (clock_id) {
         0 => .real,
         1 => .awake,
         2 => .cpu_process,
         3 => .cpu_thread,
-        else => return .inval,
+        else => return error.Inval,
     };
     const ts = std.Io.Timestamp.now(io, clock);
     const ns_i = ts.toNanoseconds();
-    if (ns_i < 0) return .inval;
-    const ns_u: u64 = @intCast(@min(ns_i, std.math.maxInt(u64)));
-    return writeU64LE(mem, time_ptr, ns_u);
+    if (ns_i < 0) return error.Inval;
+    return @intCast(@min(ns_i, std.math.maxInt(u64)));
 }
 
 // ============================================================

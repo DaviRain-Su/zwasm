@@ -22,6 +22,7 @@ const zwasm = @import("../zwasm.zig");
 const wasi_host = @import("../wasi/host.zig");
 const wasi_fd = @import("../wasi/fd.zig");
 const wasi_proc = @import("../wasi/proc.zig");
+const wasi_clocks = @import("../wasi/clocks.zig");
 const wasi_p1 = @import("../wasi/preview1.zig");
 const adapter = @import("../wasi/adapter.zig");
 const resource_table = @import("../feature/component/resource_table.zig");
@@ -457,6 +458,17 @@ fn p2Exit(caller: *Caller, status: u32) WasiP2Error!void {
     return WasiP2Error.ProcExit;
 }
 
+/// `wasi:clocks/monotonic-clock` `now()` → instant(u64). Returns the host
+/// monotonic clock (P1 clock id 1) directly as the lowered `i64` — no guest
+/// memory / return area. `now()` is infallible in WIT and the component-run
+/// path always has `host.io`, so a clock-read failure is a host-setup bug.
+fn p2MonotonicNow(caller: *Caller) WasiP2Error!i64 {
+    const ctx = caller.data(WasiP2Ctx);
+    const ns = wasi_clocks.clockTimeNs(ctx.host, 1) catch
+        @panic("WASI-P2 monotonic-clock.now: host clock unavailable (host.io unset)");
+    return @bitCast(ns);
+}
+
 /// `wasi:io/streams` `[method]output-stream.blocking-write-and-flush`
 /// (self, ptr, len, retptr): write the flat `list<u8>` at `(ptr, len)` to the
 /// fd bound to `self`, then store the `result<_, stream-error>` ok-discriminant
@@ -612,8 +624,9 @@ fn defineClassifiedFunc(lk: *Linker, module: []const u8, name: []const u8, op: a
         .fs_get_directories => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!void, p2GetDirectories),
         .fs_descriptor_open_at => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32, u32, u32, u32, u32, u32) WasiP2Error!void, p2DescriptorOpenAt),
         .cli_exit => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!void, p2Exit),
-        // Classified but not yet trampolined (stdin/clocks/random + the rest of
-        // the fs descriptor subset) — honest hard error, no silent skip. These
+        .clocks_monotonic_now => try lk.defineFuncCtx(module, name, ctx, fn (*Caller) WasiP2Error!i64, p2MonotonicNow),
+        // Classified but not yet trampolined (stdin/wall-clock/random + the rest
+        // of the fs descriptor subset) — honest hard error, no silent skip. These
         // land as their own D3 chunks once a fixture exercises each.
         .cli_get_stdin,
         .out_stream_blocking_flush,
@@ -621,7 +634,6 @@ fn defineClassifiedFunc(lk: *Linker, module: []const u8, name: []const u8, op: a
         .in_stream_blocking_read,
         .in_stream_drop,
         .clocks_wall_now,
-        .clocks_monotonic_now,
         .random_get_bytes,
         .fs_descriptor_read,
         .fs_descriptor_sync,
@@ -1281,6 +1293,25 @@ test "D3: a WASI-P2 component calls wasi:cli/exit(err) → host exit code 1" {
     // a set exit_code as a clean termination.
     try runWasiP2Main(&eng, testing.allocator, bytes, &host);
     try testing.expectEqual(@as(u32, 1), host.exit_code.?);
+}
+
+test "D3: a WASI-P2 component reads monotonic-clock.now() — sane + monotonic → exit 0" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/wasi_p2_clock.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+    host.io = io;
+
+    // run() reads now() twice; exit(0) iff first>0 and second>=first (the
+    // clocks_monotonic_now trampoline forwards to the host monotonic clock).
+    try runWasiP2Main(&eng, testing.allocator, bytes, &host);
+    try testing.expectEqual(@as(u32, 0), host.exit_code.?);
 }
 
 test "D2 (EXIT): a WASI-P2 fs component writes a file via get-directories+open-at+write e2e" {
