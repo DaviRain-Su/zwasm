@@ -14,12 +14,18 @@ Pre-release groundwork. Plan = `docs/migration_v1_to_v2.md` §1 tiers +
 2. ✅ **ADR (#3) = ADR-0179** — interruption/limits per wasmtime's 3 orthogonal
    mechanisms: fuel (deterministic, opt-in) · epoch (cheap counter, timeout+
    cancel) · store-limits (max memory/table). Explicit names.
-3. **← NEXT: #3a epoch interruption** (timeout + host-thread cancel). FIRST
-   sub-step = real perf spike in the JIT prologue (ride existing stack-probe
-   checkpoint — Q3 measured here, not on the interp stub). Then implement:
-   process-global epoch counter + `Store.setEpochDeadline` + `Engine.incrementEpoch`,
-   checked at func-entry + loop back-edges (interp `mvp.zig` + both JIT arches);
-   trap `error.Interrupted`; Zig + C API (`zwasm.h`).
+3. **#3a interruption** (timeout + host-thread cancel; cooperative flag, NOT a
+   u64 epoch counter — the v0 form per ADR-0179, a per-instance
+   `*std.atomic.Value(u32)` the guest polls):
+   - ✅ **#3a-1 interp foundation** `1001fa0e`: `error.Interrupted` +
+     `Runtime.interrupt`/`checkInterrupt` + func-entry (`mvp.invoke`) & throttled
+     loop-back-edge (`dispatch.run`, /1024) polls. 3 deterministic tests green.
+   - **← NEXT #3a-2**: wire the flag host→Runtime — `Instance`/`Engine` owns the
+     atomic; invoke sets `rt.interrupt`; Zig API (`instance.interrupt()` /
+     engine-level) + a facade end-to-end test (host-fn or thread trips it).
+   - **#3a-3 JIT**: prologue (ride stack-probe) + loop back-edge epoch poll, both
+     arches + trap stub → `error.Interrupted`. FIRST: real perf spike here (Q3).
+   - **#3a-4**: C API (`zwasm.h`) + CLI `--timeout <ms>` (timer thread sets flag).
 4. **#3c store limits** → 5. **#3b fuel (opt-in)** → 6. **#1 C-API WASI preopen**
    (`wasi.h`; CLI `--dir` capability already exists; D-251).
 
