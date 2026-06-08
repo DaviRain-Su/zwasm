@@ -91,6 +91,9 @@ pub fn decodeElement(parent_alloc: Allocator, body: []const u8) sections.Error!E
 
     var pos: usize = 0;
     const count = try leb128.readUleb128(u32, body, &pos);
+    // An element segment occupies ≥1 byte (its flag prefix) — reject an
+    // oversized count before allocating (Wasm spec §5.1.3 vec).
+    if (count > body.len - pos) return sections.Error.UnexpectedEnd;
     const items = try alloc.alloc(ElementSegment, count);
 
     for (items) |*e| {
@@ -101,6 +104,7 @@ pub fn decodeElement(parent_alloc: Allocator, body: []const u8) sections.Error!E
                 try init_expr.scanInitExpr(body, &pos);
                 const expr = body[expr_start..pos];
                 const n = try leb128.readUleb128(u32, body, &pos);
+                try sections.checkVecCount(n, body, pos); // ≥1 byte/elem — reject oversized count pre-alloc
                 const funcs = try alloc.alloc(u32, n);
                 for (funcs) |*f| f.* = try leb128.readUleb128(u32, body, &pos);
                 e.* = .{
@@ -117,6 +121,7 @@ pub fn decodeElement(parent_alloc: Allocator, body: []const u8) sections.Error!E
                 pos += 1;
                 if (elemkind != 0x00) return sections.Error.InvalidFunctype;
                 const n = try leb128.readUleb128(u32, body, &pos);
+                try sections.checkVecCount(n, body, pos); // ≥1 byte/elem — reject oversized count pre-alloc
                 const funcs = try alloc.alloc(u32, n);
                 for (funcs) |*f| f.* = try leb128.readUleb128(u32, body, &pos);
                 e.* = .{ .kind = .passive, .elem_type = .funcref, .funcidxs = funcs };
@@ -127,6 +132,7 @@ pub fn decodeElement(parent_alloc: Allocator, body: []const u8) sections.Error!E
                 pos += 1;
                 if (elemkind != 0x00) return sections.Error.InvalidFunctype;
                 const n = try leb128.readUleb128(u32, body, &pos);
+                try sections.checkVecCount(n, body, pos); // ≥1 byte/elem — reject oversized count pre-alloc
                 const funcs = try alloc.alloc(u32, n);
                 for (funcs) |*f| f.* = try leb128.readUleb128(u32, body, &pos);
                 e.* = .{ .kind = .declarative, .elem_type = .funcref, .funcidxs = funcs };
@@ -143,6 +149,7 @@ pub fn decodeElement(parent_alloc: Allocator, body: []const u8) sections.Error!E
                 try init_expr.scanInitExpr(body, &pos);
                 const expr = body[expr_start..pos];
                 const n = try leb128.readUleb128(u32, body, &pos);
+                try sections.checkVecCount(n, body, pos); // ≥1 byte/elem — reject oversized count pre-alloc
                 const funcs = try alloc.alloc(u32, n);
                 for (funcs) |*f| f.* = try readFuncrefInitExpr(body, &pos, .funcref);
                 e.* = .{
@@ -165,6 +172,7 @@ pub fn decodeElement(parent_alloc: Allocator, body: []const u8) sections.Error!E
                 pos += 1;
                 if (elemkind != 0x00) return sections.Error.InvalidFunctype;
                 const n = try leb128.readUleb128(u32, body, &pos);
+                try sections.checkVecCount(n, body, pos); // ≥1 byte/elem — reject oversized count pre-alloc
                 const funcs = try alloc.alloc(u32, n);
                 for (funcs) |*f| f.* = try leb128.readUleb128(u32, body, &pos);
                 e.* = .{
@@ -184,6 +192,7 @@ pub fn decodeElement(parent_alloc: Allocator, body: []const u8) sections.Error!E
                     else => return sections.Error.InvalidFunctype,
                 };
                 const n = try leb128.readUleb128(u32, body, &pos);
+                try sections.checkVecCount(n, body, pos); // ≥1 byte/elem — reject oversized count pre-alloc
                 // 10.G cycle 164 — discriminate by the first item's opcode.
                 // WasmGC general const-expr items (array.new / struct.new …)
                 // start with 0xFB; ref.func / ref.null / global.get / i31
@@ -217,6 +226,7 @@ pub fn decodeElement(parent_alloc: Allocator, body: []const u8) sections.Error!E
                     else => return sections.Error.InvalidFunctype,
                 };
                 const n = try leb128.readUleb128(u32, body, &pos);
+                try sections.checkVecCount(n, body, pos); // ≥1 byte/elem — reject oversized count pre-alloc
                 const funcs = try alloc.alloc(u32, n);
                 for (funcs) |*f| f.* = try readFuncrefInitExpr(body, &pos, reftype_vt);
                 e.* = .{
@@ -236,6 +246,7 @@ pub fn decodeElement(parent_alloc: Allocator, body: []const u8) sections.Error!E
                     else => return sections.Error.InvalidFunctype,
                 };
                 const n = try leb128.readUleb128(u32, body, &pos);
+                try sections.checkVecCount(n, body, pos); // ≥1 byte/elem — reject oversized count pre-alloc
                 const funcs = try alloc.alloc(u32, n);
                 for (funcs) |*f| f.* = try readFuncrefInitExpr(body, &pos, reftype_vt);
                 e.* = .{ .kind = .declarative, .elem_type = reftype_vt, .funcidxs = funcs };

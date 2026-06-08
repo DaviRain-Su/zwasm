@@ -50,6 +50,10 @@ pub fn decodeData(parent_alloc: Allocator, body: []const u8) sections.Error!Data
 
     var pos: usize = 0;
     const count = try leb128.readUleb128(u32, body, &pos);
+    // A data segment occupies ≥1 byte (its flag prefix), so a count exceeding
+    // the remaining body is malformed — reject before allocating to avoid a
+    // huge speculative allocation from a crafted count (Wasm spec §5.1.3 vec).
+    if (count > body.len - pos) return sections.Error.UnexpectedEnd;
     const items = try alloc.alloc(DataSegment, count);
 
     for (items) |*d| {

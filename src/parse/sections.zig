@@ -43,6 +43,18 @@ pub const Error = error{
     OutOfMemory,
 } || leb128.Error;
 
+/// A `vec(T)` element occupies ≥1 byte in the binary format, so a declared
+/// element `count` larger than the bytes remaining in the section body is
+/// malformed. Reject it BEFORE `alloc.alloc(T, count)` so an oversized count
+/// cannot trigger a huge speculative allocation — the per-element loop would
+/// otherwise only fail with `UnexpectedEnd` after the allocation already ran.
+/// `pos` must be `≤ body.len` (every `leb128.read*` caller guarantees this).
+/// Wasm spec §5.1.3 (vec). Pub so the extracted section decoders
+/// (`sections_element.zig` etc.) share the one guard.
+pub inline fn checkVecCount(count: u32, body: []const u8, pos: usize) Error!void {
+    if (count > body.len - pos) return Error.UnexpectedEnd;
+}
+
 // Code section (Wasm §5.5.11) extracted to `sections_codes.zig`
 // per ADR-0096; re-exports below preserve `sections.X` namespace.
 const codes_mod = @import("sections_codes.zig");
@@ -431,10 +443,12 @@ const TypeAcc = struct {
 fn readSubtypeInto(alloc: Allocator, body: []const u8, pos: *usize, acc: TypeAcc) Error!void {
     var fin = true;
     var supers: []const u32 = &.{};
+    if (pos.* >= body.len) return Error.UnexpectedEnd;
     if (body[pos.*] == 0x50 or body[pos.*] == 0x4F) {
         if (body[pos.*] == 0x50) fin = false; // 0x50 = sub (open); 0x4F = sub final
         pos.* += 1;
         const super_count = try leb128.readUleb128(u32, body, pos);
+        try checkVecCount(super_count, body, pos.*);
         const s = try alloc.alloc(u32, super_count);
         for (s) |*x| x.* = try leb128.readUleb128(u32, body, pos);
         supers = s;
@@ -444,9 +458,11 @@ fn readSubtypeInto(alloc: Allocator, body: []const u8, pos: *usize, acc: TypeAcc
         0x60 => {
             pos.* += 1;
             const param_count = try leb128.readUleb128(u32, body, pos);
+            try checkVecCount(param_count, body, pos.*);
             const params = try alloc.alloc(ValType, param_count);
             for (params) |*p| p.* = try init_expr.readValType(body, pos);
             const result_count = try leb128.readUleb128(u32, body, pos);
+            try checkVecCount(result_count, body, pos.*);
             const results = try alloc.alloc(ValType, result_count);
             for (results) |*r| r.* = try init_expr.readValType(body, pos);
             try acc.items.append(alloc, .{ .params = params, .results = results });
@@ -457,6 +473,7 @@ fn readSubtypeInto(alloc: Allocator, body: []const u8, pos: *usize, acc: TypeAcc
         0x5F => {
             pos.* += 1;
             const field_count = try leb128.readUleb128(u32, body, pos);
+            try checkVecCount(field_count, body, pos.*);
             const fields = try alloc.alloc(StructFieldType, field_count);
             for (fields) |*f| f.* = try readFieldType(body, pos);
             try acc.items.append(alloc, .{ .params = &.{}, .results = &.{} });
@@ -552,6 +569,7 @@ pub fn decodeTypes(parent_alloc: Allocator, body: []const u8) Error!Types {
 pub fn decodeFunctions(alloc: Allocator, body: []const u8) Error![]u32 {
     var pos: usize = 0;
     const count = try leb128.readUleb128(u32, body, &pos);
+    try checkVecCount(count, body, pos);
     const indices = try alloc.alloc(u32, count);
     errdefer alloc.free(indices);
     for (indices) |*idx| {
@@ -582,6 +600,7 @@ pub const TagEntry = struct {
 pub fn decodeTags(alloc: Allocator, body: []const u8) Error![]TagEntry {
     var pos: usize = 0;
     const count = try leb128.readUleb128(u32, body, &pos);
+    try checkVecCount(count, body, pos);
     const entries = try alloc.alloc(TagEntry, count);
     errdefer alloc.free(entries);
     for (entries) |*entry| {
@@ -651,6 +670,7 @@ pub fn decodeImports(parent_alloc: Allocator, body: []const u8) Error!Imports {
 
     var pos: usize = 0;
     const count = try leb128.readUleb128(u32, body, &pos);
+    try checkVecCount(count, body, pos);
     const items = try alloc.alloc(Import, count);
 
     for (items) |*imp| {
@@ -744,6 +764,7 @@ pub fn decodeTables(parent_alloc: Allocator, body: []const u8) Error!Tables {
 
     var pos: usize = 0;
     const count = try leb128.readUleb128(u32, body, &pos);
+    try checkVecCount(count, body, pos);
     const items = try alloc.alloc(zir.TableEntry, count);
 
     for (items) |*t| {
@@ -829,6 +850,7 @@ pub fn decodeGlobals(parent_alloc: Allocator, body: []const u8) Error!Globals {
 
     var pos: usize = 0;
     const count = try leb128.readUleb128(u32, body, &pos);
+    try checkVecCount(count, body, pos);
     const items = try alloc.alloc(GlobalDef, count);
 
     for (items) |*g| {
@@ -952,6 +974,7 @@ pub fn decodeMemory(parent_alloc: Allocator, body: []const u8) Error!Memories {
 
     var pos: usize = 0;
     const count = try leb128.readUleb128(u32, body, &pos);
+    try checkVecCount(count, body, pos);
     const items = try alloc.alloc(MemoryEntry, count);
     for (items) |*entry| {
         entry.* = try readMemLimits(body, &pos);
@@ -1015,6 +1038,7 @@ pub fn decodeExports(parent_alloc: Allocator, body: []const u8) Error!Exports {
 
     var pos: usize = 0;
     const count = try leb128.readUleb128(u32, body, &pos);
+    try checkVecCount(count, body, pos);
     const items = try alloc.alloc(Export, count);
 
     // 10.E cycle 79 — Wasm 3.0 EH adds export-kind 0x04 (tag); the
@@ -1436,8 +1460,11 @@ test "decodeFunctions: three typeidxs preserved in order" {
 }
 
 test "decodeFunctions: rejects truncated input" {
-    // count=2 but only one typeidx
-    const r = decodeFunctions(testing.allocator, &[_]u8{ 0x02, 0x00 });
+    // count=1; the single typeidx is a truncated multi-byte LEB (0x80 sets the
+    // continuation bit with no follow byte). The element count itself fits the
+    // body, so this exercises the per-element truncation path (not the
+    // vec-count guard, which has its own test).
+    const r = decodeFunctions(testing.allocator, &[_]u8{ 0x01, 0x80 });
     try testing.expectError(leb128.Error.Truncated, r);
 }
 
@@ -1544,6 +1571,18 @@ test "decodeImports: empty section" {
     var i = try decodeImports(testing.allocator, &[_]u8{0x00});
     defer i.deinit();
     try testing.expectEqual(@as(usize, 0), i.items.len);
+}
+
+test "decode vec count: an oversized element count is rejected pre-allocation (UnexpectedEnd)" {
+    // A declared count far larger than the bytes that follow must surface as
+    // UnexpectedEnd WITHOUT a huge speculative allocation (checkVecCount). 0xFF
+    // 0xFF 0xFF 0xFF 0x0F = uleb 0xFFFFFFFF, then no element bytes.
+    const huge = [_]u8{ 0xFF, 0xFF, 0xFF, 0xFF, 0x0F };
+    try testing.expectError(Error.UnexpectedEnd, decodeImports(testing.allocator, &huge));
+    try testing.expectError(Error.UnexpectedEnd, decodeMemory(testing.allocator, &huge));
+    try testing.expectError(Error.UnexpectedEnd, decodeTables(testing.allocator, &huge));
+    try testing.expectError(Error.UnexpectedEnd, decodeExports(testing.allocator, &huge));
+    try testing.expectError(Error.UnexpectedEnd, decodeGlobals(testing.allocator, &huge));
 }
 
 test "decodeImports: single function import" {

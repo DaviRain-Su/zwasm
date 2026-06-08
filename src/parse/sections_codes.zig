@@ -44,6 +44,10 @@ pub fn decodeCodes(parent_alloc: Allocator, body: []const u8) sections.Error!Cod
 
     var pos: usize = 0;
     const fn_count = try leb128.readUleb128(u32, body, &pos);
+    // A code entry occupies ≥1 byte (its size prefix), so a count exceeding the
+    // remaining body is malformed — reject before allocating to avoid a huge
+    // speculative allocation from a crafted count (Wasm spec §5.1.3 vec).
+    if (fn_count > body.len - pos) return sections.Error.UnexpectedEnd;
     const items = try alloc.alloc(CodeEntry, fn_count);
 
     for (items) |*entry| {
