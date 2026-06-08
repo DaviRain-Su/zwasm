@@ -3,24 +3,6 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Active bundle
-
-- **Bundle-ID**: tier1-3a3-jit-sandbox (JIT interrupt poll → fuel → JIT mem-cap)
-- **Cycles-remaining**: ~4
-- **Continuity-memo**: interp & JIT runtimes are SEPARATE (`setupRuntimeLinked`
-  builds `RuntimeOwned.rt: JitRuntime` independent of the interp `Runtime`). So
-  the JIT needs the SAME host flag via a new TRAILING `JitRuntime.interrupt_ptr:
-  ?*const std.atomic.Value(u32)` + `interrupt_ptr_off` const, set post-setup by a
-  `RuntimeOwned.setInterruptFlag(ptr)` (no signature churn). Poll = after the
-  arm64 stack-probe `B.LS` (emit.zig:~340): `LDR X16,[X19,#interrupt_ptr_off];
-  CBZ X16,+N; LDR W17,[X16]; CBNZ W17,<interrupted-stub>` (encCbnzW exists,
-  inst.zig:644) + an interrupted trap-stub mirroring the stack-overflow stub
-  (sets trap_flag + trap_kind). x86_64 mirrors. §2 rule: ship plumbing+codegen+
-  test in ONE chunk (no infra-only commit). Win64 = cross-compile only + debt the
-  runtime check (NOT grabbing windows — respects cw-dev suspend / ADR-0174).
-- **Exit-condition**: a JIT-compiled `(loop)` traps `error.Interrupted` when the
-  host raises the flag (arm64 Mac test first, then x86_64 ubuntu).
-
 ## ▶ ACTIVE CAMPAIGN: v1→v2 Tier-1 parity + release-doc prep (user-directed 2026-06-08)
 
 Pre-release groundwork. Plan = `docs/migration_v1_to_v2.md` §1 tiers +
@@ -52,16 +34,25 @@ Pre-release groundwork. Plan = `docs/migration_v1_to_v2.md` §1 tiers +
    - **#3a-4**: C API (`zwasm.h`) + `TrapKind.interrupted` in trap_surface (today
      `mapInterpTrap` else→binding_error) + CLI `--timeout <ms>` (timer→flag).
 
-**STATE**: interp-engine sandboxing (default engine) COMPLETE + green + pushed
-= interrupt (#3a-1/2) + memory-limit (#3c-1 `7216e7b1`). Remaining Tier-1 GATED:
-- **JIT-sandboxing block** = the **Active bundle** above (#3a-3 JIT interrupt poll
-  → #3b fuel → #3c-2 JIT mem-cap → #3a-4 C-API/CLI). Win64 via cross-compile +
-  debt (NOT grabbing windows — respects cw-dev suspend, ADR-0174). #3c-2 may
-  upgrade the store-limit to a pre-instantiate config (wasmtime StoreLimits style)
-  flowing to BOTH instantiate.zig (interp) + setup.zig (JIT).
+**STATE**: **interp-engine sandboxing TRIAD COMPLETE + green + pushed** (the
+default engine) = interrupt (#3a-1/2) + memory-limit (#3c-1 `7216e7b1`) + fuel
+(#3b `58479dd6`), all via the Zig facade `Instance.{interrupt,setMemoryPagesLimit,
+setFuel,...}`. This is the substantive Tier-1 sandboxing deliverable.
+
+Remaining Tier-1 GATED / reframed (Step-0 findings):
+- **JIT-engine sandboxing = documented enhancement, NOT v0.1-blocking** (bundle
+  CLOSED). It needs MORE than codegen: a host→JIT interrupt DRIVING path (today
+  none — facade is interp-only; CLI `--engine jit` has no interrupt API) + the
+  prologue poll/stub codegen (Win64-risk) + a JIT-run-trap test harness (none
+  exists). The default interp engine already gives the sandbox guarantee; route
+  untrusted code through it. → Phase B documents this.
+- **#3a-4 surface** (CLI `--fuel`/`--max-memory`/`--timeout` + C-API config
+  setters for the interp path) = small follow-on; the Zig facade (primary surface,
+  ADR-0109) already has it → Phase B notes it.
 - **#1 C-API WASI preopen — BLOCKED by D-251** (`wasi.h:90-92`: pure C-API has no
-  `std.Io` to open dirs; CLI `--dir` works only because `main` owns io). Needs an
-  io-design decision (ADR-level) → record as a Phase-B documented gap, don't block.
+  `std.Io` to open dirs). Needs an io-design ADR → Phase B documented gap.
+
+**← NEXT: Phase B** (Tier-1's feasible core is done; honestly document the rest).
 
 **Phase B** — write the honest "v1-has / v2-still-lacks" remainder into
 `docs/migration_v1_to_v2.md` (Tier 2 #5 ILP32; Tier 3 #4 allocator / #6 mem-copy
