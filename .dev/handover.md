@@ -20,12 +20,17 @@ Pre-release groundwork. Plan = `docs/migration_v1_to_v2.md` §1 tiers +
    - ✅ **#3a-1 interp foundation** `1001fa0e`: `error.Interrupted` +
      `Runtime.interrupt`/`checkInterrupt` + func-entry (`mvp.invoke`) & throttled
      loop-back-edge (`dispatch.run`, /1024) polls. 3 deterministic tests green.
-   - **← NEXT #3a-2**: wire the flag host→Runtime — `Instance`/`Engine` owns the
-     atomic; invoke sets `rt.interrupt`; Zig API (`instance.interrupt()` /
-     engine-level) + a facade end-to-end test (host-fn or thread trips it).
-   - **#3a-3 JIT**: prologue (ride stack-probe) + loop back-edge epoch poll, both
-     arches + trap stub → `error.Interrupted`. FIRST: real perf spike here (Q3).
-   - **#3a-4**: C API (`zwasm.h`) + CLI `--timeout <ms>` (timer thread sets flag).
+   - ✅ **#3a-2 facade wiring** `460210f1`: `Instance.interrupt()`/`clearInterrupt()`/
+     `interruptRequested()` backed by `Runtime.interrupt_flag_storage` (armed at
+     `api/instance.zig`); facade invoke polls at func entry; mapDispatchErr arm;
+     facade e2e test green.
+   - **← NEXT #3a-3 JIT**: JitRuntime gains `interrupt_ptr` (= `&rt.interrupt_flag_storage`,
+     set in `entry.zig` invoke build); prologue (ride stack-probe @emit.zig) + loop
+     back-edge (`op_control.zig` emitBr loop case) poll, BOTH arches + an
+     interrupted trap stub → `error.Interrupted`. FIRST sub-step: real perf spike
+     (Q3) — bench a JIT loop with/without the back-edge poll.
+   - **#3a-4**: C API (`zwasm.h`) + `TrapKind.interrupted` in trap_surface (today
+     it maps to binding_error) + CLI `--timeout <ms>` (timer thread sets flag).
 4. **#3c store limits** → 5. **#3b fuel (opt-in)** → 6. **#1 C-API WASI preopen**
    (`wasi.h`; CLI `--dir` capability already exists; D-251).
 
