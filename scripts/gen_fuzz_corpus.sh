@@ -39,6 +39,9 @@ printf '\x00\x61\x73\x6d'                                         > "$OUT/malfor
 printf '\xde\xad\xbe\xef\x01\x00\x00\x00'                         > "$OUT/malformed_bad_magic.wasm"
 printf '\x00\x61\x73\x6d\x01\x00\x00\x00\x99\x01\x00'             > "$OUT/malformed_bad_section_id.wasm"
 printf '\x00\x61\x73\x6d\x01\x00\x00\x00\x01\xff\xff\xff\xff\x0f' > "$OUT/malformed_oversize_seclen.wasm"
+# Type section: rec group (0x4E) declaring 5 subtypes but supplying none — the
+# subtype reader must hit its bounds guard, not read past the body.
+printf '\x00\x61\x73\x6d\x01\x00\x00\x00\x01\x03\x01\x4e\x05'     > "$OUT/malformed_trunc_rectype.wasm"
 : > "$OUT/malformed_empty.wasm"
 
 echo "[gen_fuzz_corpus] $MODE: $(find "$OUT" -type f | wc -l | tr -d ' ') files in $OUT"
