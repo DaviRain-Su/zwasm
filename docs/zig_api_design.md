@@ -319,18 +319,24 @@ defer inst_b.deinit();
 
 ### §3.8 — WASI
 
+As-built `WasiConfig` (`src/zwasm/linker.zig`) carries `args` only; after
+`defineWasi` every `wasi_snapshot_preview1` import in the module is satisfied as
+a unit:
+
 ```zig
 try linker.defineWasi(.{
-    .stdin = io.stdIn(),
-    .stdout = io.stdOut(),
-    .stderr = io.stdErr(),
-    .args = &.{"prog", "arg1", "arg2"},
-    .env = &.{ .{ "PATH", "/usr/bin" } },
-    .preopens = &.{ .{ "/tmp", "/sandbox/tmp" } },
+    .args = &.{ "prog", "arg1", "arg2" },
 });
 // All wasi_snapshot_preview1 imports are defined as a unit.
 const inst = try linker.instantiate(module);
 ```
+
+`env` / `preopens` / `stdin` / `stdout` / `stderr` are not yet fields on the
+Zig `WasiConfig` (deferred — D-177 / D-251). Until they land, drive those from
+the surfaces that already support them: filesystem preopens via the CLI `--dir`
+flag or the C API, and stdio capture via the C API. The shape above is the
+intended target once the config grows; code against the current single-field
+struct.
 
 ## §4 — Value layout (uniform 16-byte slot per ADR-0110)
 
