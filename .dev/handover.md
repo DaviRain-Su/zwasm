@@ -3,25 +3,40 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## ⏸ zwasm v2 development PAUSED (user directive 2026-06-08)
+## ▶ ACTIVE CAMPAIGN: v1→v2 Tier-1 parity + release-doc prep (user-directed 2026-06-08)
 
-**Paused at `1c542a84`, verified green Mac aarch64 + ubuntu x86_64** (windows
-gating suspended @9d832f1d, ADR-0174). Development is **demand-driven from now
-on**: resume only when ClojureWasm v1 (cw v1) surfaces a concrete requirement.
-The runtime is feature-complete for cw v1's needs. Handoff for the consuming
-side: [`docs/handoff_cw_v1.md`](../docs/handoff_cw_v1.md). No release tagged
-(ADR-0156: tag/publish/`main`-cutover are manual, user-only). The autonomous
-loop is **NOT re-armed** while paused.
+Pre-release groundwork. Plan = `docs/migration_v1_to_v2.md` §1 tiers +
+`docs/v1_contributor_history.md`. Tier table decided with the user.
 
-**Demand-driven fix 2026-06-08 (cljw handoff §A1–A4)**: musl portability fixed
-— `x86_64-linux-musl` ReleaseSafe `-Dwasm` now links (cljw's #1 edge-deploy
-blocker). `src/platform/stack_limit.zig` glibc `pthread_getattr_np` path is
-`comptime`-gated behind `builtin.abi.isGnu()`; musl fallback = `/proc/self/maps`
-top − `RLIMIT_STACK` (glibc/sanitizer method), runtime-verified on real Linux
-musl-static (ADR-0178). Also: README CM-status staleness fixed; consumer doc
-[`docs/handoff_cw_v1.md`](../docs/handoff_cw_v1.md) gained teardown/lifetime
-(§A4) + CM-embedding-API stability (§A2) sections. A3 (clean checkpoint) = this
-commit. Still paused after this; loop NOT re-armed.
+**Phase A — implement Tier 1** (this order):
+1. **#2 link hardening** — add a top-level `static-lib` build step (installs
+   `libzwasm.a`); fix `.note.GNU-stack`→executable-stack; raw system-linker
+   (gcc/clang, not zig) CI test on Linux; document `-lm`. (Q4 verified: macOS
+   raw-clang OK; Linux raw-gcc needs `-lm` only — no compiler-rt gap; exec-stack
+   note is the one real defect.)
+2. **ADR (#3)** — interruption/limits per **wasmtime's 3 orthogonal mechanisms**:
+   fuel (deterministic, opt-in) · epoch (cheap counter, timeout+cancel) ·
+   StoreLimits (max memory/table). Option names need not match v1; explicit.
+3. **#3a epoch interruption** (timeout + host-thread cancel) — FIRST sub-step =
+   real perf spike in the JIT prologue (ride the existing stack-probe checkpoint;
+   Q3 deferred-to-here on purpose, stub bench would mislead).
+4. **#3c store limits** → 5. **#3b fuel (opt-in)** → 6. **#1 C-API WASI preopen**
+   (`wasi.h`; CLI `--dir` capability already exists; D-251).
+
+**Phase B** — write the honest "v1-has / v2-still-lacks" remainder into
+`docs/migration_v1_to_v2.md` (Tier 2 #5 ILP32; Tier 3 #4 allocator / #6 mem-copy
+helpers / #7 WAT / #8 rich CLI).
+**Phase C** — re-freeze (no tag; ADR-0156 manual-only).
+**Phase D** — re-organize public-facing docs (README etc.) for official release,
+then stop.
+
+Tier 3 (won't do): #4 allocator (no contributor need, Q5), #6, #7 (WAT→wasm-tools
+ADR-0159), #8 (lean CLI ADR-0159). Tier 2: #5 ILP32 = needs static-lib step +
+#97-class `@sizeOf(usize)<8` work (not 1-target-add); weigh after Tier 1.
+
+**Already landed (pushed `02d08793`)**: musl portability (ADR-0178), test-stderr
+noise cleanup. Docs committed local `f1bee8f1` (contributor history + guide
+rewrite). No release tagged (ADR-0156 user-only).
 
 ## State at pause
 

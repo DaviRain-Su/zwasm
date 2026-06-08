@@ -967,6 +967,19 @@ pub fn build(b: *std.Build) void {
     const test_c_api_step = b.step("test-c-api", "Build libzwasm.a + the C host example, run the example");
     test_c_api_step.dependOn(&run_c_host.step);
 
+    // `zig build static-lib` — install libzwasm.a + the public C headers into
+    // zig-out/ for non-Zig consumers (Rust/C). External (non-zig) linkers must
+    // add `-lm` (zwasm references libm: trunc/truncf/…; verified on Linux gcc)
+    // and, on Linux, `-Wl,-z,noexecstack` (zig-emitted objects currently lack a
+    // `.note.GNU-stack` section — Zig upstream limitation, D-312; harmless
+    // deprecation warning otherwise). Respects -Dgc / -Dcomponent / -Dtarget.
+    const static_lib_step = b.step("static-lib", "Install libzwasm.a + public headers (C/Rust consumers; link with -lm [+ -Wl,-z,noexecstack on Linux])");
+    const install_static_lib = b.addInstallArtifact(c_api_lib, .{});
+    static_lib_step.dependOn(&install_static_lib.step);
+    inline for (.{ "wasm.h", "wasi.h", "zwasm.h" }) |h| {
+        static_lib_step.dependOn(&b.addInstallFileWithDir(b.path("include/" ++ h), .header, h).step);
+    }
+
     // `zig build test-c-api-conformance` — §13.4. Compiles each
     // `test/c_api_conformance/*.c` (wasm-c-api example ports +
     // zwasm-specific tests) against `include/wasm.h` + libzwasm.a and

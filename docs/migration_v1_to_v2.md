@@ -91,6 +91,21 @@ WASI host setup moves to `wasi.h` (`zwasm_wasi_config_*` + `zwasm_store_set_wasi
 There is currently **no C-API path for fuel/timeout/cancellation or directory
 preopen** — embedders relying on those must stay on v1 or wait for the deferred work.
 
+**Building + linking from a non-Zig project** (C / Rust):
+
+```sh
+zig build static-lib            # → zig-out/lib/libzwasm.a + zig-out/include/*.h
+# external (non-zig) link line:
+cc -Izig-out/include app.c zig-out/lib/libzwasm.a -lm           # macOS
+cc -Izig-out/include app.c zig-out/lib/libzwasm.a -lm -Wl,-z,noexecstack   # Linux
+```
+
+`-lm` is required (zwasm references `trunc`/`truncf`/…). On Linux,
+`-Wl,-z,noexecstack` silences a benign `.note.GNU-stack` warning (Zig emits no
+such note yet — D-312; the link succeeds regardless). `scripts/test_extlink.sh`
+exercises this exact line. No compiler-rt shim is needed (Zig bundles it into
+the archive — unlike v1, which needed `-Dcompiler-rt`).
+
 ---
 
 ## 4. Zig API migration (`WasmModule` → `Engine`/`Module`/`Instance`/`Linker`)

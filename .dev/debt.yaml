@@ -3,6 +3,26 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
+  - id: "D-312"
+    layer: "infra"
+    status: "blocked-by"
+    description: |-
+      blocked-by (Zig upstream): zig-emitted ELF objects lack a `.note.GNU-stack`
+      section, so a non-zig system linker (gcc/clang) linking `libzwasm.a` on Linux
+      warns "missing .note.GNU-stack section implies executable stack" (deprecated;
+      may become a hard ld error in future). Link still SUCCEEDS (verified ubuntu
+      gcc, returns 42). Consumer mitigation = `-Wl,-z,noexecstack` (documented in
+      the `static-lib` build step + docs/migration_v1_to_v2.md C-API link line).
+      No build-API knob exists: the exec-stack property is set at the consumer's
+      FINAL link; a static `.a` is just an object archive. DISCHARGE: when Zig
+      emits `.note.GNU-stack` for its objects (watch ziglang/zig), drop the
+      documented consumer flag. Companion fact (not a defect): external linkers
+      also need `-lm` (zwasm references trunc/truncf/…); documented. No compiler-rt
+      gap (zig bundles it into the .a — Q4 verified, better than v1 #23).
+    first_raised: "2026-06-08"
+    last_reviewed: "2026-06-08"
+    refs: |-
+      build.zig (static-lib step); docs/migration_v1_to_v2.md (C-API external link line); scripts/test_extlink.sh
   - id: "D-299"
     layer: "code"
     status: "now"
