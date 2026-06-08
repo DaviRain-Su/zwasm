@@ -102,6 +102,12 @@ pub const Host = struct {
     /// (forthcoming in 4.7/4.8).
     stdout_buffer: ?*std.ArrayList(u8) = null,
     stderr_buffer: ?*std.ArrayList(u8) = null,
+    /// Allocator used to GROW the caller-owned `stdout_buffer` / `stderr_buffer`.
+    /// When null the Host's own `alloc` is used. An embedder that owns the
+    /// capture buffers (e.g. cljw `wasm/run`) sets this to the SAME allocator it
+    /// will free / `toOwnedSlice` them with, so the buffer's grow-allocator and
+    /// the caller's free-allocator agree (no cross-allocator invalid-free).
+    capture_alloc: ?Allocator = null,
     /// Optional source of bytes for `fd_read` over fd 0 (stdin).
     /// Tests set both; `stdin_pos` is mutated as the guest reads.
     stdin_bytes: ?[]const u8 = null,

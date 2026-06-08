@@ -255,12 +255,14 @@ pub const PreopenDir = struct { host_path: []const u8, guest_path: []const u8 };
 /// guest's WASI preopen table (the `--dir <host>[:<guest>]` flag). The
 /// opened host dir fds live for the process lifetime (CLI-scoped); the
 /// realworld runners pass `&.{}` (no preopens) per D-243.
-pub fn runWasmCapturedOpts(
+pub fn runWasmCapturedFull(
     alloc: std.mem.Allocator,
     io: std.Io,
     bytes: []const u8,
     argv: []const []const u8,
     stdout_capture: ?*std.ArrayList(u8),
+    stderr_capture: ?*std.ArrayList(u8),
+    stdin_bytes: ?[]const u8,
     invoke_name: ?[]const u8,
     preopens: []const PreopenDir,
     env_keys: []const []const u8,
@@ -309,6 +311,11 @@ pub fn runWasmCapturedOpts(
         };
     }
     if (stdout_capture) |buf| cfg.stdout_buffer = buf;
+    if (stderr_capture) |buf| cfg.stderr_buffer = buf;
+    if (stdin_bytes) |s| cfg.stdin_bytes = s;
+    // Grow the caller-owned capture buffers with the caller's allocator so the
+    // grow-allocator and the caller's free/toOwnedSlice allocator agree.
+    cfg.capture_alloc = alloc;
     if (argv.len > 0) cfg.setArgs(argv) catch {
         diagnostic.setDiag(.instantiate, .config_alloc_failed, .unknown, "wasi argv allocation failed", .{});
         wasm_c_api.zwasm_wasi_config_delete(cfg);
@@ -428,6 +435,24 @@ pub fn runWasmCapturedOpts(
         }
     }
     return 1;
+}
+
+/// Back-compat shim: stdout-only capture (no stderr/stdin). Existing callers
+/// (the `run` CLI command, realworld runners) keep their signature; embedders
+/// that need stderr/stdin capture (cljw `wasm/run`) call `runWasmCapturedFull`.
+pub fn runWasmCapturedOpts(
+    alloc: std.mem.Allocator,
+    io: std.Io,
+    bytes: []const u8,
+    argv: []const []const u8,
+    stdout_capture: ?*std.ArrayList(u8),
+    invoke_name: ?[]const u8,
+    preopens: []const PreopenDir,
+    env_keys: []const []const u8,
+    env_vals: []const []const u8,
+    invoke_args: ?[]const u8,
+) !u8 {
+    return runWasmCapturedFull(alloc, io, bytes, argv, stdout_capture, null, null, invoke_name, preopens, env_keys, env_vals, invoke_args);
 }
 
 /// Emit the formatted `--invoke` result text on the guest-stdout channel:

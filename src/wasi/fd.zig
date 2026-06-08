@@ -138,7 +138,7 @@ pub fn writeSlice(host: *Host, fd: p1.Fd, bytes: []const u8) p1.Errno {
     else
         null;
 
-    if (buffer) |b| b.appendSlice(host.alloc, bytes) catch return .nomem;
+    if (buffer) |b| b.appendSlice(host.capture_alloc orelse host.alloc, bytes) catch return .nomem;
     if (file_opt) |f| f.writeStreamingAll(io_opt.?, bytes) catch return .io;
     if (std_stream) |s| s.writeStreamingAll(io_opt.?, bytes) catch return .io;
     return .success;
