@@ -506,11 +506,32 @@ fn preDecodeSectionBodies(alloc: std.mem.Allocator, module: *Module) bool {
         } else 0;
         for (t.items) |tbl| {
             if (!validRefTypeIdx(tbl.elem_type, ntypes)) return false;
+            // Wasm §A.1 — bound the per-table backing allocation against a
+            // crafted huge `min` (implementation entry cap). Runs unconditionally
+            // (this no-code path too), so a table-only module can't bypass it.
+            if (tbl.min > sections.MAX_TABLE_ENTRIES) return false;
+            if (tbl.max) |mx| {
+                if (mx > sections.MAX_TABLE_ENTRIES or mx < tbl.min) return false;
+            }
         }
     }
     if (module.find(.memory)) |s| {
         var m = sections.decodeMemory(alloc, s.body) catch return false;
-        m.deinit();
+        defer m.deinit();
+        // Wasm §3.2.5 / §A.1 — a memory min/max above the per-idx-type page
+        // ceiling is rejected at validate time (interp path; mirrors the JIT
+        // `engine/compile.zig`), so a crafted oversized declared memory is
+        // refused, never allocated. Runs unconditionally (no-code path too).
+        for (m.items) |me| {
+            const cap: u64 = switch (me.idx_type) {
+                .i32 => sections.MAX_MEMORY_PAGES_I32,
+                .i64 => sections.MAX_MEMORY_PAGES_I64,
+            };
+            if (me.min > cap) return false;
+            if (me.max) |mx| {
+                if (mx > cap or mx < me.min) return false;
+            }
+        }
     }
     if (module.find(.global)) |s| {
         var g = sections.decodeGlobals(alloc, s.body) catch return false;

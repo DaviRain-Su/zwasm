@@ -259,6 +259,28 @@ test "Module.imports: func import → {module,name,kind} (ADR-0109 introspection
     try testing.expectEqual(ExternKind.func, exps.items[0].kind);
 }
 
+test "Engine.compile: rejects a memory whose declared min exceeds the spec page ceiling" {
+    // (memory 70000) — min 70000 pages > 65536 (i32 ceiling). uleb 70000 = F0 A2 04.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x05, 0x05, 0x01, 0x00, 0xF0, 0xA2, 0x04, // memory: min 70000
+    };
+    var eng = try _zwasm.Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    try testing.expectError(error.ValidateFailed, eng.compile(&bytes));
+}
+
+test "Engine.compile: rejects a table whose declared min exceeds the implementation entry cap" {
+    // (table 20000000 funcref) — min 20M > MAX_TABLE_ENTRIES (10M). uleb 20000000 = 80 DC BC 09.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x04, 0x07, 0x01, 0x70, 0x00, 0x80, 0xDC, 0xBC, 0x09, // table funcref min 20000000
+    };
+    var eng = try _zwasm.Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    try testing.expectError(error.ValidateFailed, eng.compile(&bytes));
+}
+
 test "Module.instantiate: default opts arm a finite fuel budget (ADR-0179)" {
     // (module (func (export "f") (result i32) (i32.const 42)))
     const bytes = [_]u8{
