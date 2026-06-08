@@ -427,7 +427,7 @@ slot:
 |---|---|---|
 | Top-level | `Runtime` (wraps wasm_engine + wasm_store) | `Engine` (internal physical struct renamed `JitRuntime` to preserve JIT ABI surface) |
 | Module load | `Module.parse(rt, bytes)` (calls `wasm_module_new`) | `engine.compile(bytes)` |
-| Imports | `InstantiateOpts = struct {}` (empty) | `Linker` builder |
+| Imports | imports not in opts | `Linker` builder (`InstantiateOpts` now carries `fuel`/`max_memory_pages` budgets, ADR-0179) |
 | Typed call | none (114 internal `callXxx_yyy`) | `TypedFunc(Sig)` comptime-generic |
 | Memory access | none | `Memory.slice()` + helpers |
 | Value type | tagged `union(enum)` (~16+ bytes, v128 = u128) | untagged `extern union` (uniform 16 bytes per ADR-0110; v128 first-class — **no separate `V128` type**) |

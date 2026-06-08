@@ -22,10 +22,10 @@
 
 | Capability                                 | v1 (verified)                                                                                                                                                                                                    | v2                                                                                                                                                                                                                      | Nature                                                                                          |
 |--------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------|
-| **Fuel / instruction-budget metering**     | `Vm.fuel: ?u64`, `consumeInstructionBudget()`, `FuelExhausted` trap (`src/vm.zig`); `--fuel`, `zwasm_config_set_fuel`                                                                                            | **Addressed (interp engine)** — `Instance.setFuel`/`fuelRemaining` (`Runtime.fuel`, exact per-instr decrement in `dispatch.run`), `error.OutOfFuel` (ADR-0179 #3b). JIT-engine fuel + CLI `--fuel` + C-API = follow-on | **Addressed (interp); JIT/CLI follow-on**                                                       |
+| **Fuel / instruction-budget metering**     | `Vm.fuel: ?u64`, `consumeInstructionBudget()`, `FuelExhausted` trap (`src/vm.zig`); `--fuel`, `zwasm_config_set_fuel`                                                                                            | **Addressed (interp engine)** — `Module.InstantiateOpts.fuel` (a `Budget` union with a **finite default**, 1e9 instr, applied before the start function) + `Instance.setFuel`/`fuelRemaining` for dynamic adjust (`Runtime.fuel`, exact per-instr decrement in `dispatch.run`), `error.OutOfFuel` (ADR-0179 #3b). JIT-engine fuel + CLI `--fuel` + C-API = follow-on | **Addressed (interp); JIT/CLI follow-on**                                                       |
 | **Timeout / deadline traps**               | `Vm.deadline_ns: ?i128`, ~1024-instr deadline checks, `TimeoutExceeded` (`src/vm.zig`); `--timeout`, `zwasm_config_set_timeout`                                                                                  | **Addressed (interp engine)** — host-thread/timer raises `Instance.interrupt()`; the guest polls + traps `error.Interrupted` (ADR-0179 #3a). JIT-engine + CLI `--timeout` (timer) = follow-on                          | **Addressed (interp); JIT/CLI follow-on**                                                       |
 | **Cooperative cancellation (host thread)** | `Vm.cancelled: std.atomic.Value(bool)`, `Vm.cancel()`, `zwasm_module_cancel()` (`src/vm.zig`, `src/c_api.zig`)                                                                                                   | **Addressed (interp engine)** — `Instance.interrupt()`/`clearInterrupt()`/`interruptRequested()` (`Runtime.checkInterrupt`, func-entry + loop back-edge; ADR-0179 #3a). JIT-engine + C-API = follow-on                 | **Addressed (interp); JIT/C-API follow-on**                                                     |
-| **Host memory-size limit**                 | `--max-memory`, `zwasm_config_set_max_memory`                                                                                                                                                                    | **Addressed (interp engine)** — `Instance.setMemoryPagesLimit` (tighter `pages_max` in `growMemory`; ADR-0179 #3c). JIT-engine + CLI/C-API = follow-on                                                                 | **Addressed (interp); JIT/CLI follow-on**                                                       |
+| **Host memory-size limit**                 | `--max-memory`, `zwasm_config_set_max_memory`                                                                                                                                                                    | **Addressed (interp engine)** — `Module.InstantiateOpts.max_memory_pages` (`Budget` union, **finite default** 4096 pages = 256 MiB, bounds the initial allocation + every `memory.grow`; over-cap declared memory → `error.MemoryLimitExceeded`) + `Instance.setMemoryPagesLimit` for dynamic adjust (ADR-0179 #3c). Plus a per-instance **table-elements** cap `Instance.setTableElementsLimit` (no v1 equivalent; D-316). JIT-engine + CLI/C-API = follow-on                                                                 | **Addressed (interp); JIT/CLI follow-on**                                                       |
 | **WAT (text format) loading**              | full 6019-line parser `src/wat.zig` (`watToWasm`), `-Dwat`, `loadFromWat`, CLI accepts `.wat`                                                                                                                    | **Absent by design** — delegated to `wasm-tools`/`wabt` (ADR-0159)                                                                                                                                                     | **Intentional**                                                                                 |
 | **Custom host allocator via C API**        | `zwasm_config_set_allocator`, `zwasm_alloc_fn_t`/`zwasm_free_fn_t`                                                                                                                                               | wasm-c-api has no allocator hook                                                                                                                                                                                        | **Intentional (API model change)**                                                              |
 | **C-API linear-memory accessors**          | `zwasm_module_memory_{data,size,read,write}`                                                                                                                                                                     | reach memory via wasm-c-api `wasm_memory_data/_size` (different shape; no read/write copy helpers)                                                                                                                      | **Model change**                                                                                |
@@ -39,8 +39,13 @@
   sandboxing surface, several community-contributed: cancellation = jtakakura
   #28, timeout = DeanoC #6) are now implemented for the **interpreter** engine
   (ADR-0179): `Instance.interrupt()`/`clearInterrupt()`/`setFuel()`/
-  `fuelRemaining()`/`setMemoryPagesLimit()`. Route untrusted/sandboxed code
-  through the interp engine (the default) to get these guarantees today.
+  `fuelRemaining()`/`setMemoryPagesLimit()`/`setTableElementsLimit()`. The
+  **default `Module.instantiate(.{})` flow is now bounded out of the box** —
+  `InstantiateOpts.fuel` and `.max_memory_pages` carry FINITE defaults (a
+  `Budget` union; spell `.unmetered` to opt out for trusted code), so an embedder
+  that forgets to set a budget still gets a metered instance rather than an
+  unbounded one. Route untrusted/sandboxed code through the interp engine (the
+  default) to get these guarantees today.
 - **Follow-on (real, scoped, not yet done)** —
   1. **JIT-engine sandboxing**: the interrupt/fuel/mem-cap above currently apply
      to the *interpreter*. Extending them to `--engine jit` is a multi-part effort
@@ -164,8 +169,8 @@ const sum = try add.call(.{ 10, 20 });        // 30
 |-------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `WasmModule` (load==instantiate)                      | `Engine` / `Module` / `Instance` (one Module → many Instances)                                                                                                                                                                                                  |
 | `load`, `loadWithOptions(Config)`                     | `Engine.init` + `engine.compile` + `module.instantiate`                                                                                                                                                                                                          |
-| `loadFromWat` / `loadFromWatWithFuel`                 | **none** (WAT → wasm-tools; fuel deferred)                                                                                                                                                                                                                      |
-| `loadWithFuel`, `Config{fuel,timeout,…}`             | **none** (deferred)                                                                                                                                                                                                                                              |
+| `loadFromWat` / `loadFromWatWithFuel`                 | **none** for WAT (→ wasm-tools); fuel via `module.instantiate(.{ .fuel = … })`                                                                                                                                                                                  |
+| `loadWithFuel`, `Config{fuel,timeout,…}`             | `module.instantiate(.{ .fuel = .{ .limited = N }, .max_memory_pages = … })` (finite defaults; `.unmetered` to opt out) + `Instance.setFuel`/`setMemoryPagesLimit`/`interrupt` (timeout via a host timer thread) — ADR-0179, interp engine                        |
 | `loadWasi[WithOptions]`                               | `Linker.defineWasi(.{})` then `lk.instantiate(&module)`                                                                                                                                                                                                          |
 | `loadWithImports` / `loadWasiWithImports`             | `Linker.defineFunc("mod","name", fn(*Caller,…)R, fn)`                                                                                                                                                                                                           |
 | `loadLinked(shared_store)`                            | shared imports via `Linker` (`defineMemory`, etc.)                                                                                                                                                                                                               |
@@ -186,12 +191,16 @@ plus `ImportItem`/`ExportItem`/`ModuleImports`/`ModuleExports` introspection.
 | v1                                                     | v2 (Zig facade)                                                                                                          |
 |--------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------|
 | `Vm.cancel()` / `zwasm_module_cancel` (timeout/cancel) | `Instance.interrupt()` (from any thread) → guest traps `error.Interrupted`; `clearInterrupt()` / `interruptRequested()` |
-| `Config.fuel` / `loadWithFuel`                         | `Instance.setFuel(?u64)` → `error.OutOfFuel` at exhaustion; `Instance.fuelRemaining()`                                  |
-| `Config{max_memory}` / `--max-memory`                  | `Instance.setMemoryPagesLimit(?u64)` → `memory.grow` past it returns −1                                                 |
+| `Config.fuel` / `loadWithFuel`                         | `Module.InstantiateOpts.fuel` (finite default; bounds the start fn) **or** `Instance.setFuel(?u64)` → `error.OutOfFuel`; `Instance.fuelRemaining()` |
+| `Config{max_memory}` / `--max-memory`                  | `Module.InstantiateOpts.max_memory_pages` (finite default; bounds initial alloc + grow) **or** `Instance.setMemoryPagesLimit(?u64)` → `memory.grow` past it returns −1 |
+| *(no v1 equivalent)*                                   | `Instance.setTableElementsLimit(?u64)` → `table.grow` past it returns −1 (D-316)                                        |
 
-For a wall-clock timeout, a host timer thread calls `instance.interrupt()` after
-the deadline. These apply to the interpreter (the default engine); see §1 for the
-JIT-engine follow-on.
+`InstantiateOpts.{fuel,max_memory_pages}` use a `Budget = union(enum){ unmetered,
+limited: u64 }`; both default to a finite `limited` so `Module.instantiate(.{})`
+is bounded by default — pass `.unmetered` for trusted modules. For a wall-clock
+timeout, a host timer thread calls `instance.interrupt()` after the deadline.
+These apply to the interpreter (the default engine); see §1 for the JIT-engine
+follow-on.
 
 ---
 
@@ -225,6 +234,12 @@ capability model and `--dir` preopen at the CLI). **Differences:**
   (`-Dcomponent`, a real `wasm32-wasip2` component runs e2e) — absent in v1.
 - **C-API WASI preopen** regressed: present in v1's `zwasm.h`, deferred in v2's
   `wasi.h` (§1 / §3, D-251). CLI `--dir` preopen works in both.
+- **Preopen confinement**: guest paths are escape-guarded (absolute / `..`
+  rejected), and `path_symlink` refuses a target that would escape the preopen
+  root (a guest cannot plant an escaping symlink). Following a *pre-existing*
+  on-disk symlink that escapes a writable preopen is not yet beneath-confined
+  (cap-std-style `RESOLVE_BENEATH`) — tracked as D-315; only relevant once a
+  writable preopen is granted to untrusted code.
 
 ---
 

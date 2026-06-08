@@ -109,13 +109,16 @@ Surface: `Engine` / `Module` / `Instance` / `Linker` (host imports via
 `Trap` / `Value`. Runnable: [`examples/zig_dep/`](examples/zig_dep/)
 (external path-dep consumer) and [`examples/zig_host/`](examples/zig_host/).
 
-**Sandboxing untrusted guests** (interpreter engine): `Instance.interrupt()`
-stops a runaway guest from another thread (timeout or cancellation →
-`error.Interrupted`); `Instance.setFuel(n)` imposes a deterministic
-instruction budget (→ `error.OutOfFuel`); `Instance.setMemoryPagesLimit(n)`
-caps linear-memory growth. Run untrusted code on the interp engine (the
-default) for these guarantees. (JIT-engine sandboxing is a tracked follow-on —
-see [`docs/migration_v1_to_v2.md`](docs/migration_v1_to_v2.md) §1.)
+**Sandboxing untrusted guests** (interpreter engine): `mod.instantiate(.{})`
+is **bounded by default** — `InstantiateOpts.fuel` and `.max_memory_pages` carry
+finite defaults (a deterministic instruction budget → `error.OutOfFuel`, and a
+linear-memory cap), so a forgotten budget still yields a metered instance; pass
+`.unmetered` for trusted code. `Instance.interrupt()` stops a runaway guest from
+another thread (timeout or cancellation → `error.Interrupted`);
+`setFuel`/`setMemoryPagesLimit`/`setTableElementsLimit` adjust the budgets on a
+live instance. Run untrusted code on the interp engine (the default) for these
+guarantees. (JIT-engine sandboxing is a tracked follow-on — see
+[`docs/migration_v1_to_v2.md`](docs/migration_v1_to_v2.md) §1.)
 
 **C** (wasm-c-api) — [`include/wasm.h`](include/wasm.h) is byte-identical
 to the upstream standard (the interface wasmtime/wasmer follow); WASI
