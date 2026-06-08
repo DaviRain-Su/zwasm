@@ -41,14 +41,21 @@ pub const Instance = struct {
     /// ADR-0179 #3a — request cooperative interruption of this instance from
     /// any thread (timeout / host cancellation). The running guest traps
     /// `error.Interrupted` at the next function entry or loop back-edge poll.
-    /// Idempotent. Call `clearInterrupt` before re-invoking. No-op if the
-    /// instance has no live runtime.
+    /// Idempotent. Call `clearInterrupt` before re-invoking.
+    ///
+    /// INVARIANT / D-314 seam: the facade only produces interp-backed instances
+    /// today, so `handle.runtime` is always present and the budget mutators
+    /// always take effect. The assert pins that — a future JIT-backed facade
+    /// instance (`handle.runtime == null`) MUST route to the JIT limit path
+    /// (D-314), never fall through this setter as a no-op.
     pub fn interrupt(self: *Instance) void {
+        std.debug.assert(self.handle.runtime != null);
         if (self.handle.runtime) |rt| rt.interrupt_flag_storage.store(1, .monotonic);
     }
 
     /// Clear a prior `interrupt()` so this instance can be invoked again.
     pub fn clearInterrupt(self: *Instance) void {
+        std.debug.assert(self.handle.runtime != null); // D-314 seam (see `interrupt`)
         if (self.handle.runtime) |rt| rt.interrupt_flag_storage.store(0, .monotonic);
     }
 
@@ -64,6 +71,7 @@ pub const Instance = struct {
     /// `null` clears the host cap. (Interp/facade path; the JIT `--engine jit`
     /// grow cap is clamped at setup — #3c-2.)
     pub fn setMemoryPagesLimit(self: *Instance, max_pages: ?u64) void {
+        std.debug.assert(self.handle.runtime != null); // D-314 seam (see `interrupt`)
         if (self.handle.runtime) |rt| rt.store_memory_pages_max = max_pages;
     }
 
@@ -72,6 +80,7 @@ pub const Instance = struct {
     /// `error.OutOfFuel` at 0. `null` = unmetered. (Interp/default engine; JIT
     /// fuel is a documented post-v0.1 enhancement.)
     pub fn setFuel(self: *Instance, fuel: ?u64) void {
+        std.debug.assert(self.handle.runtime != null); // D-314 seam (see `interrupt`)
         if (self.handle.runtime) |rt| rt.fuel = fuel;
     }
 
