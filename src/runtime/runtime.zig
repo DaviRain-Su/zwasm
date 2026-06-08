@@ -387,6 +387,14 @@ pub const Runtime = struct {
     /// NOT a trap. (JIT path = `MemGrowCtx.max_pages`, clamped at setup — #3c-2.)
     store_memory_pages_max: ?u64 = null,
 
+    /// ADR-0179 #3b: host-imposed deterministic instruction budget — remaining
+    /// fuel, decremented once per executed interp instruction; trap `OutOfFuel`
+    /// at 0. `null` = unmetered (zero hot-path cost: one predictable optional
+    /// unwrap per instruction). Set/read via the facade `Instance.setFuel`/
+    /// `fuelRemaining`. Interp-engine only (the default engine); JIT-engine
+    /// fuel is a documented post-v0.1 enhancement (handover).
+    fuel: ?u64 = null,
+
     /// Optional per-instruction trace hook (Phase 6 / §9.6 / 6.A
     /// per ADR-0013). When non-null, `dispatch.step` invokes
     /// `trace_cb(trace_ctx, event)` after each handler call.

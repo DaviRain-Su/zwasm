@@ -61,6 +61,11 @@ pub const Trap = error{
     /// loop back-edges and traps here. Spec-external (embedder resource
     /// control), surfaced as a trap. Spec reason: "interrupt".
     Interrupted,
+    /// Host-imposed deterministic instruction-budget exhausted (ADR-0179 #3b):
+    /// the per-`Runtime` fuel counter reached 0. Spec-external (embedder
+    /// resource control); deterministic (decrements once per executed interp
+    /// instruction). Spec reason: "all fuel consumed".
+    OutOfFuel,
 };
 
 /// Per-instruction trace event (Phase 6 / §9.6 / 6.A per ADR-0013).

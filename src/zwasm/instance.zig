@@ -67,6 +67,20 @@ pub const Instance = struct {
         if (self.handle.runtime) |rt| rt.store_memory_pages_max = max_pages;
     }
 
+    /// ADR-0179 #3b — set the deterministic instruction budget (fuel). The
+    /// interp decrements once per executed instruction and traps
+    /// `error.OutOfFuel` at 0. `null` = unmetered. (Interp/default engine; JIT
+    /// fuel is a documented post-v0.1 enhancement.)
+    pub fn setFuel(self: *Instance, fuel: ?u64) void {
+        if (self.handle.runtime) |rt| rt.fuel = fuel;
+    }
+
+    /// Remaining fuel, or `null` if unmetered / no live runtime.
+    pub fn fuelRemaining(self: *Instance) ?u64 {
+        if (self.handle.runtime) |rt| return rt.fuel;
+        return null;
+    }
+
     /// Wasm spec §4.5.3 — comptime-typed export-function wrapper.
     /// `Sig` must be a Zig function type whose param + result
     /// types map to Wasm scalars (i32/i64/f32/f64); multi-result
@@ -295,6 +309,7 @@ fn mapDispatchErr(err: anyerror) Instance.InvokeError {
         error.UnalignedAtomic => error.UnalignedAtomic, // Wasm threads (ADR-0168)
         error.ExpectedSharedMemory => error.ExpectedSharedMemory, // Wasm threads (ADR-0168)
         error.Interrupted => error.Interrupted, // host timeout/cancel (ADR-0179 #3a)
+        error.OutOfFuel => error.OutOfFuel, // host fuel budget exhausted (ADR-0179 #3b)
         error.OutOfMemory => error.OutOfMemory,
         // A host func (e.g. wasi:cli/exit) requested process exit — unwind cleanly.
         error.ProcExit => error.ProcExit,
@@ -364,4 +379,39 @@ test "facade setMemoryPagesLimit: host cap refuses memory.grow past it (ADR-0179
 
     inst.setMemoryPagesLimit(null); // clear host cap
     try testing.expectEqual(@as(?u32, 3), mem.grow(1)); // 3 → 4 OK (spec max only)
+}
+
+test "facade setFuel: exhausted budget traps OutOfFuel; ample budget completes + drains (ADR-0179 #3b)" {
+    // (module (func (export "f") (result i32) (i32.const 42)))
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic + version
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, // type: ()->(i32)
+        0x03, 0x02, 0x01, 0x00, // func: 1× type 0
+        0x07, 0x05, 0x01, 0x01, 'f', 0x00, 0x00, // export "f" = func 0
+        0x0a, 0x06, 0x01, 0x04, 0x00, 0x41, 0x2a, 0x0b, // code: i32.const 42; end
+    };
+    var eng = try _zwasm.Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var mod = try eng.compile(&bytes);
+    defer mod.deinit();
+    var inst = try mod.instantiate(.{});
+    defer inst.deinit();
+
+    var results = [_]_zwasm.Value{.{ .i32 = 0 }};
+
+    // Zero budget → the first instruction traps deterministically.
+    inst.setFuel(0);
+    try testing.expectError(error.OutOfFuel, inst.invoke("f", &.{}, &results));
+
+    // Ample budget → completes, and instructions were charged.
+    inst.setFuel(1000);
+    try inst.invoke("f", &.{}, &results);
+    try testing.expectEqual(@as(i32, 42), results[0].i32);
+    const rem = inst.fuelRemaining() orelse return error.NoFuel;
+    try testing.expect(rem < 1000);
+
+    // Unmetered → always completes.
+    inst.setFuel(null);
+    try inst.invoke("f", &.{}, &results);
+    try testing.expectEqual(@as(i32, 42), results[0].i32);
 }

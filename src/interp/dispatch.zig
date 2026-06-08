@@ -111,6 +111,12 @@ pub fn run(
                 if (rt.interrupt_tick & runtime.Runtime.INTERRUPT_CHECK_MASK == 0 and
                     flag.load(.monotonic) != 0) return Trap.Interrupted;
             }
+            // ADR-0179 #3b: deterministic fuel — exact per-instruction decrement
+            // (no throttle, unlike the interrupt poll), trap at exhaustion.
+            if (rt.fuel) |*remaining| {
+                if (remaining.* == 0) return Trap.OutOfFuel;
+                remaining.* -= 1;
+            }
             const cur = f.pc;
             try step(rt, table, &instrs[cur]);
             if (f.pc == cur) f.pc += 1;
