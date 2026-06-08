@@ -9,17 +9,17 @@ Pre-release groundwork. Plan = `docs/migration_v1_to_v2.md` §1 tiers +
 `docs/v1_contributor_history.md`. Tier table decided with the user.
 
 **Phase A — implement Tier 1** (this order):
-1. **#2 link hardening** — add a top-level `static-lib` build step (installs
-   `libzwasm.a`); fix `.note.GNU-stack`→executable-stack; raw system-linker
-   (gcc/clang, not zig) CI test on Linux; document `-lm`. (Q4 verified: macOS
-   raw-clang OK; Linux raw-gcc needs `-lm` only — no compiler-rt gap; exec-stack
-   note is the one real defect.)
-2. **ADR (#3)** — interruption/limits per **wasmtime's 3 orthogonal mechanisms**:
-   fuel (deterministic, opt-in) · epoch (cheap counter, timeout+cancel) ·
-   StoreLimits (max memory/table). Option names need not match v1; explicit.
-3. **#3a epoch interruption** (timeout + host-thread cancel) — FIRST sub-step =
-   real perf spike in the JIT prologue (ride the existing stack-probe checkpoint;
-   Q3 deferred-to-here on purpose, stub bench would mislead).
+1. ✅ **#2 link hardening** — `static-lib` step + `scripts/test_extlink.sh` +
+   migration-guide link line + D-312 (GNU-stack=zig-upstream). `45438b7a`.
+2. ✅ **ADR (#3) = ADR-0179** — interruption/limits per wasmtime's 3 orthogonal
+   mechanisms: fuel (deterministic, opt-in) · epoch (cheap counter, timeout+
+   cancel) · store-limits (max memory/table). Explicit names.
+3. **← NEXT: #3a epoch interruption** (timeout + host-thread cancel). FIRST
+   sub-step = real perf spike in the JIT prologue (ride existing stack-probe
+   checkpoint — Q3 measured here, not on the interp stub). Then implement:
+   process-global epoch counter + `Store.setEpochDeadline` + `Engine.incrementEpoch`,
+   checked at func-entry + loop back-edges (interp `mvp.zig` + both JIT arches);
+   trap `error.Interrupted`; Zig + C API (`zwasm.h`).
 4. **#3c store limits** → 5. **#3b fuel (opt-in)** → 6. **#1 C-API WASI preopen**
    (`wasi.h`; CLI `--dir` capability already exists; D-251).
 
