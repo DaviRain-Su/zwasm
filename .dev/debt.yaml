@@ -37,11 +37,16 @@ entries:
       interp-only invariant is enforced, so when (1) wires a JIT-backed facade
       instance (`runtime == null`) it MUST route to the JIT limit path, not no-op.
       DISCHARGE: pick (2) anytime (cheap); (1)+(3-remainder) as a focused
-      windows-resumed bundle.
+      windows-resumed bundle. SCOPE: the broader "JIT reachable from the facade/
+      C-API at all" effort (generic invoke-by-name-with-args ABI trampoline,
+      instantiate fork, accessor runtime==null branches, Linker host-import JIT
+      wiring, Win64 codegen) is assessed in
+      .dev/architecture/jit_facade_integration_scope.md — sandboxing (this row)
+      is one slice of it; the gating spike is the generic argument-ABI trampoline.
     first_raised: "2026-06-08"
     last_reviewed: "2026-06-08"
     refs: |-
-      .dev/decisions/0179_execution_interruption_resource_limits.md (Revision); docs/migration_v1_to_v2.md §1; src/zwasm/instance.zig (facade methods); src/runtime/runtime.zig (interrupt/fuel/store_memory_pages_max); src/engine/setup.zig (JIT mem_max_pages); commit fb18bd82 (bundle memo)
+      .dev/architecture/jit_facade_integration_scope.md (full scope assessment); .dev/decisions/0179_execution_interruption_resource_limits.md (Revision); docs/migration_v1_to_v2.md §1; src/zwasm/instance.zig (facade methods); src/runtime/runtime.zig (interrupt/fuel/store_memory_pages_max); src/engine/setup.zig (JIT mem_max_pages); commit fb18bd82 (bundle memo)
   - id: "D-315"
     layer: "code"
     status: "blocked-by"
