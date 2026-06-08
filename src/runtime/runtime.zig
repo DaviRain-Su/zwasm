@@ -362,6 +362,17 @@ pub const Runtime = struct {
     /// the check is skipped and `frame_buf[256]` is the only guard.
     native_stack_limit: ?usize = null,
 
+    /// ADR-0179 #3a: cooperative interruption flag, host-owned (lives on the
+    /// Engine/Instance; set from any thread for timeout/cancellation). `null`
+    /// = no interruption configured → zero hot-path cost (the optional unwrap
+    /// is one predictable branch). Polled unconditionally at function entry
+    /// (`checkInterrupt`) and throttled on the interp loop back-edge
+    /// (`dispatch.run`, every `INTERRUPT_CHECK_MASK + 1` steps) so a tight
+    /// `(loop (br 0))` with no calls is still interruptible.
+    interrupt: ?*std.atomic.Value(u32) = null,
+    /// Free-running step counter for the throttled loop-back-edge poll above.
+    interrupt_tick: u64 = 0,
+
     /// Optional per-instruction trace hook (Phase 6 / §9.6 / 6.A
     /// per ADR-0013). When non-null, `dispatch.step` invokes
     /// `trace_cb(trace_ctx, event)` after each handler call.
@@ -519,6 +530,20 @@ pub const Runtime = struct {
             break :blk l;
         };
         if (limit != 0 and sp <= limit) return Trap.CallStackExhausted;
+    }
+
+    /// Throttle mask for the interp loop-back-edge interruption poll
+    /// (ADR-0179 #3a): check the flag once per 1024 steps. Bounds the
+    /// per-instruction cost while keeping cancellation latency sub-µs.
+    pub const INTERRUPT_CHECK_MASK: u64 = 1023;
+
+    /// Trap `Interrupted` if the host has raised the cooperative interruption
+    /// flag (ADR-0179 #3a). No-op when no flag is configured. Called at
+    /// function entry; the interp loop back-edge calls it throttled.
+    pub inline fn checkInterrupt(self: *Runtime) Trap!void {
+        if (self.interrupt) |flag| {
+            if (flag.load(.monotonic) != 0) return Trap.Interrupted;
+        }
     }
 
     pub fn popFrame(self: *Runtime) Frame {
@@ -730,6 +755,24 @@ test "Runtime: native stack-limit check traps CallStackExhausted below the limit
     // even sp==0 passes, leaving frame_buf[256] as the sole guard.
     r.native_stack_limit = 0;
     try r.checkNativeStackLimit(0);
+}
+
+test "Runtime: checkInterrupt traps Interrupted only when the host flag is raised (ADR-0179 #3a)" {
+    var r = Runtime.init(testing.allocator);
+    defer r.deinit();
+
+    // No flag configured → no-op (zero hot-path cost path).
+    try r.checkInterrupt();
+
+    var flag = std.atomic.Value(u32).init(0);
+    r.interrupt = &flag;
+    try r.checkInterrupt(); // flag clear → still passes
+
+    flag.store(1, .monotonic); // host requests interruption
+    try testing.expectError(Trap.Interrupted, r.checkInterrupt());
+
+    flag.store(0, .monotonic); // cleared → passes again
+    try r.checkInterrupt();
 }
 
 test "Runtime: per-frame label stack spills past the inline cap and popFrame frees it (D-242)" {

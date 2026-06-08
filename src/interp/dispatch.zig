@@ -103,6 +103,14 @@ pub fn run(
         f.pc = 0;
         f.done = false;
         while (f.pc < instrs.len and !f.done) {
+            // ADR-0179 #3a: throttled cooperative-interrupt poll so a tight
+            // `(loop (br 0))` with no calls is still interruptible. Zero cost
+            // when no flag is configured (one predictable optional-unwrap).
+            if (rt.interrupt) |flag| {
+                rt.interrupt_tick +%= 1;
+                if (rt.interrupt_tick & runtime.Runtime.INTERRUPT_CHECK_MASK == 0 and
+                    flag.load(.monotonic) != 0) return Trap.Interrupted;
+            }
             const cur = f.pc;
             try step(rt, table, &instrs[cur]);
             if (f.pc == cur) f.pc += 1;

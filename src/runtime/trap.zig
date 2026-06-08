@@ -55,6 +55,12 @@ pub const Trap = error{
     /// requires the memory be shared; non-shared traps. Spec reason:
     /// "expected shared memory". (`notify` does NOT require shared.)
     ExpectedSharedMemory,
+    /// Host-requested execution interruption (ADR-0179, Tier-1 #3a): a
+    /// timeout deadline elapsed or a host thread requested cancellation.
+    /// Cooperative — the guest polls a host-owned flag at function entry +
+    /// loop back-edges and traps here. Spec-external (embedder resource
+    /// control), surfaced as a trap. Spec reason: "interrupt".
+    Interrupted,
 };
 
 /// Per-instruction trace event (Phase 6 / §9.6 / 6.A per ADR-0013).

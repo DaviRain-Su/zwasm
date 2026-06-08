@@ -682,6 +682,7 @@ pub fn invoke(rt: *Runtime, table: *const DispatchTable, callee: *const zir.ZirF
     // limit BEFORE a SEGV (the binding guard on the small Windows stack,
     // where ~128 < the frame_buf[256] cap).
     try rt.checkNativeStackLimit(@frameAddress());
+    try rt.checkInterrupt(); // ADR-0179 #3a: host-requested timeout/cancel
     const params_len = callee.sig.params.len;
     const total = params_len + callee.locals.len;
     const locals = try rt.alloc.alloc(runtime.Value, total);
@@ -1122,6 +1123,49 @@ test "br 0 from inside block: jumps past end" {
     // br 0 (arity=0) discarded the i32.const 1 result. Then i32.const 3 pushed.
     try testing.expectEqual(@as(u32, 1), rt.operand_len);
     try testing.expectEqual(@as(u32, 3), rt.popOperand().u32);
+}
+
+test "interp invoke: traps Interrupted at function entry when the host flag is raised (ADR-0179 #3a)" {
+    var fnz = zir.ZirFunc.init(0, .{ .params = &.{}, .results = &.{} }, &.{});
+    defer fnz.deinit(testing.allocator);
+    try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+
+    var t = DispatchTable.init();
+    register(&t);
+    var rt = Runtime.init(testing.allocator);
+    defer rt.deinit();
+
+    var flag = std.atomic.Value(u32).init(1); // host requested interruption
+    rt.interrupt = &flag;
+    try testing.expectError(Trap.Interrupted, invoke(&rt, &t, &fnz));
+
+    flag.store(0, .monotonic); // cleared → the same function runs to completion
+    try invoke(&rt, &t, &fnz);
+}
+
+test "interp loop: a tight (loop (br 0)) is interruptible at the back-edge (ADR-0179 #3a)" {
+    var fnz = zir.ZirFunc.init(0, .{ .params = &.{}, .results = &.{} }, &.{});
+    defer fnz.deinit(testing.allocator);
+    try fnz.blocks.append(testing.allocator, .{ .kind = .loop, .start_inst = 0, .end_inst = 2 });
+    // loop; br 0 (→ loop header, infinite); end
+    try fnz.instrs.append(testing.allocator, .{ .op = .loop, .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .br, .payload = 0, .extra = 0 });
+    try fnz.instrs.append(testing.allocator, .{ .op = .end, .payload = 0, .extra = 0 });
+
+    var t = DispatchTable.init();
+    register(&t);
+    var rt = Runtime.init(testing.allocator);
+    defer rt.deinit();
+
+    // Pre-raised flag: the throttled back-edge poll trips within
+    // INTERRUPT_CHECK_MASK+1 (=1024) steps — bounded, no thread needed. If the
+    // mechanism regressed, the loop would spin forever (test hang = failure).
+    var flag = std.atomic.Value(u32).init(1);
+    rt.interrupt = &flag;
+    try rt.pushFrame(.{ .sig = fnz.sig, .locals = &.{}, .operand_base = 0, .pc = 0, .func = &fnz });
+    defer _ = rt.popFrame();
+
+    try testing.expectError(Trap.Interrupted, dispatch_loop.run(&rt, &t, fnz.instrs.items));
 }
 
 test "if cond=0 skips to end; cond=1 runs then-branch" {
