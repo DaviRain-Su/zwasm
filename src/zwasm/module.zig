@@ -90,17 +90,60 @@ pub const Module = struct {
         self.native.deinit(self.alloc);
     }
 
-    pub const InstantiateOpts = struct {};
+    /// A per-axis runtime budget (ADR-0179). `unmetered` must be spelled out;
+    /// it is never the silent default, so an embedder running untrusted modules
+    /// gets a bounded instance unless it deliberately opts out.
+    pub const Budget = union(enum) {
+        unmetered,
+        limited: u64,
+
+        fn toOptional(self: Budget) ?u64 {
+            return switch (self) {
+                .unmetered => null,
+                .limited => |v| v,
+            };
+        }
+    };
+
+    /// Default deterministic instruction budget (~1e9 interp instructions).
+    pub const default_fuel: u64 = 1_000_000_000;
+    /// Default linear-memory ceiling in 64 KiB pages (4096 = 256 MiB), an extra
+    /// cap below the spec 4 GiB ceiling.
+    pub const default_max_memory_pages: u64 = 4096;
+
+    /// Instantiation options (ADR-0179). Both budgets default to a FINITE value
+    /// so the common `init → compile → instantiate → invoke` flow is bounded
+    /// without an extra call; set the axis to `.unmetered` for trusted modules.
+    pub const InstantiateOpts = struct {
+        fuel: Budget = .{ .limited = default_fuel },
+        max_memory_pages: Budget = .{ .limited = default_max_memory_pages },
+    };
 
     /// `StartTrapped` = the module's `(start)` function trapped during
-    /// instantiation (D-275); `InstantiateFailed` = any other failure
-    /// (link / alloc). The specific trap kind is available to C hosts via
-    /// `wasm_instance_new`'s `trap_out` + `wasm_trap_message`.
-    pub const InstantiateError = error{ InstantiateFailed, StartTrapped };
+    /// instantiation (D-275); `MemoryLimitExceeded` = the module's declared
+    /// initial linear memory exceeds `opts.max_memory_pages`;
+    /// `InstantiateFailed` = any other failure (link / alloc). The specific
+    /// trap kind is available to C hosts via `wasm_instance_new`'s `trap_out` +
+    /// `wasm_trap_message`.
+    pub const InstantiateError = error{ InstantiateFailed, StartTrapped, MemoryLimitExceeded };
 
-    pub fn instantiate(self: *Module, _: InstantiateOpts) InstantiateError!_zwasm.Instance {
+    pub fn instantiate(self: *Module, opts: InstantiateOpts) InstantiateError!_zwasm.Instance {
+        const limits: _api_instance.InstantiateLimits = .{
+            .fuel = opts.fuel.toOptional(),
+            .max_memory_pages = opts.max_memory_pages.toOptional(),
+        };
+
+        // Reject an over-cap declared initial memory before instantiation so the
+        // caller gets a distinct error (the runtime also enforces this, but its
+        // null return cannot carry the specific cause).
+        if (limits.max_memory_pages) |cap| {
+            if (self.declaredInitialMemoryPages()) |min_pages| {
+                if (min_pages > cap) return error.MemoryLimitExceeded;
+            }
+        }
+
         var trap: ?*_trap_surface.Trap = null;
-        const inst = _api_instance.wasm_instance_new(self.c_store, self.c_handle, null, &trap) orelse {
+        const inst = _api_instance.instantiateFacade(self.c_store, self.c_handle, &trap, limits) orelse {
             if (trap) |t| {
                 _trap_surface.wasm_trap_delete(t); // facade owns the trap; free it
                 return error.StartTrapped;
@@ -108,6 +151,23 @@ pub const Module = struct {
             return error.InstantiateFailed;
         };
         return .{ .handle = inst, .c_store = self.c_store };
+    }
+
+    /// Largest declared initial page count across the module's DEFINED memories
+    /// (the no-import facade path has no imported memories), or `null` when the
+    /// module declares no memory. Page units match the runtime page cap.
+    fn declaredInitialMemoryPages(self: *const Module) ?u64 {
+        const sec = self.native.find(.memory) orelse return null;
+        // EXEMPT-FALLBACK: ADR-0179 — best-effort pre-check for a distinct
+        // caller error; `instantiateRuntime` re-decodes + enforces the cap
+        // authoritatively, so a decode miss here safely defers to that path
+        // (the section already parsed during `compile`).
+        var decoded = _sections.decodeMemory(self.alloc, sec.body) catch return null;
+        defer decoded.deinit();
+        if (decoded.items.len == 0) return null;
+        var max_min: u64 = 0;
+        for (decoded.items) |entry| max_min = @max(max_min, entry.min);
+        return max_min;
     }
 
     /// Section count from the native parser.
@@ -197,6 +257,68 @@ test "Module.imports: func import → {module,name,kind} (ADR-0109 introspection
     try testing.expectEqual(@as(usize, 1), exps.items.len);
     try testing.expectEqualStrings("exp_f", exps.items[0].name);
     try testing.expectEqual(ExternKind.func, exps.items[0].kind);
+}
+
+test "Module.instantiate: default opts arm a finite fuel budget (ADR-0179)" {
+    // (module (func (export "f") (result i32) (i32.const 42)))
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, 0x03,
+        0x02, 0x01, 0x00, 0x07, 0x05, 0x01, 0x01, 'f',
+        0x00, 0x00, 0x0a, 0x06, 0x01, 0x04, 0x00, 0x41,
+        0x2a, 0x0b,
+    };
+    var eng = try _zwasm.Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var mod = try eng.compile(&bytes);
+    defer mod.deinit();
+    var inst = try mod.instantiate(.{}); // finite defaults, no extra call
+    defer inst.deinit();
+    const rem = inst.fuelRemaining() orelse return error.ExpectedFiniteDefault;
+    try testing.expect(rem <= Module.default_fuel);
+}
+
+test "Module.instantiate: fuel=.limited(0) traps first instruction; .unmetered completes (ADR-0179)" {
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, 0x03,
+        0x02, 0x01, 0x00, 0x07, 0x05, 0x01, 0x01, 'f',
+        0x00, 0x00, 0x0a, 0x06, 0x01, 0x04, 0x00, 0x41,
+        0x2a, 0x0b,
+    };
+    var eng = try _zwasm.Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var mod = try eng.compile(&bytes);
+    defer mod.deinit();
+    var results = [_]_zwasm.Value{.{ .i32 = 0 }};
+
+    var inst0 = try mod.instantiate(.{ .fuel = .{ .limited = 0 } });
+    defer inst0.deinit();
+    try testing.expectError(error.OutOfFuel, inst0.invoke("f", &.{}, &results));
+
+    var inst1 = try mod.instantiate(.{ .fuel = .unmetered });
+    defer inst1.deinit();
+    try inst1.invoke("f", &.{}, &results);
+    try testing.expectEqual(@as(i32, 42), results[0].i32);
+    try testing.expectEqual(@as(?u64, null), inst1.fuelRemaining());
+}
+
+test "Module.instantiate: declared initial memory above max_memory_pages → MemoryLimitExceeded (ADR-0179)" {
+    // (module (memory 2))  — min 2 pages.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x05, 0x03, 0x01, 0x00, 0x02, // memory: min 2
+    };
+    var eng = try _zwasm.Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var mod = try eng.compile(&bytes);
+    defer mod.deinit();
+
+    try testing.expectError(error.MemoryLimitExceeded, mod.instantiate(.{ .max_memory_pages = .{ .limited = 1 } }));
+
+    var inst = try mod.instantiate(.{ .max_memory_pages = .{ .limited = 2 } });
+    defer inst.deinit();
+    try testing.expect(inst.memory() != null);
 }
 
 test "Module.exports: memory export → kind=.memory (kind-mapping boundary)" {

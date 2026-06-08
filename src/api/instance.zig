@@ -584,7 +584,17 @@ pub export fn wasm_instance_new(
 
     // D-275: thread `trap_out` so a start-function trap surfaces per the
     // wasm-c-api contract (null return + `*trap_out` = the start trap).
-    return instantiateInternal(store, module, BuildBindingsCApi{ .imports_array = imports_array }, trap_out);
+    // The C ABI `wasm_instance_new` carries no budget knobs (upstream wasm.h
+    // shape); per-instance budgets are the Zig facade's `instantiateFacade`.
+    return instantiateInternal(store, module, BuildBindingsCApi{ .imports_array = imports_array }, trap_out, .{});
+}
+
+/// Zig-facade no-import instantiation (`src/zwasm/module.zig::Module.instantiate`)
+/// that threads per-instance runtime budgets (ADR-0179). Mirrors
+/// `wasm_instance_new` with a null imports vector but accepts `limits` so fuel /
+/// memory caps are armed before the start function and the initial allocation.
+pub fn instantiateFacade(store: *Store, module: *const Module, trap_out: ?*?*Trap, limits: InstantiateLimits) ?*Instance {
+    return instantiateInternal(store, module, BuildBindingsCApi{ .imports_array = null }, trap_out, limits);
 }
 
 /// Shape produced by either the c_api Extern path (`wasm_instance_new`)
@@ -650,11 +660,20 @@ fn findStartFuncIdx(bytes: []const u8) ?u32 {
     return null;
 }
 
+/// ADR-0179 — per-instance runtime budgets applied at instantiation. `null` =
+/// unmetered for that axis. Threaded in so they take effect BEFORE the start
+/// function runs (fuel) and BEFORE the initial linear memory is allocated
+/// (`max_memory_pages`), not only on the post-instantiate setters / `memory.grow`.
+pub const InstantiateLimits = struct {
+    fuel: ?u64 = null,
+    max_memory_pages: ?u64 = null,
+};
+
 /// Internal entry shared by `wasm_instance_new` (C ABI path,
 /// Extern[]-driven bindings) and `src/zwasm/linker.zig` (native
 /// path, host-fn + cross-instance bindings). Both wrap their
 /// resolver in a `BindingsBuilder` and call here.
-pub fn instantiateInternal(store: *Store, module: *const Module, builder_state: anytype, trap_out: ?*?*Trap) ?*Instance {
+pub fn instantiateInternal(store: *Store, module: *const Module, builder_state: anytype, trap_out: ?*?*Trap, limits: InstantiateLimits) ?*Instance {
     const alloc = storeAllocator(store) orelse return null;
 
     var local_state = builder_state;
@@ -668,6 +687,11 @@ pub fn instantiateInternal(store: *Store, module: *const Module, builder_state: 
     // ADR-0179 #3a-2: arm cooperative interruption — point the poll at this
     // Runtime's own stable flag storage (now at its final heap address).
     inst_rt.interrupt = &inst_rt.interrupt_flag_storage;
+    // ADR-0179 #3b/#3c: arm the runtime budgets up front so fuel bounds the
+    // start function (run below) and the memory cap bounds the INITIAL
+    // allocation in `instantiateRuntime` (not just later `memory.grow`).
+    inst_rt.fuel = limits.fuel;
+    inst_rt.store_memory_pages_max = limits.max_memory_pages;
 
     const inst = alloc.create(Instance) catch {
         inst_rt.deinit();

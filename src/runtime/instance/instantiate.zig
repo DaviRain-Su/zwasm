@@ -1387,6 +1387,13 @@ pub fn instantiateRuntime(
         if (defined_memories) |memories| {
             for (memories.items, 0..) |entry, di| {
                 const pages = entry.min;
+                // ADR-0179 #3c: a host page cap bounds the INITIAL allocation,
+                // not only `memory.grow` — a declared `min` above the cap is
+                // refused here before the bytes are reserved (page units match
+                // `growMemory`'s direct comparison).
+                if (rt.store_memory_pages_max) |cap| {
+                    if (pages > cap) return error.MemoryLimitExceeded;
+                }
                 // Custom-page-sizes (ADR-0168 v0.2): initial bytes = min ×
                 // (1 << page_size_log2). Default 64 KiB.
                 const page_size: usize = @as(usize, 1) << @intCast(entry.page_size_log2);
