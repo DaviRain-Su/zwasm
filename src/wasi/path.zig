@@ -36,6 +36,40 @@ fn pathHasParentEscape(path: []const u8) bool {
     return false;
 }
 
+/// A symlink TARGET escapes the preopen root if, resolved relative to the
+/// directory that holds the link, it would ascend above the root (or is
+/// absolute). This is the PLANT-time half of cap-std-style confinement: it
+/// stops a guest from CREATING, through zwasm's own API, a symlink that points
+/// outside the sandbox — the primary "plant then read through it" escalation.
+/// `link_sub` is the link's path relative to the preopen root and has already
+/// passed `pathHasParentEscape` (no `..`, not absolute).
+///
+/// Following a PRE-EXISTING on-disk symlink that escapes is the separate
+/// follow-time confinement (RESOLVE_BENEATH / component walk) tracked by D-315;
+/// this lexical check is sound and matches the WASI host policy for creation.
+fn symlinkTargetEscapes(link_sub: []const u8, target: []const u8) bool {
+    if (target.len > 0 and target[0] == '/') return true; // absolute target
+    // Depth of the directory containing the link, relative to the preopen root.
+    var depth: usize = 0;
+    var lit = std.mem.tokenizeScalar(u8, link_sub, '/');
+    while (lit.next()) |seg| {
+        if (std.mem.eql(u8, seg, ".")) continue;
+        depth += 1;
+    }
+    if (depth > 0) depth -= 1; // drop the link's own final component
+    var tit = std.mem.tokenizeScalar(u8, target, '/');
+    while (tit.next()) |seg| {
+        if (std.mem.eql(u8, seg, ".")) continue;
+        if (std.mem.eql(u8, seg, "..")) {
+            if (depth == 0) return true; // would ascend above the preopen root
+            depth -= 1;
+        } else {
+            depth += 1;
+        }
+    }
+    return false;
+}
+
 const Resolved = struct { dir: std.Io.Dir, sub: []const u8 };
 
 /// Resolve `(dirfd, path_ptr, path_len)` to a host `Dir` + bounded guest path.
@@ -139,13 +173,15 @@ pub fn pathLink(host: *Host, mem: []const u8, old_dirfd: p1.Fd, old_flags: u32, 
 
 /// `path_symlink(target, target_len, dirfd, link_path, link_path_len) → errno`
 /// — create a symlink at `link_path` (relative to `dirfd`, escape-guarded)
-/// whose contents are `target`. The target is the symlink's literal value, NOT
-/// a path resolved against the preopen, so it is not escape-checked.
+/// whose contents are `target`. The target is escape-checked against the
+/// preopen root (`symlinkTargetEscapes`): a guest cannot plant a symlink that
+/// points outside the sandbox (`notcapable`).
 pub fn pathSymlink(host: *Host, mem: []const u8, target_ptr: u32, target_len: u32, dirfd: p1.Fd, path_ptr: u32, path_len: u32) p1.Errno {
     const target = sliceMemConst(mem, target_ptr, target_len) orelse return .fault;
     var r: Resolved = undefined;
     const e = resolve(host, mem, dirfd, path_ptr, path_len, &r);
     if (e != .success) return e;
+    if (symlinkTargetEscapes(r.sub, target)) return .notcapable;
     const io = host.io orelse return .nosys;
     r.dir.symLink(io, target, r.sub, .{}) catch |err| return mapDirErr(err);
     return .success;
@@ -305,6 +341,54 @@ test "pathFilestatGet / pathFilestatSetTimes: stat a path + set its mtim" {
     try testing.expectEqual(p1.Errno.inval, pathFilestatSetTimes(&h, &mem, dirfd, 0, 0, 5, 0, 0, p1.FSTFLAGS_MTIM | p1.FSTFLAGS_MTIM_NOW));
     writeGuestPath(&mem, 0, "nope!");
     try testing.expectEqual(p1.Errno.noent, pathFilestatGet(&h, &mem, dirfd, 0, 0, 5, FS));
+}
+
+test "symlinkTargetEscapes: lexical containment of a symlink target vs the preopen root" {
+    // Within the root (depth math, link in root: parent depth 0).
+    try testing.expect(!symlinkTargetEscapes("link", "target.txt"));
+    try testing.expect(!symlinkTargetEscapes("link", "./a/b"));
+    // Link in root, target ascends → escape.
+    try testing.expect(symlinkTargetEscapes("link", "../outside"));
+    try testing.expect(symlinkTargetEscapes("link", "/etc/passwd")); // absolute
+    // Link one dir deep: parent depth 1, one `..` returns to root (ok).
+    try testing.expect(!symlinkTargetEscapes("a/link", "../b"));
+    try testing.expect(!symlinkTargetEscapes("a/link", "../a/b"));
+    // Link one dir deep, two `..` ascends above the root → escape.
+    try testing.expect(symlinkTargetEscapes("a/link", "../../b"));
+    // Descent then equal ascent stays within.
+    try testing.expect(!symlinkTargetEscapes("a/b/link", "../../x")); // parent depth 2 → 0
+    try testing.expect(symlinkTargetEscapes("a/b/link", "../../../x")); // depth 2 → -1 escape
+    // `..` interleaved with names that net-escape mid-walk.
+    try testing.expect(symlinkTargetEscapes("link", "a/../../x")); // 0→1→0→-1 escape
+}
+
+test "pathSymlink: refuses to plant a symlink whose target escapes the preopen (notcapable)" {
+    // POSIX-only: Windows symlink creation needs a privilege. comptime
+    // early-return, not a skip. The escape CHECK itself is platform-independent
+    // and fully covered by the pure `symlinkTargetEscapes` test above; this only
+    // exercises the host create path.
+    // SIBLING-AT: src/wasi/path.zig (pathSymlink delegates to cross-platform
+    // std.Io.Dir.symLink after the escape guard; Win64 build verified via
+    // `zig build -Dtarget=x86_64-windows-gnu`, per skip.zig ADR-0122 D3).
+    if (comptime builtin.os.tag == .windows) return;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var h = try Host.init(testing.allocator);
+    defer h.deinit();
+    h.io = testing.io;
+    const dirfd = try h.addPreopen(tmp.dir.handle, "/sandbox");
+
+    var mem: [128]u8 = @splat(0);
+    // target = "../escape" (len 9) @0; link path "lnk" (len 3) @16.
+    writeGuestPath(&mem, 0, "../escape");
+    writeGuestPath(&mem, 16, "lnk");
+    try testing.expectEqual(p1.Errno.notcapable, pathSymlink(&h, &mem, 0, 9, dirfd, 16, 3));
+    // The link must NOT have been created on the host.
+    try testing.expectError(error.FileNotFound, tmp.dir.statFile(testing.io, "lnk", .{}));
+
+    // An absolute target is likewise refused.
+    writeGuestPath(&mem, 32, "/etc/passwd");
+    try testing.expectEqual(p1.Errno.notcapable, pathSymlink(&h, &mem, 32, 11, dirfd, 16, 3));
 }
 
 test "pathSymlink / pathReadlink: create a symlink and read its target back" {

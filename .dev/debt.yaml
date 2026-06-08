@@ -46,31 +46,34 @@ entries:
     layer: "code"
     status: "blocked-by"
     description: |-
-      blocked-by (needs cross-platform path-resolution rework + 3-host test): WASI
-      `path_*` confinement is escape-guarded on the GUEST path (`pathHasParentEscape`
-      rejects absolute + `..`; resolution is `openat`-relative via a preopen dirfd),
-      but it is NOT cap-std-style "beneath" confinement. Two gaps: (a) a
-      `path_symlink` target is stored verbatim (the spec allows arbitrary symlink
-      contents), and (b) follow-symlink operations (`path_open`/`statFile`/`readLink`
-      follow modes) delegate to `std.Io.Dir` with no RESOLVE_BENEATH / O_NOFOLLOW
-      component walk — so a guest with a WRITABLE preopen could plant a symlink whose
-      target escapes the preopen root, then follow it. Only bites once a writable
-      preopen is granted to untrusted code (no embedder does today; CLI `--dir` is
-      operator-chosen). あるべき論 fix: cap-std-style confinement — resolve each path
-      component within the preopen, following symlinks only while they stay beneath
-      the root (Linux `openat2(RESOLVE_BENEATH|RESOLVE_NO_MAGICLINKS)`; a manual
-      component walk with `O_NOFOLLOW` + re-resolve on other platforms; or a
+      blocked-by (FOLLOW-TIME half needs cross-platform path-resolution rework +
+      3-host test): WASI `path_*` confinement is escape-guarded on the GUEST path
+      (`pathHasParentEscape` rejects absolute + `..`; resolution is `openat`-relative
+      via a preopen dirfd). PLANT-TIME symlink confinement is now DONE
+      (`symlinkTargetEscapes`, @<this>): a guest can no longer CREATE a symlink whose
+      target escapes the preopen root (lexical containment vs the link's depth;
+      absolute targets refused) → the "plant then read through it" escalation is
+      closed for symlinks created via zwasm's API. REMAINING (the blocked half): no
+      cap-std-style "beneath" confinement at FOLLOW time — `path_open`/`statFile`/
+      `readLink` follow modes delegate to `std.Io.Dir` with no RESOLVE_BENEATH /
+      O_NOFOLLOW component walk, so a PRE-EXISTING on-disk symlink (placed by
+      something other than the guest, inside an operator-granted writable preopen)
+      that escapes would still be followed. Only bites once a writable preopen
+      containing attacker-or-foreign symlinks is granted to untrusted code (no
+      embedder does today; CLI `--dir` is operator-chosen). あるべき論 fix: resolve
+      each path component within the preopen, following symlinks only while they
+      stay beneath the root (Linux `openat2(RESOLVE_BENEATH|RESOLVE_NO_MAGICLINKS)`;
+      a manual component walk with `O_NOFOLLOW` + re-resolve elsewhere; or a
       post-resolve realpath-prefix check). Blocked because `std.Io.Dir` exposes no
       openat2/O_NOFOLLOW (the file deliberately avoids `std.posix` for Win64), the
       Host stores only `(host_handle, guest_path)` not a root PATH (so a realpath
-      check needs new state), and the fix needs Mac+Linux+Windows verification. Not a
-      workaround-now item (no-workaround rule): track + do as a focused FS-grant
-      hardening bundle. DISCHARGE: when FS-grant-to-untrusted ships, OR proactively
-      as a `wasi/path.zig` resolver rework with a 3-host symlink-escape test.
+      check needs new state), and the fix needs Mac+Linux+Windows verification.
+      DISCHARGE: when FS-grant-to-untrusted ships, OR proactively as a
+      `wasi/path.zig` resolver rework with a 3-host symlink-escape test.
     first_raised: "2026-06-08"
     last_reviewed: "2026-06-08"
     refs: |-
-      src/wasi/path.zig (resolve / pathHasParentEscape / pathSymlink / pathReadlink / pathFilestatGet follow modes); src/wasi/host.zig (PreopenEntry: host_handle + guest_path, no host root path)
+      src/wasi/path.zig (symlinkTargetEscapes DONE; resolve / pathHasParentEscape; the FOLLOW-time gap is pathOpen/statFile/readLink follow modes via std.Io.Dir); src/wasi/host.zig (PreopenEntry: host_handle + guest_path, no host root path)
   - id: "D-316"
     layer: "code"
     status: "note"
