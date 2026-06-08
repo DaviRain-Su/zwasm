@@ -665,6 +665,9 @@ pub fn instantiateInternal(store: *Store, module: *const Module, builder_state: 
 
     const inst_rt = alloc.create(runtime.Runtime) catch return null;
     inst_rt.* = runtime.Runtime.init(alloc);
+    // ADR-0179 #3a-2: arm cooperative interruption — point the poll at this
+    // Runtime's own stable flag storage (now at its final heap address).
+    inst_rt.interrupt = &inst_rt.interrupt_flag_storage;
 
     const inst = alloc.create(Instance) catch {
         inst_rt.deinit();

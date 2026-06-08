@@ -370,6 +370,13 @@ pub const Runtime = struct {
     /// (`dispatch.run`, every `INTERRUPT_CHECK_MASK + 1` steps) so a tight
     /// `(loop (br 0))` with no calls is still interruptible.
     interrupt: ?*std.atomic.Value(u32) = null,
+    /// Owned, stable storage for the interruption flag (ADR-0179 #3a-2). The
+    /// per-instance Runtime is heap-allocated (`Instance.runtime: ?*Runtime`),
+    /// so `&rt.interrupt_flag_storage` is a stable address the host can set
+    /// from any thread (`Instance.interrupt()`) and the JIT can hold a pointer
+    /// to (JitRuntime, #3a-3). Wired by pointing `interrupt` at it once the
+    /// Runtime is at its final heap address (`api/instance.zig`). Default 0.
+    interrupt_flag_storage: std.atomic.Value(u32) = .{ .raw = 0 },
     /// Free-running step counter for the throttled loop-back-edge poll above.
     interrupt_tick: u64 = 0,
 

@@ -38,6 +38,26 @@ pub const Instance = struct {
         _api_instance.wasm_instance_delete(self.handle);
     }
 
+    /// ADR-0179 #3a — request cooperative interruption of this instance from
+    /// any thread (timeout / host cancellation). The running guest traps
+    /// `error.Interrupted` at the next function entry or loop back-edge poll.
+    /// Idempotent. Call `clearInterrupt` before re-invoking. No-op if the
+    /// instance has no live runtime.
+    pub fn interrupt(self: *Instance) void {
+        if (self.handle.runtime) |rt| rt.interrupt_flag_storage.store(1, .monotonic);
+    }
+
+    /// Clear a prior `interrupt()` so this instance can be invoked again.
+    pub fn clearInterrupt(self: *Instance) void {
+        if (self.handle.runtime) |rt| rt.interrupt_flag_storage.store(0, .monotonic);
+    }
+
+    /// Whether an interruption is currently pending (set, not yet cleared).
+    pub fn interruptRequested(self: *Instance) bool {
+        if (self.handle.runtime) |rt| return rt.interrupt_flag_storage.load(.monotonic) != 0;
+        return false;
+    }
+
     /// Wasm spec §4.5.3 — comptime-typed export-function wrapper.
     /// `Sig` must be a Zig function type whose param + result
     /// types map to Wasm scalars (i32/i64/f32/f64); multi-result
@@ -144,6 +164,10 @@ pub const Instance = struct {
         args: []const _zwasm.Value,
         results: []_zwasm.Value,
     ) InvokeError!void {
+        // ADR-0179 #3a: the facade runs the body via `dispatch.run` directly
+        // (not `mvp.invoke`), so the function-entry interrupt poll must happen
+        // here; the throttled loop poll inside `dispatch.run` covers tight loops.
+        if (self.handle.runtime) |rt0| try rt0.checkInterrupt();
         const found_idx = blk: {
             for (self.handle.exports_storage) |exp| {
                 if (!std.mem.eql(u8, exp.name, name)) continue;
@@ -261,9 +285,47 @@ fn mapDispatchErr(err: anyerror) Instance.InvokeError {
         error.CastFailure => error.CastFailure, // Wasm 3.0 GC ref.cast (10.G c152)
         error.UnalignedAtomic => error.UnalignedAtomic, // Wasm threads (ADR-0168)
         error.ExpectedSharedMemory => error.ExpectedSharedMemory, // Wasm threads (ADR-0168)
+        error.Interrupted => error.Interrupted, // host timeout/cancel (ADR-0179 #3a)
         error.OutOfMemory => error.OutOfMemory,
         // A host func (e.g. wasi:cli/exit) requested process exit — unwind cleanly.
         error.ProcExit => error.ProcExit,
         else => @panic("zwasm.Instance.invoke: dispatch returned non-Trap error variant"),
     };
+}
+
+const testing = std.testing;
+
+test "facade Instance.interrupt(): a pending interrupt traps the next invoke; clear re-enables (ADR-0179 #3a-2)" {
+    // (module (func (export "f") (result i32) (i32.const 42)))
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic + version
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, // type: ()->(i32)
+        0x03, 0x02, 0x01, 0x00, // func: 1× type 0
+        0x07, 0x05, 0x01, 0x01, 'f', 0x00, 0x00, // export "f" = func 0
+        0x0a, 0x06, 0x01, 0x04, 0x00, 0x41, 0x2a, 0x0b, // code: i32.const 42; end
+    };
+    var eng = try _zwasm.Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var mod = try eng.compile(&bytes);
+    defer mod.deinit();
+    var inst = try mod.instantiate(.{});
+    defer inst.deinit();
+
+    var results = [_]_zwasm.Value{.{ .i32 = 0 }};
+
+    // Baseline: runs to completion.
+    try inst.invoke("f", &.{}, &results);
+    try testing.expectEqual(@as(i32, 42), results[0].i32);
+
+    // Host requests interruption → the next invoke traps at function entry.
+    try testing.expect(!inst.interruptRequested());
+    inst.interrupt();
+    try testing.expect(inst.interruptRequested());
+    try testing.expectError(error.Interrupted, inst.invoke("f", &.{}, &results));
+
+    // Cleared → runs to completion again.
+    inst.clearInterrupt();
+    try testing.expect(!inst.interruptRequested());
+    try inst.invoke("f", &.{}, &results);
+    try testing.expectEqual(@as(i32, 42), results[0].i32);
 }
