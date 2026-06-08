@@ -72,10 +72,10 @@ Tier 3 (won't do): #4 allocator (no contributor need, Q5), #6, #7 (WAT→wasm-to
 ADR-0159), #8 (lean CLI ADR-0159). Tier 2: #5 ILP32 = needs static-lib step +
 #97-class `@sizeOf(usize)<8` work (not 1-target-add); weigh after Tier 1.
 
-**Already pushed**: #2 `45438b7a` (static-lib), ADR-0179 `91727cc6`, #3a-1
-`2a568f83` (interp interrupt), #3a-2 `c40ae7d8` (facade interrupt) — all
-ubuntu-green. Earlier: musl (ADR-0178), test-noise cleanup, contributor history
-+ guide rewrite. No release tagged (ADR-0156 user-only).
+**Already pushed (all ubuntu-green)**: #2 static-lib `45438b7a`, ADR-0179
+`91727cc6`, #3a-1 interp-interrupt `1001fa0e`, #3a-2 facade-interrupt `460210f1`,
+#3c-1 interp-memory-limit `7216e7b1`. Earlier: musl (ADR-0178), test-noise
+cleanup, contributor history + guide rewrite. No release tagged (ADR-0156).
 
 **D-313 (filed, not blocking)**: realworld `c_sha256_hash.wasm` has a WRONG baked
 expected hash — zwasm computes the CORRECT sha256 (verified vs `shasum`, interp
@@ -98,22 +98,9 @@ hole). NOT a zwasm bug; fixture regen + runner-assert deferred.
 - Debt ledger **52 entries** (D-311 discharged @02965aa6/a0069ce8). `now` = D-299
   only (env-constrained x86_64 W^X). Rest `blocked-by`/`note` = long-tail.
 
-## Parked work (resume threads, demand-driven)
-
-- **CM deeper conformance** (the natural next thread): name validation
-  (kebab/extern-name — fixtures need binary extraction from official `.wast`;
-  WIT text parser rejects bad names), outer-alias nesting-depth + export-name
-  existence, deep subtyping / canon-ABI constraints, CM corpus growth. Driver:
-  [`component_model_plan.md`](component_model_plan.md); validator seam ready.
-- **WASI-P2 sockets** (D3-8, spike-first); **Go/tinygo cross-toolchain proof**
-  (toolchain-gated). 32 `blocked-by` debt = call_ref / future proposals.
-
-## Resuming (if cw v1 needs more)
-
-1. Read this file + [`ROADMAP.md`](ROADMAP.md) (single source of truth).
-2. `/continue` skill drives the autonomous TDD loop; pick the CM-deeper thread
-   or whatever cw v1's need maps to. 3-host gate discipline unchanged.
-3. Before any `main` merge / Win64-risk diff: `should_gate_windows.sh --resume`.
+**Parked (demand-driven, NOT this campaign)**: CM deeper conformance
+([`component_model_plan.md`](component_model_plan.md)); WASI-P2 sockets; Go/tinygo
+proof; 32 `blocked-by` debt (call_ref / future proposals).
 
 ## Key refs
 
