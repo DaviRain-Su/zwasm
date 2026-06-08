@@ -24,13 +24,27 @@ Pre-release groundwork. Plan = `docs/migration_v1_to_v2.md` §1 tiers +
      `interruptRequested()` backed by `Runtime.interrupt_flag_storage` (armed at
      `api/instance.zig`); facade invoke polls at func entry; mapDispatchErr arm;
      facade e2e test green.
-   - **← NEXT #3a-3 JIT**: JitRuntime gains `interrupt_ptr` (= `&rt.interrupt_flag_storage`,
-     set in `entry.zig` invoke build); prologue (ride stack-probe @emit.zig) + loop
-     back-edge (`op_control.zig` emitBr loop case) poll, BOTH arches + an
-     interrupted trap stub → `error.Interrupted`. FIRST sub-step: real perf spike
-     (Q3) — bench a JIT loop with/without the back-edge poll.
+   - **#3a-3 JIT interruption** — DEFERRED in order (see RE-SEQUENCE below): it is
+     a **Win64-prologue/frame-layout-risk** codegen change → per ADR-0174 needs
+     `should_gate_windows.sh --resume` FIRST. Plan: JitRuntime `interrupt_ptr`
+     (= `&rt.interrupt_flag_storage`, set where JitRuntime is built — find the
+     construction site that has the Runtime); prologue poll (ride stack-probe
+     @emit.zig, both arches) + loop back-edge (`op_control.zig` emitBr loop case);
+     interrupted trap stub → `error.Interrupted`. FIRST sub-step = Q3 perf spike.
    - **#3a-4**: C API (`zwasm.h`) + `TrapKind.interrupted` in trap_surface (today
-     it maps to binding_error) + CLI `--timeout <ms>` (timer thread sets flag).
+     `mapInterpTrap` else→binding_error) + CLI `--timeout <ms>` (timer→flag).
+
+**RE-SEQUENCE (autonomous, intra-Tier-1, 2026-06-08)**: interp+facade interruption
+(#3a-1/2) is the default-engine win and is DONE. The remaining codegen items
+(#3a-3 JIT interrupt poll, #3b fuel) are **Win64-prologue-risk** and need windows
+un-suspended (ADR-0174 `--resume`). So do the **non-codegen, low-Win64-risk** items
+FIRST: **NEXT = #3c store-limits** (host max memory pages / table elems), then
+**#1 C-API WASI preopen**. THEN a focused Win64-resumed block for #3a-3 + #3b.
+#3c mapping: cap goes in `Runtime.growMemory` (interp+facade chokepoint, runtime.zig:443
+`page_cap` min-chain) AND the JIT `memory_grow_fn`/`table_grow_fn` overrides (find
+the runner override sites — they grow WITHOUT routing through growMemory) — or
+refactor those overrides to route through growMemory (cleaner). Config: add
+`store_memory_pages_max`/`store_table_elems_max` on Runtime (+Engine/Instance API).
 4. **#3c store limits** → 5. **#3b fuel (opt-in)** → 6. **#1 C-API WASI preopen**
    (`wasi.h`; CLI `--dir` capability already exists; D-251).
 
