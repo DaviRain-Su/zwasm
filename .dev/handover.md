@@ -3,13 +3,31 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## ⏸ Tier-1 / release-prep campaign COMPLETE → re-frozen (2026-06-08)
+## Embedder-hardening pass landed (2026-06-08) — local commits, NOT pushed
 
-User-directed pre-release groundwork DONE. Development re-frozen (demand-driven;
-**no release tagged** — ADR-0156: tag/publish/`main`-cutover are manual, user-only).
-Loop NOT re-armed.
+User-directed robustness pass on the embedder surface + module decoder. Local
+commits `14de5430..d3f860d0` on `zwasm-from-scratch` (NOT pushed; **no release
+tagged** — ADR-0156). All gates green on Mac; standalone test binary
+2664 pass / 0 fail; ~8700-input mutation fuzz over the decoder = 0 crashes.
 
-**Shipped (all ubuntu-green, pushed)**: #2 static-lib + extlink hardening
+**Shipped this pass (local)**:
+- **Facade `InstantiateOpts` budgets (ADR-0179 rev)** `14de5430` — `fuel` +
+  `max_memory_pages` as a `Budget` union with FINITE defaults (1e9 / 4096 pg);
+  armed before `(start)` + initial mem alloc; over-cap declared mem →
+  `error.MemoryLimitExceeded`. `.unmetered` is explicit. C-API/Linker keep
+  unmetered default (their budget surface = D-314 follow-on).
+- **Facade budget-mutator invariant** `ac3db7c2` — `assert(runtime != null)`
+  pins the interp-only facade; marks the D-314 JIT seam (no silent no-op).
+- **Decoder robustness** `bd59fe86`/`e41d0c2c` — `checkVecCount` bounds every
+  section vec-count vs remaining body (no huge speculative alloc); per-fn locals
+  capped at 50000 (wasmparser limit); subtype-read bounds guard.
+- **Fuzz** `a1c53484` — truncated rec-group seed; mutation campaign clean.
+- **Docs/CI** `c902e067`/`0a788775` — §3.8 WasiConfig matches as-built; 18
+  Actions SHA-pinned; bench.yml shellcheck clean.
+- **Debt** `d3f860d0` — D-315 (WASI cap-std path confinement, blocked-by) +
+  D-316 (store ResourceLimiter, note).
+
+**Prior Tier-1 / release-prep (all ubuntu-green, pushed)**: #2 static-lib + extlink hardening
 `45438b7a` (D-312, GNU-stack=zig-upstream); **ADR-0179** sandboxing design;
 **interp-engine sandboxing TRIAD** via the Zig facade — interrupt/cancel/timeout
 `Instance.interrupt()` (#3a-1/2 `1001fa0e`/`460210f1`), memory-limit
