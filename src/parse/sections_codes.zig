@@ -11,6 +11,13 @@ const init_expr = @import("init_expr.zig");
 const Allocator = std.mem.Allocator;
 const ValType = zir.ValType;
 
+/// Per-function declared-locals ceiling. Matches the industry limit
+/// (`wasmparser` `MAX_WASM_FUNCTION_LOCALS`, used by wasmtime) so the flattened
+/// `locals` allocation is bounded: a single `(count valtype)` decl may name up
+/// to ~2^32 locals, which would otherwise force a multi-GB allocation from a
+/// few crafted bytes. The Wasm core spec leaves this implementation-defined.
+pub const MAX_FUNCTION_LOCALS: u32 = 50_000;
+
 pub const CodeEntry = struct {
     /// Flattened locals: each `(count valtype)` decl is expanded so
     /// the validator/lowerer can index `locals[i]` directly.
@@ -72,7 +79,7 @@ pub fn decodeCodes(parent_alloc: Allocator, body: []const u8) sections.Error!Cod
             total += c;
             _ = try init_expr.readValType(code, &probe);
         }
-        if (total > std.math.maxInt(u32)) return sections.Error.LocalsOverflow;
+        if (total > MAX_FUNCTION_LOCALS) return sections.Error.LocalsOverflow;
 
         const locals = try alloc.alloc(ValType, @intCast(total));
         var w: usize = 0;
@@ -147,6 +154,14 @@ test "decodeCodes: two functions, body slices borrow correctly" {
 test "decodeCodes: rejects size overrun" {
     const body = [_]u8{ 0x01, 0xFF, 0x00 }; // size=255 but only 1 byte follows
     try testing.expectError(sections.Error.UnexpectedEnd, decodeCodes(testing.allocator, &body));
+}
+
+test "decodeCodes: rejects a locals count above MAX_FUNCTION_LOCALS (bounds the alloc)" {
+    // 1 func; body = decl_count=1, count=0xFFFFFFFF (uleb FF FF FF FF 0F),
+    // valtype i32 (0x7F), end (0x0B). A single decl naming ~2^32 locals must be
+    // rejected pre-allocation, not flattened into a multi-GB `locals` slice.
+    const body = [_]u8{ 0x01, 0x08, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0x0F, 0x7F, 0x0B };
+    try testing.expectError(sections.Error.LocalsOverflow, decodeCodes(testing.allocator, &body));
 }
 
 test "decodeCodes: rejects bad valtype in locals decl" {
