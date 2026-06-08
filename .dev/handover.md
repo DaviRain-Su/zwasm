@@ -45,9 +45,15 @@ Tier 3 (won't do): #4 allocator (no contributor need, Q5), #6, #7 (WAT→wasm-to
 ADR-0159), #8 (lean CLI ADR-0159). Tier 2: #5 ILP32 = needs static-lib step +
 #97-class `@sizeOf(usize)<8` work (not 1-target-add); weigh after Tier 1.
 
-**Already landed (pushed `02d08793`)**: musl portability (ADR-0178), test-stderr
-noise cleanup. Docs committed local `f1bee8f1` (contributor history + guide
-rewrite). No release tagged (ADR-0156 user-only).
+**Already pushed**: #2 `45438b7a` (static-lib), ADR-0179 `91727cc6`, #3a-1
+`2a568f83` (interp interrupt), #3a-2 `c40ae7d8` (facade interrupt) — all
+ubuntu-green. Earlier: musl (ADR-0178), test-noise cleanup, contributor history
++ guide rewrite. No release tagged (ADR-0156 user-only).
+
+**D-313 (filed, not blocking)**: realworld `c_sha256_hash.wasm` has a WRONG baked
+expected hash — zwasm computes the CORRECT sha256 (verified vs `shasum`, interp
++jit). Gate passes (realworld-run lane doesn't assert guest stdout = a gate
+hole). NOT a zwasm bug; fixture regen + runner-assert deferred.
 
 ## State at pause
 
