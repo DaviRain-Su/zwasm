@@ -15,7 +15,7 @@ SHA and vendor date. Re-sync via:
 SG=~/Documents/OSS/sightglass/benchmarks
 DEST=$(git rev-parse --show-toplevel)/bench/sightglass
 
-for name in noop quicksort richards bz2 gcc-loops; do
+for name in noop quicksort richards gcc-loops; do
     rm -rf "$DEST/$name"
     mkdir -p "$DEST/$name"
     cp -r "$SG/$name"/. "$DEST/$name/"
@@ -25,17 +25,21 @@ done
 
 Update `PROVENANCE.txt` with the new commit SHA + date.
 
-## Why these five
+## Why these four
 
 | Benchmark   | Lines | Domain                 | Notes                                     |
 |-------------|-------|------------------------|-------------------------------------------|
 | `noop`      | 11    | sanity baseline        | smallest possible loop; tests harness     |
 | `quicksort` | 178   | compute                | classic recursive sort                    |
 | `richards`  | 387   | OO scheduler           | the SunSpider-era OO classic              |
-| `bz2`       | 5779  | compression + I/O      | needs `default.input` (216 KB)            |
 | `gcc-loops` | 405   | vectorizer-friendly    | C++; tests SIMD / branch-heavy code paths |
 
-Coverage rationale: all five are in-repo C/C++ source so the
+> `bz2` (compression) was vendored originally but **dropped for license
+> reasons**: its `benchmark.c` bundles VEX code under GPLv2, incompatible
+> with this tree's Apache-2.0 uniformity. A non-GPL compression bench
+> (snappy / zlib-family) could fill the gap later.
+
+Coverage rationale: all four are in-repo C/C++ source so the
 "reject TinyGo binary-only and gc_* source-less artifacts"
 clause from ADR-0012 §3 holds. Larger Rust-crate benchmarks
 (`blake3-*`, `regex`, `rust-html-rewriter`, …) are deferred to

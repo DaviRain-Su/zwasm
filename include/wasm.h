@@ -1,4 +1,5 @@
 // WebAssembly C API
+// Vendored from WebAssembly/wasm-c-api, Apache-2.0. SPDX-License-Identifier: Apache-2.0
 
 #ifndef WASM_H
 #define WASM_H

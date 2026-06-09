@@ -15,6 +15,7 @@
         "src",
         "include",
         "LICENSE",
+        "THIRD_PARTY.md",
         "README.md",
     },
 }

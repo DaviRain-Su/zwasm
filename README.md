@@ -193,4 +193,4 @@ private/     gitignored agent scratch
 
 ## License
 
-MIT. See `LICENSE`.
+Copyright 2026 zwasm Contributors. Licensed under Apache-2.0 — see `LICENSE`.

@@ -5,7 +5,6 @@ Selected:
   - noop      (sanity, 11 lines C)
   - quicksort (178 lines C, classic compute)
   - richards  (387 lines C, classic OO)
-  - bz2       (5779 lines C + 216 KB default.input, compression)
   - gcc-loops (405 lines C++, vectorizer)
 
 Excluded categories per ADR-0012 §3:
@@ -13,3 +12,8 @@ Excluded categories per ADR-0012 §3:
   - Dockerfile-only benchmarks without colocated source
   - libsodium-* (binary-only, no C source colocated)
   - shootout/* (binary-only, source elsewhere in upstream)
+
+Excluded for license (Apache-2.0 tree purity):
+  - bz2 — benchmark.c bundles VEX code under GPLv2 (the rest is bzip2's
+    BSD); incompatible with this tree's Apache-2.0 uniformity, so dropped.
+    A non-GPL compression bench (snappy / zlib-family) could replace it.

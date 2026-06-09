@@ -935,7 +935,7 @@ heap is 8-byte aligned). i31ref is unboxed in the tag.
 zwasm_from_scratch/
 ├── README.md                   # 1-line intro + build/test
 ├── CLAUDE.md                   # AI operational instructions
-├── LICENSE                     # MIT
+├── LICENSE                     # Apache-2.0
 ├── .envrc                      # use flake
 ├── .gitignore                  # zig-out, .zig-cache, private/, etc.
 ├── flake.nix                   # Zig 0.16.0 + hyperfine + yq + wabt
