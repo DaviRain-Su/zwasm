@@ -3,38 +3,54 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Embedder-hardening pass landed (2026-06-08) — PUSHED, 2-host green
+## JIT-correctness pass (2026-06-12) — PUSHED, ubuntu re-gate in flight
 
-User-directed robustness pass on the embedder surface + module decoder. Commits
-`14de5430..d6699b00` on `zwasm-from-scratch`, **pushed** (no release tagged —
-ADR-0156). Mac green; **ubuntu `test-all` OK @d6699b00**; windows gate OK
-@9ee8f297 (later commits ABI-neutral + Win64 cross-compile clean — a windows
-re-run + the 800MHz-throttle debug is batched for last, user-directed). Standalone
-2669 pass / 0 fail; ~8700-input decoder mutation fuzz = 0 crashes.
+User-directed "make the codebase better" session, prioritised JIT spec-correctness
+(the bar's `100% spec` holds for interp; JIT had real gaps). Commits
+`e758412a..fc5be95e` on `zwasm-from-scratch`, **pushed** (no release — ADR-0156).
+Mac arm64 green; ubuntu `test-all` OK @008dc3be; **ubuntu re-gate of the memory64
+codegen commit `fc5be95e` IN FLIGHT** (verify verdict in `private/ubuntu_gate_3_*`
+before trusting). Rosetta x86_64 edge runner green (the JIT path).
 
-**Shipped this pass**:
-- **Facade `InstantiateOpts` budgets (ADR-0179 rev)** `14de5430` — `fuel` +
-  `max_memory_pages` `Budget` union, FINITE defaults (1e9 / 4096 pg); armed
-  before `(start)` + initial mem alloc; over-cap mem → `error.MemoryLimitExceeded`.
-- **Facade budget-mutator invariant** `ac3db7c2` — `assert(runtime != null)`
-  pins the interp-only facade (D-314 JIT seam tripwire).
-- **Decoder robustness** `bd59fe86`/`e41d0c2c`/`9dcf72a2` — `checkVecCount`
-  bounds every section vec-count; per-fn locals cap 50000; memory min/max vs spec
-  page ceiling validated on the INTERP path too (was JIT-only); subtype-read guard.
-- **table-min regression FIXED** `3ab0494f` — a large table `min` is spec-valid
-  (table.6); the 10M figure was wasmparser's element-COUNT cap, mis-applied.
-- **D-315 plant-time symlink** `e5510784` — `path_symlink` refuses an
-  escaping/absolute target (`symlinkTargetEscapes`); guest can't plant an escape.
-- **D-316 table cap** `d6699b00` — `Instance.setTableElementsLimit` (mirrors
-  setMemoryPagesLimit; interp + facade grow paths).
-- **ZE-3** closed by analysis — `_exit(70)` is CLI-only, never the embedder path;
-  no raw panic/unreachable in embedder-reachable decode/runtime (no code change).
-- **Fuzz** `a1c53484` — rec-group + limit-overrun seeds. **Docs/CI**
-  `c902e067`/`0a788775` — §3.8 WasiConfig as-built; 18 Actions SHA-pinned.
-- **Debt** `d3f860d0` (+ updates): D-315 follow-time symlink confinement
-  (blocked-by); D-316 store-level instance-COUNT limiter (note).
+**Shipped**:
+- **memory64 JIT bounds overflow FIXED (both arches)** `fc5be95e` — `emitMemOpI64`
+  did `ADD ea,#size; CMP; B.HI` so `ea+size` near 2^64 WRAPPED past the bounds
+  check → no trap (spec violation). Now flag-setting `ADDS`+`B.HS` (arm64) /
+  `ADD`+`JC` (x86_64). `ZWASM_SPEC_ENGINE=jit` wasm-3.0 memory64 FAILtrapNoTrap
+  51→0, return 337/0. **This reopened+fixed D-234**, mis-closed as a "harness
+  artifact" over 6 cycles (its isolation tests all used SMALL addresses that never
+  overflow). Lesson `…harness-artifacts` corrected: Rule 6 (isolation must replay
+  the corpus's boundary INPUT values) overrides its Rule 4.
+- **Test capture-allocator mismatch FIXED** `008dc3be` — `2d99e5a2` made
+  runWasmCaptured* grow the buffer with the CALLER's allocator; diff_runner +
+  wasi/runner still freed with `c_allocator` → `free(): invalid pointer` SIGABRT
+  on x86_64-Linux (first ubuntu RED since that change). Mac aliased malloc so it
+  hid there.
+- **D-237 spec-runner double-free FIXED** `314a0c97` — the corpus-end
+  `defer free(cur_module_bytes)` fired even after ownership transferred to
+  kept_bytes; now respects `cur_bytes_kept`. `ZWASM_SPEC_DETAIL=1` env added.
+- **36 stale multi-memory skips retired** `93792696` — regen with the current
+  distiller; `assert_unlinkable`/`assert_uninstantiable` now real directives.
+- **D-299 stale row deleted** `e758412a` — already fixed same-day as D-303.
 
-> Audit-feedback bookkeeping for this pass lives in `private/` (gitignored).
+**Open JIT-correctness follow-ons (NEXT, per task list)**:
+- **D-317** — JIT call_indirect uses structural canonical equality, not GC
+  subtyping (interp D-198 analog). The last 2 jit-mode wasm-3.0 return fails
+  (`gc/ref_test test-sub`/`test-canon` wrongly trap a legit subtype). Multi-arch
+  hot-path change; interp carries correctness.
+- **D-318** (note) — Rosetta x86_64-macos corpus-JIT SEGVs (pre-existing, local-
+  diagnostic only, not a gate; native x86_64-Linux is green).
+- Then **D-314** JIT sandboxing (interrupt/fuel/mem-cap on `--engine jit`;
+  Win64-risk → `should_gate_windows.sh --resume`, conflicts w/ cw dev) +
+  diagnostics/DX (trap backtraces; industry pain #1) + D-313 realworld stdout-
+  assert gate-hole.
+
+**Prior pass — embedder-hardening (2026-06-08, `14de5430..d6699b00`, pushed,
+ubuntu-green @d6699b00)**: facade `InstantiateOpts` fuel + `max_memory_pages`
+budgets (ADR-0179 rev); decoder robustness (`checkVecCount`, locals cap,
+interp-path memory ceiling); table-min regression fix; D-315 plant-time symlink
+refuse; D-316 `setTableElementsLimit`; rec-group fuzz seeds; 18 Actions SHA-pinned.
+Detail in git log + `private/` (gitignored).
 
 **Prior Tier-1 / release-prep (all ubuntu-green, pushed)**: #2 static-lib + extlink hardening
 `45438b7a` (D-312, GNU-stack=zig-upstream); **ADR-0179** sandboxing design;
