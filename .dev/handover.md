@@ -74,8 +74,10 @@ README release polish. Earlier: musl (ADR-0178), test-noise cleanup,
   intentionally lean) · memory-safety sound · dogfooded into cw v1.
 - **Test iteration**: integration runners build ReleaseSafe (ADR-0177); unit
   `zig build test` stays Debug. `zig build test-all` auto-fast, no flag.
-- Debt ledger **52 entries** (D-311 discharged @02965aa6/a0069ce8). `now` = D-299
-  only (env-constrained x86_64 W^X). Rest `blocked-by`/`note` = long-tail.
+- Debt ledger **53 entries**, **zero `now` rows** (stale D-299 row deleted
+  2026-06-12 — its substance was fixed+discharged same-day as D-303 @5b0db8e1/
+  31b05bf9; re-verified: misaligned atomic load/store traps on arm64 + Rosetta
+  x86_64 JIT). Rest `blocked-by`/`note` = long-tail.
 
 **Parked (demand-driven, NOT this campaign)**: CM deeper conformance
 ([`component_model_plan.md`](component_model_plan.md)); WASI-P2 sockets; Go/tinygo

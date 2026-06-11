@@ -158,50 +158,6 @@ entries:
     last_reviewed: "2026-06-08"
     refs: |-
       build.zig (static-lib step); docs/migration_v1_to_v2.md (C-API external link line); scripts/test_extlink.sh
-  - id: "D-299"
-    layer: "code"
-    status: "now"
-    description: |-
-      now (JIT atomic alignment-trap — x86_64 runtime bug, B2 REVERTED @fc37ca49; 2026-06-07, Phase 17.1, ADR-0168).
-      i32.atomic.load LOADS correctly on both arches (B1 @38d25379, KEPT). The runtime natural-alignment trap
-      (UnalignedAtomic on a misaligned effective address) was added in B2 (@fff9daae) and WORKED on arm64
-      (`encTstLowBitsW` TST + B.NE → EmitCindStub code 14) but FAILED on x86_64 — the misaligned fixture loaded
-      0 instead of trapping. REVERTED to restore the 3-host gate (ubuntu test-all RED @9277b785). The interp
-      already traps correctly (Chunk A @219e7d58, KEPT) → JIT/interp DIVERGE on misaligned atomics (both arches
-      now, JIT side absent). NARROWED DIAGNOSIS (Rosetta x86_64-macos reproduces locally — `zig build
-      test-edge-cases -Dtarget=x86_64-macos`): the emitted bytes are PROVABLY CORRECT at end-of-compile —
-      `MOV EDX,EBX(=ea); TEST DL,#3 (f6 c2 03); JNE rel32=50 → stub@77`; stub@77 = `41 c7 87` (MOV [R15+trap_flag_off],1,
-      identical to the working oob code-6 stub). Yet at runtime `trap_flag=0, result=0` (JNE not taken / stub not
-      run) on BOTH native ubuntu x86_64 AND Rosetta. So either the EXECUTED JIT page ≠ `buf` (linker/page-copy or
-      W^X stale-page, cf. lesson mac-aarch64-thread-rx-mode-survives-alloc — x86_64 variant?), OR the
-      trap-stub-from-mid-body pattern has an x86_64-specific issue invisible to byte inspection. **2026-06-07
-      page-dump finding** (probe in `entry.invokeAndCheck` reading bytes at the entry fn ptr, Rosetta): the
-      EXECUTED invoked-entry page ≠ the `buf` dumped in `x86_64/emit.zig compile()`. The invoked entry begins with
-      the **ADR-0105 stack-limit prologue** (`PUSH RBP; PUSH R15; MOV RBP,RSP; MOV R15,RDI; CMP RSP,[R15+0xe0];
-      JBE stack_stub`) absent from the compile-buf dump (which had only `PUSH RBP; MOV RBP,RSP`) — so the
-      body+stubs I patch are wrapped/re-laid-out by an entry/link layer before execution (a separate page DID show
-      `TEST DL,3 (f6 c2 03)` at byte 18, matching buf). A uniform prepend preserves relative JNE→stub, AND oob/div
-      traps survive the same wrapping, so the differentiator is still unknown. NEXT: lldb breakpoint on the INVOKED
-      entry (not the body page), single-step to the `TEST DL,#3` + `JNE`, observe ZF + the actual JNE target vs the
-      stub. Then re-land B2 (cherry-pick arm64 which worked + fix x86_64). Discharge: misaligned `i32.atomic.load`
-      traps UnalignedAtomic on all 3 hosts. **2026-06-07 verified-emit finding** (ndisasm of the x86_64 ALIGNED
-      entry, captured via an `entry.invokeAndCheck` page-dump probe under Rosetta): the alignment check + stub ARE
-      byte-correct in the executed page — `test dl,0x3; jnz <stub>`; the stub sets `[r15+0x28]=1` (trap_flag) +
-      `[r15+0x2c]=0xE` (trap_kind=14), byte-identical to the working oob (code 6) / oob_table (code 2) stubs which
-      DO trap. So the EMIT is correct on x86_64; the runtime non-trap is NOT an emit bug visible to disasm.
-      CAVEAT: rapid-disasm attempts were confounded by tooling (`/bin/ls -t .zig-cache/o/*/zwasm-edge-runner` can
-      pick the native-arm64 runner; byte signatures like `MOV EBX,2` collide across fixtures) — so the misaligned
-      entry itself was never cleanly isolated. PROPER next step = lldb: build the x86_64-macos edge-runner, `lldb
-      -- <exe> <iso-dir-with-only-the-misaligned-fixture>`, breakpoint at the entry fn ptr, single-step through
-      `test dl,3; jnz`, watch RFLAGS.ZF + whether the branch is taken + r15+0x28 after. Error-path-only gap (well-
-      formed programs never do unaligned atomics; threads spec-suite not yet wired) so the ops bundle can proceed
-      meanwhile (load/store/rmw work for aligned; this central emitMemOp trap fix covers all once cracked).
-    first_raised: "2026-06-07"
-    last_reviewed: "2026-06-07"
-    refs: |-
-      git show fff9daae (reverted B2 — arm64 worked, x86_64 buggy); fc37ca49 (the revert)
-      src/engine/codegen/x86_64/op_memory.zig emitMemOp (where the TEST DL+JNE went)
-      src/engine/codegen/shared/entry.zig invokeAndCheck (trap_flag poll)
   - id: "D-294"
     layer: "code"
     status: "partial"
