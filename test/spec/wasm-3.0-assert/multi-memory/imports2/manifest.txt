@@ -12,9 +12,9 @@ assert_return load i32:8 -> i32:1048576
 assert_trap load i32:1000000
 module imports2.3.wasm
 module imports2.4.wasm
-skip-impl directive-assert_unlinkable
-skip-impl directive-assert_unlinkable
-skip-impl directive-assert_unlinkable
-skip-impl directive-assert_unlinkable
-skip-impl directive-assert_unlinkable
-skip-impl directive-assert_unlinkable
+assert_unlinkable imports2.5.wasm
+assert_unlinkable imports2.6.wasm
+assert_unlinkable imports2.7.wasm
+assert_unlinkable imports2.8.wasm
+assert_unlinkable imports2.9.wasm
+assert_unlinkable imports2.10.wasm

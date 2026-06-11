@@ -1,8 +1,8 @@
 module imports0.0.wasm
 register test
-skip-impl directive-assert_unlinkable
-skip-impl directive-assert_unlinkable
-skip-impl directive-assert_unlinkable
-skip-impl directive-assert_unlinkable
-skip-impl directive-assert_unlinkable
-skip-impl directive-assert_unlinkable
+assert_unlinkable imports0.1.wasm
+assert_unlinkable imports0.2.wasm
+assert_unlinkable imports0.3.wasm
+assert_unlinkable imports0.4.wasm
+assert_unlinkable imports0.5.wasm
+assert_unlinkable imports0.6.wasm

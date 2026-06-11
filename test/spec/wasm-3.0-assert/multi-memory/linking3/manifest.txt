@@ -1,6 +1,6 @@
 module $Mm linking3.0.wasm
 register Mm
-skip-impl directive-assert_unlinkable
+assert_unlinkable linking3.1.wasm
 assert_return $Mm::load i32:0 -> i32:0
 assert_uninstantiable linking3.2.wasm
 assert_return $Mm::load i32:0 -> i32:97
