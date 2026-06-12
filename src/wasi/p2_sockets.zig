@@ -201,6 +201,14 @@ pub const TcpSocket = struct {
         return .{ .family = self.family, .state = .connected, .stream = stream };
     }
 
+    /// `tcp.remote-address`. The peer address of a connected socket: an
+    /// accepted connection carries the peer sockaddr from the OS accept;
+    /// a client carries the address it connected to.
+    pub fn remoteAddress(self: *TcpSocket) !net.IpAddress {
+        const stream = self.connectedStream() orelse return error.InvalidState;
+        return stream.socket.address;
+    }
+
     /// `tcp.local-address`. Listening sockets report the RESOLVED address
     /// (ephemeral `:0` becomes the real port); `bound` reports the stored
     /// request; connected clients are not-supported (no getsockname in the

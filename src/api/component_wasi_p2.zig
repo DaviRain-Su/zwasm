@@ -1148,11 +1148,118 @@ fn p2TcpShutdown(caller: *Caller, self: u32, how: u32, retptr: u32) WasiP2Error!
     try writeSockUnitResult(mem, retptr, null);
 }
 
-/// `tcp.is-listening` (self) -> bool. Phase 1 has no listening state.
+/// `tcp.is-listening` (self) -> bool.
 fn p2TcpIsListening(caller: *Caller, self: u32) WasiP2Error!u32 {
     const ctx = caller.data(WasiP2Ctx);
-    _ = try ctx.resources.rep(WasiP2Ctx.TCP_SOCKET_RT, self);
-    return 0;
+    const sock = try ctxTcpSocket(ctx, try ctx.resources.rep(WasiP2Ctx.TCP_SOCKET_RT, self));
+    return @intFromBool(sock.state == .listening);
+}
+
+/// `tcp.start-listen` (self, retptr) -> result<_, error-code>. The OS
+/// socket+bind+listen runs here (ADR-0180 Phase-2 defer-bind divergence).
+fn p2TcpStartListen(caller: *Caller, self: u32, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const mem = try ctxMemory(caller);
+    const sock = try ctxTcpSocket(ctx, try ctx.resources.rep(WasiP2Ctx.TCP_SOCKET_RT, self));
+    sock.startListen(try ctxIo(ctx)) catch |e| return writeSockUnitResult(mem, retptr, e);
+    try writeSockUnitResult(mem, retptr, null);
+}
+
+/// `tcp.finish-listen` (self, retptr) -> result<_, error-code>.
+fn p2TcpFinishListen(caller: *Caller, self: u32, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const mem = try ctxMemory(caller);
+    const sock = try ctxTcpSocket(ctx, try ctx.resources.rep(WasiP2Ctx.TCP_SOCKET_RT, self));
+    sock.finishListen() catch |e| return writeSockUnitResult(mem, retptr, e);
+    try writeSockUnitResult(mem, retptr, null);
+}
+
+/// `tcp.set-listen-backlog-size` (self, value:u64, retptr) ->
+/// result<_, error-code>.
+fn p2TcpSetListenBacklog(caller: *Caller, self: u32, value: u64, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const mem = try ctxMemory(caller);
+    const sock = try ctxTcpSocket(ctx, try ctx.resources.rep(WasiP2Ctx.TCP_SOCKET_RT, self));
+    sock.setListenBacklog(value) catch |e| return writeSockUnitResult(mem, retptr, e);
+    try writeSockUnitResult(mem, retptr, null);
+}
+
+/// `tcp.accept` (self, retptr) -> result<tuple<own<tcp-socket>,
+/// own<input-stream>, own<output-stream>>, error-code> (ok handles
+/// @+4/+8/+12; err@+4). Registers the accepted connection as a fresh
+/// connected tcp-socket resource and mints its socket-backed stream pair
+/// (the finish-connect shape).
+fn p2TcpAccept(caller: *Caller, self: u32, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const mem = try ctxMemory(caller);
+    const sock = try ctxTcpSocket(ctx, try ctx.resources.rep(WasiP2Ctx.TCP_SOCKET_RT, self));
+    const accepted = sock.accept(try ctxIo(ctx)) catch |e| {
+        try mem.write(retptr, @as(u8, 1));
+        try mem.write(retptr + 4, @intFromEnum(p2sock.errorToCode(e)));
+        return;
+    };
+    // NOTE: append AFTER the last `sock` deref — it may move the list.
+    const idx: u32 = @intCast(ctx.tcp_sockets.items.len);
+    ctx.tcp_sockets.append(ctx.alloc, accepted) catch return WasiP2Error.OutOfMemory;
+    const sock_h = try ctx.resources.new(WasiP2Ctx.TCP_SOCKET_RT, idx);
+    const in_h = try ctx.resources.new(WasiP2Ctx.SOCK_INPUT_STREAM_RT, idx);
+    const out_h = try ctx.resources.new(WasiP2Ctx.SOCK_OUTPUT_STREAM_RT, idx);
+    try mem.write(retptr, @as(u8, 0));
+    try mem.write(retptr + 4, sock_h);
+    try mem.write(retptr + 8, in_h);
+    try mem.write(retptr + 12, out_h);
+}
+
+/// Store a `result<ip-socket-address, error-code>` at `retptr` per the
+/// canonical ABI in-memory layout: result disc@0, payload@+4; the
+/// ip-socket-address variant disc@+4, case record@+8 (ipv4: port:u16@8,
+/// addr bytes@10..14; ipv6: port:u16@8, flow:u32@12, segments 8*u16
+/// @16..32, scope-id:u32@32).
+fn writeIpSocketAddressResult(mem: Memory, retptr: u32, addr: std.Io.net.IpAddress) WasiP2Error!void {
+    try mem.write(retptr, @as(u8, 0));
+    switch (addr) {
+        .ip4 => |a| {
+            try mem.write(retptr + 4, @as(u8, 0));
+            try mem.write(retptr + 8, a.port);
+            for (a.bytes, 0..) |b, i| try mem.write(retptr + 10 + @as(u32, @intCast(i)), b);
+        },
+        .ip6 => |a| {
+            try mem.write(retptr + 4, @as(u8, 1));
+            try mem.write(retptr + 8, a.port);
+            try mem.write(retptr + 12, a.flow);
+            for (0..8) |i| {
+                const seg: u16 = (@as(u16, a.bytes[i * 2]) << 8) | a.bytes[i * 2 + 1];
+                try mem.write(retptr + 16 + @as(u32, @intCast(i * 2)), seg);
+            }
+            try mem.write(retptr + 32, @as(u32, 0)); // scope-id (not modeled)
+        },
+    }
+}
+
+/// `tcp.local-address` (self, retptr) -> result<ip-socket-address, error-code>.
+fn p2TcpLocalAddress(caller: *Caller, self: u32, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const mem = try ctxMemory(caller);
+    const sock = try ctxTcpSocket(ctx, try ctx.resources.rep(WasiP2Ctx.TCP_SOCKET_RT, self));
+    const addr = sock.localAddress() catch |e| {
+        try mem.write(retptr, @as(u8, 1));
+        try mem.write(retptr + 4, @intFromEnum(p2sock.errorToCode(e)));
+        return;
+    };
+    try writeIpSocketAddressResult(mem, retptr, addr);
+}
+
+/// `tcp.remote-address` (self, retptr) -> result<ip-socket-address, error-code>.
+fn p2TcpRemoteAddress(caller: *Caller, self: u32, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const mem = try ctxMemory(caller);
+    const sock = try ctxTcpSocket(ctx, try ctx.resources.rep(WasiP2Ctx.TCP_SOCKET_RT, self));
+    const addr = sock.remoteAddress() catch |e| {
+        try mem.write(retptr, @as(u8, 1));
+        try mem.write(retptr + 4, @intFromEnum(p2sock.errorToCode(e)));
+        return;
+    };
+    try writeIpSocketAddressResult(mem, retptr, addr);
 }
 
 // -- not-supported stubs (ADR-0180 phased scope): the spec's TYPED signal --
@@ -1287,6 +1394,12 @@ fn defineClassifiedFunc(lk: *Linker, module: []const u8, name: []const u8, op: a
         .sock_tcp_subscribe => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!u32, p2TcpSubscribe),
         .sock_tcp_shutdown => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32, u32) WasiP2Error!void, p2TcpShutdown),
         .sock_tcp_is_listening => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!u32, p2TcpIsListening),
+        .sock_tcp_start_listen => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32) WasiP2Error!void, p2TcpStartListen),
+        .sock_tcp_finish_listen => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32) WasiP2Error!void, p2TcpFinishListen),
+        .sock_tcp_accept => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32) WasiP2Error!void, p2TcpAccept),
+        .sock_tcp_local_address => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32) WasiP2Error!void, p2TcpLocalAddress),
+        .sock_tcp_remote_address => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32) WasiP2Error!void, p2TcpRemoteAddress),
+        .sock_tcp_set_backlog => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u64, u32) WasiP2Error!void, p2TcpSetListenBacklog),
         .sock_tcp_drop => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!void, p2ResourceDrop),
         .sock_stub_unit2 => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32) WasiP2Error!void, p2SockStubUnit2),
         .sock_stub_unit3i => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32, u32) WasiP2Error!void, p2SockStubUnit3i),

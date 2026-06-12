@@ -1589,6 +1589,71 @@ test "ADR-0180: a real rust wasip2 TCP client connects + echoes through wasi:soc
     try testing.expectEqualStrings("got pong-ping\n", capture.items);
 }
 
+/// Host-side client for the listener e2e: retry-connect to the guest's
+/// port until its listen completes, send "ping", read the echo.
+fn tcpClientOnce(io: std.Io, port: u16) void {
+    const addr: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(port) };
+    var attempts: u32 = 0;
+    var stream = while (attempts < 500) : (attempts += 1) {
+        if (addr.connect(io, .{ .mode = .stream, .protocol = .tcp })) |s| break s else |_| {
+            // Guest hasn't reached listen yet — back off and retry.
+            io.sleep(.{ .nanoseconds = 2 * std.time.ns_per_ms }, .awake) catch return;
+        }
+    } else return;
+    defer stream.close(io);
+    const data = [_][]const u8{"ping"};
+    _ = io.vtable.netWrite(io.userdata, stream.socket.handle, "", &data, 1) catch return;
+    // Read until the guest's full "ping-ack" reply arrived (2 writes).
+    var buf: [16]u8 = undefined;
+    var total: usize = 0;
+    while (total < 8) {
+        var bufs = [_][]u8{buf[total..]};
+        const n = io.vtable.netRead(io.userdata, stream.socket.handle, &bufs) catch return;
+        if (n == 0) return;
+        total += n;
+    }
+}
+
+test "ADR-0180 Phase 2: a real rust wasip2 TCP listener accepts + echoes through wasi:sockets" {
+    if (@import("builtin").os.tag == .windows) return skip.blocker(.@"D-319");
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/wasi_p2_listen_rust.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    // Pick a free loopback port for the guest (bind :0, note, release —
+    // the test-local reuse window is accepted).
+    const probe_addr: std.Io.net.IpAddress = .{ .ip4 = std.Io.net.Ip4Address.loopback(0) };
+    var probe = try probe_addr.listen(io, .{ .mode = .stream, .protocol = .tcp });
+    const port = probe.socket.address.getPort();
+    probe.deinit(io);
+    var port_buf: [8]u8 = undefined;
+    const port_str = try std.fmt.bufPrint(&port_buf, "{d}", .{port});
+
+    var client_fut = try io.concurrent(tcpClientOnce, .{ io, port });
+    defer client_fut.cancel(io);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+    host.io = io;
+    try host.setArgs(&.{ "tcp_listen", port_str });
+    var capture: std.ArrayList(u8) = .empty;
+    defer capture.deinit(testing.allocator);
+    host.stdout_buffer = &capture;
+
+    // A real `rustc --target wasm32-wasip2` std::net::TcpListener guest:
+    // bind(argv port) -> start/finish-listen -> local-address ->
+    // subscribe/poll readiness -> accept (3-tuple mint + remote-address)
+    // -> echo "ping"+"-ack" — the ADR-0180 Phase-2 existence proof.
+    try runWasiP2Main(&eng, testing.allocator, bytes, &host);
+    var expect_buf: [48]u8 = undefined;
+    const expected = try std.fmt.bufPrint(&expect_buf, "served ping on {d}\n", .{port});
+    try testing.expectEqualStrings(expected, capture.items);
+}
+
 test "ADR-0183 F1: greet introspects as (param string) -> string from the binary" {
     var threaded: std.Io.Threaded = .init(testing.allocator, .{});
     defer threaded.deinit();
