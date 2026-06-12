@@ -12,13 +12,14 @@
   AFD readiness with D-319 discharged, guest-defined resources D-322,
   component default-ON ADR-0182, validator rules 1–12, corpus
   **158/0/0**, rust+tinygo proofs 3-host green).
-- **NOW-pointer: completion-refinement over the campaign-grown
-  surfaces** (per the updated widget row): NEXT chunk = invoke
-  `audit_scaffolding` (campaign-close audit — the phase-boundary-grade
-  trigger), then act on its findings + the refinement candidates:
-  grown-file simplify passes (component_wasi_p2 ~1900?, canon, validate
-  — check file_size_check), docs sweep (zig_api_design §3.9 extension
-  for resources/handles), debt long-tail.
+- **Campaign-close audit DONE** (private/audit-2026-06-13.md): 0 block;
+  3 soon ALL FIXED inline (validate.zig/types.zig stale headers; 14
+  blocked-by rows re-walked + dates refreshed). Health good.
+- **NOW-pointer: completion-refinement** — NEXT candidates: simplify
+  pass over the grown component files (component_wasi_p2 / canon /
+  validate — soft-cap set; no hard-cap breach) · docs sweep
+  (zig_api_design §3.9 extension for resources/own-borrow handles +
+  README/tutorial CM mention) · debt long-tail · D-323 blocked-by.
 - **Open user-decision item**: ADR-0184 Proposed (C-API engine-owned io
   — ADR-0143 surface reversal; loop does NOT implement until reviewed).
 - **Other open**: D-323 (stdlib NTSTATUS, blocked-by) · D-318 (note,
