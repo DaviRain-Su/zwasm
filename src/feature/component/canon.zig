@@ -1,5 +1,5 @@
-//! Canonical ABI **lift/lower + memory layout** (CM campaign chunks B1–B4;
-//! spec `component-model/design/mvp/CanonicalABI.md`). Design: ADR-0171.
+//! Canonical ABI **lift/lower + memory layout** (spec
+//! `component-model/design/mvp/CanonicalABI.md`). Design: ADR-0171 / ADR-0183.
 //!
 //! Lifts/lowers component-level values across the core/component boundary. A
 //! component `Value` is DISTINCT from `runtime.Value` (`single_slot_dual_meaning`):
@@ -7,10 +7,11 @@
 //! lowered form of a scalar IS `runtime.Value` (`lower`/`lift`); aggregates are
 //! laid out in guest linear memory (`store`/`load`).
 //!
-//! Coverage: B1 flat scalars · B2 enum/flags + size/align/discriminant · B3
-//! utf8 string over memory · B4 recursive `store`/`load` for list + record.
-//! variant/option/result (B5) + the multi-value flat lowering for fn-call
-//! params (B6) extend this. utf16/latin1 string encodings pending.
+//! Coverage: flat scalars · enum/flags + size/align/discriminant · utf8 string
+//! over memory · recursive `store`/`load` for list/record/variant · the
+//! multi-value flat lowering for fn-call params (`flattenType`/`lowerFlat`/
+//! `liftFlat`) · the decoded-`TypeInfo`→`CanonType` bridge · resource handle
+//! own/borrow (D-322). utf16/latin1 string encodings pending.
 //!
 //! The realloc callback is INJECTED (vtable pattern, `zone_deps`): canon.zig
 //! never imports the core runtime's instance/invoke; the orchestration layer
@@ -25,9 +26,9 @@ const core = @import("../../runtime/value.zig");
 pub const CoreValue = core.Value;
 const PrimValType = types.PrimValType;
 
-/// A component-level runtime value. B1: flat scalars; B2 enum/flags; B4 adds
-/// the aggregate forms (string / list / record). `list`/`record` borrow their
-/// element/field slices from the caller (or an arena on load).
+/// A component-level runtime value: flat scalars, enum/flags, and the
+/// aggregate forms (string / list / record / variant). `list`/`record` borrow
+/// their element/field slices from the caller (or an arena on load).
 pub const Value = union(enum) {
     bool: bool,
     s8: i8,
@@ -61,9 +62,9 @@ pub const VariantValue = struct {
     payload: ?*const Value,
 };
 
-/// The despecialized value type the canonical ABI computes layout over. B2:
-/// primitives + enum + flags; B4 adds the recursive `list` / `record` forms;
-/// variant/option/result extend it in B5.
+/// The despecialized value type the canonical ABI computes layout over:
+/// primitives + enum + flags + the recursive `list` / `record` / `variant`
+/// forms (option/result/tuple despecialize into variant/record).
 pub const CanonType = union(enum) {
     prim: PrimValType,
     /// number of enum cases (`> 0`).
@@ -211,8 +212,8 @@ pub const ReallocError = error{ AllocFailed, OutOfBounds };
 /// (ADR-0171). An error result signals OOM / trap.
 pub const ReallocFn = *const fn (ctx: *anyopaque, old_ptr: u32, old_size: u32, alignment: u32, new_size: u32) ReallocError!u32;
 
-/// Guest string encoding (`canonopt` `string-encoding`). B3 implements utf8;
-/// utf16 / latin1+utf16 land next.
+/// Guest string encoding (`canonopt` `string-encoding`). utf8 is implemented;
+/// utf16 / latin1+utf16 are still pending (rejected by lift/lower for now).
 pub const StringEncoding = enum { utf8, utf16, latin1_utf16 };
 
 /// Per-call canonical-ABI context: the guest linear memory (lift/lower target),
@@ -304,14 +305,13 @@ pub const LiftError = error{
     InvalidEnum,
     /// A flags bit-set with bits set beyond the declared label count.
     InvalidFlags,
-    /// Lifting an aggregate / non-flat-scalar type — handled in B3+.
+    /// Lifting an aggregate / non-flat-scalar type — use `load` / `liftFlat`.
     NotFlatScalar,
 };
 
 pub const LowerError = error{
     /// An aggregate (string/list/record) has no single-core-value flat form —
-    /// it lowers to a sequence via memory (use `store`); the multi-value flat
-    /// lowering for fn-call params lands in B6.
+    /// it lowers to a sequence via memory (`store`) or to flats (`lowerFlat`).
     NotFlatScalar,
 };
 
