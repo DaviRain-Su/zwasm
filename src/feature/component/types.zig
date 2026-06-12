@@ -504,6 +504,58 @@ pub const TypeInfo = struct {
         string_encoding: StringEncoding,
     };
 
+    /// One introspected func export: the name + its WIT-typed signature,
+    /// taken from the SELF-DESCRIBING binary (ADR-0183 / CWFS ADR-0135 —
+    /// no `.wit` sidecar). Slices borrow from this `TypeInfo`.
+    pub const ExportedFunc = struct {
+        name: []const u8,
+        ty: FuncType,
+    };
+
+    /// The WIT `functype` of a lifted func export, or null when the export
+    /// does not resolve to a concrete local functype (alias-minted types
+    /// stay deferred — concrete components lift with an explicit type).
+    pub fn resolveFuncType(self: *const TypeInfo, export_name: []const u8) ?FuncType {
+        var func_idx: ?u32 = null;
+        for (self.exports.items) |e| {
+            if (e.sort == .func and std.mem.eql(u8, e.name, export_name)) {
+                func_idx = e.index;
+                break;
+            }
+        }
+        const fi = func_idx orelse return null;
+        var li: u32 = 0;
+        for (self.canons.items) |c| {
+            if (c != .lift) continue;
+            if (li == fi) {
+                const ti = c.lift.type_index;
+                if (ti >= self.type_space.items.len) return null;
+                switch (self.type_space.items[ti]) {
+                    .def => |d| switch (self.deftypes.items[d]) {
+                        .func => |ft| return ft,
+                        else => return null,
+                    },
+                    .named => return null, // alias-minted signature — deferred
+                }
+            }
+            li += 1;
+        }
+        return null;
+    }
+
+    /// Introspect every typed func export (ADR-0183 F1). Caller frees the
+    /// returned slice; the names/types borrow from this `TypeInfo`.
+    pub fn exportedFuncs(self: *const TypeInfo, alloc: Allocator) Allocator.Error![]ExportedFunc {
+        var out: std.ArrayList(ExportedFunc) = .empty;
+        errdefer out.deinit(alloc);
+        for (self.exports.items) |e| {
+            if (e.sort != .func) continue;
+            const ft = self.resolveFuncType(e.name) orelse continue;
+            try out.append(alloc, .{ .name = e.name, .ty = ft });
+        }
+        return out.toOwnedSlice(alloc);
+    }
+
     /// Resolve a component `func` export (by name) to its `canon lift` and the
     /// underlying core exports — so the host invokes the resolved core funcs
     /// instead of guessing names. Assumes the func index space is populated by

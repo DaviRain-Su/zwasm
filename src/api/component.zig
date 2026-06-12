@@ -70,6 +70,13 @@ pub const ComponentInstance = struct {
     /// (defaults to the conventional `cabi_realloc`).
     realloc_name: []const u8 = "cabi_realloc",
 
+    /// ADR-0183 F1 — introspect the typed func exports from the
+    /// SELF-DESCRIBING binary (no `.wit` sidecar; CWFS ADR-0135). Caller
+    /// frees the slice; names/types borrow from the instance's `TypeInfo`.
+    pub fn exportedFuncs(self: *const ComponentInstance, alloc: Allocator) Allocator.Error![]ctypes.TypeInfo.ExportedFunc {
+        return self.info.exportedFuncs(alloc);
+    }
+
     pub fn deinit(self: *ComponentInstance) void {
         self.core.deinit();
         self.alloc.destroy(self.core);
@@ -380,6 +387,9 @@ pub fn instantiate(engine: *Engine, alloc: Allocator, bytes: []const u8) Error!C
 // smell cap as the P2 surface grew). Re-exported here so the public `run` path
 // (`cli/run.zig` → `component.runWasiP2Main`) and the in-tree e2e/unit tests
 // keep the same surface.
+/// ADR-0183 — the public component-level value tree (rich typed invoke).
+pub const ComponentValue = @import("../feature/component/value.zig").ComponentValue;
+
 const cwasi = @import("component_wasi_p2.zig");
 pub const runWasiP2Main = cwasi.runWasiP2Main;
 const WasiP2Ctx = cwasi.WasiP2Ctx;
@@ -1495,4 +1505,25 @@ test "ADR-0180: a real rust wasip2 TCP client connects + echoes through wasi:soc
     // ADR-0180 Phase-1 existence proof.
     try runWasiP2Main(&eng, testing.allocator, bytes, &host);
     try testing.expectEqualStrings("got pong-ping\n", capture.items);
+}
+
+test "ADR-0183 F1: greet introspects as (param string) -> string from the binary" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/greet_component.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var ci = try instantiate(&eng, testing.allocator, bytes);
+    defer ci.deinit();
+
+    const funcs = try ci.exportedFuncs(testing.allocator);
+    defer testing.allocator.free(funcs);
+    try testing.expectEqual(@as(usize, 1), funcs.len);
+    try testing.expectEqualStrings("greet", funcs[0].name);
+    try testing.expectEqual(@as(usize, 1), funcs[0].ty.params.len);
+    try testing.expectEqual(ctypes.PrimValType.string, funcs[0].ty.params[0].ty.primitive);
+    try testing.expectEqual(ctypes.PrimValType.string, funcs[0].ty.result.?.primitive);
 }
