@@ -32,11 +32,24 @@ pub fn validate(info: *const TypeInfo) Error!void {
     // aliases + type imports + type exports), NOT `deftypes.len` — a valid
     // reference to an aliased/imported type lives past the type-section count.
     const type_space_len = info.type_space_len;
+    // Rule 1 refinement: a type-section def may only reference STRICTLY
+    // EARLIER type indices (definition order) — its bound is its own
+    // position in the type index space, not the final space size (the
+    // corpus "(type (option 0))" self-/forward-reference class). Aliased/
+    // imported/exported types referenced from elsewhere still bound by the
+    // final size below.
+    for (info.type_space.items, 0..) |entry, pos| {
+        switch (entry) {
+            .def => |d| try checkDefTypeIndices(info.deftypes.items[d], @intCast(pos)),
+            .named => {},
+        }
+    }
     for (info.deftypes.items) |dt| {
-        try checkDefTypeIndices(dt, type_space_len);
         try checkDefTypeLabels(dt);
         try checkDefTypeOuterAliases(dt, 1);
+        try checkDefTypeDeclDups(dt);
     }
+    try checkInstances(info);
     try checkCanons(info, type_space_len);
     try checkAliases(info);
     for (info.imports.items) |imp| {
@@ -46,9 +59,127 @@ pub fn validate(info: *const TypeInfo) Error!void {
     for (info.exports.items) |ex| {
         if (ex.desc) |d| try checkExternDesc(d, type_space_len);
         try checkExternName(ex.name);
+        // Export sortidx bounds for the tracked index spaces (corpus
+        // "module/instance index out of bounds" top-level classes).
+        switch (ex.sort) {
+            .core => |cs| if (cs == .module and ex.index >= info.core_module_count) return Error.InvalidSort,
+            .component => if (ex.index >= info.component_count) return Error.InvalidSort,
+            .instance => if (ex.index >= info.instance_origins.items.len) return Error.InvalidSort,
+            .func => if (ex.index >= info.component_funcs.items.len) return Error.InvalidSort,
+            .type => if (ex.index >= info.type_space_len) return Error.InvalidSort,
+            .value => {}, // value index space not tracked — deferred
+        }
     }
     try checkExportedTypes(info);
     try checkDuplicateNames(info);
+}
+
+/// Rule 8 extension: name uniqueness INSIDE nested instance/component type
+/// scopes — import/export decls in one scope conflict case-insensitively
+/// (corpus "(type (component (import \"a\")(import \"A\")))" class). Each
+/// scope is independent; nested type_defs recurse.
+fn checkDefTypeDeclDups(dt: DefType) Error!void {
+    switch (dt) {
+        .instance_type => |it| {
+            for (it.decls, 0..) |decl, i| {
+                if (decl == .type_def) try checkDefTypeDeclDups(decl.type_def.*);
+                const name = instanceDeclName(decl) orelse continue;
+                try checkExternName(name);
+                for (it.decls[0..i]) |prev| {
+                    const pn = instanceDeclName(prev) orelse continue;
+                    if (std.ascii.eqlIgnoreCase(name, pn)) return Error.InvalidName;
+                }
+            }
+        },
+        .component_type => |ct| {
+            for (ct.decls, 0..) |decl, i| {
+                const inner = componentDeclInstanceDecl(decl);
+                if (inner != null and inner.? == .type_def) try checkDefTypeDeclDups(inner.?.type_def.*);
+                const name = componentDeclName(decl) orelse continue;
+                try checkExternName(name);
+                for (ct.decls[0..i]) |prev| {
+                    const pn = componentDeclName(prev) orelse continue;
+                    if (std.ascii.eqlIgnoreCase(name, pn)) return Error.InvalidName;
+                }
+            }
+        },
+        .value, .func, .enum_, .flags, .record, .list, .tuple, .variant, .option, .result, .own, .borrow => {},
+    }
+}
+
+fn instanceDeclName(decl: types.InstanceDecl) ?[]const u8 {
+    return switch (decl) {
+        .export_decl => |d| d.name,
+        .type_def, .alias => null,
+    };
+}
+
+fn componentDeclName(decl: types.ComponentDecl) ?[]const u8 {
+    return switch (decl) {
+        .import_decl => |d| d.name,
+        .instance_decl => |id| instanceDeclName(id),
+    };
+}
+
+fn componentDeclInstanceDecl(decl: types.ComponentDecl) ?types.InstanceDecl {
+    return switch (decl) {
+        .import_decl => null,
+        .instance_decl => |id| id,
+    };
+}
+
+/// Rule 9: instantiate-section bounds + names (corpus instantiate.wast
+/// "index out of bounds" / argument-conflict classes). Definition order:
+/// an instantiate/inline-export may only reference EARLIER instances (its
+/// own position is the bound); module/component operands bound by their
+/// section counts; instantiation-arg names must not conflict
+/// (case-insensitive); component-level inline-export names are extern
+/// names. Non-instance arg sorts keep gross final-space bounds where
+/// tracked (false-negative at worst).
+fn checkInstances(info: *const TypeInfo) Error!void {
+    for (info.core_instances.items, 0..) |ci, i| {
+        switch (ci) {
+            .instantiate => |it| {
+                if (it.module >= info.core_module_count) return Error.InvalidInstance;
+                for (it.args, 0..) |arg, ai| {
+                    if (arg.instance >= i) return Error.InvalidInstance;
+                    for (it.args[0..ai]) |prev| {
+                        if (std.ascii.eqlIgnoreCase(arg.name, prev.name)) return Error.InvalidName;
+                    }
+                }
+            },
+            .inline_exports => |exps| for (exps, 0..) |e, ei| {
+                switch (e.sort) {
+                    .func => if (e.index >= info.core_funcs.items.len) return Error.InvalidInstance,
+                    .table => if (e.index >= info.core_tables.items.len) return Error.InvalidInstance,
+                    else => {}, // memory/global/... core spaces not tracked — deferred
+                }
+                for (exps[0..ei]) |prev| {
+                    if (std.ascii.eqlIgnoreCase(e.name, prev.name)) return Error.InvalidName;
+                }
+            },
+        }
+    }
+    for (info.component_instances.items, 0..) |ci, i| {
+        switch (ci) {
+            .instantiate => |it| {
+                if (it.component >= info.component_count) return Error.InvalidInstance;
+                for (it.args, 0..) |arg, ai| {
+                    if (std.meta.activeTag(arg.sort) == .instance and arg.index >= i) return Error.InvalidInstance;
+                    for (it.args[0..ai]) |prev| {
+                        if (std.ascii.eqlIgnoreCase(arg.name, prev.name)) return Error.InvalidName;
+                    }
+                }
+            },
+            .inline_exports => |exps| for (exps, 0..) |e, ei| {
+                try checkExternName(e.name);
+                if (std.meta.activeTag(e.sort) == .instance and e.index >= i) return Error.InvalidInstance;
+                for (exps[0..ei]) |prev| {
+                    if (std.ascii.eqlIgnoreCase(e.name, prev.name)) return Error.InvalidName;
+                }
+            },
+        }
+    }
 }
 
 /// Rule 8: name uniqueness, ASCII-case-insensitive — kebab labels compare
@@ -271,7 +402,17 @@ fn checkAliases(info: *const TypeInfo) Error!void {
     for (info.aliases.items) |al| switch (al.target) {
         .core_export => |ce| if (ce.instance >= core_inst_len) return Error.InvalidAlias,
         .component_export => |ce| if (ce.instance >= comp_inst_len) return Error.InvalidAlias,
-        .outer => |o| if (o.count >= 1) return Error.InvalidAlias,
+        .outer => |o| {
+            if (o.count >= 1) return Error.InvalidAlias;
+            // count 0 = the current component: existence is checkable for the
+            // sorts whose spaces are tracked (others stay deferred).
+            switch (al.sort) {
+                .type => if (o.index >= info.type_space_len) return Error.InvalidAlias,
+                .component => if (o.index >= info.component_count) return Error.InvalidAlias,
+                .core => |cs| if (cs == .module and o.index >= info.core_module_count) return Error.InvalidAlias,
+                else => {},
+            }
+        },
     };
 }
 

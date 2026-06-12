@@ -1,0 +1,262 @@
+# Distilled VERBATIM from the official WebAssembly/component-model
+# test/wasm-tools corpus: assert_invalid cases in the categories the
+# ADR-0176 validator implements (rules 1-8). Encoded via `wasm-tools
+# parse` (no validation); zwasm must REJECT each.
+# adapt.wast: "memory index out of bounds"
+# (fixture adapt_01.wasm kept for when the gap closes)
+skip-impl adapt_01: canon-opt core-memory index space not tracked on TypeInfo (deferred; ADR-0176)
+# alias.wast: "invalid outer alias count of 100"
+assert_invalid test/spec/component-model-assert/official_distilled/alias_01.wasm
+# alias.wast: "index out of bounds"
+# (fixture alias_02.wasm kept for when the gap closes)
+skip-impl alias_02: core-type index space not tracked on TypeInfo (outer-alias target existence deferred; ADR-0176)
+# alias.wast: "invalid outer alias count of 100"
+assert_invalid test/spec/component-model-assert/official_distilled/alias_03.wasm
+# alias.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/alias_04.wasm
+# alias.wast: "invalid outer alias count of 100"
+assert_invalid test/spec/component-model-assert/official_distilled/alias_05.wasm
+# alias.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/alias_06.wasm
+# definedtypes.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/definedtypes_01.wasm
+# definedtypes.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/definedtypes_02.wasm
+# definedtypes.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/definedtypes_03.wasm
+# definedtypes.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/definedtypes_04.wasm
+# definedtypes.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/definedtypes_05.wasm
+# definedtypes.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/definedtypes_06.wasm
+# definedtypes.wast: "record field name `A-b-C-d` conflicts with previous field name `a-B-c-D`"
+assert_invalid test/spec/component-model-assert/official_distilled/definedtypes_07.wasm
+# definedtypes.wast: "variant case name `x` conflicts with previous case name `x`"
+assert_invalid test/spec/component-model-assert/official_distilled/definedtypes_08.wasm
+# definedtypes.wast: "flag name `X` conflicts with previous flag name `x`"
+assert_invalid test/spec/component-model-assert/official_distilled/definedtypes_09.wasm
+# definedtypes.wast: "enum tag name `X` conflicts with previous tag name `x`"
+assert_invalid test/spec/component-model-assert/official_distilled/definedtypes_10.wasm
+# export.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/export_01.wasm
+# export.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/export_02.wasm
+# export.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/export_03.wasm
+# export.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/export_04.wasm
+# func.wast: "function parameter name `FOO` conflicts with previous parameter name `foo`"
+assert_invalid test/spec/component-model-assert/official_distilled/func_01.wasm
+# import.wast: "import name `a` conflicts with previous name `a`"
+assert_invalid test/spec/component-model-assert/official_distilled/import_01.wasm
+# import.wast: "import name `a` conflicts with previous name `a`"
+assert_invalid test/spec/component-model-assert/official_distilled/import_02.wasm
+# import.wast: "type index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/import_03.wasm
+# import.wast: "type index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/import_04.wasm
+# import.wast: "conflicts with previous name"
+assert_invalid test/spec/component-model-assert/official_distilled/import_05.wasm
+# import.wast: "`` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/import_06.wasm
+# import.wast: "`` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/import_07.wasm
+# import.wast: "not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/import_08.wasm
+# import.wast: "not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/import_09.wasm
+# import.wast: "`wasi/http` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/import_10.wasm
+# import.wast: "`TyPeS` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/import_11.wasm
+# import.wast: "`WaSi` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/import_12.wasm
+# import.wast: "`HtTp` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/import_13.wasm
+# import.wast: "`` is not in kebab case"
+# (fixture import_14.wasm kept for when the gap closes)
+skip-impl import_14: depname/urlname grammar validation deferred (rule 5 accepts =-forms unchecked; ADR-0176)
+# import.wast: "`` is not in kebab case"
+# (fixture import_15.wasm kept for when the gap closes)
+skip-impl import_15: depname/urlname grammar validation deferred (rule 5 accepts =-forms unchecked; ADR-0176)
+# import.wast: "`` is not in kebab case"
+# (fixture import_16.wasm kept for when the gap closes)
+skip-impl import_16: depname/urlname grammar validation deferred (rule 5 accepts =-forms unchecked; ADR-0176)
+# import.wast: "`` is not in kebab case"
+# (fixture import_17.wasm kept for when the gap closes)
+skip-impl import_17: depname/urlname grammar validation deferred (rule 5 accepts =-forms unchecked; ADR-0176)
+# import.wast: "`` is not in kebab case"
+# (fixture import_18.wasm kept for when the gap closes)
+skip-impl import_18: depname/urlname grammar validation deferred (rule 5 accepts =-forms unchecked; ADR-0176)
+# import.wast: "`` is not in kebab case"
+# (fixture import_19.wasm kept for when the gap closes)
+skip-impl import_19: depname/urlname grammar validation deferred (rule 5 accepts =-forms unchecked; ADR-0176)
+# import.wast: "`` is not in kebab case"
+# (fixture import_20.wasm kept for when the gap closes)
+skip-impl import_20: depname/urlname grammar validation deferred (rule 5 accepts =-forms unchecked; ADR-0176)
+# import.wast: "`` is not in kebab case"
+# (fixture import_21.wasm kept for when the gap closes)
+skip-impl import_21: depname/urlname grammar validation deferred (rule 5 accepts =-forms unchecked; ADR-0176)
+# import.wast: "`` is not in kebab case"
+# (fixture import_22.wasm kept for when the gap closes)
+skip-impl import_22: depname/urlname grammar validation deferred (rule 5 accepts =-forms unchecked; ADR-0176)
+# import.wast: "`` is not in kebab case"
+# (fixture import_23.wasm kept for when the gap closes)
+skip-impl import_23: depname/urlname grammar validation deferred (rule 5 accepts =-forms unchecked; ADR-0176)
+# instance-type.wast: "export name `a` conflicts with previous name `a`"
+assert_invalid test/spec/component-model-assert/official_distilled/instance-type_01.wasm
+# instantiate.wast: "function index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/instantiate_01.wasm
+# instantiate.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/instantiate_02.wasm
+# instantiate.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/instantiate_03.wasm
+# instantiate.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/instantiate_04.wasm
+# instantiate.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/instantiate_05.wasm
+# instantiate.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/instantiate_06.wasm
+# instantiate.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/instantiate_07.wasm
+# instantiate.wast: "index out of bounds"
+# (fixture instantiate_08.wasm kept for when the gap closes)
+skip-impl instantiate_08: nested concrete-component decode not implemented (inner sections undecoded; ADR-0176)
+# instantiate.wast: "index out of bounds"
+# (fixture instantiate_09.wasm kept for when the gap closes)
+skip-impl instantiate_09: nested concrete-component decode not implemented (inner sections undecoded; ADR-0176)
+# instantiate.wast: "instantiation argument `a` conflicts with previous argument `a`"
+assert_invalid test/spec/component-model-assert/official_distilled/instantiate_10.wasm
+# instantiate.wast: "index out of bounds"
+# (fixture instantiate_11.wasm kept for when the gap closes)
+skip-impl instantiate_11: nested concrete-component decode not implemented (inner sections undecoded; ADR-0176)
+# instantiate.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/instantiate_12.wasm
+# instantiate.wast: "index out of bounds"
+# (fixture instantiate_13.wasm kept for when the gap closes)
+skip-impl instantiate_13: nested concrete-component decode not implemented (inner sections undecoded; ADR-0176)
+# instantiate.wast: "index out of bounds"
+# (fixture instantiate_14.wasm kept for when the gap closes)
+skip-impl instantiate_14: nested concrete-component decode not implemented (inner sections undecoded; ADR-0176)
+# instantiate.wast: "export name `a` conflicts with previous name `a`"
+assert_invalid test/spec/component-model-assert/official_distilled/instantiate_15.wasm
+# instantiate.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/instantiate_16.wasm
+# invalid.wast: "type index out of bounds"
+# (fixture invalid_01.wasm kept for when the gap closes)
+skip-impl invalid_01: nested type-scope deep validation deferred (decl-internal refs; ADR-0176)
+# naming.wast: "`1` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/naming_01.wasm
+# naming.wast: "enum tag name `NevEr` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/naming_02.wasm
+# naming.wast: "record field name `GoNnA` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/naming_03.wasm
+# naming.wast: "variant case name `GIVe` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/naming_04.wasm
+# naming.wast: "function parameter name `yOu` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/naming_05.wasm
+# naming.wast: "`NevEr` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/naming_06.wasm
+# naming.wast: "`GonnA` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/naming_07.wasm
+# naming.wast: "`lET` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/naming_08.wasm
+# naming.wast: "`YoU` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/naming_09.wasm
+# naming.wast: "`DOWn` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/naming_10.wasm
+# naming.wast: "import name `[method]a.a` conflicts with previous name `a`"
+# (fixture naming_11.wasm kept for when the gap closes)
+skip-impl naming_11: resource-name conflict semantics ([method]x.y vs x) deferred (needs semantic name model; ADR-0176)
+# naming.wast: "import name `[static]a.a` conflicts with previous name `a`"
+# (fixture naming_12.wasm kept for when the gap closes)
+skip-impl naming_12: resource-name conflict semantics ([method]x.y vs x) deferred (needs semantic name model; ADR-0176)
+# resources.wast: "type index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/resources_01.wasm
+# resources.wast: "type index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/resources_02.wasm
+# resources.wast: "type index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/resources_03.wasm
+# resources.wast: "function index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/resources_04.wasm
+# resources.wast: "not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/resources_05.wasm
+# resources.wast: "not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/resources_06.wasm
+# resources.wast: "not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/resources_07.wasm
+# resources.wast: "not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/resources_08.wasm
+# resources.wast: "not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/resources_09.wasm
+# resources.wast: "not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/resources_10.wasm
+# resources.wast: "not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/resources_11.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_01.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_02.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_03.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_04.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_05.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_06.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_07.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_08.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_09.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_10.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_11.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_12.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+# (fixture type-export-restrictions_13.wasm kept for when the gap closes)
+skip-impl type-export-restrictions_13: rule-7 export-type-named inside nested type scopes deferred (ADR-0176)
+# type-export-restrictions.wast: "type not valid to be used as export"
+# (fixture type-export-restrictions_14.wasm kept for when the gap closes)
+skip-impl type-export-restrictions_14: rule-7 export-type-named inside nested type scopes deferred (ADR-0176)
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_15.wasm
+# types.wast: "module index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/types_01.wasm
+# types.wast: "instance index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/types_02.wasm
+# types.wast: "type index out of bounds"
+# (fixture types_03.wasm kept for when the gap closes)
+skip-impl types_03: nested type-scope deep validation deferred (decl-internal refs; ADR-0176)
+# types.wast: "type index out of bounds"
+# (fixture types_04.wasm kept for when the gap closes)
+skip-impl types_04: nested type-scope deep validation deferred (decl-internal refs; ADR-0176)
+# types.wast: "export name `A` conflicts with previous name `a`"
+assert_invalid test/spec/component-model-assert/official_distilled/types_05.wasm
+# types.wast: "import name `a` conflicts with previous name `A`"
+assert_invalid test/spec/component-model-assert/official_distilled/types_06.wasm
+# types.wast: "type index out of bounds"
+# (fixture types_07.wasm kept for when the gap closes)
+skip-impl types_07: nested type-scope deep validation deferred (decl-internal refs; ADR-0176)
+# types.wast: "type index out of bounds"
+# (fixture types_08.wasm kept for when the gap closes)
+skip-impl types_08: nested type-scope deep validation deferred (decl-internal refs; ADR-0176)
+# types.wast: "invalid outer alias count of 100"
+assert_invalid test/spec/component-model-assert/official_distilled/types_09.wasm
+# types.wast: "type index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/types_10.wasm
+# types.wast: "export name `FOO-bar-BAZ` conflicts with previous name `foo-BAR-baz`"
+assert_invalid test/spec/component-model-assert/official_distilled/types_11.wasm
+# types.wast: "type index out of bounds"
+# (fixture types_12.wasm kept for when the gap closes)
+skip-impl types_12: nested type-scope deep validation deferred (decl-internal refs; ADR-0176)
+# types.wast: "invalid outer alias count of 100"
+assert_invalid test/spec/component-model-assert/official_distilled/types_13.wasm
+# types.wast: "type index out of bounds"
+# (fixture types_14.wasm kept for when the gap closes)
+skip-impl types_14: nested type-scope deep validation deferred (decl-internal refs; ADR-0176)

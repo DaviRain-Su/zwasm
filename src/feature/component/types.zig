@@ -379,6 +379,11 @@ pub const TypeInfo = struct {
     /// out-of-bounds; validation (ADR-0176) bounds-checks against THIS instead.
     /// Always `type_space.items.len`.
     type_space_len: u32,
+    /// Counts of the component's `core:module` / nested `component` sections
+    /// (their index spaces), for the validator's instantiate-section bounds
+    /// (ADR-0176 rule 9).
+    core_module_count: u32,
+    component_count: u32,
     /// The component type index space in definition order: each entry records
     /// whether its index was minted by a `type`-section def (`.def` = index
     /// into `deftypes`) or introduced under a name by a type-sort `alias` /
@@ -1124,8 +1129,15 @@ pub fn decodeTypeInfo(parent: Allocator, component: *const decode.Component) Err
     var component_funcs: std.ArrayList(ComponentFuncDef) = .empty;
     var instance_origins: std.ArrayList(InstanceOrigin) = .empty;
     var type_space: std.ArrayList(TypeSpaceEntry) = .empty;
+    var core_module_count: u32 = 0;
+    var component_count: u32 = 0;
 
     for (component.sections.items) |sec| {
+        switch (sec.id) {
+            .core_module => core_module_count += 1,
+            .component => component_count += 1,
+            else => {},
+        }
         // Track per-kind counts before this section so the newly-decoded entries
         // append to the core-/component-func and instance index spaces in binary
         // (section) order — entries from different sections must interleave by
@@ -1190,6 +1202,8 @@ pub fn decodeTypeInfo(parent: Allocator, component: *const decode.Component) Err
         // imports + type exports (the four minting forms), in definition order.
         .type_space_len = @intCast(type_space.items.len),
         .type_space = type_space,
+        .core_module_count = core_module_count,
+        .component_count = component_count,
         .imports = imports,
         .exports = exports,
         .canons = canons,
