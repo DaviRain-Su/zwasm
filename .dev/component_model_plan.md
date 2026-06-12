@@ -208,14 +208,17 @@ design forks. Update this doc's `[x]` + handover NEXT each chunk.
   fixtures; close the gap to wasmtime where "beyond is satisfiable" (ADR-0170).
   **Started**: D-308 adversarial edge case @82d63d27 — an unknown wasi import
   (`wasi:sockets/tcp`) errors cleanly (no signal); fixture `wasi_p2_unknown_import.wasm`.
-  **E3-CM-validation bundle (ADR-0176) OPEN**: structural-first component validator
+  **E3-CM-validation bundle (ADR-0176) CLOSED 2026-06-12**: structural-first component validator
   `src/feature/component/validate.zig` (post-decode, pre-instantiate, all 3 host entry points), driven by the official
-  `component-model/test/wasm-tools` `assert_invalid` corpus (365+17). Runner gained `assert_invalid`/`assert_malformed`
-  directives. **DONE: rules 1–4 index bounds** (type `cfdb07be` / canon `6224a7e7` / alias-instance `5374dca7` /
-  externdesc `d72c1b44`; fixtures `*_index_oob/`) + **rule 5 name format** (`2b2eaeac` — kebab `label` grammar on
-  deftype labels + import/export names incl. interfacename/bracket forms; fixture `kebab_name/`, corpus 11/0).
-  Next rules by corpus frequency: outer-alias count (~5) · export-type validity (~15) · undefined-resource refs (~5);
-  deep-type cases = truthful `skip-impl`. See handover `## Active bundle`.
+  `component-model/test/wasm-tools` `assert_invalid` corpus. Runner has `assert_invalid`/`assert_malformed` + `skip-impl`
+  directives; **corpus 18 pass / 0 fail / 2 reasoned skip-impl**. Rules shipped: **1–4 index bounds** (type `cfdb07be` /
+  canon `6224a7e7` / alias-instance `5374dca7` / externdesc `d72c1b44`) · **5 name format** (`2b2eaeac` — kebab `label`
+  grammar on deftype labels + import/export names incl. interfacename/bracket forms) · **6 outer-alias count vs nesting
+  depth** · **7 export-type-named** (`TypeInfo.type_space` definition-order origins) · **8 case-insensitive dup-names**.
+  Remaining-category triage: nested inline-component cases (resources.wast resource-refs, ~5) = skip-impl until
+  recursive nested-component decode lands (`nested_component_resource_refs/`); deep extern-name grammars
+  (base64/url/dep, ~12) = skip-impl (`extern_name_deep_forms/`); deep canon-ABI/subtyping cases = ADR-0176 out-of-scope
+  (later bundle); wat-text-level malformed cases = N/A for a binary validator.
   Remaining (separate): more WASI-P2 boundary fixtures (trap/handle-invalid paths).
 
 ## Retrospective (fill at campaign close)
