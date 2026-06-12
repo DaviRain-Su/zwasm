@@ -6,15 +6,22 @@
 ## Current state
 
 - **Phase 16 (完成形 finalization, ADR-0156 — no release, pursued indefinitely).**
-- Last: bundle **d314-jit-sandbox CLOSED** (see below) @<close-commit>; 3-host
+- Last: bundle **d314-jit-sandbox CLOSED** (see below) @316d77b8; 3-host
   green (ubuntu @a1f3d84d, windowsmini @a1f3d84d recorded, Mac 2688/0).
-- **NEXT: D-313** — regen the realworld `c_sha256_hash.wasm` fixture (its baked
-  expected hash is wrong; zwasm matches `shasum`) + close the gate-hole: the
-  realworld runner doesn't assert guest stdout — add the assert so a fixture
-  self-printing `verify: FAIL` can never golden-PASS again (lesson
-  `fixture-self-verify-false-lead`). Fixture regen needs the Mac-only
-  `nix develop .#gen` toolchain. Then: ROADMAP §9 Phase-16 table next `[ ]`
-  (surface audits / dogfooding / debt repayment).
+- **D-313 DISCHARGED `7079ab9a`**: run-runner now captures guest stdout and
+  FAILs on "FAIL" tokens (the assert immediately caught rust_sha256 as a
+  SECOND defective fixture); both sha256 fixtures regenerated from corrected
+  in-repo sources (test/realworld/src/ + PROVENANCE.md; gen-shell emcc +
+  cargo wasip1); run lane 55/55, diff lane MATCH vs wasmtime. Docs synced to
+  the shipped sandboxing surface @4aa14310 (cli/c_api refs, README,
+  CHANGELOG, migration guide ×8 rows, ROADMAP §3.1/§10.4 code-as-truth).
+- **NEXT: debt-hygiene chunk** — the 4 ADR-0078 SOON drift findings every
+  pre-push prints (SKIP-NO-LINK-TYPECHECK→D-157, SKIP-WIN64-EXHAUSTION→D-162
+  discharged @17917f07 but still cited, SKIP-WIN64-CALL-INDIRECT-TRAP→D-163,
+  SKIP-WIN64-MULTI-RESULT→D-164): update ADR-0078's Paired-artifact column
+  (cite discharge SHAs or remove dead SKIP rows). Then: Phase-16 ledger
+  long-tail (all §9.16 table rows are [x]; the phase is open-ended — debt
+  repayment + surface refinement per ADR-0156).
 
 ## Sandboxing bundle d314-jit-sandbox — CLOSED 2026-06-12
 
@@ -79,7 +86,7 @@ lesson `host-memory-exhaustion-defenses`).
   sound · dogfooded into cw v1.
 - **Test iteration**: integration runners ReleaseSafe (ADR-0177); unit
   `zig build test` Debug; `test-all` auto-fast.
-- Debt ledger **53 entries**, **zero `now` rows**; D-314 re-scoped to `note`
+- Debt ledger **54 entries**, **zero `now` rows**; D-314 re-scoped to `note`
   (follow-on list). Rest `blocked-by`/`note` = long-tail.
 
 **Parked (demand-driven)**: CM deeper conformance
