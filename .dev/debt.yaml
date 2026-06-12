@@ -101,29 +101,6 @@ entries:
     last_reviewed: "2026-06-08"
     refs: |-
       src/zwasm/engine.zig (InitOpts); src/runtime/instance/instantiate.zig (instance/table alloc); src/runtime/runtime.zig (growMemory page cap)
-  - id: "D-313"
-    layer: "test"
-    status: "blocked-by"
-    description: |-
-      blocked-by (fixture regen needs the Mac nix gen toolchain): the realworld
-      fixture `test/realworld/wasm/c_sha256_hash.wasm` has a WRONG baked expected
-      constant for "Hello, SHA-256!" — it expects
-      `3d61375cc279a6fe4c887bc4eee58ec78bc32cf2b026252918b9b0d74eaffeb5` and
-      self-reports "verify: FAIL". zwasm computes
-      `d0e8b8f11c98f369016eb2ed3c541e1f01382f9d5b3104c9ffd06b6175a46271`, which is
-      the CORRECT sha256 (verified: `printf 'Hello, SHA-256!' | shasum -a 256`
-      matches zwasm, interp AND jit). So this is a FIXTURE defect, not a zwasm
-      bug. It does NOT fail the gate because the realworld-RUN lane only checks
-      the run completes (exit 0), not the guest's self-reported stdout — a gate
-      hole (companion finding): a fixture with a wrong internal constant passes
-      silently. DISCHARGE: regen the fixture from its C source with the correct
-      expected (Mac `nix develop .#gen`), AND consider having the realworld-run
-      runner assert guest "result: OK" / no "FAIL" tokens in stdout to close the
-      hole. Surfaced 2026-06-08 reading the #3a-2 ubuntu log.
-    first_raised: "2026-06-08"
-    last_reviewed: "2026-06-08"
-    refs: |-
-      test/realworld/wasm/c_sha256_hash.wasm; scripts/run_remote_ubuntu.sh (realworld-run lane); .dev/toolchain_provisioning.md (nix .#gen)
   - id: "D-312"
     layer: "infra"
     status: "blocked-by"

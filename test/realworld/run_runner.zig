@@ -104,8 +104,19 @@ pub fn main(init: std.process.Init) !void {
         defer gpa.free(bytes);
 
         const run_argv: [1][]const u8 = .{entry.name};
-        const result = cli_run.runWasm(gpa, io, bytes, &run_argv);
+        // D-313 — capture guest stdout and refuse self-verify failures: a
+        // fixture printing "FAIL" (e.g. a wrong baked expected constant)
+        // must RED the gate, not pass on exit-code alone. The exit-code-only
+        // check let c_sha256_hash's wrong constant ship silently.
+        var guest_out: std.ArrayList(u8) = .empty;
+        defer guest_out.deinit(gpa);
+        const result = cli_run.runWasmCaptured(gpa, io, bytes, &run_argv, &guest_out, null);
         if (result) |exit_code| {
+            if (std.mem.find(u8, guest_out.items, "FAIL") != null) {
+                try stdout.print("FAIL  {s}: guest self-verify reported FAIL in stdout\n", .{entry.name});
+                failed += 1;
+                continue;
+            }
             try stdout.print("PASS  {s} (exit={d})\n", .{ entry.name, exit_code });
             passed += 1;
         } else |err| switch (err) {
