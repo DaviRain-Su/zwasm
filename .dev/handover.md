@@ -57,16 +57,15 @@
 - **Typed-API polish LANDED**: `assert_typed` + `component_p2` corpus
   directives · typed-invoke core deduped into `api/component_typed.zig`
   (P1 split) · docs `zig_api_design.md` §3.9.
-- **Validator skips 19→1 (corpus 157/0/1)**: index spaces + def-order
-  alias_space_before + semantic extern-name keys @6c895983 · rule 10
-  nested type-scope deep validation (named-types restriction per
-  wasm-tools model) @09c4d520 · rule 11 core-type section decode +
-  module-decl validation @785acfaf · rule-9 sortidx bounds (instantiate
-  args + inline exports; new core_global_count; the instantiate_* skips
-  were misdiagnosed — plain bounds, no nested decode needed) @7ee5c997.
-  The LAST skip-impl = `nested_component_resource_refs` (inner inline
-  component outer-aliasing the parent's RESOURCE type) — genuinely needs
-  recursive nested-component section decode.
+- **Component spec corpus COMPLETE: 158/0/0** (skips 19→0 this
+  session): index spaces + def-order alias_space_before + semantic
+  extern-name keys @6c895983 · rule 10 nested type-scope deep validation
+  @09c4d520 · rule 11 core-type section decode @785acfaf · rule-9
+  sortidx bounds @7ee5c997 · last case resolved @e988e4f4 — it rejects
+  via the UNDECODED resource-definition form (0x3f), the right verdict
+  for a decode-level reason; **D-322** (note) tracks the honest
+  residual: resource defs 0x3f/0x3e decode + the outer-alias
+  generativity rule + an exported-resource fixture must land TOGETHER.
 - **adr0180-phase2-listeners bundle CLOSED (exit MET on the re-scope
   arm)**: listeners/accept/local+remote-address/backlog + WSAPoll all
   LANDED (rust TcpListener e2e green Mac+ubuntu); windows verification
@@ -74,14 +73,13 @@
   @d039d727, D-319 row re-scoped to the named hang barrier (3-hypothesis
   list + targeted-probe plan in the row). D-320 size datapoint: base
   1.97 MB (+37.6 KB), lean unchanged.
-- **NEXT**: recursive nested-component decode (LAST validator skip;
-  design brief from survey: decode component-section bodies recursively
-  in decodeTypeInfo via decode.decode(sec.body) — body includes inner
-  preamble; add nested TypeInfo list + resource-type tracking — NOTE
-  resource DEFTYPE decode itself is still deferred at types.zig ~888 and
-  must land with it; validate inner outer-type-aliases of count==1
-  against parent resource entries, recurse). Then: D-319 windows probe
-  (one targeted `zig build test`-only remote run), D-318, D-251.
+- **NEXT (pick per component_model_plan Work sequence)**: D-322
+  (guest-defined resources — decode 0x3f/0x3e + generativity rule +
+  wit-bindgen exported-resource fixture; serves the CWFS WIT north star)
+  · D-319 windows hang probe (ONE targeted `zig build test`-only remote
+  run; hypothesis list in the row) · D-318 · D-251. Nested-decode survey
+  brief (for D-322's alias scan) is summarized in the D-322/manifest
+  notes.
 
 ## Closed-work pointers (detail in git log / ADRs)
 
