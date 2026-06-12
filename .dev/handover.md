@@ -6,25 +6,27 @@
 ## Active bundle
 
 - **Bundle-ID**: d314-jit-sandbox (interrupt poll → fuel → mem-cap → C-API/CLI)
-- **Cycles-remaining**: ~5
-- **Continuity-memo**: DONE — trap surface (`TrapKind.interrupted=16`) `5564c553`;
-  **arm64 prologue interrupt poll** `c1a9da15` (`JitRuntime.interrupt_ptr` trailing
-  field + `interrupt_ptr_off`; poll after the stack-probe `B.LS`: `LDR X16←ptr; CBZ
-  skip; LDR W17←[X16]; CMP W17,WZR; B.NE→interrupt stub kind=16`; `CMP+B.NE` NOT
-  CBNZ — EmitCindStub patcher does B/B.cond only; `JitInstance.setInterruptFlag`).
-  Prologue grew 56→76; param-store byte tests relativised to `body_start_offset()`.
-  **NEXT = x86_64 prologue poll** (after the `JBE` stack probe, emit.zig ~351;
-  stub in op_control.zig like the stack-overflow stub kind=16; MOV/TEST/JZ-skip/
-  MOV-flag/JNE). x86_64 prologue IS Win64-prologue-risk → `should_gate_windows.sh
-  --resume` + verify (windowsmini FREE now — user 2026-06-12, CWFS uses tag refs).
-  Then ungate the `runner_trap_test` interrupt test (drop the `skip.blocker(.@"D-314")`
-  arch-gate). Then loop **back-edge poll** (the `(loop)`-with-no-calls case; fb=
-  frame_bytes since it fires post-SUB-SP, a SEPARATE fixup list) → #3b fuel → #3c-2
-  mem-cap → #3a-4 CLI `--timeout`/`--fuel`/`--max-memory`. **Code-size note**: the
-  poll (20 B) + interrupt stub (28 B) are unconditional per fn — measure the bloat
-  and consider an opt-in compile flag (wasmtime-style) per perf-measure-first.
+- **Cycles-remaining**: ~4
+- **Continuity-memo**: DONE — trap surface `5564c553`; **prologue interrupt poll
+  BOTH arches** (arm64 `c1a9da15`, x86_64 `6d56f517`). Poll after the stack probe
+  reads `JitRuntime.interrupt_ptr` (trailing extern field) → CBZ/JZ skip when null
+  → load flag → CMP/TEST → B.NE/JNE into an interrupt stub (kind 16). arm64 `CMP+
+  B.NE` NOT CBNZ (EmitCindStub patcher = B/B.cond only); x86_64 stub in op_control.zig
+  via `ctx.interrupt_fixup`, gated on uses_runtime_ptr (R15). `JitInstance.setInterruptFlag`
+  drives it. body_start_offset +20 (arm64) / +30 (x86_64); byte tests relativised.
+  Test UNGATED, passes arm64+x86_64 (Rosetta); ubuntu + windows verify in flight.
+  **NEXT = loop BACK-EDGE poll** — a `(loop)` with no calls never re-enters a
+  prologue, so a tight loop isn't caught yet (the canonical exit-condition case).
+  Insert a poll at each backward branch (br/br_if/br_table to a loop header);
+  fires POST-SUB-SP → stub fb=frame_bytes (a SEPARATE fixup list, NOT the fb=0
+  prologue stub). On x86_64 a no-call loop fn lacks R15 → must FORCE R15 setup
+  when a loop is present (or the loop poll can't read the flag). Then #3b fuel →
+  #3c-2 mem-cap → #3a-4 CLI `--timeout`/`--fuel`/`--max-memory`. **Code-size note**:
+  poll (20–30 B) + stub (28 B) unconditional per fn — measure bloat, consider an
+  opt-in compile flag (wasmtime-style) per perf-measure-first.
 - **Exit-condition**: a JIT-compiled looping/recursive fn traps `error.Interrupted`
-  when the host raises the flag, verified 3-host (windows in scope for x86_64).
+  when the host raises the flag, verified 3-host. (Recursion: DONE both arches.
+  Tight loop: pending the back-edge poll.)
 
 ## JIT-correctness pass (2026-06-12) — LANDED, 2-host green
 
