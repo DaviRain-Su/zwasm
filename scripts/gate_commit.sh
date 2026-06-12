@@ -40,6 +40,24 @@ for arg in "$@"; do
     esac
 done
 
+# --- bounded execution ----------------------------------------------------
+#
+# 2026-06-12 host-memory-exhaustion audit: an unbounded `zig build test`
+# that hangs (e.g. a JIT-miscompiled infinite loop before D-314 interrupt
+# polls existed) becomes an hours-long orphan when the invoking session
+# dies — an 8.5 h zig process was observed overnight (21:27→05:54).
+# Every zig build here is bounded; a hang dies by itself even orphaned.
+bounded() {
+    local secs="$1"; shift
+    if command -v timeout >/dev/null 2>&1; then
+        timeout -k 30 "$secs" "$@"
+    elif command -v gtimeout >/dev/null 2>&1; then
+        gtimeout -k 30 "$secs" "$@"
+    else
+        "$@"
+    fi
+}
+
 # --- diff classification -------------------------------------------------
 
 STAGED="$(git diff --cached --name-only)"
@@ -236,7 +254,7 @@ elif [ "$DOCS_ONLY" -eq 1 ]; then
     echo "[gate_commit] (docs/config-only diff — skipping zig build test)"
 else
     echo "[gate_commit] zig build test ..."
-    zig build test
+    bounded 1800 zig build test
 fi
 
 # --- gate: edge-case fixture runner (corpus-touching commits only) -------
@@ -253,7 +271,7 @@ fi
 # This is enforcement, NOT swallow/skip: the runner still fails loudly.
 if [ -f build.zig ] && echo "$STAGED" | grep -qE '^test/(edge_cases|realworld)/'; then
     echo "[gate_commit] zig build test-edge-cases (corpus fixtures staged) ..."
-    zig build test-edge-cases
+    bounded 900 zig build test-edge-cases
 fi
 
 # --- gate: zig build lint (skipped on docs-only OR --fast) ---------------
@@ -270,7 +288,7 @@ elif [ "$DOCS_ONLY" -eq 1 ]; then
     echo "[gate_commit] (docs/config-only diff — skipping zig build lint)"
 else
     echo "[gate_commit] zig build lint ..."
-    zig build lint -- --max-warnings 0
+    bounded 900 zig build lint -- --max-warnings 0
 fi
 
 # --- scope-gated lints: rules / skills / .dev/*.md markers --------------

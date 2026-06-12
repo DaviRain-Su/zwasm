@@ -59,6 +59,24 @@ orphan_guard() {
         echo "[orphan_guard] reaped orphan 'ssh $host' ($pid, ppid 1)" >&2
     done
 
+    # 2.5. Reap LOCAL build/test orphans (2026-06-12 host-memory-exhaustion
+    #      audit). A `zig build` or a .zig-cache test binary whose parent
+    #      died re-parents to PID 1 and can hang for hours (8.5 h zig
+    #      observed overnight), holding memory while Defender re-scans its
+    #      cache churn. ppid==1 is precise: a live gate/build always has a
+    #      shell or build-runner parent, so legit in-flight work is never
+    #      touched. Runs on every remote-gate kick (= every loop turn) —
+    #      much tighter than the 30-min SessionStart backstop.
+    local cmd
+    for pid in $(pgrep -f 'zig build |\.zig-cache/o/|zig-out/bin/' 2>/dev/null || true); do
+        [ "$pid" = "$self_pid" ] && continue
+        ppid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')"
+        [ "$ppid" = "1" ] || continue
+        cmd="$(ps -o command= -p "$pid" 2>/dev/null | head -c 120)"
+        kill -TERM "$pid" 2>/dev/null || true
+        echo "[orphan_guard] reaped local build/test orphan ($pid, ppid 1): $cmd" >&2
+    done
+
     # 3. Re-exec self under a total time bound. Degrade gracefully if no
     #    timeout binary is on PATH (the reap already ran; run unbounded).
     export _REMOTE_GUARDED=1
