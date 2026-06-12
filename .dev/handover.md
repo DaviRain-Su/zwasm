@@ -83,9 +83,13 @@
   boxed state; unknown handles are typed shape errors. The CWFS "WIT as
   north star" stack is now end-to-end: introspection + typed calls +
   guest-defined resources.
-- **NEXT**: D-318 (Rosetta corpus-JIT diagnostic) · D-251 (C-API WASI
-  preopen ADR draft) · D-323 (stdlib NTSTATUS, blocked-by) · CM plan
-  long-tail per component_model_plan.md.
+- **ADR-0184 DRAFTED (Proposed)**: C-API engine-owned std.Io for WASI
+  preopen_dir/inherit_env (D-255 discharge design; ADR-0143 surface
+  reversal ⇒ awaiting USER review before implementation — the loop does
+  not implement it meanwhile).
+- **NEXT**: D-318 (Rosetta corpus-JIT SEGV diagnostic — local x86_64
+  runs; open as an investigation bundle if multi-cycle) · D-323
+  (blocked-by stdlib) · CM plan long-tail per component_model_plan.md.
 
 ## Closed-work pointers (detail in git log / ADRs)
 
