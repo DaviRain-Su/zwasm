@@ -93,7 +93,7 @@ ecosystem bar, not because v1 had it):
 | Custom page sizes           | Complete                                                                                               |
 | Atomics / relaxed-SIMD      | Complete (instruction sets; threaded EXECUTION stays §3.3)                                            |
 | WASI 0.1                    | Complete                                                                                               |
-| **Component Model**         | **wasmtime-equivalent** (ADR-0170/0181; opt-in `-Dcomponent`, campaign = Phase 17 NOW-pointer)         |
+| **Component Model**         | **wasmtime-equivalent — SHIPPED** (ADR-0170/0181/0182; default-ON, `-Dcomponent=false` = lean opt-out; campaign closed 2026-06-13, corpus 158/0/0) |
 | **WASI 0.2 (preview2)**     | **wasmtime-equivalent native host** (ADR-0170/0180; CLI world + fs + sockets-TCP shipped)              |
 | 4-platform JIT              | aarch64-darwin / aarch64-linux / x86_64-linux / x86_64-windows                                         |
 | Spec testsuite              | 100 %, 0 skip                                                                                          |

@@ -23,11 +23,26 @@
   (err-result helpers) · canon.zig stale B-chunk prose cleared
   (comment-only) · validate.zig NULL (audited healthy — candidate folds
   all fail the churn bar). Campaign-grown surfaces are clean.
-- **NOW-pointer: completion-refinement continues** — NEXT: debt
-  long-tail walk (Step 0.5 picks from the 58-entry ledger; zero `now`
-  rows — the long-tail is blocked-by/note re-evaluation + any
-  dischargeable `partial` rows) · D-323 stays blocked-by (stdlib).
-  Open user item: ADR-0184 (Proposed) awaits review.
+- **D-290 progressed**: regen_spec_2_0_assert.sh migrated to
+  wasm-tools (swap-GREEN, exact 25437/0/489 parity; + D-148
+  supported_multi staleness fixed). Remaining blocked distillers =
+  regen_wasmtime_misc.sh + regen_spec_simd_assert.sh (re-curation
+  class — per-fixture work, the D-290 row has the full evidence).
+- **STOPPED 2026-06-13 by user (weekly rate limit)** after a
+  resume-wiring audit: handover clean (no forbidden phrases, links
+  resolve), SessionStart/PostCompact hooks verified, continue-skill
+  file chain complete, ROADMAP §1.2 CM row reality-synced (was still
+  "opt-in/campaign-NOW"). A fresh session resumes with `/continue`
+  ALONE: it reads this file → the widget row 17 NOW-pointer
+  (completion-refinement) → next candidates below. All gates green at
+  stop (mac test/lint, ubuntu test-all @357a019e, windows batch
+  recorded @0a84e770; post-stop commits are mac-gated, ubuntu verifies
+  on first resume).
+- **NOW-pointer: completion-refinement continues** — NEXT candidates
+  (pick one): D-290 re-curation distillers (above) · debt long-tail
+  re-evaluation · §1.3 backlog stays demand-driven · D-323 blocked-by.
+  Open USER item: ADR-0184 (Proposed — C-API engine-owned io) awaits
+  review; the loop does not implement it meanwhile.
 - **Open user-decision item**: ADR-0184 Proposed (C-API engine-owned io
   — ADR-0143 surface reversal; loop does NOT implement until reviewed).
 - **Other open**: D-323 (stdlib NTSTATUS, blocked-by) · D-318 (note,
