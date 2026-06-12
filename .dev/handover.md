@@ -14,23 +14,28 @@
   sequence** — the "Parked" note at the bottom predates those pivots'
   completion. If the user prefers debt work instead, the candidates are in
   NEXT below.
-- Last: bundle **d314-jit-sandbox CLOSED** (see below) @316d77b8; 3-host
-  green (ubuntu @a1f3d84d, windowsmini @a1f3d84d recorded, Mac 2688/0).
-- **D-313 DISCHARGED `7079ab9a`**: run-runner now captures guest stdout and
-  FAILs on "FAIL" tokens (the assert immediately caught rust_sha256 as a
-  SECOND defective fixture); both sha256 fixtures regenerated from corrected
-  in-repo sources (test/realworld/src/ + PROVENANCE.md; gen-shell emcc +
-  cargo wasip1); run lane 55/55, diff lane MATCH vs wasmtime. Docs synced to
-  the shipped sandboxing surface @4aa14310 (cli/c_api refs, README,
-  CHANGELOG, migration guide ×8 rows, ROADMAP §3.1/§10.4 code-as-truth).
-- **ADR-0078 SOON drifts CLEARED**: the 4 standing pre-push findings
-  (D-157/162/163/164) resolved — closure SHAs cited in the table + the
-  pairing script taught id-first discharge phrasings; drift 0.
-- **NEXT (default, per ROADMAP)**: resume the CM + WASI-P2 campaign at
-  `component_model_plan.md`'s Work sequence. Secondary (user-redirect only):
-  ledger long-tail — D-318 (Rosetta corpus-JIT SEGVs, local-diagnostic),
-  D-314 note follow-ons (poll code-size measure, perf-measure-first cheap),
-  D-251 (C-API WASI preopen io-acquisition ADR).
+- Last: **CM campaign resumed** — validator **rule 5 name format / kebab**
+  @2b2eaeac (E3-CM-validation bundle; corpus runner 11/0, Mac test-all+lint
+  green). Prior: d314-jit-sandbox bundle CLOSED @316d77b8 (3-host green);
+  D-313 discharged @7079ab9a; ADR-0078 SOON drifts cleared (drift 0).
+- **NEXT**: E3-CM-validation bundle next rule — outer-alias count (~5 corpus
+  cases), then export-type validity (~15), undefined-resource refs (~5). See
+  `## Active bundle`. Secondary (user-redirect only): ledger long-tail —
+  D-318 (Rosetta corpus-JIT SEGVs), D-314 note follow-ons, D-251 (C-API WASI
+  preopen io-acquisition ADR).
+
+## Active bundle
+
+- **Bundle-ID**: E3-CM-validation (ADR-0176)
+- **Cycles-remaining**: ~3
+- **Continuity-memo**: rules land in corpus-frequency order; DONE rules 1–4
+  index bounds (`cfdb07be`/`6224a7e7`/`5374dca7`/`d72c1b44`) + rule 5 name
+  format (`2b2eaeac`). Next: outer-alias count → export-type validity →
+  undefined-resource refs. Deep-type cases = truthful `skip-impl`.
+- **Exit-condition**: corpus runner covers the structural categories
+  (index-bounds / names / outer-alias / export-type / resource-refs) with
+  committed fixtures, 0 fail; remaining corpus categories triaged as either
+  fixture-covered or per-case `skip-impl` with reason.
 
 ## Sandboxing bundle d314-jit-sandbox — CLOSED 2026-06-12
 

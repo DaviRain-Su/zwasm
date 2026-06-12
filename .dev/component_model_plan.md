@@ -211,8 +211,11 @@ design forks. Update this doc's `[x]` + handover NEXT each chunk.
   **E3-CM-validation bundle (ADR-0176) OPEN**: structural-first component validator
   `src/feature/component/validate.zig` (post-decode, pre-instantiate, all 3 host entry points), driven by the official
   `component-model/test/wasm-tools` `assert_invalid` corpus (365+17). Runner gained `assert_invalid`/`assert_malformed`
-  directives. **Rule 1 (type-index bounds) DONE** — fixture `type_index_oob/oob.wasm`. Rules 2–4 (names / alias /
-  export-type) follow as chunks; deep-type cases = truthful `skip-impl`. See handover `## Active bundle`.
+  directives. **DONE: rules 1–4 index bounds** (type `cfdb07be` / canon `6224a7e7` / alias-instance `5374dca7` /
+  externdesc `d72c1b44`; fixtures `*_index_oob/`) + **rule 5 name format** (`2b2eaeac` — kebab `label` grammar on
+  deftype labels + import/export names incl. interfacename/bracket forms; fixture `kebab_name/`, corpus 11/0).
+  Next rules by corpus frequency: outer-alias count (~5) · export-type validity (~15) · undefined-resource refs (~5);
+  deep-type cases = truthful `skip-impl`. See handover `## Active bundle`.
   Remaining (separate): more WASI-P2 boundary fixtures (trap/handle-invalid paths).
 
 ## Retrospective (fill at campaign close)
