@@ -243,6 +243,13 @@ fn builtRealloc(p: *anyopaque, old_ptr: u32, old_size: u32, alignment: u32, new_
     return ptr;
 }
 
+/// `CanonContext.borrow_rep_fn` over a BUILT component: a borrow handle of
+/// a guest-defined resource resolves to its rep in the component's table.
+fn builtBorrowRep(p: *anyopaque, ti: u32, handle: u32) canon.BorrowRepError!u32 {
+    const ctx: *cwasi.WasiP2Ctx = @ptrCast(@alignCast(p));
+    return ctx.guest_resources.rep(ti, handle) catch canon.BorrowRepError.InvalidHandle;
+}
+
 /// ADR-0183 F3 — TYPED invoke against a BUILT component (the general
 /// ADR-0175 graph incl. WASI wiring): real-toolchain components import
 /// wasi, so the single-module `ComponentInstance` path cannot run them.
@@ -267,6 +274,9 @@ pub fn invokeTypedBuilt(
         .memory_fn = builtMemoryFetch,
         .realloc_ctx = @ptrCast(built.ctx),
         .realloc_fn = builtRealloc,
+        // D-322: borrow params of guest-defined resources lower to the rep.
+        .resource_ctx = @ptrCast(built.ctx),
+        .borrow_rep_fn = builtBorrowRep,
     };
     return typed.invokeTypedCore(built.alloc, info, cx, core_inst, pr_inst, ft, r, args, out_alloc);
 }
@@ -1703,6 +1713,20 @@ test "D-322: a wit-bindgen guest-defined resource component builds + counter rou
     try testing.expectEqual(@as(i32, 6), vres[0].i32);
     try main_inst.invoke("zwasm:restest/counter-api#[method]counter.get", &.{.{ .i32 = rep }}, &vres);
     try testing.expectEqual(@as(i32, 6), vres[0].i32);
+
+    // TYPED path (D-322 slice b): instance-path export resolution +
+    // own-result lift + borrow-param lower through the table hook.
+    const h = (try invokeTypedBuilt(&built, "zwasm:restest/counter-api#[constructor]counter", &.{.{ .u32 = 40 }}, testing.allocator)).?;
+    try testing.expect(h == .own);
+    const g1 = (try invokeTypedBuilt(&built, "zwasm:restest/counter-api#[method]counter.get", &.{.{ .borrow = h.own }}, testing.allocator)).?;
+    try testing.expectEqual(@as(u32, 40), g1.u32);
+    const g2 = (try invokeTypedBuilt(&built, "zwasm:restest/counter-api#[method]counter.increment", &.{.{ .borrow = h.own }}, testing.allocator)).?;
+    try testing.expectEqual(@as(u32, 41), g2.u32);
+    // an unknown borrow handle is a typed shape error, not a crash
+    try testing.expectError(
+        error.ValueTypeMismatch,
+        invokeTypedBuilt(&built, "zwasm:restest/counter-api#[method]counter.get", &.{.{ .borrow = 999 }}, testing.allocator),
+    );
 }
 
 test "ADR-0183 F1: greet introspects as (param string) -> string from the binary" {

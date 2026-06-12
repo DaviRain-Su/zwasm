@@ -800,12 +800,16 @@ entries:
       0x3f is sleb-positive unlike every other deftype op) + dtor core-func bounds +
       rule 12 (nested-component scan; outer-aliasing the parent's generative resource —
       or a def transitively carrying own/borrow/resource — rejects). 0x3e (async dtor)
-      stays a truthful UnsupportedTypeForm. RESIDUAL (Phase-I MEASURED @ the
-      resource_counter fixture): buildWasiP2Component fails UnknownImport on the
-      synthesized '[export]<iface>' '[resource-new]/[resource-drop]<r>' core imports —
-      wire canon resource.new/drop/rep core_funcs to the C1 resource table in the graph
-      builder; then ComponentValue needs own-handle arms so invokeTyped can drive
-      [constructor] -> own<r> -> [method]. Discharge: resource_counter e2e green.
+      stays a truthful UnsupportedTypeForm. CLOSED (discharge met: resource_counter
+      e2e green on the runtime AND typed paths): the graph engine synthesizes the
+      '[export]<iface>' resource builtins over a guest table + build-time dtor
+      resolution; ComponentValue/CanonType own+borrow flow through
+      flatten/lower/lift/store/load with the CanonContext borrow_rep hook
+      (lower_borrow owner-rep rule); exportedFuncIndex resolves "<iface>#<func>"
+      paths through wit-component interface-wrapper instantiations (nested scan
+      import/export maps + instance_origins local-ordinal mapping). Residual ideas
+      (own params transfer semantics, non-import-backed wrapper exports) are
+      demand-driven follow-ups, not gaps in the shipped surface.
     first_raised: "2026-06-13"
     last_reviewed: "2026-06-13"
     refs: |-

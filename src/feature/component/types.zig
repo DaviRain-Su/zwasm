@@ -366,7 +366,14 @@ pub const AliasSpaceBefore = struct {
 pub const NestedComponentScan = struct {
     outer_type_aliases: []const OuterTypeRef,
     children: []const NestedComponentScan,
+    /// Func-sort IMPORT names in definition order (the inner func index
+    /// space prefix) — wit-component interface wrappers re-export these.
+    func_import_names: []const []const u8 = &.{},
+    /// Func-sort EXPORTS (name + inner func index).
+    func_exports: []const NestedFuncExport = &.{},
 };
+
+pub const NestedFuncExport = struct { name: []const u8, index: u32 };
 
 pub const OuterTypeRef = struct { count: u32, index: u32 };
 
@@ -574,15 +581,59 @@ pub const TypeInfo = struct {
     /// The WIT `functype` of a lifted func export, or null when the export
     /// does not resolve to a concrete local functype (alias-minted types
     /// stay deferred — concrete components lift with an explicit type).
-    pub fn resolveFuncType(self: *const TypeInfo, export_name: []const u8) ?FuncType {
-        var func_idx: ?u32 = null;
-        for (self.exports.items) |e| {
-            if (e.sort == .func and std.mem.eql(u8, e.name, export_name)) {
-                func_idx = e.index;
-                break;
+    /// Resolve a func-export PATH to its component-func index: a top-level
+    /// func export name, or `<instance-export>#<func>` addressing a func
+    /// inside an exported INSTANCE (wit-bindgen interface exports; D-322).
+    fn exportedFuncIndex(self: *const TypeInfo, path: []const u8) ?u32 {
+        if (std.mem.findScalar(u8, path, '#')) |hash| {
+            const iface = path[0..hash];
+            const fname = path[hash + 1 ..];
+            for (self.exports.items) |e| {
+                if (std.meta.activeTag(e.sort) != .instance) continue;
+                if (!std.mem.eql(u8, e.name, iface)) continue;
+                // e.index indexes the full instance space (imports mint
+                // indices too); map to the LOCAL-defs ordinal.
+                if (e.index >= self.instance_origins.items.len) return null;
+                if (std.meta.activeTag(self.instance_origins.items[e.index]) != .local) return null;
+                var local_ord: usize = 0;
+                for (self.instance_origins.items[0..e.index]) |o| {
+                    if (std.meta.activeTag(o) == .local) local_ord += 1;
+                }
+                if (local_ord >= self.component_instances.items.len) return null;
+                switch (self.component_instances.items[local_ord]) {
+                    .inline_exports => |exps| for (exps) |ie| {
+                        if (std.meta.activeTag(ie.sort) == .func and std.mem.eql(u8, ie.name, fname)) return ie.index;
+                    },
+                    // A wit-component interface WRAPPER: a nested component
+                    // that re-exports its func imports under the interface
+                    // names; chase export -> inner import -> instantiate arg.
+                    .instantiate => |it| {
+                        if (it.component >= self.nested_scans.items.len) return null;
+                        const scan = self.nested_scans.items[it.component];
+                        for (scan.func_exports) |fe| {
+                            if (!std.mem.eql(u8, fe.name, fname)) continue;
+                            if (fe.index >= scan.func_import_names.len) return null; // non-import-backed — deferred
+                            const iname = scan.func_import_names[fe.index];
+                            for (it.args) |arg| {
+                                if (std.meta.activeTag(arg.sort) == .func and std.mem.eql(u8, arg.name, iname)) return arg.index;
+                            }
+                            return null;
+                        }
+                        return null;
+                    },
+                }
+                return null;
             }
+            return null;
         }
-        const fi = func_idx orelse return null;
+        for (self.exports.items) |e| {
+            if (e.sort == .func and std.mem.eql(u8, e.name, path)) return e.index;
+        }
+        return null;
+    }
+
+    pub fn resolveFuncType(self: *const TypeInfo, export_name: []const u8) ?FuncType {
+        const fi = self.exportedFuncIndex(export_name) orelse return null;
         const lift = self.liftForFuncIndex(fi) orelse return null;
         const ti = lift.type_index;
         if (ti >= self.type_space.items.len) return null;
@@ -636,14 +687,7 @@ pub const TypeInfo = struct {
     /// `canon lift`s in order (true for a single-component leaf; func imports /
     /// aliases occupy earlier slots and are handled when a component uses them).
     pub fn resolveLiftedFunc(self: *const TypeInfo, export_name: []const u8) ?ResolvedLift {
-        var func_idx: ?u32 = null;
-        for (self.exports.items) |e| {
-            if (e.sort == .func and std.mem.eql(u8, e.name, export_name)) {
-                func_idx = e.index;
-                break;
-            }
-        }
-        const fi = func_idx orelse return null;
+        const fi = self.exportedFuncIndex(export_name) orelse return null;
         const lift = self.liftForFuncIndex(fi) orelse return null;
         return .{
             .core_func = self.resolveCoreFuncExport(lift.core_func) orelse return null,
@@ -1110,6 +1154,8 @@ fn scanNestedComponent(a: std.mem.Allocator, bytes: []const u8) Error!NestedComp
     };
     var outer_refs: std.ArrayList(OuterTypeRef) = .empty;
     var children: std.ArrayList(NestedComponentScan) = .empty;
+    var func_imports: std.ArrayList([]const u8) = .empty;
+    var func_exports: std.ArrayList(NestedFuncExport) = .empty;
     for (inner.sections.items) |sec| switch (sec.id) {
         .alias => {
             var tmp: std.ArrayList(Alias) = .empty;
@@ -1122,12 +1168,30 @@ fn scanNestedComponent(a: std.mem.Allocator, bytes: []const u8) Error!NestedComp
                 }
             }
         },
+        .import => {
+            var tmp: std.ArrayList(Import) = .empty;
+            try decodeImportSection(a, &tmp, sec.body);
+            for (tmp.items) |imp| switch (imp.desc) {
+                .func => try func_imports.append(a, imp.name),
+                else => {},
+            };
+        },
+        .@"export" => {
+            var tmp: std.ArrayList(Export) = .empty;
+            try decodeExportSection(a, &tmp, sec.body);
+            for (tmp.items) |ex| {
+                if (std.meta.activeTag(ex.sort) == .func)
+                    try func_exports.append(a, .{ .name = ex.name, .index = ex.index });
+            }
+        },
         .component => try children.append(a, try scanNestedComponent(a, sec.body)),
         else => {},
     };
     return .{
         .outer_type_aliases = outer_refs.items,
         .children = children.items,
+        .func_import_names = func_imports.items,
+        .func_exports = func_exports.items,
     };
 }
 
