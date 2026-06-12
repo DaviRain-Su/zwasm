@@ -15,11 +15,15 @@
 - **Campaign-close audit DONE** (private/audit-2026-06-13.md): 0 block;
   3 soon ALL FIXED inline (validate.zig/types.zig stale headers; 14
   blocked-by rows re-walked + dates refreshed). Health good.
+- **Docs sweep DONE**: README CM row reality-synced (was: "opt-in,
+  default false, rules 1-4, parked" — now default-ON / campaign complete
+  / 158/0/0) + zig_api_design §3.9 extended with resources/handles +
+  instance-path addressing.
 - **NOW-pointer: completion-refinement** — NEXT candidates: simplify
   pass over the grown component files (component_wasi_p2 / canon /
-  validate — soft-cap set; no hard-cap breach) · docs sweep
-  (zig_api_design §3.9 extension for resources/own-borrow handles +
-  README/tutorial CM mention) · debt long-tail · D-323 blocked-by.
+  validate; soft-cap set, no hard-cap breach — fork the simplify
+  subagent per file) · remaining debt long-tail walk (Step 0.5 picks) ·
+  D-323 blocked-by (stdlib).
 - **Open user-decision item**: ADR-0184 Proposed (C-API engine-owned io
   — ADR-0143 surface reversal; loop does NOT implement until reviewed).
 - **Other open**: D-323 (stdlib NTSTATUS, blocked-by) · D-318 (note,
