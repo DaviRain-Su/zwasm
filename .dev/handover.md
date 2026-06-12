@@ -54,45 +54,21 @@
   batch at 43ab91a8: all suites green on win64 incl. component corpus;
   the one red was the NEW TCP e2e lacking its D-319 gate — fixed
   @d0cd9f67 (next batch verifies + --record).
-- **NEW NOW-POINTER (user-directed 2026-06-13): ADR-0183 typed component
-  embedder API** — CWFS's ADR-0135 made WIT the north star
-  (component-as-namespace; no .wit sidecar; records↔maps etc.). See
-  `## Active bundle`. After: sockets Phase-2 / remaining 19 validator
-  skips / D-318 / D-314 / D-251.
-
-## Active bundle
-
-- **Bundle-ID**: typed-component-api (ADR-0183 / plan Phase F)
-- **Cycles-remaining**: ~4
-- **Continuity-memo**: **F1 DONE** (`value.zig` ComponentValue +
-  `TypeInfo.resolveFuncType`/`exportedFuncs` + ComponentInstance API;
-  greet introspects (param string)->string from the binary). **NEXT =
-  F2**: `invokeTyped` LOWER — validate args vs the export's FuncType,
-  lower via canon.zig (flat when it fits; cabi_realloc + memory writes
-  for string/list/record, mirroring invokeStringExport's plumbing in
-  api/component.zig ~L178). Then F3 lift + compound round-trip, F4
-  wit-bindgen proof fixture + `assert_typed` directives. Consumer =
-  CWFS (blocked on this surface). **F2 design note**: canon.store's
-  list branch uses `cx.memory` AFTER `cx.realloc` — a LATENT staleness
-  bug when realloc grows/moves guest memory (existing fixtures pre-size;
-  invokeString re-fetches between calls). F2a = make CanonContext
-  re-fetch memory via callback (mech. replace `cx.memory` reads) + add
-  **F2a+F2b DONE**: flatten machinery + staleness fix + decoded-type
-  bridge + ComponentValue converters + `invokeTyped` (greet runs TYPED:
-  string in → owned "Hello, zwasm!" out; shape/arity validation).
-  **NEXT = F3/F4 (bundle exit)**: fixture BUILT (/tmp/typedtest —
-  wit-bindgen 0.36 world `typed-test`, export `process(payload) ->
-  result<payload, string>`, payload = record{list<u32>, string};
-  cargo wasm32-wasip2, 51 KB; lib.rs must NOT re-`use` generated types).
-  It imports wasi (rust-std baggage) → the single-module
-  `instantiate()` path can't run it. IN-FLIGHT: extract the ADR-0175
-  general builder from runWasiP2Main into `buildWasiP2Instances` →
-  `BuiltComponent` (instances+ctx+info, deinit) and generalize
-  invokeTyped to run against the built main instance (CWFS components
-  will import wasi too). Then commit fixture + e2e + docs.
-- **Exit-condition**: a committed wit-bindgen component exchanging
-  `record{list<u32>, string}` ↔ `result<record, string>` round-trips
-  through `invokeTyped` in an e2e test (greet also callable typed).
+- **typed-component-api bundle CLOSED (exit MET)**: ADR-0183 F1–F4
+  shipped — ComponentValue + binary introspection + canonical-ABI call
+  flattening (+ canon memory-staleness fix) + invokeTyped /
+  invokeTypedBuilt (general builder extracted from runWasiP2Main as
+  `BuiltComponent`) + named-type/nested-scope resolution
+  (TypeSpaceEntry provenance; `use`d interface types resolve into the
+  import's instance-type decls). PROOF: wit-bindgen `typed_payload`
+  round-trips `record{list<u32>, string}` ↔ `result<record, string>`
+  with named fields + re-specialization; greet runs typed. Both CWFS
+  ADR-0135 runtime asks now servable. Follow-up polish (not bundled):
+  `assert_typed` corpus directive · docs Zig-API section · simplify
+  pass (api/component.zig at 1994 LOC, near the 2000 cap).
+- **NEXT (CM campaign)**: simplify/docs polish for the typed API, then
+  sockets Phase-2 (listeners + D-319) or the 19 validator skips.
+  Secondary: D-318, D-314 follow-ons, D-251.
 
 ## Closed-work pointers (detail in git log / ADRs)
 
