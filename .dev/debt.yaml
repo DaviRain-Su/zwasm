@@ -798,6 +798,24 @@ entries:
     last_reviewed: "2026-06-13"
     refs: |-
       ADR-0180 (Phase 2 Revision); src/wasi/p2_sockets.zig pollOnce/WSAPoll; lesson windows-test-compile-gate
+  - id: "D-322"
+    layer: "feature/component"
+    status: "note"
+    description: |-
+      note (CM feature gap): resource-type DEFINITIONS (deftype 0x3f sync / 0x3e async)
+      are undecoded — decodeDefType returns UnsupportedTypeForm (types.zig "resourcetype"
+      TODO). The runtime resource TABLE exists (C1) and `(sub resource)` import bounds
+      work, but a guest-DEFINED resource (wit-bindgen exported resource) cannot decode.
+      Side effect: corpus nested_component_resource_refs/outer_alias_resource passes for
+      this decode-level reason, NOT the real rule (inner component outer-aliasing the
+      parent's generative resource type). Discharge: decode 0x3f/0x3e + validate the
+      outer-alias generativity rule (needs the nested-component alias scan) + a
+      wit-bindgen exported-resource fixture e2e; the corpus case must then still reject.
+    first_raised: "2026-06-13"
+    last_reviewed: "2026-06-13"
+    refs: |-
+      types.zig decodeDefType 0x3f TODO; nested_component_resource_refs/manifest.txt; ADR-0176
+
 
   - id: "D-318"
     layer: "test"

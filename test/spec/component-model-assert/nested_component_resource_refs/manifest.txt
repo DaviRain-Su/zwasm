@@ -1,4 +1,9 @@
 # Official corpus category: "refers to resources not defined in the current
-# component" (resources.wast, ~5 cases). Representative fixture committed as
-# outer_alias_resource.{wat,wasm} for when the gap closes.
-skip-impl nested inline-component decode not implemented — the decoder enumerates top-level sections only, so an inner component's outer-alias of a parent resource type is invisible to the validator (ADR-0176 deferred)
+# component" (resources.wast, ~5 cases). The verdict is GREEN today but for a
+# decode-level reason: resource-type DEFINITIONS (0x3f) are still undecoded
+# (UnsupportedTypeForm — D-322), so the PARENT's `(type $t (resource ...))`
+# rejects before the alias rule is ever consulted. When D-322 lands resource
+# defs, the inner-component outer-alias-of-parent-resource rule (Binary.md:
+# outer-aliased types must not be generative) must land WITH it or this case
+# regresses to a false accept.
+assert_invalid test/spec/component-model-assert/nested_component_resource_refs/outer_alias_resource.wasm
