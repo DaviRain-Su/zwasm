@@ -19,11 +19,11 @@
   default false, rules 1-4, parked" — now default-ON / campaign complete
   / 158/0/0) + zig_api_design §3.9 extended with resources/handles +
   instance-path addressing.
-- **NOW-pointer: completion-refinement** — NEXT candidates: simplify
-  pass over the grown component files (component_wasi_p2 / canon /
-  validate; soft-cap set, no hard-cap breach — fork the simplify
-  subagent per file) · remaining debt long-tail walk (Step 0.5 picks) ·
-  D-323 blocked-by (stdlib).
+- **Simplify pass 1/3 DONE**: component_wasi_p2 -31 LOC (err-result
+  helpers folded; stale docstrings removed; gates green).
+- **NOW-pointer: completion-refinement** — NEXT: simplify canon.zig
+  (1549) then validate.zig (1199) via the same subagent recipe (null
+  result acceptable) · debt long-tail walk · D-323 blocked-by.
 - **Open user-decision item**: ADR-0184 Proposed (C-API engine-owned io
   — ADR-0143 surface reversal; loop does NOT implement until reviewed).
 - **Other open**: D-323 (stdlib NTSTATUS, blocked-by) · D-318 (note,
