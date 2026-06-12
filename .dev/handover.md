@@ -38,12 +38,10 @@
   posture** (seam asserts at zwasm/instance.zig:49-50 stay) → "facade
   engine=jit arming" is OUT; the CLI JIT path arms JitInstance directly
   (setFuel/setMemoryPagesLimit/setInterruptFlag all exist post-#3b/#3c-2).
-  **Chunk 1 (CLI)**: `--fuel <N>` (interp: rt.fuel via the api Instance's
-  runtime ptr; jit: thread into runWasmJit→runner opts), `--max-memory
-  <bytes>` (interp: store_memory_pages_max; jit: MemGrowCtx.host_max_pages),
-  `--timeout <ms>` (host timer thread → interrupt flag; works BOTH engines —
-  JIT polls interrupt_ptr since #3a). Engine-dependent fuel units documented
-  in --help. **Chunk 2 (C-API)**: zwasm.h minimal instance-level setters
+  **Chunk 1 (CLI) DONE `ce2ded2b`**: all 3 flags on both engines (io.concurrent
+  timer raises the shared interrupt flag; runner.RunLimits arms the JitRuntime;
+  cwasm/component runs refuse the flags loudly; grow-probe pins the bytes→pages
+  conversion; 2685/0). **NEXT = Chunk 2 (C-API)**: zwasm.h minimal instance-level setters
   (mirror facade: set_fuel/fuel_remaining/set_memory_pages_limit/interrupt;
   v1 was config-level — v2 chose post-instantiate mutability) + TrapKind 16/17
   exposure; needs a small ADR-0179 rev note on the C naming. THEN bundle
