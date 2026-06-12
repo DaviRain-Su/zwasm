@@ -6,27 +6,30 @@
 ## Active bundle
 
 - **Bundle-ID**: d314-jit-sandbox (interrupt poll → fuel → mem-cap → C-API/CLI)
-- **Cycles-remaining**: ~4
+- **Cycles-remaining**: ~3
 - **Continuity-memo**: DONE — trap surface `5564c553`; **prologue interrupt poll
-  BOTH arches** (arm64 `c1a9da15`, x86_64 `6d56f517`). Poll after the stack probe
-  reads `JitRuntime.interrupt_ptr` (trailing extern field) → CBZ/JZ skip when null
-  → load flag → CMP/TEST → B.NE/JNE into an interrupt stub (kind 16). arm64 `CMP+
-  B.NE` NOT CBNZ (EmitCindStub patcher = B/B.cond only); x86_64 stub in op_control.zig
-  via `ctx.interrupt_fixup`, gated on uses_runtime_ptr (R15). `JitInstance.setInterruptFlag`
-  drives it. body_start_offset +20 (arm64) / +30 (x86_64); byte tests relativised.
-  Test UNGATED, passes arm64+x86_64 (Rosetta); ubuntu + windows verify in flight.
-  **NEXT = loop BACK-EDGE poll** — a `(loop)` with no calls never re-enters a
-  prologue, so a tight loop isn't caught yet (the canonical exit-condition case).
-  Insert a poll at each backward branch (br/br_if/br_table to a loop header);
-  fires POST-SUB-SP → stub fb=frame_bytes (a SEPARATE fixup list, NOT the fb=0
-  prologue stub). On x86_64 a no-call loop fn lacks R15 → must FORCE R15 setup
-  when a loop is present (or the loop poll can't read the flag). Then #3b fuel →
-  #3c-2 mem-cap → #3a-4 CLI `--timeout`/`--fuel`/`--max-memory`. **Code-size note**:
-  poll (20–30 B) + stub (28 B) unconditional per fn — measure bloat, consider an
-  opt-in compile flag (wasmtime-style) per perf-measure-first.
-- **Exit-condition**: a JIT-compiled looping/recursive fn traps `error.Interrupted`
-  when the host raises the flag, verified 3-host. (Recursion: DONE both arches.
-  Tight loop: pending the back-edge poll.)
+  BOTH arches** (arm64 `c1a9da15`, x86_64 `6d56f517`, 3-host green — recursion/call
+  case); **arm64 loop BACK-EDGE poll** `5b441f96` (poll at each br/br_if-to-loop
+  site → POST-frame stub fb=frame_bytes via the SEPARATE `back_edge_interrupt_fixups`
+  list; helper `emitBackEdgeInterruptPoll`; a tight `(loop)` now traps on arm64).
+  **NEXT = x86_64 loop back-edge poll** — mirror the arm64 helper in
+  x86_64/op_control.zig at the br/br_if-to-loop sites (a SEPARATE `interrupt_fixup`
+  is already a single u32 — need a LIST or a 2nd fixup; the back-edge stub is a
+  2nd op_control stub block with fb-restore = `ADD RSP, frame_bytes` before POP).
+  **CRITICAL x86_64 gotcha**: a no-call loop fn has NO R15 (`uses_runtime_ptr=false`)
+  → the back-edge poll can't read interrupt_ptr → must FORCE uses_runtime_ptr (R15
+  setup) when the fn contains a loop (prescan, or set it in usage.usesRuntimePtr).
+  Then UNGATE the loop test (drop `skip.blocker(.@"D-314")`) + the br_table-to-loop
+  case (both arches). Then #3b fuel → #3c-2 mem-cap → #3a-4 CLI. **Code-size**: poll
+  +stub unconditional per fn — measure, consider opt-in flag (perf-measure-first).
+  **GATE NOTE**: the 3 D-311 raw-entry-call tests (linker×2/entry-f32,
+  releasesafe_jit_failures.md) crash SEED-FLAKILY in `zig build test` (undefined-
+  memory read picks up test-order leftover) → can intermittently RED the local
+  pre-commit gate. Pre-existing; retry the commit (reshuffles the seed) or the
+  3-host test-all (Debug unit + ReleaseSafe integration) is the authority.
+- **Exit-condition**: a JIT looping/recursive fn traps `error.Interrupted` when the
+  host raises the flag. Recursion: DONE both arches. Tight loop: DONE arm64,
+  pending x86_64 back-edge.
 
 ## JIT-correctness pass (2026-06-12) — LANDED, 2-host green
 
