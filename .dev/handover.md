@@ -15,13 +15,14 @@
   cargo wasip1); run lane 55/55, diff lane MATCH vs wasmtime. Docs synced to
   the shipped sandboxing surface @4aa14310 (cli/c_api refs, README,
   CHANGELOG, migration guide ×8 rows, ROADMAP §3.1/§10.4 code-as-truth).
-- **NEXT: debt-hygiene chunk** — the 4 ADR-0078 SOON drift findings every
-  pre-push prints (SKIP-NO-LINK-TYPECHECK→D-157, SKIP-WIN64-EXHAUSTION→D-162
-  discharged @17917f07 but still cited, SKIP-WIN64-CALL-INDIRECT-TRAP→D-163,
-  SKIP-WIN64-MULTI-RESULT→D-164): update ADR-0078's Paired-artifact column
-  (cite discharge SHAs or remove dead SKIP rows). Then: Phase-16 ledger
-  long-tail (all §9.16 table rows are [x]; the phase is open-ended — debt
-  repayment + surface refinement per ADR-0156).
+- **ADR-0078 SOON drifts CLEARED**: the 4 standing pre-push findings
+  (D-157/162/163/164) resolved — closure SHAs cited in the table + the
+  pairing script taught id-first discharge phrasings; drift 0.
+- **NEXT**: Phase-16 ledger long-tail (all §9.16 rows [x]; open-ended debt
+  repayment + surface refinement per ADR-0156). At resume: Step 0.5 debt
+  sweep picks the next item — candidates: D-318 (Rosetta corpus-JIT SEGVs,
+  local-diagnostic), D-314 note follow-ons (poll code-size measure is
+  perf-measure-first cheap), D-251 (C-API WASI preopen io-acquisition ADR).
 
 ## Sandboxing bundle d314-jit-sandbox — CLOSED 2026-06-12
 
