@@ -396,6 +396,7 @@ const p2GetDirectories = cwasi.p2GetDirectories;
 // Tests
 // ============================================================
 const testing = std.testing;
+const skip = @import("../test_support/skip.zig");
 
 /// A minimal core module: `(module (func (export "run") (result i32) i32.const 42))`.
 const core_run42 = [_]u8{
@@ -1459,6 +1460,9 @@ fn tcpEchoServerOnce(io: std.Io, server: *std.Io.net.Server) void {
 }
 
 test "ADR-0180: a real rust wasip2 TCP client connects + echoes through wasi:sockets" {
+    // Windows socket-host verification is ADR-0180 Phase-2 scope (D-319) —
+    // the readiness pollOnce panics there until WSAPoll lands.
+    if (@import("builtin").os.tag == .windows) return skip.blocker(.@"D-319");
     var threaded: std.Io.Threaded = .init(testing.allocator, .{});
     defer threaded.deinit();
     const io = threaded.io();
