@@ -73,17 +73,22 @@
   @d039d727, D-319 row re-scoped to the named hang barrier (3-hypothesis
   list + targeted-probe plan in the row). D-320 size datapoint: base
   1.97 MB (+37.6 KB), lean unchanged.
-- **D-319 probe IN FLIGHT**: `-Dd319-probe=true` flag landed (permanent
-  diagnostic; 7 skip sites honor it); probe run
-  `run_remote_windows.sh 'test -Dd319-probe=true'` kicked with timeout
-  1200 → verdict in /tmp/win_probe.log at next Step 0.7. Reproduces
-  (timeout) = hang confirmed in the unit step; completes = hang was in a
-  RUNNER-vs-test interaction, rethink. Next probe after evidence:
-  bisect unit-vs-e2e (the unit step includes component.zig e2e tests).
-- **NEXT (pick per component_model_plan Work sequence)**: D-322
-  (guest-defined resources — decode 0x3f/0x3e + generativity rule +
-  wit-bindgen exported-resource fixture; serves the CWFS WIT north star)
-  · D-319 next probe per evidence · D-318 · D-251.
+- **D-319 probe #1 evidence (in flight)**: `zig build test
+  -Dd319-probe=true` on windowsmini showed NO output for 14+ min (normal
+  ~5 min) → hang REPRODUCES in the unit step (verdict via timeout-1200
+  notification; /tmp/win_probe.log). Next probe: bisect — the unit
+  binary contains BOTH p2_sockets lifecycle tests AND the component.zig
+  rust e2e; new hypothesis H4: WSAPoll misreports ready ⇒ blocking
+  netRead hangs (lifecycle recv) — vs H2/H3 e2e-only paths. Record
+  evidence in the D-319 row next cycle.
+- **D-322 CORE LANDED @3cf52d80**: resource defs (0x3f) decode (raw-byte
+  peek — 0x3f is sleb-positive) + dtor core-func bounds + rule 12
+  resource generativity (nested-component recursive scan; the corpus
+  case now rejects via the REAL rule) + runner prints reject reasons +
+  core_scan.zig P1 split (types.zig was past the 2000 cap). D-322
+  residual = guest-resource RUNTIME path (exported-resource fixture e2e).
+- **NEXT**: D-319 probe verdict + row update, then D-322 runtime fixture
+  OR D-318 / D-251.
 
 ## Closed-work pointers (detail in git log / ADRs)
 
