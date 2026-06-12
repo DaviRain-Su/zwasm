@@ -14,25 +14,10 @@
   sequence** — the "Parked" note at the bottom predates those pivots'
   completion. If the user prefers debt work instead, the candidates are in
   NEXT below.
-- Last: **E2 Go proof LANDED @2976e380** (bundle e2-go-wasip2-host CLOSED —
-  exit MET: tinygo wasip2 hello prints "hello" e2e; the fs component
-  round-trips mkdir/write/stat/rename/readdir/remove → "FS-OK b.txt").
-  Shipped with it: P2 host completion (path-`*-at` trampolines +
-  directory-entry-stream + get-random-u64), **start-via-import dispatch fix**
-  (Wasm §4.5.4; wit-component start-shim), CLI `--dir` → component path,
-  POSIX-style dir opens in P1 pathOpen. Earlier this session:
-  E3-CM-validation bundle CLOSED (validator rules 1–8; corpus 18/0 + 2
-  reasoned skip-impl). Mac test-all+lint+cross-compile green per chunk.
-- **d3-8-sockets-tcp bundle CLOSED (exit MET)**: ADR-0180 Phase 1 shipped —
-  `p2_sockets.zig` TcpSocket over `std.Io.net` (impl-1) + component
-  trampolines with REAL poll(2) readiness, honest not-supported stubs
-  (listen/accept/options/UDP/name-lookup), and real
-  get-arguments/get-environment (impl-2/3 @edd5eaad, e2e test follow-up
-  commit). Proof: `wasi_p2_tcp_rust.wasm` (rustc wasip2 std::net) connects
-  to a loopback echo server and round-trips e2e ("got pong-ping"). Also:
-  E3 error-path fixture `wasi_p2_fs_err_go` · sockets survey · ADR-0180.
-  Phase 2 (listeners + windows WSAPoll D-319) + Phase 3 (UDP/name-lookup)
-  deferred per ADR-0180.
+- Recently closed bundles (detail in git log): e2-go-wasip2-host
+  @2976e380 (tinygo hello + fs e2e; start-via-import fix; CLI --dir) ·
+  d3-8-sockets-tcp @edd5eaad (ADR-0180 Phase 1: TcpSocket + real poll(2)
+  readiness; rust TCP client e2e) · E3-CM-validation (rules 1-8).
 - **ADR-0181 LANDED (user-approved 2026-06-13)**: version lines retired
   from the ROADMAP; §1.2 floor gained CM + WASI-0.2 wasmtime-equivalent
   rows; §1.3→capability backlog; optimising tier → §3.2 permanent-out;
