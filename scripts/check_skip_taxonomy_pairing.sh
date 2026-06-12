@@ -114,6 +114,14 @@ while IFS=$'\t' read -r tok cls art; do
       if [ -n "$id" ]; then
         if debt_active "$id"; then
           debt_active_count=$((debt_active_count + 1))
+        # Explicit closure citation — "D-NNN — CLOSED `<sha>`…" rows are
+        # intentionally pointing at the discharged state. Trust the marker +
+        # cited sha instead of re-deriving via `git log --grep` (whose newest
+        # match drifts: any commit MENTIONING the discharge — including the
+        # drift-sweep commit itself — becomes the newest hit and would
+        # invalidate the older inline citation forever).
+        elif printf '%s' "$art" | grep -qE 'CLOSED' && printf '%s' "$art" | grep -qE '[0-9a-f]{8}'; then
+          debt_active_count=$((debt_active_count + 1))
         else
           sha=$(debt_discharged_sha "$id")
           if [ -n "$sha" ]; then
