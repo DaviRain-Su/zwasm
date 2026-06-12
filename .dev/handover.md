@@ -23,33 +23,19 @@
   POSIX-style dir opens in P1 pathOpen. Earlier this session:
   E3-CM-validation bundle CLOSED (validator rules 1–8; corpus 18/0 + 2
   reasoned skip-impl). Mac test-all+lint+cross-compile green per chunk.
-- Also landed: **E3 error-path fixture** `wasi_p2_fs_err_go` (wasmtime-
-  matched) · sockets survey · **ADR-0180** (sockets: TCP-client subset
-  first, REAL readiness; listeners/UDP phased) · **sockets impl-1**
-  (`p2_sockets.zig` state machine, loopback lifecycle tests green).
-- **NEXT**: bundle `d3-8-sockets-tcp` (see `## Active bundle`). After:
-  E3 corpus growth. Secondary (user-redirect only): D-318, D-314, D-251.
-
-## Active bundle
-
-- **Bundle-ID**: d3-8-sockets-tcp (ADR-0180 Phase 1)
-- **Cycles-remaining**: ~3
-- **Continuity-memo**: **impl-1 DONE** — `src/wasi/p2_sockets.zig`
-  (TcpSocket state machine over `std.Io.net`; pinned-0.16 has NO raw posix
-  sockets → ADR-0180 Revision: sync connect inside start-connect, cached
-  for finish; readiness via posix.poll on the handle; D-319 = windows
-  verification, skip.Blocker-typed). **NEXT = impl-2**: TCP_SOCKET_RT +
-  trampolines in component_wasi_p2.zig (create-tcp-socket / start-bind /
-  finish-bind / start-connect / finish-connect → mint socket-backed
-  input/output-stream resources; instance-network singleton resource;
-  adapter classify rows for wasi:sockets/tcp + tcp-create-socket +
-  instance-network) + socket-aware `pollable.ready`/`p2Poll` (TcpSocket
-  .ready branch; non-socket pollables keep always-ready). impl-3:
-  tinygo/rust TCP-client echo guest + e2e (host-side loopback listener
-  from the impl-1 test pattern).
-- **Exit-condition**: a committed real-toolchain TCP-client component
-  connects to the e2e test's loopback listener and echoes a line through
-  zwasm (matching wasmtime).
+- **d3-8-sockets-tcp bundle CLOSED (exit MET)**: ADR-0180 Phase 1 shipped —
+  `p2_sockets.zig` TcpSocket over `std.Io.net` (impl-1) + component
+  trampolines with REAL poll(2) readiness, honest not-supported stubs
+  (listen/accept/options/UDP/name-lookup), and real
+  get-arguments/get-environment (impl-2/3 @edd5eaad, e2e test follow-up
+  commit). Proof: `wasi_p2_tcp_rust.wasm` (rustc wasip2 std::net) connects
+  to a loopback echo server and round-trips e2e ("got pong-ping"). Also:
+  E3 error-path fixture `wasi_p2_fs_err_go` · sockets survey · ADR-0180.
+  Phase 2 (listeners + windows WSAPoll D-319) + Phase 3 (UDP/name-lookup)
+  deferred per ADR-0180.
+- **NEXT (CM campaign)**: E3 corpus growth (distil official `.wat`
+  fixtures into the component corpus) and/or ADR-0180 Phase-2 listeners.
+  Secondary (user-redirect only): D-318, D-314 follow-ons, D-251.
 
 ## Sandboxing bundle d314-jit-sandbox — CLOSED 2026-06-12
 
