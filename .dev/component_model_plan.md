@@ -234,7 +234,7 @@ design forks. Update this doc's `[x]` + handover NEXT each chunk.
 
 ### Phase F — typed component embedder API (ADR-0183; CWFS north-star)
 
-- [ ] **F1 — `ComponentValue` public value tree + introspection.** The WIT
+- [x] **F1 — `ComponentValue` public value tree + introspection.** The WIT
   value model as a Zig union (distinct from `runtime.Value`); 
   `exportedFuncs()` on the decoded component/instance returning typed
   signatures from the SELF-DESCRIBING binary (no `.wit` sidecar — CWFS

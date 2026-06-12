@@ -64,13 +64,15 @@
 
 - **Bundle-ID**: typed-component-api (ADR-0183 / plan Phase F)
 - **Cycles-remaining**: ~4
-- **Continuity-memo**: F1 `ComponentValue` union + `exportedFuncs()`
-  introspection (decode data already has exports + full type space;
-  this is facade plumbing) → F2 typed lower (reuse canon.zig
-  size/align/flatten + cabi_realloc patterns from the P2 trampolines)
-  → F3 lift + compound round-trip → F4 wit-bindgen proof fixture +
-  `assert_typed` corpus directives. Consumer = CWFS wasm/load+wasm/call
-  today (scalar-only); they're blocked on this surface.
+- **Continuity-memo**: **F1 DONE** (`value.zig` ComponentValue +
+  `TypeInfo.resolveFuncType`/`exportedFuncs` + ComponentInstance API;
+  greet introspects (param string)->string from the binary). **NEXT =
+  F2**: `invokeTyped` LOWER — validate args vs the export's FuncType,
+  lower via canon.zig (flat when it fits; cabi_realloc + memory writes
+  for string/list/record, mirroring invokeStringExport's plumbing in
+  api/component.zig ~L178). Then F3 lift + compound round-trip, F4
+  wit-bindgen proof fixture + `assert_typed` directives. Consumer =
+  CWFS (blocked on this surface).
 - **Exit-condition**: a committed wit-bindgen component exchanging
   `record{list<u32>, string}` ↔ `result<record, string>` round-trips
   through `invokeTyped` in an e2e test (greet also callable typed).
