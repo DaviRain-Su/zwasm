@@ -34,6 +34,7 @@ pub fn validate(info: *const TypeInfo) Error!void {
     for (info.deftypes.items) |dt| {
         try checkDefTypeIndices(dt, type_space_len);
         try checkDefTypeLabels(dt);
+        try checkDefTypeOuterAliases(dt, 1);
     }
     try checkCanons(info, type_space_len);
     try checkAliases(info);
@@ -145,16 +146,47 @@ fn checkExternDesc(desc: types.ExternDesc, type_space_len: u32) Error!void {
 /// component-instance space (`instance_origins`). Bounds are the final space
 /// size — a gross OOB (the corpus "instance index out of bounds" category) is
 /// caught; definition-order forward-reference refinement + export-name existence
-/// are deferred (a false-negative at worst, never a false-positive). `outer`
-/// aliases need nesting-depth tracking and are deferred likewise.
+/// are deferred (a false-negative at worst, never a false-positive).
+/// Rule 6 (top-level half): an `outer` alias count must be `<` the number of
+/// enclosing component scopes — the top level is ONE scope (count 0 = the
+/// current component), so any count ≥ 1 is the corpus "invalid outer alias
+/// count" category. The target index's existence at the aliased scope is
+/// deferred (index-bounds refinement).
 fn checkAliases(info: *const TypeInfo) Error!void {
     const core_inst_len: u32 = @intCast(info.core_instances.items.len);
     const comp_inst_len: u32 = @intCast(info.instance_origins.items.len);
     for (info.aliases.items) |al| switch (al.target) {
         .core_export => |ce| if (ce.instance >= core_inst_len) return Error.InvalidAlias,
         .component_export => |ce| if (ce.instance >= comp_inst_len) return Error.InvalidAlias,
-        .outer => {}, // needs nesting-depth tracking — deferred rule
+        .outer => |o| if (o.count >= 1) return Error.InvalidAlias,
     };
+}
+
+/// Rule 6 (nested half): walk nested `instance`/`component` type scopes,
+/// tracking depth = the number of enclosing component scopes at the decl site
+/// (top level = 1; each nested instance/component type adds one). An `outer`
+/// alias decl whose count ≥ depth skips past the outermost scope — the corpus
+/// "invalid outer alias count" category.
+fn checkDefTypeOuterAliases(dt: DefType, depth: u32) Error!void {
+    switch (dt) {
+        .instance_type => |it| for (it.decls) |decl| try checkInstanceDeclOuterAlias(decl, depth + 1),
+        .component_type => |ct| for (ct.decls) |decl| switch (decl) {
+            .import_decl => {},
+            .instance_decl => |id| try checkInstanceDeclOuterAlias(id, depth + 1),
+        },
+        .value, .func, .enum_, .flags, .record, .list, .tuple, .variant, .option, .result, .own, .borrow => {},
+    }
+}
+
+fn checkInstanceDeclOuterAlias(decl: types.InstanceDecl, depth: u32) Error!void {
+    switch (decl) {
+        .type_def => |td| try checkDefTypeOuterAliases(td.*, depth),
+        .alias => |al| switch (al.target) {
+            .outer => |o| if (o.count >= depth) return Error.InvalidAlias,
+            .component_export, .core_export => {},
+        },
+        .export_decl => {},
+    }
 }
 
 /// Rule 2: bounds-check every index a `canon` definition references against its
