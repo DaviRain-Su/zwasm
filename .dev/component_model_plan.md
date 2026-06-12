@@ -245,11 +245,11 @@ design forks. Update this doc's `[x]` + handover NEXT each chunk.
   fits; `cabi_realloc` + memory writes for strings/lists/records — reuse
   `canon.zig` size/align/flatten). **Red**: call greet with
   `.{ .string = "zwasm" }`.
-- [ ] **F3 — typed invoke: lift + compound round-trip.** Lift results into
+- [x] **F3 — typed invoke: lift + compound round-trip.** Lift results into
   caller-owned `ComponentValue`; record/list/variant/option/result arms.
   **Red**: a wit-bindgen fixture exchanging `record{list<u32>, string}` →
   `result<record, string>` round-trips.
-- [ ] **F4 — proof fixture + corpus directives.** Real wit-bindgen (rust)
+- [x] **F4 — proof fixture (@b25e42c0; assert_typed corpus directive + docs deferred to follow-up polish).** Real wit-bindgen (rust)
   component with rich types committed via gen shell; spec runner gains
   `assert_typed` directives; docs (`docs/` Zig API section) updated.
 
