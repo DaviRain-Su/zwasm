@@ -17,7 +17,6 @@ const decode = @import("../feature/component/decode.zig");
 const canon = @import("../feature/component/canon.zig");
 const ctypes = @import("../feature/component/types.zig");
 const cvalidate = @import("../feature/component/validate.zig");
-const runtime_value = @import("../runtime/value.zig");
 const value_conv = @import("../zwasm/value_conv.zig");
 const zwasm = @import("../zwasm.zig");
 const wasi_host = @import("../wasi/host.zig");
@@ -35,16 +34,8 @@ const PrimValType = ctypes.PrimValType;
 /// Max flattened core params for the flat (register) call path (`CanonicalABI.md`).
 pub const MAX_FLAT_PARAMS = 16;
 
-/// Bridge a lowered core value (`runtime.Value`) to a facade `Value` for the
-/// `invoke` path, per the flattened core type.
-fn coreToFacade(rv: runtime_value.Value, ct: canon.CoreType) Value {
-    return switch (ct) {
-        .i32 => .{ .i32 = rv.i32 },
-        .i64 => .{ .i64 = rv.i64 },
-        .f32 => .{ .f32 = @bitCast(rv.f32) },
-        .f64 => .{ .f64 = @bitCast(rv.f64) },
-    };
-}
+const typed = @import("component_typed.zig");
+const coreToFacade = typed.coreToFacade;
 
 pub const Error = error{
     /// The component embeds no core module to instantiate.
@@ -93,80 +84,10 @@ pub const ComponentInstance = struct {
         const r = self.info.resolveLiftedFunc(export_name) orelse return InvokeTypedError.ExportNotResolved;
         if (r.string_encoding != .utf8) return InvokeTypedError.UnsupportedEncoding;
         if (r.realloc) |rr| self.realloc_name = rr.name;
-        if (args.len != ft.params.len) return InvokeTypedError.ArgArityMismatch;
-
-        var arena_state = std.heap.ArenaAllocator.init(self.alloc);
-        defer arena_state.deinit();
-        const a = arena_state.allocator();
-
-        // Lower the params flat (CanonicalABI lower_flat; spill > 16 flats).
-        const ptypes = try a.alloc(canon.CanonType, ft.params.len);
-        var flat_param_types: std.ArrayList(canon.CoreType) = .empty;
-        for (ft.params, ptypes) |param, *slot| {
-            slot.* = try canon.canonTypeFromDecoded(a, &self.info, param.ty);
-            try canon.flattenType(a, slot.*, &flat_param_types);
-        }
         const cx = try self.canonContext();
-        var flats: std.ArrayList(canon.CoreValue) = .empty;
-        if (flat_param_types.items.len <= canon.MAX_FLAT_PARAMS) {
-            for (args, ptypes) |arg, pt| {
-                try canon.lowerFlat(cx, a, try toCanonValue(a, arg, pt), pt, &flats);
-            }
-        } else {
-            // Spill: the params become one record stored in guest memory,
-            // passed as a single i32 pointer (CanonicalABI flatten cap).
-            const spill_fields = try a.alloc(canon.CanonType.Field, ptypes.len);
-            for (ptypes, spill_fields) |pt, *f| f.* = .{ .name = "", .ty = pt };
-            const spill_ty: canon.CanonType = .{ .record = spill_fields };
-            const spill_vals = try a.alloc(canon.Value, args.len);
-            for (args, ptypes, spill_vals) |arg, pt, *slot| slot.* = try toCanonValue(a, arg, pt);
-            const size: u32 = @intCast(canon.sizeOf(spill_ty));
-            const base = try cx.realloc(0, 0, @intCast(canon.alignmentOf(spill_ty)), size);
-            try canon.store(cx, .{ .record = spill_vals }, spill_ty, base);
-            try flats.append(a, canon.CoreValue.fromI32(@bitCast(base)));
-            flat_param_types.clearRetainingCapacity();
-            try flat_param_types.append(a, .i32);
-        }
-
-        // Result flattening shape (≤ 1 flat returns directly; else the guest
-        // returns a pointer to the result area — the canon-lift convention).
-        var ret_ct: ?canon.CanonType = null;
-        var ret_flat_n: usize = 0;
-        if (ft.result) |rt| {
-            ret_ct = try canon.canonTypeFromDecoded(a, &self.info, rt);
-            var rtl: std.ArrayList(canon.CoreType) = .empty;
-            try canon.flattenType(a, ret_ct.?, &rtl);
-            ret_flat_n = rtl.items.len;
-        }
-
-        const argbuf = try a.alloc(Value, flats.items.len);
-        for (flats.items, flat_param_types.items, argbuf) |fv, ct, *slot| slot.* = coreToFacade(fv, ct);
-        var resbuf: [1]Value = .{.{ .i32 = 0 }};
-        const results: []Value = if (ret_ct == null) resbuf[0..0] else resbuf[0..1];
-        try self.core.invoke(r.core_func.name, argbuf, results);
-
-        var out: ?ComponentValue = null;
-        if (ret_ct) |rc| {
-            const cx2 = try self.canonContext(); // realloc may have moved memory
-            var lifted: canon.Value = undefined;
-            if (ret_flat_n <= canon.MAX_FLAT_RESULTS) {
-                var idx: usize = 0;
-                const rcore = [_]canon.CoreValue{value_conv.zwasmToRuntime(resbuf[0])};
-                lifted = try canon.liftFlat(cx2, a, rc, rcore[0..ret_flat_n], &idx);
-            } else {
-                const ret_ptr: u32 = @bitCast(resbuf[0].i32);
-                lifted = try canon.load(cx2, a, rc, ret_ptr);
-            }
-            out = try fromCanonValue(out_alloc, &self.info, ft.result.?, lifted);
-        }
-        errdefer if (out) |o| o.deinit(out_alloc);
-
-        if (r.post_return) |pr| {
-            var pr_args = [_]Value{resbuf[0]};
-            const pa: []Value = if (ret_ct == null) pr_args[0..0] else pr_args[0..1];
-            try self.core.invoke(pr.name, pa, &.{});
-        }
-        return out;
+        // Single-module component: the lifted func AND post_return both
+        // live on the one embedded core instance.
+        return typed.invokeTypedCore(self.alloc, &self.info, cx, self.core, self.core, ft, r, args, out_alloc);
     }
 
     pub fn deinit(self: *ComponentInstance) void {
@@ -293,182 +214,7 @@ pub const ComponentInstance = struct {
     }
 };
 
-pub const InvokeTypedError = error{
-    ExportNotResolved,
-    ArgArityMismatch,
-    UnsupportedEncoding,
-    /// A value's shape does not match the export's WIT type (wrong union
-    /// arm, record arity, variant case range, ...).
-    ValueShapeMismatch,
-} || canon.TypeBridgeError || canon.LowerFlatError || canon.LiftFlatError || canon.LoadError ||
-    Instance.InvokeError || CanonContextError || std.mem.Allocator.Error;
-
-/// Convert a public `ComponentValue` into the canon value model
-/// (arena-allocated; record fields are matched POSITIONALLY against the
-/// type — `toCanon` is called with the canon type to validate shapes).
-fn toCanonValue(arena: std.mem.Allocator, v: ComponentValue, ty: canon.CanonType) InvokeTypedError!canon.Value {
-    switch (ty) {
-        .prim => |p| return switch (p) {
-            .string => if (v == .string) .{ .string = v.string } else InvokeTypedError.ValueShapeMismatch,
-            .bool => if (v == .bool) .{ .bool = v.bool } else InvokeTypedError.ValueShapeMismatch,
-            .s8 => if (v == .s8) .{ .s8 = v.s8 } else InvokeTypedError.ValueShapeMismatch,
-            .u8 => if (v == .u8) .{ .u8 = v.u8 } else InvokeTypedError.ValueShapeMismatch,
-            .s16 => if (v == .s16) .{ .s16 = v.s16 } else InvokeTypedError.ValueShapeMismatch,
-            .u16 => if (v == .u16) .{ .u16 = v.u16 } else InvokeTypedError.ValueShapeMismatch,
-            .s32 => if (v == .s32) .{ .s32 = v.s32 } else InvokeTypedError.ValueShapeMismatch,
-            .u32 => if (v == .u32) .{ .u32 = v.u32 } else InvokeTypedError.ValueShapeMismatch,
-            .s64 => if (v == .s64) .{ .s64 = v.s64 } else InvokeTypedError.ValueShapeMismatch,
-            .u64 => if (v == .u64) .{ .u64 = v.u64 } else InvokeTypedError.ValueShapeMismatch,
-            .f32 => if (v == .f32) .{ .f32 = v.f32 } else InvokeTypedError.ValueShapeMismatch,
-            .f64 => if (v == .f64) .{ .f64 = v.f64 } else InvokeTypedError.ValueShapeMismatch,
-            .char => if (v == .char) .{ .char = v.char } else InvokeTypedError.ValueShapeMismatch,
-            .error_context => InvokeTypedError.ValueShapeMismatch,
-        },
-        .enum_ => return if (v == .@"enum") .{ .enum_value = v.@"enum" } else InvokeTypedError.ValueShapeMismatch,
-        .flags => return if (v == .flags) .{ .flags = v.flags } else InvokeTypedError.ValueShapeMismatch,
-        .list => |elem| {
-            const items = if (v == .list) v.list else return InvokeTypedError.ValueShapeMismatch;
-            const out = try arena.alloc(canon.Value, items.len);
-            for (items, out) |item, *slot| slot.* = try toCanonValue(arena, item, elem.*);
-            return .{ .list = out };
-        },
-        .record => |fields| {
-            // record OR (despecialized) tuple — both match positionally.
-            const vals: []const ComponentValue = switch (v) {
-                .record => |r| blk: {
-                    const tmp = try arena.alloc(ComponentValue, r.len);
-                    for (r, tmp) |f, *slot| slot.* = f.value;
-                    break :blk tmp;
-                },
-                .tuple => |t| t,
-                else => return InvokeTypedError.ValueShapeMismatch,
-            };
-            if (vals.len != fields.len) return InvokeTypedError.ValueShapeMismatch;
-            const out = try arena.alloc(canon.Value, fields.len);
-            for (fields, vals, out) |f, val, *slot| slot.* = try toCanonValue(arena, val, f.ty);
-            return .{ .record = out };
-        },
-        .variant => |cases| {
-            // variant OR a despecialized option/result value.
-            const cv: ComponentValue.Variant = switch (v) {
-                .variant => |vv| vv,
-                .option => |opt| .{ .case = if (opt == null) 0 else 1, .payload = opt },
-                .result => |r| .{ .case = if (r.is_ok) 0 else 1, .payload = r.payload },
-                else => return InvokeTypedError.ValueShapeMismatch,
-            };
-            if (cv.case >= cases.len) return InvokeTypedError.ValueShapeMismatch;
-            if (cases[cv.case].payload) |pt| {
-                const pv = cv.payload orelse return InvokeTypedError.ValueShapeMismatch;
-                const slot = try arena.create(canon.Value);
-                slot.* = try toCanonValue(arena, pv.*, pt);
-                return .{ .variant = .{ .case = cv.case, .payload = slot } };
-            }
-            if (cv.payload != null) return InvokeTypedError.ValueShapeMismatch;
-            return .{ .variant = .{ .case = cv.case, .payload = null } };
-        },
-    }
-}
-
-/// Convert a canon value back into a caller-owned `ComponentValue`, guided
-/// by the DECODED type (so records keep field NAMES and option/result/tuple
-/// re-specialize from the variant/record canon forms).
-fn fromCanonValue(out_alloc: std.mem.Allocator, info: *const ctypes.TypeInfo, vt: ctypes.ValType, cv: canon.Value) InvokeTypedError!ComponentValue {
-    var arena_state = std.heap.ArenaAllocator.init(out_alloc);
-    defer arena_state.deinit();
-    return fromCanonValueScoped(out_alloc, arena_state.allocator(), info, &.{}, vt, cv);
-}
-
-/// `fromCanonValue` with an explicit NESTED-scope context: `locals` is the
-/// decl-order local type space when `vt` came from an imported-instance
-/// type declaration (empty at top level). `scratch` backs resolver
-/// allocations only — output values are owned by `out_alloc`.
-fn fromCanonValueScoped(out_alloc: std.mem.Allocator, scratch: std.mem.Allocator, info: *const ctypes.TypeInfo, locals: []const ?*const ctypes.DefType, vt: ctypes.ValType, cv: canon.Value) InvokeTypedError!ComponentValue {
-    switch (vt) {
-        .primitive => |p| return switch (p) {
-            .string => .{ .string = try out_alloc.dupe(u8, cv.string) },
-            .bool => .{ .bool = cv.bool },
-            .s8 => .{ .s8 = cv.s8 },
-            .u8 => .{ .u8 = cv.u8 },
-            .s16 => .{ .s16 = cv.s16 },
-            .u16 => .{ .u16 = cv.u16 },
-            .s32 => .{ .s32 = cv.s32 },
-            .u32 => .{ .u32 = cv.u32 },
-            .s64 => .{ .s64 = cv.s64 },
-            .u64 => .{ .u64 = cv.u64 },
-            .f32 => .{ .f32 = cv.f32 },
-            .f64 => .{ .f64 = cv.f64 },
-            .char => .{ .char = cv.char },
-            .error_context => InvokeTypedError.UnsupportedType,
-        },
-        .type_index => |ti| {
-            if (locals.len != 0) {
-                if (ti >= locals.len) return InvokeTypedError.InvalidTypeIndex;
-                const dt = locals[ti] orelse return InvokeTypedError.UnsupportedType;
-                return fromCanonDefType(out_alloc, scratch, info, locals, dt.*, cv);
-            }
-            const resolved = try canon.resolveTypeIndex(scratch, info, ti);
-            return fromCanonDefType(out_alloc, scratch, info, resolved.locals, resolved.dt, cv);
-        },
-    }
-}
-
-fn fromCanonDefType(out_alloc: std.mem.Allocator, scratch: std.mem.Allocator, info: *const ctypes.TypeInfo, locals: []const ?*const ctypes.DefType, dt: ctypes.DefType, cv: canon.Value) InvokeTypedError!ComponentValue {
-    switch (dt) {
-        .value => |vt| return fromCanonValueScoped(out_alloc, scratch, info, locals, vt, cv),
-        .record => |rec| {
-            const fields = try out_alloc.alloc(ComponentValue.Field, rec.fields.len);
-            errdefer out_alloc.free(fields);
-            for (rec.fields, cv.record, fields) |f, val, *slot| {
-                slot.* = .{ .name = f.name, .value = try fromCanonValueScoped(out_alloc, scratch, info, locals, f.ty, val) };
-            }
-            return .{ .record = fields };
-        },
-        .tuple => |t| {
-            const items = try out_alloc.alloc(ComponentValue, t.types.len);
-            errdefer out_alloc.free(items);
-            for (t.types, cv.record, items) |ty, val, *slot| slot.* = try fromCanonValueScoped(out_alloc, scratch, info, locals, ty, val);
-            return .{ .tuple = items };
-        },
-        .list => |l| {
-            const items = try out_alloc.alloc(ComponentValue, cv.list.len);
-            errdefer out_alloc.free(items);
-            for (cv.list, items) |val, *slot| slot.* = try fromCanonValueScoped(out_alloc, scratch, info, locals, l.element.*, val);
-            return .{ .list = items };
-        },
-        .option => |o| {
-            if (cv.variant.case == 0) return .{ .option = null };
-            const slot = try out_alloc.create(ComponentValue);
-            errdefer out_alloc.destroy(slot);
-            slot.* = try fromCanonValueScoped(out_alloc, scratch, info, locals, o.payload.*, cv.variant.payload.?.*);
-            return .{ .option = slot };
-        },
-        .result => |r| {
-            const is_ok = cv.variant.case == 0;
-            const pt: ?ctypes.ValType = if (is_ok) r.ok else r.err;
-            if (pt) |ty| {
-                const slot = try out_alloc.create(ComponentValue);
-                errdefer out_alloc.destroy(slot);
-                slot.* = try fromCanonValueScoped(out_alloc, scratch, info, locals, ty, cv.variant.payload.?.*);
-                return .{ .result = .{ .is_ok = is_ok, .payload = slot } };
-            }
-            return .{ .result = .{ .is_ok = is_ok, .payload = null } };
-        },
-        .variant => |v| {
-            const case = cv.variant.case;
-            if (case >= v.cases.len) return InvokeTypedError.ValueShapeMismatch;
-            if (v.cases[case].payload) |pt| {
-                const slot = try out_alloc.create(ComponentValue);
-                errdefer out_alloc.destroy(slot);
-                slot.* = try fromCanonValueScoped(out_alloc, scratch, info, locals, pt, cv.variant.payload.?.*);
-                return .{ .variant = .{ .case = case, .payload = slot } };
-            }
-            return .{ .variant = .{ .case = case, .payload = null } };
-        },
-        .enum_ => return .{ .@"enum" = cv.enum_value },
-        .flags => return .{ .flags = cv.flags },
-        .func, .own, .borrow, .instance_type, .component_type => return InvokeTypedError.UnsupportedType,
-    }
-}
+pub const InvokeTypedError = typed.InvokeTypedError;
 
 /// `CanonContext.memory_fn` over a BUILT component: re-fetch the
 /// memory-exporting instance's linear memory on every access.
@@ -512,83 +258,17 @@ pub fn invokeTypedBuilt(
     const r = info.resolveLiftedFunc(export_name) orelse return InvokeTypedError.ExportNotResolved;
     if (r.string_encoding != .utf8) return InvokeTypedError.UnsupportedEncoding;
     if (r.realloc) |rr| built.ctx.realloc_name = rr.name;
-    if (args.len != ft.params.len) return InvokeTypedError.ArgArityMismatch;
     const core_inst = built.guestInstance(r.core_func.instance) orelse return InvokeTypedError.ExportNotResolved;
-
-    var arena_state = std.heap.ArenaAllocator.init(built.alloc);
-    defer arena_state.deinit();
-    const a = arena_state.allocator();
-
+    // post_return may live on a different guest instance than the lifted
+    // func; absent instances skip cleanup (matching the pre-split behavior).
+    const pr_inst: ?*Instance = if (r.post_return) |pr| built.guestInstance(pr.instance) else null;
     const cx = canon.CanonContext{
         .memory_ctx = @ptrCast(built.ctx),
         .memory_fn = builtMemoryFetch,
         .realloc_ctx = @ptrCast(built.ctx),
         .realloc_fn = builtRealloc,
     };
-
-    const ptypes = try a.alloc(canon.CanonType, ft.params.len);
-    var flat_param_types: std.ArrayList(canon.CoreType) = .empty;
-    for (ft.params, ptypes) |param, *slot| {
-        slot.* = try canon.canonTypeFromDecoded(a, info, param.ty);
-        try canon.flattenType(a, slot.*, &flat_param_types);
-    }
-    var flats: std.ArrayList(canon.CoreValue) = .empty;
-    if (flat_param_types.items.len <= canon.MAX_FLAT_PARAMS) {
-        for (args, ptypes) |arg, pt| {
-            try canon.lowerFlat(cx, a, try toCanonValue(a, arg, pt), pt, &flats);
-        }
-    } else {
-        const spill_fields = try a.alloc(canon.CanonType.Field, ptypes.len);
-        for (ptypes, spill_fields) |pt, *f| f.* = .{ .name = "", .ty = pt };
-        const spill_ty: canon.CanonType = .{ .record = spill_fields };
-        const spill_vals = try a.alloc(canon.Value, args.len);
-        for (args, ptypes, spill_vals) |arg, pt, *slot| slot.* = try toCanonValue(a, arg, pt);
-        const size: u32 = @intCast(canon.sizeOf(spill_ty));
-        const base = try cx.realloc(0, 0, @intCast(canon.alignmentOf(spill_ty)), size);
-        try canon.store(cx, .{ .record = spill_vals }, spill_ty, base);
-        try flats.append(a, canon.CoreValue.fromI32(@bitCast(base)));
-        flat_param_types.clearRetainingCapacity();
-        try flat_param_types.append(a, .i32);
-    }
-
-    var ret_ct: ?canon.CanonType = null;
-    var ret_flat_n: usize = 0;
-    if (ft.result) |rt| {
-        ret_ct = try canon.canonTypeFromDecoded(a, info, rt);
-        var rtl: std.ArrayList(canon.CoreType) = .empty;
-        try canon.flattenType(a, ret_ct.?, &rtl);
-        ret_flat_n = rtl.items.len;
-    }
-
-    const argbuf = try a.alloc(Value, flats.items.len);
-    for (flats.items, flat_param_types.items, argbuf) |fv, ct, *slot| slot.* = coreToFacade(fv, ct);
-    var resbuf: [1]Value = .{.{ .i32 = 0 }};
-    const results: []Value = if (ret_ct == null) resbuf[0..0] else resbuf[0..1];
-    try core_inst.invoke(r.core_func.name, argbuf, results);
-
-    var out: ?ComponentValue = null;
-    if (ret_ct) |rc| {
-        var lifted: canon.Value = undefined;
-        if (ret_flat_n <= canon.MAX_FLAT_RESULTS) {
-            var idx: usize = 0;
-            const rcore = [_]canon.CoreValue{value_conv.zwasmToRuntime(resbuf[0])};
-            lifted = try canon.liftFlat(cx, a, rc, rcore[0..ret_flat_n], &idx);
-        } else {
-            const ret_ptr: u32 = @bitCast(resbuf[0].i32);
-            lifted = try canon.load(cx, a, rc, ret_ptr);
-        }
-        out = try fromCanonValue(out_alloc, info, ft.result.?, lifted);
-    }
-    errdefer if (out) |o| o.deinit(out_alloc);
-
-    if (r.post_return) |pr| {
-        if (built.guestInstance(pr.instance)) |pri| {
-            var pr_args = [_]Value{resbuf[0]};
-            const pa: []Value = if (ret_ct == null) pr_args[0..0] else pr_args[0..1];
-            try pri.invoke(pr.name, pa, &.{});
-        }
-    }
-    return out;
+    return typed.invokeTypedCore(built.alloc, info, cx, core_inst, pr_inst, ft, r, args, out_alloc);
 }
 
 pub const InvokeStringError = error{
@@ -628,7 +308,7 @@ fn reallocViaGuest(ctx: *anyopaque, old_ptr: u32, old_size: u32, alignment: u32,
     return ptr;
 }
 
-pub const CanonContextError = error{NoMemory};
+pub const CanonContextError = typed.CanonContextError;
 
 fn firstCoreModule(decoded: *const decode.Component) ?[]const u8 {
     for (decoded.sections.items) |sec| {

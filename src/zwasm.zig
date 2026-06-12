@@ -403,6 +403,7 @@ test {
     _ = @import("feature/component/resource_table.zig");
     _ = @import("feature/component/value.zig");
     _ = @import("api/component.zig");
+    _ = @import("api/component_typed.zig");
 }
 
 // ============================================================

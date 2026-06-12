@@ -485,7 +485,9 @@ fn parseCharLit(text: []const u8, pos: *usize) !u21 {
     } else {
         const len = std.unicode.utf8ByteSequenceLength(text[pos.*]) catch return error.BadValue;
         if (pos.* + len > text.len) return error.BadValue;
-        cp = std.unicode.utf8Decode(text[pos.* .. pos.* + len]) catch return error.BadValue;
+        const view = std.unicode.Utf8View.init(text[pos.* .. pos.* + len]) catch return error.BadValue;
+        var cp_it = view.iterator();
+        cp = cp_it.nextCodepoint() orelse return error.BadValue;
         pos.* += len;
     }
     try expectChar(text, pos, '\'');
