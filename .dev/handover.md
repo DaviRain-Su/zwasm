@@ -72,7 +72,15 @@
   for string/list/record, mirroring invokeStringExport's plumbing in
   api/component.zig ~L178). Then F3 lift + compound round-trip, F4
   wit-bindgen proof fixture + `assert_typed` directives. Consumer =
-  CWFS (blocked on this surface).
+  CWFS (blocked on this surface). **F2 design note**: canon.store's
+  list branch uses `cx.memory` AFTER `cx.realloc` — a LATENT staleness
+  bug when realloc grows/moves guest memory (existing fixtures pre-size;
+  invokeString re-fetches between calls). F2a = make CanonContext
+  re-fetch memory via callback (mech. replace `cx.memory` reads) + add
+  `flattenType`/`join` + `lowerFlat`/`liftFlat` (CanonicalABI flatten;
+  MAX_FLAT_PARAMS 16 / MAX_FLAT_RESULTS 1, spill→ptr beyond). F2b =
+  decoded-type→CanonType + ComponentValue↔canon.Value converters +
+  `invokeTyped` in api/component.zig; greet typed e2e.
 - **Exit-condition**: a committed wit-bindgen component exchanging
   `record{list<u32>, string}` ↔ `result<record, string>` round-trips
   through `invokeTyped` in an e2e test (greet also callable typed).
