@@ -48,6 +48,61 @@ pub fn validate(info: *const TypeInfo) Error!void {
         try checkExternName(ex.name);
     }
     try checkExportedTypes(info);
+    try checkDuplicateNames(info);
+}
+
+/// Rule 8: name uniqueness, ASCII-case-insensitive — kebab labels compare
+/// case-insensitively per the Explainer.md `label` semantics, so `A-b`
+/// conflicts with `a-B` (corpus "...conflicts with previous name...",
+/// naming.wast). Checked within top-level import names, within export names
+/// (the two namespaces are separate — an import and an export may share a
+/// name), and within each deftype's label set (func params, record fields,
+/// variant cases, enum/flags labels). O(n²) pairwise keeps the validator
+/// allocation-free; the lists are small.
+fn checkDuplicateNames(info: *const TypeInfo) Error!void {
+    for (info.imports.items, 0..) |imp, i| {
+        for (info.imports.items[0..i]) |prev| {
+            if (std.ascii.eqlIgnoreCase(imp.name, prev.name)) return Error.InvalidName;
+        }
+    }
+    for (info.exports.items, 0..) |ex, i| {
+        for (info.exports.items[0..i]) |prev| {
+            if (std.ascii.eqlIgnoreCase(ex.name, prev.name)) return Error.InvalidName;
+        }
+    }
+    for (info.deftypes.items) |dt| try checkDefTypeLabelDups(dt);
+}
+
+fn checkDefTypeLabelDups(dt: DefType) Error!void {
+    switch (dt) {
+        .func => |ft| for (ft.params, 0..) |p, i| {
+            for (ft.params[0..i]) |prev| {
+                if (std.ascii.eqlIgnoreCase(p.name, prev.name)) return Error.InvalidName;
+            }
+        },
+        .record => |rec| for (rec.fields, 0..) |f, i| {
+            for (rec.fields[0..i]) |prev| {
+                if (std.ascii.eqlIgnoreCase(f.name, prev.name)) return Error.InvalidName;
+            }
+        },
+        .variant => |v| for (v.cases, 0..) |c, i| {
+            for (v.cases[0..i]) |prev| {
+                if (std.ascii.eqlIgnoreCase(c.name, prev.name)) return Error.InvalidName;
+            }
+        },
+        .enum_ => |e| try checkLabelSliceDups(e.labels),
+        .flags => |fl| try checkLabelSliceDups(fl.labels),
+        .value, .list, .tuple, .option, .result, .own, .borrow => {},
+        .instance_type, .component_type => {},
+    }
+}
+
+fn checkLabelSliceDups(labels: []const []const u8) Error!void {
+    for (labels, 0..) |l, i| {
+        for (labels[0..i]) |prev| {
+            if (std.ascii.eqlIgnoreCase(l, prev)) return Error.InvalidName;
+        }
+    }
 }
 
 /// Rule 7: a type export must be "valid to be used as export"
@@ -337,6 +392,12 @@ test "rule 7: exported local type may reference named types only" {
         [_]u8{ 7, type_local_ref.len } ++ type_local_ref ++
         [_]u8{ 11, export_g2.len } ++ export_g2;
     try std.testing.expectError(Error.InvalidExternDesc, validateBytes(&invalid));
+}
+
+test "rule 8: case-insensitive label duplicates" {
+    try checkLabelSliceDups(&.{ "a", "b", "a-b" });
+    try std.testing.expectError(Error.InvalidName, checkLabelSliceDups(&.{ "a-B-c-D", "A-b-C-d" }));
+    try std.testing.expectError(Error.InvalidName, checkLabelSliceDups(&.{ "x", "y", "x" }));
 }
 
 test "rule 5: label grammar boundaries" {
