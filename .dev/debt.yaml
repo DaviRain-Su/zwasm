@@ -783,16 +783,17 @@ entries:
       RUNNER suite completed first, so the hang is inside `zig build test` = the socket
       lifecycle tests and/or the rust client/listener e2e — all first-ever win
       executions). Windows test gating RESTORED on the 7 sites pending root cause.
-      Hypotheses (investigation_discipline §1):
-        1. WSAPoll never reports readiness (bad fd cast/flags) — unit lifecycle tests
-           would FAIL fast (~1s loops), not hang => predicts hang is NOT here.
-        2. Threaded netAccept/io.concurrent deadlock on windows in the e2e harness
-           (host echo thread blocks in accept forever when the guest side errored;
-           future.cancel cannot interrupt a blocking accept) — predicts e2e hang.
-        3. Guest poll infinite-retry: p2Poll caps one call at 30s but rust std retries
-           forever when readiness never fires — predicts e2e hang with idle CPU.
-      Distinguishing probe: targeted windowsmini run of ONLY `zig build test` with the
-      skips selectively removed (unit-only first, then e2e-only).
+      Hypotheses (§1) + PROBE #1 (2026-06-13, `zig build test -Dd319-probe=true`
+      @1bcf0d17, timeout 1200 exit 124): the hang REPRODUCES in the unit step alone.
+        1. ~~WSAPoll never-ready => fail-fast not hang~~ superseded by H4.
+        2. Threaded netAccept/io.concurrent deadlock (the e2e tests are IN the unit
+           binary too).
+        3. Guest poll infinite-retry (e2e path).
+        4. NEW: WSAPoll MISREPORTS ready (revents mask) => the lifecycle recv()
+           (blocking netRead) hangs with no data.
+      Probe #2 (flag re-scoped @ this commit): -Dd319-probe now gates ONLY the
+      p2_sockets UNIT lifecycle tests (e2e stays plain-gated) — a unit-only windows
+      run isolates H1/H4 from H2/H3.
       Discharge: socket tests green on windowsmini.
     first_raised: "2026-06-12"
     last_reviewed: "2026-06-13"
@@ -806,9 +807,12 @@ entries:
       0x3f is sleb-positive unlike every other deftype op) + dtor core-func bounds +
       rule 12 (nested-component scan; outer-aliasing the parent's generative resource —
       or a def transitively carrying own/borrow/resource — rejects). 0x3e (async dtor)
-      stays a truthful UnsupportedTypeForm. RESIDUAL: the guest-resource RUNTIME path
-      (a wit-bindgen exported-resource component e2e — lift/lower own/borrow through
-      canon + the C1 resource table at instantiation). Discharge: that fixture runs e2e.
+      stays a truthful UnsupportedTypeForm. RESIDUAL (Phase-I MEASURED @ the
+      resource_counter fixture): buildWasiP2Component fails UnknownImport on the
+      synthesized '[export]<iface>' '[resource-new]/[resource-drop]<r>' core imports —
+      wire canon resource.new/drop/rep core_funcs to the C1 resource table in the graph
+      builder; then ComponentValue needs own-handle arms so invokeTyped can drive
+      [constructor] -> own<r> -> [method]. Discharge: resource_counter e2e green.
     first_raised: "2026-06-13"
     last_reviewed: "2026-06-13"
     refs: |-
