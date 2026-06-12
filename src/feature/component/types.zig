@@ -338,6 +338,12 @@ pub const Alias = struct {
     target: AliasTarget,
 };
 
+/// Index-space snapshot taken just BEFORE an alias mints its own entry.
+pub const AliasSpaceBefore = struct {
+    type_space: u32,
+    core_types: u32,
+};
+
 /// `instantiatearg ::= name sortidx` — a `with` arg satisfying a child
 /// component's import with a definition from this component's index spaces.
 pub const ComponentInstantiateArg = struct {
@@ -396,6 +402,15 @@ pub const TypeInfo = struct {
     /// (ADR-0176 rule 9).
     core_module_count: u32,
     component_count: u32,
+    /// Core-type index space size: core-type section defs + core-type aliases.
+    core_type_count: u32,
+    /// Core-memory index space size: aliases of core-instance exports of
+    /// sort memory (the only top-level minting form).
+    core_memory_count: u32,
+    /// Parallel to `aliases`: index-space sizes at each alias's DEFINITION
+    /// point (an outer count-0 alias must not see indices it mints itself —
+    /// definition order, same posture as the rule-1 type_space positions).
+    alias_space_before: std.ArrayList(AliasSpaceBefore),
     /// The component type index space in definition order: each entry records
     /// whether its index was minted by a `type`-section def (`.def` = index
     /// into `deftypes`) or introduced under a name by a type-sort `alias` /
@@ -1201,11 +1216,15 @@ pub fn decodeTypeInfo(parent: Allocator, component: *const decode.Component) Err
     var type_space: std.ArrayList(TypeSpaceEntry) = .empty;
     var core_module_count: u32 = 0;
     var component_count: u32 = 0;
+    var core_type_count: u32 = 0;
+    var core_memory_count: u32 = 0;
+    var alias_space_before: std.ArrayList(AliasSpaceBefore) = .empty;
 
     for (component.sections.items) |sec| {
         switch (sec.id) {
             .core_module => core_module_count += 1,
             .component => component_count += 1,
+            .core_type => core_type_count += 1,
             else => {},
         }
         // Track per-kind counts before this section so the newly-decoded entries
@@ -1246,16 +1265,24 @@ pub fn decodeTypeInfo(parent: Allocator, component: *const decode.Component) Err
                 .resource_rep => |t| try core_funcs.append(a, .{ .resource_rep = t }),
                 .lift => try component_funcs.append(a, .{ .lift = @intCast(abs) }),
             },
-            .alias => for (aliases.items[aliases_before..], aliases_before..) |al, al_abs| switch (al.sort) {
-                .core => |cs| switch (cs) {
-                    .func => try core_funcs.append(a, .{ .alias = al.target }),
-                    .table => try core_tables.append(a, al.target),
+            .alias => for (aliases.items[aliases_before..], aliases_before..) |al, al_abs| {
+                try alias_space_before.append(a, .{
+                    .type_space = @intCast(type_space.items.len),
+                    .core_types = core_type_count,
+                });
+                switch (al.sort) {
+                    .core => |cs| switch (cs) {
+                        .func => try core_funcs.append(a, .{ .alias = al.target }),
+                        .table => try core_tables.append(a, al.target),
+                        .memory => core_memory_count += 1,
+                        .type => core_type_count += 1,
+                        else => {},
+                    },
+                    .func => try component_funcs.append(a, .{ .alias = al.target }),
+                    .instance => try instance_origins.append(a, .local),
+                    .type => try type_space.append(a, .{ .named = .{ .alias = @intCast(al_abs) } }),
                     else => {},
-                },
-                .func => try component_funcs.append(a, .{ .alias = al.target }),
-                .instance => try instance_origins.append(a, .local),
-                .type => try type_space.append(a, .{ .named = .{ .alias = @intCast(al_abs) } }),
-                else => {},
+                }
             },
             .instance => for (component_instances.items[cinst_before..]) |_| try instance_origins.append(a, .local),
             .@"export" => for (exports.items[exports_before..], exports_before..) |ex, ex_abs| {
@@ -1274,6 +1301,9 @@ pub fn decodeTypeInfo(parent: Allocator, component: *const decode.Component) Err
         .type_space = type_space,
         .core_module_count = core_module_count,
         .component_count = component_count,
+        .core_type_count = core_type_count,
+        .core_memory_count = core_memory_count,
+        .alias_space_before = alias_space_before,
         .imports = imports,
         .exports = exports,
         .canons = canons,

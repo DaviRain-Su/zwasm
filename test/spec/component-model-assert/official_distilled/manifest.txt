@@ -3,13 +3,11 @@
 # ADR-0176 validator implements (rules 1-8). Encoded via `wasm-tools
 # parse` (no validation); zwasm must REJECT each.
 # adapt.wast: "memory index out of bounds"
-# (fixture adapt_01.wasm kept for when the gap closes)
-skip-impl adapt_01: canon-opt core-memory index space not tracked on TypeInfo (deferred; ADR-0176)
+assert_invalid test/spec/component-model-assert/official_distilled/adapt_01.wasm
 # alias.wast: "invalid outer alias count of 100"
 assert_invalid test/spec/component-model-assert/official_distilled/alias_01.wasm
 # alias.wast: "index out of bounds"
-# (fixture alias_02.wasm kept for when the gap closes)
-skip-impl alias_02: core-type index space not tracked on TypeInfo (outer-alias target existence deferred; ADR-0176)
+assert_invalid test/spec/component-model-assert/official_distilled/alias_02.wasm
 # alias.wast: "invalid outer alias count of 100"
 assert_invalid test/spec/component-model-assert/official_distilled/alias_03.wasm
 # alias.wast: "index out of bounds"
@@ -157,11 +155,9 @@ assert_invalid test/spec/component-model-assert/official_distilled/naming_09.was
 # naming.wast: "`DOWn` is not in kebab case"
 assert_invalid test/spec/component-model-assert/official_distilled/naming_10.wasm
 # naming.wast: "import name `[method]a.a` conflicts with previous name `a`"
-# (fixture naming_11.wasm kept for when the gap closes)
-skip-impl naming_11: resource-name conflict semantics ([method]x.y vs x) deferred (needs semantic name model; ADR-0176)
+assert_invalid test/spec/component-model-assert/official_distilled/naming_11.wasm
 # naming.wast: "import name `[static]a.a` conflicts with previous name `a`"
-# (fixture naming_12.wasm kept for when the gap closes)
-skip-impl naming_12: resource-name conflict semantics ([method]x.y vs x) deferred (needs semantic name model; ADR-0176)
+assert_invalid test/spec/component-model-assert/official_distilled/naming_12.wasm
 # resources.wast: "type index out of bounds"
 assert_invalid test/spec/component-model-assert/official_distilled/resources_01.wasm
 # resources.wast: "type index out of bounds"

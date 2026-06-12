@@ -193,15 +193,45 @@ fn checkInstances(info: *const TypeInfo) Error!void {
 fn checkDuplicateNames(info: *const TypeInfo) Error!void {
     for (info.imports.items, 0..) |imp, i| {
         for (info.imports.items[0..i]) |prev| {
-            if (std.ascii.eqlIgnoreCase(imp.name, prev.name)) return Error.InvalidName;
+            if (externNamesConflict(imp.name, prev.name)) return Error.InvalidName;
         }
     }
     for (info.exports.items, 0..) |ex, i| {
         for (info.exports.items[0..i]) |prev| {
-            if (std.ascii.eqlIgnoreCase(ex.name, prev.name)) return Error.InvalidName;
+            if (externNamesConflict(ex.name, prev.name)) return Error.InvalidName;
         }
     }
     for (info.deftypes.items) |dt| try checkDefTypeLabelDups(dt);
+}
+
+const ExternNameKeyKind = enum { label, constructor, resource_func, other };
+
+/// Semantic comparison key for extern-name uniqueness (Binary.md name
+/// uniqueness; the wasm-tools `ComponentNameKind` Eq/Hash model):
+/// `[method]r.m` and `[static]r.m` share one `r.m` key (they conflict with
+/// each other), and the degenerate `[method]r.r` / `[static]r.r` collapses
+/// to the plain label `r` (so it conflicts with an extern named `r`).
+/// `[constructor]r` keys separately; every other form compares raw.
+fn externNameKey(name: []const u8) struct { kind: ExternNameKeyKind, body: []const u8 } {
+    if (std.mem.startsWith(u8, name, "[constructor]"))
+        return .{ .kind = .constructor, .body = name["[constructor]".len..] };
+    const rm = if (std.mem.startsWith(u8, name, "[method]"))
+        name["[method]".len..]
+    else if (std.mem.startsWith(u8, name, "[static]"))
+        name["[static]".len..]
+    else
+        return .{ .kind = .label, .body = name };
+    if (std.mem.findScalar(u8, rm, '.')) |dot| {
+        if (std.ascii.eqlIgnoreCase(rm[0..dot], rm[dot + 1 ..]))
+            return .{ .kind = .label, .body = rm[0..dot] };
+    }
+    return .{ .kind = .resource_func, .body = rm };
+}
+
+fn externNamesConflict(a: []const u8, b: []const u8) bool {
+    const ka = externNameKey(a);
+    const kb = externNameKey(b);
+    return ka.kind == kb.kind and std.ascii.eqlIgnoreCase(ka.body, kb.body);
 }
 
 fn checkDefTypeLabelDups(dt: DefType) Error!void {
@@ -530,17 +560,23 @@ fn checkExternDesc(desc: types.ExternDesc, type_space_len: u32) Error!void {
 fn checkAliases(info: *const TypeInfo) Error!void {
     const core_inst_len: u32 = @intCast(info.core_instances.items.len);
     const comp_inst_len: u32 = @intCast(info.instance_origins.items.len);
-    for (info.aliases.items) |al| switch (al.target) {
+    for (info.aliases.items, info.alias_space_before.items) |al, before| switch (al.target) {
         .core_export => |ce| if (ce.instance >= core_inst_len) return Error.InvalidAlias,
         .component_export => |ce| if (ce.instance >= comp_inst_len) return Error.InvalidAlias,
         .outer => |o| {
             if (o.count >= 1) return Error.InvalidAlias;
             // count 0 = the current component: existence is checkable for the
-            // sorts whose spaces are tracked (others stay deferred).
+            // sorts whose spaces are tracked (others stay deferred). The
+            // bound is the space size at the alias's DEFINITION point — an
+            // outer alias must not satisfy itself with the index it mints.
             switch (al.sort) {
-                .type => if (o.index >= info.type_space_len) return Error.InvalidAlias,
+                .type => if (o.index >= before.type_space) return Error.InvalidAlias,
                 .component => if (o.index >= info.component_count) return Error.InvalidAlias,
-                .core => |cs| if (cs == .module and o.index >= info.core_module_count) return Error.InvalidAlias,
+                .core => |cs| switch (cs) {
+                    .module => if (o.index >= info.core_module_count) return Error.InvalidAlias,
+                    .type => if (o.index >= before.core_types) return Error.InvalidAlias,
+                    else => {},
+                },
                 else => {},
             }
         },
@@ -586,10 +622,23 @@ fn checkCanons(info: *const TypeInfo, type_space_len: u32) Error!void {
         .lift => |l| {
             if (l.core_func >= core_func_len) return Error.InvalidCanon;
             if (l.type_index >= type_space_len) return Error.InvalidTypeIndex;
+            try checkCanonOpts(info, l.opts);
         },
-        .lower => |l| if (l.func >= comp_func_len) return Error.InvalidCanon,
+        .lower => |l| {
+            if (l.func >= comp_func_len) return Error.InvalidCanon;
+            try checkCanonOpts(info, l.opts);
+        },
         .resource_new, .resource_drop, .resource_rep => |t| if (t >= type_space_len) return Error.InvalidTypeIndex,
     };
+}
+
+/// Canon-opt index operands: `(memory m)` indexes the core-memory space,
+/// `(realloc f)` / `(post-return f)` the core-func space.
+fn checkCanonOpts(info: *const TypeInfo, opts: types.CanonOpts) Error!void {
+    const core_func_len: u32 = @intCast(info.core_funcs.items.len);
+    if (opts.memory) |m| if (m >= info.core_memory_count) return Error.InvalidCanon;
+    if (opts.realloc) |r| if (r >= core_func_len) return Error.InvalidCanon;
+    if (opts.post_return) |pr| if (pr >= core_func_len) return Error.InvalidCanon;
 }
 
 /// Rule 1: bounds-check every type-index a top-level deftype references against
