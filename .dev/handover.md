@@ -45,11 +45,17 @@
   §3.3/§7/§8 reality-synced (atomics=instruction-set shipped, threaded
   EXECUTION deferred; native P2 host described). New D-320 (note):
   lightweight axis needs a binary-size/poll-code-size bench series.
+- **ADR-0182 LANDED**: component support default-ON (`-Dcomponent=false`
+  = real lean opt-out; CM subsystem measured at 156 KB / +8.3%). D-321
+  (gate rot) discharged; D-320 size series live
+  (`scripts/record_binary_size.sh`, base 1.94 MB / lean 1.78 MB).
 - **NEXT (CM campaign)**: ADR-0180 Phase-2 listeners (accept/listen +
-  windows WSAPoll D-319), or close the 30 skip-impl gaps (nested-scope
-  deep refs is the biggest cluster), or D-320 size-series (cheap
-  infrastructure chunk). Secondary: D-318, D-314, D-251. Loop RESUMED
-  per user directive (2026-06-13 「どんどん進めて」).
+  windows WSAPoll D-319), or close the 30 validator skip-impl gaps
+  (nested-scope deep refs = biggest cluster). Secondary: D-318, D-314
+  follow-ons (incl. poll code-size, the D-320 residual), D-251. Loop
+  RESUMED per user directive (2026-06-13 「どんどん進めて」). Windows
+  batch gate kicked at 43ab91a8 (build.zig ABI-risk) — verify at next
+  Step 0.7 + --record.
 
 ## Sandboxing bundle d314-jit-sandbox — CLOSED 2026-06-12
 
