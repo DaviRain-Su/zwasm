@@ -1376,7 +1376,7 @@ fn canonTypeFromLocalDefType(arena: std.mem.Allocator, info: *const types.TypeIn
         },
         .enum_ => |e| return .{ .enum_ = @intCast(e.labels.len) },
         .flags => |fl| return .{ .flags = @intCast(fl.labels.len) },
-        .func, .own, .borrow, .instance_type, .component_type => return TypeBridgeError.UnsupportedType,
+        .func, .own, .borrow, .instance_type, .component_type, .resource => return TypeBridgeError.UnsupportedType,
     }
 }
 
@@ -1439,6 +1439,6 @@ pub fn canonTypeFromDefType(arena: std.mem.Allocator, info: *const types.TypeInf
         },
         .enum_ => |e| return .{ .enum_ = @intCast(e.labels.len) },
         .flags => |fl| return .{ .flags = @intCast(fl.labels.len) },
-        .func, .own, .borrow, .instance_type, .component_type => return TypeBridgeError.UnsupportedType,
+        .func, .own, .borrow, .instance_type, .component_type, .resource => return TypeBridgeError.UnsupportedType,
     }
 }

@@ -28,6 +28,10 @@
 const std = @import("std");
 
 const leb128 = @import("../../support/leb128.zig");
+const core_scan = @import("core_scan.zig");
+pub const CoreDefType = core_scan.CoreDefType;
+pub const CoreModuleDecl = core_scan.CoreModuleDecl;
+pub const CoreTypeDef = core_scan.CoreTypeDef;
 const decode = @import("decode.zig");
 
 const Allocator = std.mem.Allocator;
@@ -144,6 +148,9 @@ pub const DefType = union(enum) {
     /// `instancetype` (0x42) — a component instance type (a WASI interface
     /// type is one of these).
     instance_type: InstanceType,
+    /// `resourcetype` (0x3f/0x3e) — a fresh (generative) resource type.
+    /// MVP rep is i32; the optional destructor is a core funcidx.
+    resource: ResourceType,
     /// `componenttype` (0x41) — a component type.
     component_type: ComponentType,
 };
@@ -165,6 +172,14 @@ pub const ImportExportDecl = struct {
 
 pub const InstanceType = struct {
     decls: []const InstanceDecl,
+};
+
+/// `resourcetype ::= 0x3f 0x7f dtor? | 0x3e 0x7f dtor cb?` (rep i32; the
+/// 🐘 i64 rep + 🚝 async forms decode to the same shape, dtor flags kept
+/// minimal — callbacks are not modeled).
+pub const ResourceType = struct {
+    /// Core funcidx of the destructor, if declared.
+    dtor: ?u32,
 };
 
 /// One `componentdecl` (`Binary.md`): `0x03 importdecl` or an `instancedecl`.
@@ -344,37 +359,16 @@ pub const AliasSpaceBefore = struct {
     core_types: u32,
 };
 
-/// A decoded `core:deftype` (`Binary.md` core type section). Only the
-/// type-INDEX structure needed for validation is modeled; GC rec/sub
-/// shapes pass through as `.other` (no refs extracted — never a false
-/// reject).
-pub const CoreDefType = union(enum) {
-    /// Type-index refs in a functype's params/results (`(ref N)` heap types).
-    func: []const u32,
-    module: []const CoreModuleDecl,
-    other,
+/// Lightweight recursive scan of a NESTED (inline) component: only the
+/// type-sort OUTER aliases (for the resource-generativity rule) and the
+/// children are modeled. The inner section body is a complete component
+/// binary (with preamble).
+pub const NestedComponentScan = struct {
+    outer_type_aliases: []const OuterTypeRef,
+    children: []const NestedComponentScan,
 };
 
-/// One `core:moduledecl` — only the module-LOCAL type-space interactions
-/// are modeled (imports/exports of `(func (type N))`/tags, nested type
-/// defs, outer type aliases); everything else is `.other`.
-pub const CoreModuleDecl = union(enum) {
-    /// An import/export referencing the module-local type space.
-    func_type_ref: u32,
-    /// A `core:type` decl — mints a module-local type index.
-    type_def: CoreDefType,
-    /// `(alias outer ct idx (type))` — ct 0 = the module scope itself,
-    /// ct 1 = the enclosing component. Mints a module-local type index.
-    outer_type_alias: struct { count: u32, index: u32 },
-    other,
-};
-
-/// A top-level core-type definition + the core-type space size at its
-/// definition point (def-order bounds for its outer refs).
-pub const CoreTypeDef = struct {
-    def: CoreDefType,
-    space_before: u32,
-};
+pub const OuterTypeRef = struct { count: u32, index: u32 };
 
 /// `instantiatearg ::= name sortidx` — a `with` arg satisfying a child
 /// component's import with a definition from this component's index spaces.
@@ -447,6 +441,8 @@ pub const TypeInfo = struct {
     alias_space_before: std.ArrayList(AliasSpaceBefore),
     /// Decoded core-type section definitions (validation model).
     core_types: std.ArrayList(CoreTypeDef),
+    /// Recursive scans of nested (inline) component sections, in order.
+    nested_scans: std.ArrayList(NestedComponentScan),
     /// The component type index space in definition order: each entry records
     /// whether its index was minted by a `type`-section def (`.def` = index
     /// into `deftypes`) or introduced under a name by a type-sort `alias` /
@@ -834,6 +830,26 @@ fn decodeCaseVec(arena: Allocator, body: []const u8, pos: *usize) Error![]const 
 }
 
 fn decodeDefType(arena: Allocator, body: []const u8, pos: *usize) Error!DefType {
+    // resourcetype (0x3f/0x3e) sits BELOW 0x40 — as sleb it reads positive
+    // (the sign bit 0x40 is clear), unlike every other deftype op. Peek raw.
+    if (pos.* < body.len and (body[pos.*] == 0x3f or body[pos.*] == 0x3e)) {
+        const op_raw = body[pos.*];
+        pos.* += 1;
+        if (op_raw == 0x3e) return Error.UnsupportedTypeForm; // async dtor form
+        // rep valtype: 0x7f (i32) / 0x7e (i64 🐘).
+        if (pos.* >= body.len) return Error.Truncated;
+        const rep = body[pos.*];
+        pos.* += 1;
+        if (rep != 0x7f and rep != 0x7e) return Error.InvalidDefType;
+        if (pos.* >= body.len) return Error.Truncated;
+        const has_dtor = body[pos.*];
+        pos.* += 1;
+        var dtor: ?u32 = null;
+        if (has_dtor == 0x01) {
+            dtor = try leb128.readUleb128(u32, body, pos);
+        } else if (has_dtor != 0x00) return Error.InvalidDefType;
+        return .{ .resource = .{ .dtor = dtor } };
+    }
     const v = try leb128.readSleb128(i64, body, pos);
     if (v >= 0) return Error.InvalidDefType; // a deftype is never a bare typeidx
     const op: u8 = @intCast(v & 0x7f);
@@ -883,9 +899,7 @@ fn decodeDefType(arena: Allocator, body: []const u8, pos: *usize) Error!DefType 
         0x66, 0x65 => Error.UnsupportedTypeForm,
         0x41 => .{ .component_type = try decodeComponentType(arena, body, pos) },
         0x42 => .{ .instance_type = try decodeInstanceType(arena, body, pos) },
-        // TODO(p17/CM): resourcetype definitions (0x3f sync / 0x3e async) — the
-        // P2-CLI fixture uses `(sub resource)` type-bounds, not these defs.
-        0x3f, 0x3e => Error.UnsupportedTypeForm,
+
         else => Error.InvalidDefType,
     };
 }
@@ -1081,145 +1095,40 @@ fn decodeExportSection(arena: Allocator, out: *std.ArrayList(Export), body: []co
 /// `opts ::= vec(canonopt)` (`Binary.md`). Decodes the canonical-ABI options;
 /// async (0x06) / callback (0x07) defer to the async phase.
 
-// ---- core:type section decode (`Binary.md` core type grammar) ----
+// ---- nested-component scan (resource-generativity rule input) ----
 
-/// `core:deftype ::= functype (0x60) | moduletype (0x50 md*) | rec/sub
-/// (GC — passed through as .other, body unconsumed)`.
-fn decodeCoreDefType(a: std.mem.Allocator, body: []const u8, pos: *usize) Error!CoreDefType {
-    if (pos.* >= body.len) return Error.Truncated;
-    switch (body[pos.*]) {
-        0x60 => {
-            pos.* += 1;
-            var refs: std.ArrayList(u32) = .empty;
-            try decodeCoreValTypeVec(a, body, pos, &refs);
-            try decodeCoreValTypeVec(a, body, pos, &refs);
-            return .{ .func = refs.items };
-        },
-        0x50 => {
-            pos.* += 1;
-            const n = try leb128.readUleb128(u32, body, pos);
-            var decls: std.ArrayList(CoreModuleDecl) = .empty;
-            var i: u32 = 0;
-            while (i < n) : (i += 1) {
-                try decls.append(a, try decodeCoreModuleDecl(a, body, pos));
+/// Recursively scan a nested component's binary for type-sort OUTER
+/// aliases (alias sections) and deeper nested components. Decode errors
+/// inside the nested binary propagate (an unparseable inner component is
+/// an invalid component).
+fn scanNestedComponent(a: std.mem.Allocator, bytes: []const u8) Error!NestedComponentScan {
+    // arena-allocated; no deinit (the TypeInfo arena owns everything). A
+    // malformed nested binary = an invalid component (decode errors map).
+    const inner = decode.decode(a, bytes) catch |e| return switch (e) {
+        error.OutOfMemory => Error.OutOfMemory,
+        else => Error.InvalidDefType,
+    };
+    var outer_refs: std.ArrayList(OuterTypeRef) = .empty;
+    var children: std.ArrayList(NestedComponentScan) = .empty;
+    for (inner.sections.items) |sec| switch (sec.id) {
+        .alias => {
+            var tmp: std.ArrayList(Alias) = .empty;
+            try decodeAliasSection(a, &tmp, sec.body);
+            for (tmp.items) |al| {
+                if (std.meta.activeTag(al.sort) != .type) continue;
+                switch (al.target) {
+                    .outer => |o| try outer_refs.append(a, .{ .count = o.count, .index = o.index }),
+                    else => {},
+                }
             }
-            return .{ .module = decls.items };
         },
-        // GC rec groups / sub types / struct / array — not modeled yet;
-        // leave the body unconsumed (each core-type section holds one
-        // deftype, so nothing follows that we would misparse).
-        else => return .other,
-    }
-}
-
-/// `core:moduledecl ::= 0x00 import | 0x01 type | 0x02 alias | 0x03 export`.
-fn decodeCoreModuleDecl(a: std.mem.Allocator, body: []const u8, pos: *usize) Error!CoreModuleDecl {
-    if (pos.* >= body.len) return Error.Truncated;
-    const tag = body[pos.*];
-    pos.* += 1;
-    switch (tag) {
-        0x00 => { // core:import — module name + field name + importdesc
-            try skipCoreName(body, pos);
-            try skipCoreName(body, pos);
-            return decodeCoreImportDesc(body, pos);
-        },
-        0x01 => return .{ .type_def = try decodeCoreDefType(a, body, pos) },
-        0x02 => { // core:alias ::= core:sort (0x01 outer ct idx)
-            if (pos.* >= body.len) return Error.Truncated;
-            const sort = body[pos.*];
-            pos.* += 1;
-            if (pos.* >= body.len) return Error.Truncated;
-            if (body[pos.*] != 0x01) return Error.InvalidAlias; // only outer in decls
-            pos.* += 1;
-            const ct = try leb128.readUleb128(u32, body, pos);
-            const idx = try leb128.readUleb128(u32, body, pos);
-            if (sort == 0x10) return .{ .outer_type_alias = .{ .count = ct, .index = idx } };
-            return .other;
-        },
-        0x03 => { // core:exportdecl ::= name importdesc
-            try skipCoreName(body, pos);
-            return decodeCoreImportDesc(body, pos);
-        },
-        else => return Error.InvalidDefType,
-    }
-}
-
-fn skipCoreName(body: []const u8, pos: *usize) Error!void {
-    const n = try leb128.readUleb128(u32, body, pos);
-    if (pos.* + n > body.len) return Error.Truncated;
-    pos.* += n;
-}
-
-/// Core `importdesc`: func/tag carry a module-local TYPE index (modeled);
-/// table/memory/global are skipped structurally.
-fn decodeCoreImportDesc(body: []const u8, pos: *usize) Error!CoreModuleDecl {
-    if (pos.* >= body.len) return Error.Truncated;
-    const kind = body[pos.*];
-    pos.* += 1;
-    switch (kind) {
-        0x00 => return .{ .func_type_ref = try leb128.readUleb128(u32, body, pos) },
-        0x01 => { // tabletype ::= reftype limits
-            try skipCoreValType(body, pos);
-            try skipCoreLimits(body, pos);
-            return .other;
-        },
-        0x02 => { // memtype ::= limits
-            try skipCoreLimits(body, pos);
-            return .other;
-        },
-        0x03 => { // globaltype ::= valtype mut
-            try skipCoreValType(body, pos);
-            if (pos.* >= body.len) return Error.Truncated;
-            pos.* += 1;
-            return .other;
-        },
-        0x04 => { // tagtype ::= 0x00 typeidx — references the type space too
-            if (pos.* >= body.len) return Error.Truncated;
-            pos.* += 1;
-            return .{ .func_type_ref = try leb128.readUleb128(u32, body, pos) };
-        },
-        else => return Error.InvalidExternDesc,
-    }
-}
-
-fn decodeCoreValTypeVec(a: std.mem.Allocator, body: []const u8, pos: *usize, refs: *std.ArrayList(u32)) Error!void {
-    const n = try leb128.readUleb128(u32, body, pos);
-    var i: u32 = 0;
-    while (i < n) : (i += 1) try decodeCoreValType(a, body, pos, refs);
-}
-
-/// One core `valtype`; `(ref [null] ht)` heap-type INDICES are collected
-/// into `refs` (they index the core-type space).
-fn decodeCoreValType(a: std.mem.Allocator, body: []const u8, pos: *usize, refs: *std.ArrayList(u32)) Error!void {
-    if (pos.* >= body.len) return Error.Truncated;
-    const b = body[pos.*];
-    pos.* += 1;
-    switch (b) {
-        // numtype / vectype / abstract heap-type shorthands.
-        0x7F, 0x7E, 0x7D, 0x7C, 0x7B, 0x70, 0x6F, 0x6E, 0x6D, 0x6C, 0x6B, 0x6A, 0x69, 0x68, 0x67, 0x66, 0x65 => {},
-        0x63, 0x64 => { // (ref null ht) / (ref ht)
-            const ht = try leb128.readSleb128(i64, body, pos);
-            if (ht >= 0) try refs.append(a, @intCast(ht));
-        },
-        else => return Error.InvalidValType,
-    }
-}
-
-fn skipCoreValType(body: []const u8, pos: *usize) Error!void {
-    var sink: std.ArrayList(u32) = .empty;
-    var fba_buf: [64]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&fba_buf);
-    return decodeCoreValType(fba.allocator(), body, pos, &sink);
-}
-
-/// Core `limits` (incl. shared/memory64 flag variants 0x00..0x07).
-fn skipCoreLimits(body: []const u8, pos: *usize) Error!void {
-    if (pos.* >= body.len) return Error.Truncated;
-    const flags = body[pos.*];
-    pos.* += 1;
-    if (flags > 0x07) return Error.InvalidDefType;
-    _ = try leb128.readUleb128(u64, body, pos);
-    if (flags & 0x01 != 0) _ = try leb128.readUleb128(u64, body, pos);
+        .component => try children.append(a, try scanNestedComponent(a, sec.body)),
+        else => {},
+    };
+    return .{
+        .outer_type_aliases = outer_refs.items,
+        .children = children.items,
+    };
 }
 
 fn decodeCanonOpts(body: []const u8, pos: *usize) Error!CanonOpts {
@@ -1399,6 +1308,7 @@ pub fn decodeTypeInfo(parent: Allocator, component: *const decode.Component) Err
     var core_global_count: u32 = 0;
     var alias_space_before: std.ArrayList(AliasSpaceBefore) = .empty;
     var core_types: std.ArrayList(CoreTypeDef) = .empty;
+    var nested_scans: std.ArrayList(NestedComponentScan) = .empty;
 
     for (component.sections.items) |sec| {
         switch (sec.id) {
@@ -1425,6 +1335,7 @@ pub fn decodeTypeInfo(parent: Allocator, component: *const decode.Component) Err
             .core_instance => try decodeCoreInstanceSection(a, &core_instances, sec.body),
             .instance => try decodeInstanceSection(a, &component_instances, sec.body),
             .alias => try decodeAliasSection(a, &aliases, sec.body),
+            .component => try nested_scans.append(a, try scanNestedComponent(a, sec.body)),
             .core_type => {
                 // Section body = vec(core:deftype); each def mints one
                 // core-type index.
@@ -1432,7 +1343,7 @@ pub fn decodeTypeInfo(parent: Allocator, component: *const decode.Component) Err
                 const cn = try leb128.readUleb128(u32, sec.body, &cpos);
                 var ci: u32 = 0;
                 while (ci < cn) : (ci += 1) {
-                    const def = try decodeCoreDefType(a, sec.body, &cpos);
+                    const def = try core_scan.decodeCoreDefType(a, sec.body, &cpos);
                     if (def == .other) {
                         // Unmodeled (GC) form: its body is unconsumed, so
                         // the rest of this vec cannot be parsed. Count the
@@ -1509,6 +1420,7 @@ pub fn decodeTypeInfo(parent: Allocator, component: *const decode.Component) Err
         .core_global_count = core_global_count,
         .alias_space_before = alias_space_before,
         .core_types = core_types,
+        .nested_scans = nested_scans,
         .imports = imports,
         .exports = exports,
         .canons = canons,
@@ -1925,4 +1837,18 @@ test "deftype cannot be a bare typeidx" {
 test "type section with trailing bytes is rejected" {
     const bytes = comptime buildComponent(&.{.{ 7, &[_]u8{ 0x01, 0x73, 0xff } }});
     try testing.expectError(Error.TrailingBytes, decodeBoth(bytes));
+}
+
+test "resourcetype (0x3f) decodes — a valid resource def is no longer falsely rejected (D-322)" {
+    // (component (type (resource (rep i32))))
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x0d, 0x00, 0x01, 0x00, // preamble
+        0x07, 0x04, 0x01, 0x3f, 0x7f, 0x00, // type section: 1 resourcetype, no dtor
+    };
+    var comp = try decode.decode(testing.allocator, &bytes);
+    defer comp.deinit(testing.allocator);
+    var info = try decodeTypeInfo(testing.allocator, &comp);
+    defer info.deinit();
+    try testing.expectEqual(@as(usize, 1), info.deftypes.items.len);
+    try testing.expectEqual(@as(?u32, null), info.deftypes.items[0].resource.dtor);
 }

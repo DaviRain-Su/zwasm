@@ -56,6 +56,8 @@ pub fn validate(info: *const TypeInfo) Error!void {
     try checkCanons(info, type_space_len);
     try checkAliases(info);
     try checkCoreTypes(info);
+    try checkResourceDefs(info);
+    try checkNestedComponentAliases(info);
     for (info.imports.items) |imp| {
         try checkExternDesc(imp.desc, type_space_len);
         try checkExternName(imp.name, .import);
@@ -107,7 +109,7 @@ fn checkDefTypeDeclDups(dt: DefType) Error!void {
                 }
             }
         },
-        .value, .func, .enum_, .flags, .record, .list, .tuple, .variant, .option, .result, .own, .borrow => {},
+        .value, .func, .enum_, .flags, .record, .list, .tuple, .variant, .option, .result, .own, .borrow, .resource => {},
     }
 }
 
@@ -339,7 +341,7 @@ fn checkDeclDefTypeRefsNamed(dt: DefType, scope: anytype) Error!void {
             if (res.err) |er| try checkDeclValTypeNamed(er, scope);
         },
         .own, .borrow => |idx| try checkDeclRefNamed(idx, scope),
-        .enum_, .flags => {},
+        .enum_, .flags, .resource => {},
         .instance_type, .component_type => {},
     }
 }
@@ -377,7 +379,7 @@ fn checkDeclRefNamed(idx: u32, scope: anytype) Error!void {
                         if (res.err) |er| try checkDeclValTypeNamed(er, scope);
                     },
                     .own, .borrow => |ri| checkDeclRefNamed(ri, scope),
-                    .func, .instance_type, .component_type => Error.InvalidExternDesc,
+                    .func, .instance_type, .component_type, .resource => Error.InvalidExternDesc,
                 },
             }
         }
@@ -427,6 +429,85 @@ fn checkCoreDefType(def: types.CoreDefType, enclosing_space: u32) Error!void {
             };
         },
         .other => {},
+    }
+}
+
+/// Resource definitions: the dtor (if declared) indexes the core-func
+/// space (corpus resources.wast "function index out of bounds").
+fn checkResourceDefs(info: *const TypeInfo) Error!void {
+    const core_func_len: u32 = @intCast(info.core_funcs.items.len);
+    for (info.deftypes.items) |dt| switch (dt) {
+        .resource => |r| if (r.dtor) |d| {
+            if (d >= core_func_len) return Error.InvalidCanon;
+        },
+        else => {},
+    };
+}
+
+/// Rule 12 — resource generativity across component boundaries
+/// (resources.wast "refers to resources not defined in the current
+/// component"; Binary.md: an outer-aliased type must not be a resource
+/// type, which is generative). Walk each nested (inline) component's
+/// type-sort outer aliases: one that reaches THIS (root) component and
+/// lands on a resource def — or a def transitively carrying
+/// own/borrow/resource — is invalid. Intermediate inline-component
+/// scopes are not modeled (their own spaces; deferred, never a false
+/// positive); counts beyond the root are invalid outright.
+fn checkNestedComponentAliases(info: *const TypeInfo) Error!void {
+    for (info.nested_scans.items) |scan| try walkNestedScan(info, scan, 1);
+}
+
+fn walkNestedScan(info: *const TypeInfo, scan: types.NestedComponentScan, depth: u32) Error!void {
+    for (scan.outer_type_aliases) |o| {
+        if (o.count > depth) return Error.InvalidAlias; // beyond the root
+        if (o.count == depth) {
+            if (o.index >= info.type_space.items.len) return Error.InvalidAlias;
+            switch (info.type_space.items[o.index]) {
+                .named => {}, // provenance chase deferred
+                .def => |d| try checkNotResourceCarrying(info, info.deftypes.items[d]),
+            }
+        }
+        // o.count < depth: targets an intermediate inline component's
+        // own space — deferred (not modeled).
+    }
+    for (scan.children) |c| try walkNestedScan(info, c, depth + 1);
+}
+
+fn checkNotResourceCarrying(info: *const TypeInfo, dt: DefType) Error!void {
+    switch (dt) {
+        .resource => return Error.InvalidAlias,
+        .own, .borrow => return Error.InvalidAlias,
+        .value => |vt| try checkValTypeNotResource(info, vt),
+        .func => |ft| {
+            for (ft.params) |p| try checkValTypeNotResource(info, p.ty);
+            if (ft.result) |r| try checkValTypeNotResource(info, r);
+        },
+        .record => |rec| for (rec.fields) |f| try checkValTypeNotResource(info, f.ty),
+        .tuple => |t| for (t.types) |vt| try checkValTypeNotResource(info, vt),
+        .list => |l| try checkValTypeNotResource(info, l.element.*),
+        .option => |o| try checkValTypeNotResource(info, o.payload.*),
+        .variant => |v| for (v.cases) |c| {
+            if (c.payload) |pl| try checkValTypeNotResource(info, pl);
+        },
+        .result => |res| {
+            if (res.ok) |ok| try checkValTypeNotResource(info, ok);
+            if (res.err) |er| try checkValTypeNotResource(info, er);
+        },
+        .enum_, .flags => {},
+        .instance_type, .component_type => {}, // decl scopes — deferred
+    }
+}
+
+fn checkValTypeNotResource(info: *const TypeInfo, vt: ValType) Error!void {
+    switch (vt) {
+        .primitive => {},
+        .type_index => |ti| {
+            if (ti >= info.type_space.items.len) return; // bounds elsewhere
+            switch (info.type_space.items[ti]) {
+                .named => {},
+                .def => |d| try checkNotResourceCarrying(info, info.deftypes.items[d]),
+            }
+        },
     }
 }
 
@@ -583,7 +664,7 @@ fn checkDefTypeLabelDups(dt: DefType) Error!void {
         },
         .enum_ => |e| try checkLabelSliceDups(e.labels),
         .flags => |fl| try checkLabelSliceDups(fl.labels),
-        .value, .list, .tuple, .option, .result, .own, .borrow => {},
+        .value, .list, .tuple, .option, .result, .own, .borrow, .resource => {},
         .instance_type, .component_type => {},
     }
 }
@@ -643,7 +724,8 @@ fn checkDefTypeRefsNamed(info: *const TypeInfo, dt: DefType) Error!void {
             if (res.err) |er| try checkValTypeNamed(info, er);
         },
         .own, .borrow => |idx| try checkRefNamed(info, idx),
-        .enum_, .flags => {},
+        // A resource type is its own name-bearer (always exportable).
+        .enum_, .flags, .resource => {},
         // Nested type scopes — deferred (consistent with rule 1).
         .instance_type, .component_type => {},
     }
@@ -672,7 +754,7 @@ fn checkDefTypeLabels(dt: DefType) Error!void {
         .variant => |v| for (v.cases) |c| try checkLabel(c.name),
         .enum_ => |e| for (e.labels) |l| try checkLabel(l),
         .flags => |fl| for (fl.labels) |l| try checkLabel(l),
-        .value, .list, .tuple, .option, .result, .own, .borrow => {},
+        .value, .list, .tuple, .option, .result, .own, .borrow, .resource => {},
         .instance_type, .component_type => {},
     }
 }
@@ -934,7 +1016,7 @@ fn checkDefTypeOuterAliases(dt: DefType, depth: u32) Error!void {
             .import_decl => {},
             .instance_decl => |id| try checkInstanceDeclOuterAlias(id, depth + 1),
         },
-        .value, .func, .enum_, .flags, .record, .list, .tuple, .variant, .option, .result, .own, .borrow => {},
+        .value, .func, .enum_, .flags, .record, .list, .tuple, .variant, .option, .result, .own, .borrow, .resource => {},
     }
 }
 
@@ -1002,6 +1084,7 @@ fn checkDefTypeIndices(dt: DefType, type_space_len: u32) Error!void {
             if (res.err) |er| try checkValType(er, type_space_len);
         },
         .own, .borrow => |idx| if (idx >= type_space_len) return Error.InvalidTypeIndex,
+        .resource => {}, // dtor indexes the core-func space (checked by rule 12 wiring later if needed)
         // No type-index references in their immediate form:
         .enum_, .flags => {},
         // Nested type scopes — deferred to a later structural rule.

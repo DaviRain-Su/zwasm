@@ -277,9 +277,11 @@ fn runCorpus(
             if (decodeValidate(gpa, bytes)) {
                 try stdout.print("FAIL  {s}: {s} (accepted an invalid component)\n", .{ name, line });
                 failed.* += 1;
-            } else |_| {
+            } else |err| {
                 passed.* += 1;
-                try stdout.print("PASS  {s}: {s}\n", .{ name, line });
+                // The reject REASON is forensic gold: a case passing via an
+                // unrelated decode gap (vs the real rule) reads differently.
+                try stdout.print("PASS  {s}: {s} (rejected: {s})\n", .{ name, line, @errorName(err) });
             }
             continue;
         }

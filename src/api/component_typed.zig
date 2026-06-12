@@ -307,7 +307,7 @@ fn fromCanonDefType(out_alloc: std.mem.Allocator, scratch: std.mem.Allocator, in
         },
         .enum_ => return .{ .@"enum" = cv.enum_value },
         .flags => return .{ .flags = cv.flags },
-        .func, .own, .borrow, .instance_type, .component_type => return InvokeTypedError.UnsupportedType,
+        .func, .own, .borrow, .instance_type, .component_type, .resource => return InvokeTypedError.UnsupportedType,
     }
 }
 
