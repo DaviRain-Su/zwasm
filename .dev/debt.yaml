@@ -7,25 +7,33 @@ entries:
     layer: "code"
     status: "blocked-by"
     description: |-
-      blocked-by (multi-part effort + Win64-gate): zwasm v0 sandboxing (ADR-0179,
-      shipped @1001fa0e/460210f1/7216e7b1/58479dd6) is **interp-engine ONLY**, via
-      the Zig facade — `Instance.interrupt()`/`clearInterrupt()`/`interruptRequested()`
-      (cancel/timeout → error.Interrupted), `setFuel`/`fuelRemaining` (→
-      error.OutOfFuel), `setMemoryPagesLimit` (memory.grow cap). Untrusted code run
-      via `--engine jit` is currently UNGUARDED. Follow-ons (NOT v0.1-blocking — the
-      default interp engine carries the guarantee):
-      (1) **JIT-engine sandboxing** — extend interrupt/fuel/mem-cap to the JIT.
-          Needs a host→JIT interrupt DRIVING path (none today; facade is interp-only,
-          CLI `--engine jit` has no interrupt API), a prologue/back-edge poll +
-          interrupted trap-stub codegen on BOTH arches (Win64-prologue-risk →
-          `should_gate_windows.sh --resume` first per ADR-0174; conflicts w/ cw dev),
-          and a JIT-run-trap test harness (none exists — tests are byte-level).
-          interp & JIT runtimes are SEPARATE objects (`setupRuntimeLinked` builds
-          RuntimeOwned.rt independent of the interp Runtime) → needs JitRuntime
-          `interrupt_ptr` + a `setInterruptFlag`. Bundle memo: commit `fb18bd82`.
-      (2) **#3a-4 CLI/C-API surface** — `zwasm.h` setters + `TrapKind.interrupted`
-          (today trap_surface `mapInterpTrap` else→binding_error) + CLI `--fuel`/
-          `--timeout`(timer)/`--max-memory`. Small; the Zig facade already has it.
+      blocked-by (multi-part effort, IN PROGRESS — Active bundle d314-jit-sandbox in
+      handover drives it): zwasm v0 sandboxing (ADR-0179, shipped
+      @1001fa0e/460210f1/7216e7b1/58479dd6) was **interp-engine ONLY** via the Zig
+      facade — `Instance.interrupt()`/`setFuel`/`setMemoryPagesLimit`. The JIT side
+      is being built. **DONE 2026-06-12 (3-host green, windowsmini verified)**:
+      `TrapKind.interrupted=16` + the interp `error.Interrupted`→binding_error
+      mis-surface fix (`5564c553`); **JIT prologue interrupt poll BOTH arches**
+      (`c1a9da15` arm64, `6d56f517` x86_64) — `JitRuntime.interrupt_ptr` (trailing
+      extern field) + `interrupt_ptr_off` + the `JitInstance.setInterruptFlag`
+      driving path; a recursive/call-bearing fn traps kind 16 on a host-set flag;
+      **arm64 loop BACK-EDGE poll** (`5b441f96`) — `emitBackEdgeInterruptPoll` at
+      the 3 br/br_if-to-loop sites → POST-frame stub (fb=frame_bytes, separate
+      `back_edge_interrupt_fixups`); a tight no-call `(loop)` traps on arm64. The
+      paired `skip.blocker(.@"D-314")` arch-gates the loop-trap test to aarch64.
+      (1) **REMAINING codegen: x86_64 loop back-edge poll** — mirror the arm64
+          helper at the x86_64 br/br_if-to-loop sites + a 2nd op_control stub with
+          `ADD RSP, frame_bytes` before POP/RET. GOTCHA: a no-call loop fn has NO
+          R15 (`uses_runtime_ptr=false`) → FORCE R15 setup when the fn contains a
+          loop (usage.usesRuntimePtr prescan). Win64-prologue-risk; the windows
+          gate is RESUMED (sentinel deleted 2026-06-12 — windowsmini is FREE, CWFS
+          uses tag refs, no contention). Then ungate the loop test + cover
+          br_table-to-loop (both arches). Facade `--engine jit` interrupt wiring
+          rides (2). Poll+stub are unconditional per fn — measure the code-size
+          bloat, consider an opt-in compile flag (perf-measure-first).
+      (2) **#3a-4 CLI/C-API surface** — `zwasm.h` setters + CLI `--fuel`/
+          `--timeout`(timer)/`--max-memory`. Small; the Zig facade already has it
+          (TrapKind.interrupted itself landed @5564c553).
       (3) **Design upgrades** (ADR-0179 Revision): epoch-COUNTER (per-store deadline
           ticks) over the v0 binary flag; pre-instantiate StoreLimits config over the
           post-instantiate setter [FACADE done — `Module.InstantiateOpts.{fuel,
@@ -49,7 +57,7 @@ entries:
       runs sandboxed on interp. JIT sandboxing matters only for a future
       --engine-jit-from-API path. Priority for cw v1: LOW.
     first_raised: "2026-06-08"
-    last_reviewed: "2026-06-08"
+    last_reviewed: "2026-06-13"
     refs: |-
       .dev/architecture/jit_facade_integration_scope.md (full scope assessment); .dev/decisions/0179_execution_interruption_resource_limits.md (Revision); docs/migration_v1_to_v2.md §1; src/zwasm/instance.zig (facade methods); src/runtime/runtime.zig (interrupt/fuel/store_memory_pages_max); src/engine/setup.zig (JIT mem_max_pages); commit fb18bd82 (bundle memo)
   - id: "D-315"
