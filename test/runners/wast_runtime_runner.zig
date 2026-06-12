@@ -983,6 +983,7 @@ fn trapKindName(k: wasm_c_api.TrapKind) []const u8 {
         .unaligned_atomic => "UnalignedAtomic", // Wasm threads (ADR-0168)
         .expected_shared_memory => "ExpectedSharedMemory", // Wasm threads (ADR-0168)
         .interrupted => "Interrupted", // sandboxing host cancel/timeout (ADR-0179 #3a)
+        .out_of_fuel => "OutOfFuel", // sandboxing fuel budget (ADR-0179 #3b)
     };
 }
 

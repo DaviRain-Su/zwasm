@@ -86,16 +86,22 @@ test "compile: loop + br 0 + end — backward unconditional branch" {
     defer deinit(testing.allocator, out);
 
     // Loop entry recorded at body0. D-314: the `br 0` emits the loop back-edge
-    // interrupt poll (5 instrs / 20 bytes) FIRST, then the backward B. So body0
-    // is the poll's `LDR X16, [X19, #interrupt_ptr_off]`, and the B is at
-    // body0+20 targeting body0 → disp = -5 words (negative, as intended).
+    // polls FIRST — interrupt (5 instrs / 20 B, #3a) then fuel (7 instrs /
+    // 28 B, #3b) — then the backward B. So body0 is the interrupt poll's
+    // `LDR X16, [X19, #interrupt_ptr_off]`, body0+20 is the fuel poll's
+    // `LDR W16, [X19, #fuel_metered_off]`, and the B is at body0+48 targeting
+    // body0 → disp = -12 words (negative, as intended).
     const body0 = prologue.body_start_offset(false);
     try testing.expectEqual(
         @as(u32, inst.encLdrImm(16, abi.runtime_ptr_save_gpr, jit_abi.interrupt_ptr_off)),
         std.mem.readInt(u32, out.bytes[body0..][0..4], .little),
     );
-    const b_word = std.mem.readInt(u32, out.bytes[body0 + 20 ..][0..4], .little);
-    try testing.expectEqual(@as(u32, inst.encB(-5)), b_word);
+    try testing.expectEqual(
+        @as(u32, inst.encLdrImmW(16, abi.runtime_ptr_save_gpr, jit_abi.fuel_metered_off)),
+        std.mem.readInt(u32, out.bytes[body0 + 20 ..][0..4], .little),
+    );
+    const b_word = std.mem.readInt(u32, out.bytes[body0 + 48 ..][0..4], .little);
+    try testing.expectEqual(@as(u32, inst.encB(-12)), b_word);
 }
 
 test "compile: if (i32.const N) end — single-arm if; CBZ skips to end" {

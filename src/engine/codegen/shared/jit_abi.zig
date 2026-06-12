@@ -513,6 +513,21 @@ pub const JitRuntime = extern struct {
     /// A plain load is a relaxed/monotonic read of the aligned u32 (matches the
     /// interp's `.monotonic`). TRAILING (extern-struct layout; no offset churn).
     interrupt_ptr: ?*const std.atomic.Value(u32) = null,
+    /// Sandboxing (ADR-0179 #3b / D-314) — JIT fuel metering enable flag
+    /// (0 = unmetered, the poll skips). NOT a pointer like `interrupt_ptr`:
+    /// the budget cell lives in THIS struct and RuntimeOwned moves by value
+    /// into JitInstance (D-215) — a self-referential pointer would dangle on
+    /// the move. The poll, beside the interrupt poll at the prologue + every
+    /// loop back-edge, does `load fuel_metered; zero-skip; SUB fuel_cell, 1;
+    /// sign-negative → out-of-fuel stub (code 17)`. Fuel UNITS are poll-site
+    /// crossings (v1 parity), NOT interp instructions — engines meter
+    /// differently by design (ADR-0179 rev 2026-06-12). TRAILING.
+    fuel_metered: u32 = 0,
+    /// Explicit pad keeping `fuel_cell` 8-aligned in the extern layout.
+    fuel_pad: u32 = 0,
+    /// JIT fuel budget. Signed so the post-SUB sign check is one flag test:
+    /// budget N permits N polls; the poll taking it to -1 traps. TRAILING.
+    fuel_cell: i64 = 0,
 };
 
 /// Default `memory_grow_fn` — unconditionally refuses growth by
@@ -1268,6 +1283,11 @@ pub const gc_type_infos_ptr_off: u12 = @offsetOf(JitRuntime, "gc_type_infos_ptr"
 /// ADR-0179 #3a / D-314 — host cooperative-interruption flag pointer, read
 /// by the prologue/back-edge poll. Trailing field; no existing offset shifts.
 pub const interrupt_ptr_off: u12 = @offsetOf(JitRuntime, "interrupt_ptr");
+/// ADR-0179 #3b / D-314 — JIT fuel enable flag (W-form) + budget cell
+/// (X-form), read/written by the fuel poll beside each interrupt poll.
+/// Trailing fields.
+pub const fuel_metered_off: u12 = @offsetOf(JitRuntime, "fuel_metered");
+pub const fuel_cell_off: u12 = @offsetOf(JitRuntime, "fuel_cell");
 
 /// Total size of the head section consumed by the prologue.
 pub const head_size: u32 = @sizeOf(JitRuntime);
@@ -1283,6 +1303,9 @@ comptime {
     if ((mem_limit_off & 7) != 0) @compileError("mem_limit_off not 8-aligned");
     if ((funcptr_base_off & 7) != 0) @compileError("funcptr_base_off not 8-aligned");
     if ((typeidx_base_off & 7) != 0) @compileError("typeidx_base_off not 8-aligned");
+    if ((interrupt_ptr_off & 7) != 0) @compileError("interrupt_ptr_off not 8-aligned");
+    if ((fuel_metered_off & 3) != 0) @compileError("fuel_metered_off not 4-aligned");
+    if ((fuel_cell_off & 7) != 0) @compileError("fuel_cell_off not 8-aligned");
     // table_size is W-form (4 bytes); imm12 scales by 4. Must
     // be 4-aligned.
     if ((table_size_off & 3) != 0) @compileError("table_size_off not 4-aligned");
@@ -1444,7 +1467,8 @@ test "JitRuntime: total size = 464 bytes (post-10.E tag_ids tail)" {
     // ADR-0168 appends atomic_notify_fn (+8) + atomic_wait_fns[2] (+16) +
     // mem0_shared (u32 +4, pad +4) → 512 + 32 = 544.
     // D-314 appends `interrupt_ptr` (?*const atomic, +8 B, trailing) → 544 + 8 = 552.
-    try testing.expectEqual(@as(u32, 552), head_size);
+    // D-314 #3b appends `fuel_metered`+pad+`fuel_cell` (+16 B, trailing) → 552 + 16 = 568.
+    try testing.expectEqual(@as(u32, 568), head_size);
 }
 
 test "jitGcAlloc: allocates struct{i32} via the *JitRuntime bridge (10.G A-2a)" {

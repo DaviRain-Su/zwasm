@@ -395,7 +395,7 @@ test "compile: bundled Class C MEMORY-class — caller LEA X8 + callee STR X8 + 
     //                    (set by prologue, read by epilogue)
     // Body starts at body_start_offset_memory_return() = 64
     // (post-ADR-0105 D2 probe shifted +16).
-    try testing.expectEqual(@as(u32, 84), prologue.body_start_offset_memory_return());
+    try testing.expectEqual(@as(u32, 112), prologue.body_start_offset_memory_return());
 
     // STR X8, [SP, #24] at body_start_offset(true) = 60 (post-SUB-SP,
     // just before body).

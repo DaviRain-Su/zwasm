@@ -19,6 +19,7 @@ const Cond = inst.Cond;
 const ShiftKind = inst.ShiftKind;
 const encodeRex = inst.encodeRex;
 const encodeModrm = inst.encodeModrm;
+const encodeSib = inst.encodeSib;
 const rexForRR = inst.rexForRR;
 
 /// `MOV r/m, r` (opcode 0x89) — copy `src` into `dst`. Width
@@ -254,6 +255,29 @@ pub fn encSubRSpImm8(imm: i8) EncodedInsn {
     enc.push(encodeRex(true, 0, 0, 0));
     enc.push(0x83);
     enc.push(encodeModrm(0b11, 5, 4)); // /5 = SUB, rm=4 (RSP)
+    enc.push(@bitCast(imm));
+    return enc;
+}
+
+/// `SUB QWORD PTR [base + disp32], imm8` (sign-extended) — opcode 0x83 /5
+/// with REX.W (+ REX.B for R8..R15 bases), mod=10 disp32. 8-byte encoding
+/// for an R15 base. ADR-0179 #3b / D-314: the JIT fuel poll's in-memory
+/// budget decrement (`SUB [R15+fuel_cell_off], 1` → SF set when the cell
+/// goes negative → JS out-of-fuel stub).
+pub fn encSubMem64Disp32Imm8(base: Gpr, disp: i32, imm: i8) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    enc.push(encodeRex(true, 0, 0, base.extBit()));
+    enc.push(0x83);
+    enc.push(encodeModrm(0b10, 5, base.low3())); // /5 = SUB
+    if (base.low3() == 4) {
+        // SIB: scale=00, index=100 (none), base = base.low3().
+        enc.push(encodeSib(0b00, 0b100, base.low3()));
+    }
+    const u: u32 = @bitCast(disp);
+    enc.push(@truncate(u));
+    enc.push(@truncate(u >> 8));
+    enc.push(@truncate(u >> 16));
+    enc.push(@truncate(u >> 24));
     enc.push(@bitCast(imm));
     return enc;
 }

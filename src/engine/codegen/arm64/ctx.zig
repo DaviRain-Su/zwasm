@@ -152,6 +152,10 @@ pub const EmitCtx = struct {
     /// separate single fixup, fb=0): a back-edge poll fires POST-frame, so its
     /// stub restores frame_bytes before LDP/RET (fb=frame_bytes, same as oob).
     back_edge_interrupt_fixups: *std.ArrayList(u32),
+    /// ADR-0179 #3b / D-314 — loop back-edge fuel poll (B.MI → code 17 =
+    /// out_of_fuel) fixups. Emitted beside each back-edge interrupt poll;
+    /// same POST-frame stub shape (fb=frame_bytes).
+    back_edge_fuel_fixups: *std.ArrayList(u32),
     /// `return` / `br <function-depth>` placeholders; patched at
     /// function-final `end` to share the regular epilogue path.
     return_fixups: *std.ArrayList(u32),

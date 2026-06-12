@@ -68,6 +68,8 @@ pub const InitArgs = struct {
     /// POST-frame stub via emitTrapExitStub; the PROLOGUE poll's
     /// `interrupt_fixup` is a separate pre-frame single fixup, fb=0).
     back_edge_interrupt_fixups: *std.ArrayList(u32),
+    /// ADR-0179 #3b / D-314 — see EmitCtx field of the same name.
+    back_edge_fuel_fixups: *std.ArrayList(u32),
     call_fixups: *std.ArrayList(CallFixup),
     simd_const_fixups: *std.ArrayList(SimdConstFixup),
     extra_consts: *std.ArrayList([16]u8),
@@ -87,6 +89,8 @@ pub const InitArgs = struct {
     stack_probe_fixup: u32,
     /// ADR-0179 #3a / D-314 — see EmitCtx field of the same name.
     interrupt_fixup: u32,
+    /// ADR-0179 #3b / D-314 — see EmitCtx field of the same name.
+    fuel_fixup: u32,
     /// ADR-0111 D4 — see EmitCtx field of the same name.
     memory0_idx_type: sections.MemoryEntry.IdxType = .i32,
     /// EH integration IT-1 — see EmitCtx field of the same name.
@@ -188,6 +192,11 @@ pub const EmitCtx = struct {
     /// emitTrapExitStub epilogue (fb-restore + homed-reg restore), same shape
     /// as oob_fixups. Mirrors arm64 back_edge_interrupt_fixups.
     back_edge_interrupt_fixups: *std.ArrayList(u32),
+    /// ADR-0179 #3b / D-314 — loop back-edge fuel poll (`JS rel32`, 6-byte)
+    /// fixups → code 17 = out_of_fuel. Emitted beside each back-edge
+    /// interrupt poll; same POST-frame emitTrapExitStub shape. Mirrors arm64
+    /// back_edge_fuel_fixups.
+    back_edge_fuel_fixups: *std.ArrayList(u32),
     /// D-293 — table-access + call_indirect-bounds out-of-bounds (oob_table, code 2)
     /// fixups (`JAE rel32`, 6-byte), demuxed from `bounds_fixups` to a dedicated
     /// stub. Unifies x86_64 with arm64 (which already produces code 2 for cind).
@@ -307,6 +316,10 @@ pub const EmitCtx = struct {
     /// dedicated interrupted trap stub (kind 16, fb=0; the poll fires
     /// BEFORE the SUB RSP, same as the probe) and patches this JNE fixup.
     interrupt_fixup: u32,
+    /// ADR-0179 #3b / D-314 — when non-zero, op_control.zig emits a
+    /// dedicated out-of-fuel trap stub (kind 17, fb=0 pre-frame) and
+    /// patches this JS fixup (the prologue fuel poll).
+    fuel_fixup: u32,
     /// ADR-0111 D4 — memory 0's idx_type. `.i32` (legacy ≤ 4 GiB;
     /// byte-identical fast path) or `.i64` (memory64 64-bit MOV
     /// + u64 offset materialise). Per-module constant; codegen
@@ -371,6 +384,7 @@ pub const EmitCtx = struct {
             .oob_fixups = args.oob_fixups,
             .unaligned_atomic_fixups = args.unaligned_atomic_fixups,
             .back_edge_interrupt_fixups = args.back_edge_interrupt_fixups,
+            .back_edge_fuel_fixups = args.back_edge_fuel_fixups,
             .oobtable_fixups = args.oobtable_fixups,
             .cind_sig_fixups = args.cind_sig_fixups,
             .uninit_elem_fixups = args.uninit_elem_fixups,
@@ -393,6 +407,7 @@ pub const EmitCtx = struct {
             .local_disps = args.local_disps,
             .stack_probe_fixup = args.stack_probe_fixup,
             .interrupt_fixup = args.interrupt_fixup,
+            .fuel_fixup = args.fuel_fixup,
             .memory0_idx_type = args.memory0_idx_type,
             .exception_table_builder = args.exception_table_builder,
             .open_try_tables = args.open_try_tables,

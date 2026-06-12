@@ -351,6 +351,20 @@ pub fn compile(
     try gpr.writeU32(allocator, &buf, inst.encCmpRegW(17, 31));
     const interrupt_probe_fixup: u32 = @intCast(buf.items.len);
     try gpr.writeU32(allocator, &buf, inst.encBCond(.ne, 0));
+    // ADR-0179 #3b / D-314 — fuel poll (prologue crossing). `LDR W16 ←
+    // fuel_metered; CBZ W16, skip (unmetered → load + not-taken branch only);
+    // LDR X17 ← fuel_cell; SUB X17, #1; STR X17 → fuel_cell; CMP X17, XZR;
+    // B.MI` → the out-of-fuel stub (code 17, fb=0 pre-frame). Plain SUB (not
+    // SUBS) + CMP so the patcher sees the canonical CMP+B.cond pair. Skip
+    // disp = 6 words (over LDR/SUB/STR/CMP/B.MI).
+    try gpr.writeU32(allocator, &buf, inst.encLdrImmW(16, abi.runtime_ptr_save_gpr, jit_abi.fuel_metered_off));
+    try gpr.writeU32(allocator, &buf, inst.encCbzW(16, 6));
+    try gpr.writeU32(allocator, &buf, inst.encLdrImm(17, abi.runtime_ptr_save_gpr, jit_abi.fuel_cell_off));
+    try gpr.writeU32(allocator, &buf, inst.encSubImm12(17, 17, 1));
+    try gpr.writeU32(allocator, &buf, inst.encStrImm(17, abi.runtime_ptr_save_gpr, jit_abi.fuel_cell_off));
+    try gpr.writeU32(allocator, &buf, inst.encCmpRegX(17, 31));
+    const fuel_probe_fixup: u32 = @intCast(buf.items.len);
+    try gpr.writeU32(allocator, &buf, inst.encBCond(.mi, 0));
     // §9.8a / 8a.2 (ADR-0034) — JIT-execution sentinel: write 1 to
     // `JitRuntime.jit_executed_flag` so post-call readers can
     // distinguish "JIT body actually ran" from "compile-passed but
@@ -709,6 +723,9 @@ pub fn compile(
     // ADR-0179 #3a / D-314 — loop back-edge interrupt poll (code 16, fb=frame_bytes).
     var back_edge_interrupt_fixups: std.ArrayList(u32) = .empty;
     defer back_edge_interrupt_fixups.deinit(allocator);
+    // ADR-0179 #3b / D-314 — loop back-edge fuel poll (code 17, fb=frame_bytes).
+    var back_edge_fuel_fixups: std.ArrayList(u32) = .empty;
+    defer back_edge_fuel_fixups.deinit(allocator);
 
     // Return fixup list (§9.7 / 7.5-return-op): each `return` op
     // emits its result marshal inline and an unconditional B
@@ -809,6 +826,7 @@ pub fn compile(
         .uncaught_exc_fixups = &uncaught_exc_fixups,
         .oob_fixups = &oob_fixups,
         .back_edge_interrupt_fixups = &back_edge_interrupt_fixups,
+        .back_edge_fuel_fixups = &back_edge_fuel_fixups,
         .return_fixups = &return_fixups,
         .call_fixups = &call_fixups,
         .simd_const_fixups = &simd_const_fixups,
@@ -1891,6 +1909,9 @@ pub fn compile(
                 // (code 16, POST-frame → fb=frame_bytes; distinct from the
                 // prologue interrupt stub which is fb=0).
                 try EmitCindStub.emit(allocator, &buf, back_edge_interrupt_fixups.items, 16, frame_bytes);
+                // ADR-0179 #3b / D-314 — loop back-edge fuel poll stub
+                // (code 17, POST-frame → fb=frame_bytes).
+                try EmitCindStub.emit(allocator, &buf, back_edge_fuel_fixups.items, 17, frame_bytes);
                 // ADR-0105 D3 — stack-overflow trap stub. Probe fired
                 // BEFORE `SUB SP, SP, frame_bytes`, so the stub must
                 // NOT add frame_bytes back (SP is still at the post-
@@ -1901,6 +1922,8 @@ pub fn compile(
                 // ADR-0179 #3a / D-314 — cooperative-interruption stub (code 16).
                 // Fires at the same pre-frame position as the stack probe → fb=0.
                 try EmitCindStub.emit(allocator, &buf, &.{interrupt_probe_fixup}, 16, 0);
+                // ADR-0179 #3b / D-314 — prologue out-of-fuel stub (code 17, fb=0).
+                try EmitCindStub.emit(allocator, &buf, &.{fuel_probe_fixup}, 17, 0);
                 // §9.6/9.6-f-ii + §9.9-g-19 — SIMD const-pool flush +
                 // LDR-Q-literal imm19 fixups (per ADR-0042 + ADR-0051).
                 // After the trap stub, if any v128.const / i8x16.shuffle

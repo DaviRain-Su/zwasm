@@ -240,6 +240,20 @@ fn emitBackEdgeInterruptPoll(ctx: *EmitCtx) Error!void {
     const fixup_at: u32 = @intCast(ctx.buf.items.len);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.ne, 0));
     try ctx.back_edge_interrupt_fixups.append(ctx.allocator, fixup_at);
+    // ADR-0179 #3b / D-314 — fuel poll, beside the interrupt poll at every
+    // back-edge (prologue sibling in emit.zig). `LDR W16 ← fuel_metered;
+    // CBZ W16, +6 (unmetered); LDR X17 ← fuel_cell; SUB X17, #1; STR X17;
+    // CMP X17, XZR; B.MI → back_edge_fuel_fixups` (code 17, POST-frame stub).
+    // 7 instrs / 28 bytes; total back-edge poll block = 48 bytes.
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImmW(16, abi.runtime_ptr_save_gpr, jit_abi.fuel_metered_off));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCbzW(16, 6));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(17, abi.runtime_ptr_save_gpr, jit_abi.fuel_cell_off));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encSubImm12(17, 17, 1));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImm(17, abi.runtime_ptr_save_gpr, jit_abi.fuel_cell_off));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegX(17, 31));
+    const fuel_fixup_at: u32 = @intCast(ctx.buf.items.len);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.mi, 0));
+    try ctx.back_edge_fuel_fixups.append(ctx.allocator, fuel_fixup_at);
 }
 
 /// result and append to `return_fixups` so the final `end`

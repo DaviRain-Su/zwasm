@@ -730,6 +730,27 @@ pub const JitInstance = struct {
         self.owned.rt.interrupt_ptr = flag;
     }
 
+    /// ADR-0179 #3b / D-314 — arm (or disarm with null) the JIT fuel budget.
+    /// Units are POLL-SITE CROSSINGS (function prologue + each loop back-edge),
+    /// NOT interp instructions — engines meter differently by design (ADR-0179
+    /// rev 2026-06-12). Exhaustion traps with kind 17 (out_of_fuel).
+    pub fn setFuel(self: *JitInstance, fuel: ?u64) void {
+        if (fuel) |n| {
+            self.owned.rt.fuel_cell = std.math.cast(i64, n) orelse std.math.maxInt(i64);
+            self.owned.rt.fuel_metered = 1;
+        } else {
+            self.owned.rt.fuel_metered = 0;
+        }
+    }
+
+    /// Remaining JIT fuel; null when unmetered. After an out-of-fuel trap the
+    /// cell is one past zero — clamp so the host never sees a negative budget.
+    pub fn fuelRemaining(self: *const JitInstance) ?u64 {
+        if (self.owned.rt.fuel_metered == 0) return null;
+        const cell = self.owned.rt.fuel_cell;
+        return if (cell < 0) 0 else @intCast(cell);
+    }
+
     /// Wider arities / v128 result / non-scalar args → `UnsupportedEntrySignature`.
     pub fn invoke(self: *JitInstance, allocator: Allocator, export_name: []const u8, args: []const u64) Error!?u64 {
         const func_idx = try findExportFunc(allocator, self.wasm_bytes, export_name);

@@ -51,7 +51,7 @@ test "compile: empty function (no instrs, empty liveness) emits prologue+epilogu
     // 2 prologue u32s = 8 bytes. (Empty body has no `end` op so the
     // stack-overflow trap stub is not emitted; only the prologue is
     // present. Prologue grew from 40 → 56 with ADR-0105 D2 probe.)
-    try testing.expectEqual(@as(usize, 76), out.bytes.len);
+    try testing.expectEqual(@as(usize, 104), out.bytes.len);
     // Use the centralised opcode constants; ABI-pinned offsets [0..4] / [4..8].
     try prologue.assertPrologueOpcodes(out.bytes);
 }
@@ -71,7 +71,7 @@ test "compile: (i32.const 42) end yields 5-instr body returning 42 in X0" {
     // Expected stream: prologue (incl. ADR-0105 probe) + MOVZ X9,#42 +
     // MOV X0,X9 + LDP + RET + 7-instr stack-overflow trap stub.
     // = 56 + 4*4 + 7*4 = 100 bytes.
-    try testing.expectEqual(@as(usize, 148), out.bytes.len);
+    try testing.expectEqual(@as(usize, 204), out.bytes.len);
 
     // Word 0: STP prologue (ABI-pinned per AAPCS64; offset fixed).
     try testing.expectEqual(prologue.FpLrSave.stp_word, std.mem.readInt(u32, out.bytes[0..4], .little));
@@ -103,7 +103,7 @@ test "compile: i32.const 0x12345678 emits MOVZ + MOVK (full 32-bit)" {
     defer deinit(testing.allocator, out);
 
     // 7 u32s now: STP / MOV-FP-SP / MOVZ / MOVK / MOV-X0 / LDP / RET.
-    try testing.expectEqual(@as(usize, 152), out.bytes.len);
+    try testing.expectEqual(@as(usize, 208), out.bytes.len);
     const body0 = prologue.body_start_offset(false);
     try testing.expectEqual(@as(u32, inst.encMovzImm16(9, 0x5678)), std.mem.readInt(u32, out.bytes[body0..][0..4], .little));
     try testing.expectEqual(@as(u32, inst.encMovkImm16(9, 0x1234, 1)), std.mem.readInt(u32, out.bytes[body0 + 4 ..][0..4], .little));

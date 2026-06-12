@@ -241,16 +241,15 @@ test "compile: (loop (br 0) end) end — backward br with concrete disp" {
     // D-314: a `loop` forces uses_runtime_ptr (the back-edge poll reads
     // [R15+interrupt_ptr_off] and its stub writes via R15), so the full R15
     // prologue is emitted; fb = 8 (no locals/spills — just the 2-PUSH parity
-    // pad). The `br 0` emits the 32-byte poll FIRST (MOV R11,[R15+ipo] 7 +
-    // TEST 3 + JZ 6 + MOV R11D,[R11] 7 + TEST 3 + JNE 6), then the backward
-    // JMP at body0+32 targeting the loop header at body0 → disp = -37.
+    // pad). The `br 0` emits     // TEST 3 + JZ 6 + MOV R11D,[R11] 7 + TEST 3 + JNE 6), then the backward
+    // JMP at body0+62 targeting the loop header at body0 → disp = -67.
     const body0 = prologue.body_start_offset(true, 8);
     try testing.expectEqualSlices(
         u8,
         inst.encMovR64FromMemDisp32(.r11, abi.runtime_ptr_save_gpr, @intCast(jit_abi.interrupt_ptr_off)).slice(),
         out.bytes[body0..][0..7],
     );
-    try testing.expectEqualSlices(u8, inst.encJmpRel32(-37).slice(), out.bytes[body0 + 32 ..][0..5]);
+    try testing.expectEqualSlices(u8, inst.encJmpRel32(-67).slice(), out.bytes[body0 + 62 ..][0..5]);
 }
 
 test "compile: (i32.const 1) (if) (i32.const 7) (end) end — single-arm if; JE patched" {
@@ -377,16 +376,16 @@ test "compile: (loop (i32.const 0) (br_if 0) end) end — Jcc backward concrete 
 
     // D-314: loop forces uses_runtime_ptr → full R15 prologue, fb = 8 (no
     // locals/spills). Body: MOV EBX,#0 (5) + TEST EBX,EBX (2) at body0, then
-    // the no-params br_if-to-loop path = 32-byte back-edge poll + re-TEST
-    // EBX,EBX (2, the poll clobbers flags) + backward JNE at body0+41
-    // targeting the loop header at body0 → disp = body0-(body0+41)-6 = -47.
+    // the no-params br_if-to-loop path = 62-byte back-edge poll block (interrupt 32 + fuel 30) + re-TEST
+    // EBX,EBX (2, the poll clobbers flags) + backward JNE at body0+71
+    // targeting the loop header at body0 → disp = body0-(body0+41)-6 = -77.
     const body0 = prologue.body_start_offset(true, 8);
     try testing.expectEqualSlices(
         u8,
         inst.encMovR64FromMemDisp32(.r11, abi.runtime_ptr_save_gpr, @intCast(jit_abi.interrupt_ptr_off)).slice(),
         out.bytes[body0 + 7 ..][0..7],
     );
-    try testing.expectEqualSlices(u8, inst.encJccRel32(.ne, -47).slice(), out.bytes[body0 + 41 ..][0..6]);
+    try testing.expectEqualSlices(u8, inst.encJccRel32(.ne, -77).slice(), out.bytes[body0 + 71 ..][0..6]);
 }
 
 test "compile: br_table — single case + default both → block end" {
@@ -524,8 +523,9 @@ test "compile: (i32.const 0) i32.load offset=0 end — ADR-0026 prologue + bound
     //   41 C7 87 2C 00 00 00 06 00 00 00   MOV [R15+44], 6   (trap_kind=oob_memory)
     //   ...
     //
-    // Total length: 139 (pre-A3) + 11 (the new trap_kind=6 store) = 150.
-    try testing.expectEqual(@as(usize, 208), out.bytes.len);
+    // Total length: 139 (pre-A3) + 11 (the new trap_kind=6 store) = 150;
+    // +30/+28 (D-314 #3a interrupt poll+stub), +30/+28 (#3b fuel poll+stub).
+    try testing.expectEqual(@as(usize, 266), out.bytes.len);
     // Spot-check the prologue (verifies ADR-0026 + ADR-0105 structure).
     // The MOV R15, <entry_arg0> byte differs by Cc; derive the
     // expected sequence dynamically so this works on both SysV
@@ -586,14 +586,19 @@ test "compile: (i32.const 0) i32.load offset=0 end — ADR-0026 prologue + bound
     // The tail stub is the last 35 bytes: 7 (INC) + 11 (MOV trap_flag)
     // + 11 (MOV trap_kind) + 2 (XOR) + 2 (POP R15) + 1 (POP RBP) +
     // 1 (RET).
-    // D-314 — the interrupt stub (28 B, kind=16, no INC) is emitted AFTER the
-    // kind=4 stack-overflow stub (35 B), so the kind=4 stub is now at len-63
-    // (was len-35). Its INC prefix is unchanged.
-    const kind4_off: usize = out.bytes.len - 35 - 28;
+    // D-314 — the interrupt stub (28 B, kind=16, no INC) then the fuel stub
+    // (28 B, kind=17, #3b) are emitted AFTER the kind=4 stack-overflow stub
+    // (35 B), so the kind=4 stub is at len-91. Its INC prefix is unchanged.
+    const kind4_off: usize = out.bytes.len - 35 - 28 - 28;
     try testing.expectEqualSlices(u8, &.{ 0x41, 0xFF, 0x87, 0xE8, 0x00, 0x00, 0x00 }, out.bytes[kind4_off .. kind4_off + 7]);
-    // The interrupt stub (last 28 B) begins with MOV [R15+trap_flag_off=40],1.
-    const intr_off: usize = out.bytes.len - 28;
+    // The interrupt stub begins with MOV [R15+trap_flag_off=40],1 and records
+    // trap_kind 16 at +11; the fuel stub (last 28 B) records 17.
+    const intr_off: usize = out.bytes.len - 28 - 28;
     try testing.expectEqualSlices(u8, &.{ 0x41, 0xC7, 0x87, 0x28, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00 }, out.bytes[intr_off .. intr_off + 11]);
+    try testing.expectEqualSlices(u8, &.{ 0x41, 0xC7, 0x87, 0x2C, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00 }, out.bytes[intr_off + 11 .. intr_off + 22]);
+    const fuel_off: usize = out.bytes.len - 28;
+    try testing.expectEqualSlices(u8, &.{ 0x41, 0xC7, 0x87, 0x28, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00 }, out.bytes[fuel_off .. fuel_off + 11]);
+    try testing.expectEqualSlices(u8, &.{ 0x41, 0xC7, 0x87, 0x2C, 0x00, 0x00, 0x00, 0x11, 0x00, 0x00, 0x00 }, out.bytes[fuel_off + 11 .. fuel_off + 22]);
 }
 
 test "compile: i32.load with stack underflow → AllocationMissing" {

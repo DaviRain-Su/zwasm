@@ -207,6 +207,7 @@ pub const encCmpRImm8 = inst_alu.encCmpRImm8;
 pub const encImulRR = inst_alu.encImulRR;
 pub const encAddR64Imm32 = inst_alu.encAddR64Imm32;
 pub const encSubRSpImm8 = inst_alu.encSubRSpImm8;
+pub const encSubMem64Disp32Imm8 = inst_alu.encSubMem64Disp32Imm8;
 pub const encAddRSpImm8 = inst_alu.encAddRSpImm8;
 pub const encSubRSpImm32 = inst_alu.encSubRSpImm32;
 pub const encAddRSpImm32 = inst_alu.encAddRSpImm32;
@@ -594,6 +595,16 @@ test "encMovImm32W: little-endian imm32 (0xDEADBEEF)" {
 test "encSubRSpImm8: sub rsp, 16 → 48 83 ec 10" {
     const enc = encSubRSpImm8(16);
     try testing.expectEqualSlices(u8, &.{ 0x48, 0x83, 0xEC, 0x10 }, enc.slice());
+}
+
+test "encSubMem64Disp32Imm8: sub qword [r15+0x230], 1 → 49 83 af 30 02 00 00 01" {
+    const enc = encSubMem64Disp32Imm8(.r15, 0x230, 1);
+    try testing.expectEqualSlices(u8, &.{ 0x49, 0x83, 0xAF, 0x30, 0x02, 0x00, 0x00, 0x01 }, enc.slice());
+}
+
+test "encSubMem64Disp32Imm8: rsp base emits SIB → 48 83 ac 24 10 00 00 00 01" {
+    const enc = encSubMem64Disp32Imm8(.rsp, 16, 1);
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x83, 0xAC, 0x24, 0x10, 0x00, 0x00, 0x00, 0x01 }, enc.slice());
 }
 
 test "encAddRSpImm8: add rsp, 16 → 48 83 c4 10" {

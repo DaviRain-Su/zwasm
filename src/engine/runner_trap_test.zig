@@ -367,6 +367,21 @@ test "JIT interrupt poll: prologue traps interrupted (trap_kind 16) on a host-se
     try testing.expectEqual(@as(?u64, 42), try inst.invoke(testing.allocator, "f", &.{}));
 }
 
+// (func (export "f") (result i32) (local $i i32)
+//   (local.set $i (i32.const 1000000))
+//   (loop $L (local.set $i (i32.sub (local.get $i) (i32.const 1)))
+//            (br_if $L (local.get $i)))    ;; backward br_if = a back-edge
+//   (i32.const 42))
+// Shared by the interrupt R15-forcing test and the fuel tests: ~1e6 br_if
+// back-edge poll crossings + 1 prologue crossing.
+const countdown_loop_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60,
+    0x00, 0x01, 0x7f, 0x03, 0x02, 0x01, 0x00, 0x07, 0x05, 0x01, 0x01, 0x66,
+    0x00, 0x00, 0x0a, 0x1c, 0x01, 0x1a, 0x01, 0x01, 0x7f, 0x41, 0xc0, 0x84,
+    0x3d, 0x21, 0x00, 0x03, 0x40, 0x20, 0x00, 0x41, 0x01, 0x6b, 0x21, 0x00,
+    0x20, 0x00, 0x0d, 0x00, 0x0b, 0x41, 0x2a, 0x0b,
+};
+
 test "JIT loop fn with flag raised BEFORE invoke traps interrupted (D-314 #3a R15-forcing)" {
     // The flag is set BEFORE invoke, so on both arches the PROLOGUE poll traps
     // at entry (never reaching a back-edge poll). What this pins on x86_64 is
@@ -374,19 +389,7 @@ test "JIT loop fn with flag raised BEFORE invoke traps interrupted (D-314 #3a R1
     // usage.usesRuntimePtr lists `.loop` — drop that and there is NO poll at
     // all and the countdown completes with 42 (the observed TDD red). The
     // RUNNING-loop back-edge case is the thread-raiser tests below.
-    // (func (export "f") (result i32) (local $i i32)
-    //   (local.set $i (i32.const 1000000))
-    //   (loop $L (local.set $i (i32.sub (local.get $i) (i32.const 1)))
-    //            (br_if $L (local.get $i)))    ;; backward br_if = a back-edge
-    //   (i32.const 42))
-    const loop_wasm = [_]u8{
-        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60,
-        0x00, 0x01, 0x7f, 0x03, 0x02, 0x01, 0x00, 0x07, 0x05, 0x01, 0x01, 0x66,
-        0x00, 0x00, 0x0a, 0x1c, 0x01, 0x1a, 0x01, 0x01, 0x7f, 0x41, 0xc0, 0x84,
-        0x3d, 0x21, 0x00, 0x03, 0x40, 0x20, 0x00, 0x41, 0x01, 0x6b, 0x21, 0x00,
-        0x20, 0x00, 0x0d, 0x00, 0x0b, 0x41, 0x2a, 0x0b,
-    };
-    var inst = try runner.JitInstance.init(testing.allocator, &loop_wasm);
+    var inst = try runner.JitInstance.init(testing.allocator, &countdown_loop_wasm);
     defer inst.deinit(testing.allocator);
     var flag = std.atomic.Value(u32).init(0);
     inst.setInterruptFlag(&flag);
@@ -417,6 +420,32 @@ const FlagRaiser = struct {
         flag_ptr.store(1, .monotonic);
     }
 };
+
+test "JIT fuel: metered budget meters poll crossings and traps out_of_fuel (kind 17, D-314 #3b)" {
+    // Countdown guest = 1 prologue crossing + 1e6 br_if back-edge crossings
+    // (the no-params br_if polls on every pass incl. the exit pass).
+    var inst = try runner.JitInstance.init(testing.allocator, &countdown_loop_wasm);
+    defer inst.deinit(testing.allocator);
+    // Unmetered (default) → completes; fuelRemaining reads null.
+    try testing.expectEqual(@as(?u64, 42), try inst.invoke(testing.allocator, "f", &.{}));
+    try testing.expectEqual(@as(?u64, null), inst.fuelRemaining());
+    // Metered with headroom → completes; exactly 1_000_001 units consumed
+    // (pins the crossing-unit semantics: prologue + one per loop pass).
+    inst.setFuel(2_000_000);
+    try testing.expectEqual(@as(?u64, 42), try inst.invoke(testing.allocator, "f", &.{}));
+    try testing.expectEqual(@as(?u64, 2_000_000 - 1_000_001), inst.fuelRemaining());
+    // Tight budget → the 101st crossing SUBs the cell to -1 and traps 17,
+    // long before the 1e6-pass countdown could finish.
+    inst.setFuel(100);
+    try testing.expectError(entry.Error.Trap, inst.invoke(testing.allocator, "f", &.{}));
+    try testing.expectEqual(@as(u32, 17), inst.owned.rt.trap_kind);
+    try testing.expectEqual(trap_surface.TrapKind.out_of_fuel, trap_surface.jitTrapCode(inst.owned.rt.trap_kind).?);
+    try testing.expectEqual(@as(?u64, 0), inst.fuelRemaining());
+    // Disarm + clear → runs to completion again.
+    inst.setFuel(null);
+    inst.owned.rt.trap_flag = 0;
+    try testing.expectEqual(@as(?u64, 42), try inst.invoke(testing.allocator, "f", &.{}));
+}
 
 test "JIT back-edge poll interrupts a RUNNING infinite loop (br back edge, D-314 #3a)" {
     // (func (export "f") (result i32) (loop (br 0)) (i32.const 42)) — the

@@ -62,6 +62,10 @@ pub const TrapKind = enum(u32) {
     // already produces `error.Interrupted`; before this it mis-surfaced as
     // `binding_error`. The JIT prologue/back-edge poll will emit stub code 16.
     interrupted = 16,
+    // Sandboxing (ADR-0179 #3b): the metered fuel budget hit -1. Interp =
+    // `error.OutOfFuel` (per-instruction units); JIT = poll-site-crossing
+    // units (prologue + loop back-edges, stub code 17). Same kind either way.
+    out_of_fuel = 17,
 };
 
 /// `wasm_trap_t` — runtime trap surface. Carries the trap kind +
@@ -106,6 +110,7 @@ pub fn trapMessageFor(kind: TrapKind) []const u8 {
         .unaligned_atomic => "unaligned atomic",
         .expected_shared_memory => "expected shared memory",
         .interrupted => "interrupted",
+        .out_of_fuel => "all fuel consumed",
     };
 }
 
@@ -134,6 +139,7 @@ pub fn jitTrapCode(code: u32) ?TrapKind {
         14 => .unaligned_atomic, // ADR-0168 rmw/cmpxchg/wait callout helper
         15 => .expected_shared_memory, // ADR-0168 wait* on non-shared (callout)
         16 => .interrupted, // ADR-0179 #3a — JIT prologue/back-edge interruption poll stub
+        17 => .out_of_fuel, // ADR-0179 #3b — JIT fuel poll stub (prologue/back-edge SUB → negative)
         else => null, // 0 unmarked / 1 generic — still-shared bounds kinds (D-293)
     };
 }
@@ -160,6 +166,9 @@ pub fn mapInterpTrap(err: anyerror) TrapKind {
         // binding_error ("host invocation error") — the default engine traps
         // `error.Interrupted` but the surface hid the kind.
         error.Interrupted => .interrupted,
+        // Sandboxing (ADR-0179 #3b): interp fuel exhaustion (dispatch.zig
+        // per-instruction decrement) — same kind as the JIT's code-17 stub.
+        error.OutOfFuel => .out_of_fuel,
         else => .binding_error,
     };
 }
