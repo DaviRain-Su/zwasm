@@ -67,9 +67,12 @@ debt_active() {
 debt_discharged_sha() {
   local id="$1"
   local sha
-  # Try several verbs the discharge convention has used over time.
-  for verb in close discharge closes discharged fix; do
-    sha=$(git log --all --oneline --grep="${verb} ${id}\b" 2>/dev/null | head -1 | awk '{print $1}')
+  # Try several verbs the discharge convention has used over time —
+  # verb-first ("close D-NNN") and id-first ("D-NNN closed") forms; the
+  # id-first forms cover subjects like "mark §… [x] (D-157 closed)" and
+  # "remove SKIP-… arm — D-094 + D-164 closed" (2026-06-12 drift sweep).
+  for pat in "close ${id}" "discharge ${id}" "closes ${id}" "discharged ${id}" "fix ${id}" "${id} closed" "${id} close" "${id} discharged"; do
+    sha=$(git log --all --oneline --grep="${pat}\b" 2>/dev/null | head -1 | awk '{print $1}')
     if [ -n "$sha" ]; then printf '%s\n' "$sha"; return; fi
   done
 }
