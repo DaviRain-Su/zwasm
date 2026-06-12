@@ -73,13 +73,17 @@
   @d039d727, D-319 row re-scoped to the named hang barrier (3-hypothesis
   list + targeted-probe plan in the row). D-320 size datapoint: base
   1.97 MB (+37.6 KB), lean unchanged.
+- **D-319 probe IN FLIGHT**: `-Dd319-probe=true` flag landed (permanent
+  diagnostic; 7 skip sites honor it); probe run
+  `run_remote_windows.sh 'test -Dd319-probe=true'` kicked with timeout
+  1200 → verdict in /tmp/win_probe.log at next Step 0.7. Reproduces
+  (timeout) = hang confirmed in the unit step; completes = hang was in a
+  RUNNER-vs-test interaction, rethink. Next probe after evidence:
+  bisect unit-vs-e2e (the unit step includes component.zig e2e tests).
 - **NEXT (pick per component_model_plan Work sequence)**: D-322
   (guest-defined resources — decode 0x3f/0x3e + generativity rule +
   wit-bindgen exported-resource fixture; serves the CWFS WIT north star)
-  · D-319 windows hang probe (ONE targeted `zig build test`-only remote
-  run; hypothesis list in the row) · D-318 · D-251. Nested-decode survey
-  brief (for D-322's alias scan) is summarized in the D-322/manifest
-  notes.
+  · D-319 next probe per evidence · D-318 · D-251.
 
 ## Closed-work pointers (detail in git log / ADRs)
 
