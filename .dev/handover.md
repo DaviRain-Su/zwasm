@@ -80,11 +80,16 @@
   **F2a+F2b DONE**: flatten machinery + staleness fix + decoded-type
   bridge + ComponentValue converters + `invokeTyped` (greet runs TYPED:
   string in → owned "Hello, zwasm!" out; shape/arity validation).
-  **NEXT = F3/F4 (bundle exit)**: build the wit-bindgen Rust fixture
-  exchanging `record{list<u32>, string}` ↔ `result<record, string>`
-  (gen shell, rustc wasm32-wasip2 + wit-bindgen crate or cargo-component;
-  commit .wasm + source), e2e through invokeTyped, `assert_typed`
-  corpus directive, docs (Zig API section).
+  **NEXT = F3/F4 (bundle exit)**: fixture BUILT (/tmp/typedtest —
+  wit-bindgen 0.36 world `typed-test`, export `process(payload) ->
+  result<payload, string>`, payload = record{list<u32>, string};
+  cargo wasm32-wasip2, 51 KB; lib.rs must NOT re-`use` generated types).
+  It imports wasi (rust-std baggage) → the single-module
+  `instantiate()` path can't run it. IN-FLIGHT: extract the ADR-0175
+  general builder from runWasiP2Main into `buildWasiP2Instances` →
+  `BuiltComponent` (instances+ctx+info, deinit) and generalize
+  invokeTyped to run against the built main instance (CWFS components
+  will import wasi too). Then commit fixture + e2e + docs.
 - **Exit-condition**: a committed wit-bindgen component exchanging
   `record{list<u32>, string}` ↔ `result<record, string>` round-trips
   through `invokeTyped` in an e2e test (greet also callable typed).
