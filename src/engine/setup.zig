@@ -155,6 +155,10 @@ pub const MemGrowCtx = struct {
     allocator: Allocator,
     memory: []u8,
     max_pages: u64,
+    /// ADR-0179 #3c-2 / D-314 — host-imposed page cap BELOW the declared/spec
+    /// `max_pages` (JIT mirror of the facade `setMemoryPagesLimit`). null =
+    /// no host cap. Grow past it returns the spec failure (-1), not a trap.
+    host_max_pages: ?u64 = null,
 };
 
 /// Real `memory_grow_fn` (replaces `defaultMemoryGrowReject`). Grows the
@@ -176,6 +180,8 @@ pub fn jitMemoryGrow(rt: *entry.JitRuntime, delta_pages: u32) callconv(.c) i32 {
     const old_pages = old_len / page;
     const new_pages = old_pages + @as(u64, delta_pages);
     if (new_pages > ctx.max_pages) return -1;
+    // ADR-0179 #3c-2 / D-314 — host cap below the declared/spec max.
+    if (ctx.host_max_pages) |cap| if (new_pages > cap) return -1;
     const new_bytes: usize = std.math.cast(usize, new_pages * page) orelse return -1;
     const grown = ctx.allocator.realloc(ctx.memory, new_bytes) catch return -1;
     @memset(grown[old_len..new_bytes], 0);

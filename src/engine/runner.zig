@@ -751,6 +751,15 @@ pub const JitInstance = struct {
         return if (cell < 0) 0 else @intCast(cell);
     }
 
+    /// ADR-0179 #3c-2 / D-314 — impose a host max on linear memory, in PAGES
+    /// (an extra ceiling below the declared/spec max; JIT mirror of the
+    /// facade `setMemoryPagesLimit`). `memory.grow` past it returns the spec
+    /// grow-failure (-1), not a trap. `null` clears the host cap. No-op for
+    /// a module with no memory.
+    pub fn setMemoryPagesLimit(self: *JitInstance, max_pages: ?u64) void {
+        if (self.owned.mem_ctx) |ctx| ctx.host_max_pages = max_pages;
+    }
+
     /// Wider arities / v128 result / non-scalar args → `UnsupportedEntrySignature`.
     pub fn invoke(self: *JitInstance, allocator: Allocator, export_name: []const u8, args: []const u64) Error!?u64 {
         const func_idx = try findExportFunc(allocator, self.wasm_bytes, export_name);

@@ -1250,6 +1250,34 @@ test "JitInstance: memory.grow past declared max returns -1" {
     try testing.expectEqual(@as(?u64, 0xffffffff), try inst.invoke(testing.allocator, "g", &.{1}));
 }
 
+test "JitInstance: setMemoryPagesLimit host cap refuses grow past it (ADR-0179 #3c-2, D-314)" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    // (module (memory 1) (func (export "g") (param i32) (result i32)
+    //   local.get 0 memory.grow)) — NO declared max; the HOST cap (an extra
+    // ceiling below the declared/spec max, JIT mirror of the facade
+    // setMemoryPagesLimit) is what refuses the grow.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x06, 0x01, 0x60, 0x01, 0x7f, 0x01, 0x7f,
+        0x03, 0x02, 0x01, 0x00,
+        0x05, 0x03, 0x01, 0x00, 0x01, // memory: min 1, no max
+        0x07, 0x05, 0x01, 0x01, 0x67,
+        0x00, 0x00, 0x0a, 0x08, 0x01,
+        0x06, 0x00, 0x20, 0x00, 0x40,
+        0x00, 0x0b,
+    };
+    var inst = try JitInstance.init(testing.allocator, &bytes);
+    defer inst.deinit(testing.allocator);
+    inst.setMemoryPagesLimit(2); // host cap = 2 pages
+    try testing.expectEqual(@as(?u64, 1), try inst.invoke(testing.allocator, "g", &.{1})); // 1→2 = cap: ok
+    // 2→3 exceeds the host cap → spec grow-failure -1 (not a trap)
+    try testing.expectEqual(@as(?u64, 0xffffffff), try inst.invoke(testing.allocator, "g", &.{1}));
+    inst.setMemoryPagesLimit(4); // raise → allowed again
+    try testing.expectEqual(@as(?u64, 2), try inst.invoke(testing.allocator, "g", &.{1}));
+    inst.setMemoryPagesLimit(null); // clear → only the spec ceiling remains
+    try testing.expectEqual(@as(?u64, 3), try inst.invoke(testing.allocator, "g", &.{1}));
+}
+
 // ── ADR-0128 §1 / D-216 Part B: memory64 grow -1 result i64 sign-extension ──
 
 test "JitInstance: memory64 grow past max returns i64 -1 (sign-extended, not 0x0000_0000ffffffff)" {
