@@ -819,7 +819,11 @@ entries:
       SEND(0x0004); zero-timeout single-handle poll on the socket handle itself.
       Implement next cycle + probe #5. The WSAPoll extern + WSAStartup shim get
       REPLACED by the AFD path (winsock externs removed).
-      e2e hang re-test follows a green unit probe.
+      PROBE #5 (AFD poll): 2700/2832 PASSED — lifecycle/listener readiness WORKS on
+      windows; the single failure is the stdlib connect-refused mapping, now expected
+      (windows arm: error.Unexpected; guest sees error-code `unknown` until the stdlib
+      maps 0xC0000236). Probe #6 = e2e re-enabled under the flag (hang re-test with
+      working readiness).
       Discharge: socket tests green on windowsmini.
     first_raised: "2026-06-12"
     last_reviewed: "2026-06-13"
