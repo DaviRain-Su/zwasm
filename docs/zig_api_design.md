@@ -381,6 +381,22 @@ Rich shapes round-trip — the pinned proof is
 `record{list<u32>, string} ⇄ result<record, string>` over a committed
 wit-bindgen fixture (`test/component/typed_payload.wasm`).
 
+Guest-defined RESOURCES (D-322) work through the same surface: a
+constructor returns `ComponentValue.own` (an opaque handle into the
+component instance's table); methods take `.borrow` handles (the
+runtime translates handle→rep per the canonical ABI's owner-component
+rule). Func exports inside an exported interface are addressed with an
+instance path:
+
+```zig
+const h = (try comp.invokeTypedBuilt(&built,
+    "zwasm:restest/counter-api#[constructor]counter",
+    &.{.{ .u32 = 5 }}, alloc)).?; // h == .own
+const v = (try comp.invokeTypedBuilt(&built,
+    "zwasm:restest/counter-api#[method]counter.get",
+    &.{.{ .borrow = h.own }}, alloc)).?; // v.u32 == 5
+```
+
 Manifest-driven coverage: the component spec corpus runner's
 `assert_typed` directive (`test/spec/component_model_assert_runner.zig`)
 drives this same path from text, e.g.
@@ -595,3 +611,6 @@ impl lands.
   as-built per ADR-0183): `exportedFuncs` introspection +
   `invokeTyped` / `invokeTypedBuilt` + `ComponentValue`
   ownership contract + the corpus `assert_typed` pointer.
+- 2026-06-13 — **§3.9 extended** (campaign close): guest-defined
+  resources — own/borrow `ComponentValue` handles + the
+  `<iface>#<func>` instance-path addressing.
