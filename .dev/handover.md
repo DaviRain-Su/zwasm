@@ -25,7 +25,8 @@
   reasoned skip-impl). Mac test-all+lint+cross-compile green per chunk.
 - Also landed: **E3 error-path fixture** `wasi_p2_fs_err_go` (wasmtime-
   matched) · sockets survey · **ADR-0180** (sockets: TCP-client subset
-  first, REAL readiness via poll(2); listeners/UDP phased).
+  first, REAL readiness; listeners/UDP phased) · **sockets impl-1**
+  (`p2_sockets.zig` state machine, loopback lifecycle tests green).
 - **NEXT**: bundle `d3-8-sockets-tcp` (see `## Active bundle`). After:
   E3 corpus growth. Secondary (user-redirect only): D-318, D-314, D-251.
 
@@ -33,16 +34,19 @@
 
 - **Bundle-ID**: d3-8-sockets-tcp (ADR-0180 Phase 1)
 - **Cycles-remaining**: ~3
-- **Continuity-memo**: impl-1 `src/wasi/p2_sockets.zig` — TcpSocket state
-  machine (unbound→bound→connecting→connected) over `std.posix` O_NONBLOCK
-  + sockets error-code map (D-307 sibling); unit tests run the full client
-  lifecycle against an in-test loopback listener. impl-2: TCP_SOCKET_RT +
-  trampolines (create/start-bind/finish-bind/start-connect/finish-connect
-  → stream pair; instance-network singleton) + socket-aware
-  `pollable.ready`/`p2Poll` (poll(2) branch; non-socket pollables keep
-  always-ready). impl-3: tinygo/rust TCP-client guest fixture + e2e (host-
-  side loopback echo server in the test). Win64: WSAPoll divergence —
-  cross-compile before push.
+- **Continuity-memo**: **impl-1 DONE** — `src/wasi/p2_sockets.zig`
+  (TcpSocket state machine over `std.Io.net`; pinned-0.16 has NO raw posix
+  sockets → ADR-0180 Revision: sync connect inside start-connect, cached
+  for finish; readiness via posix.poll on the handle; D-319 = windows
+  verification, skip.Blocker-typed). **NEXT = impl-2**: TCP_SOCKET_RT +
+  trampolines in component_wasi_p2.zig (create-tcp-socket / start-bind /
+  finish-bind / start-connect / finish-connect → mint socket-backed
+  input/output-stream resources; instance-network singleton resource;
+  adapter classify rows for wasi:sockets/tcp + tcp-create-socket +
+  instance-network) + socket-aware `pollable.ready`/`p2Poll` (TcpSocket
+  .ready branch; non-socket pollables keep always-ready). impl-3:
+  tinygo/rust TCP-client echo guest + e2e (host-side loopback listener
+  from the impl-1 test pattern).
 - **Exit-condition**: a committed real-toolchain TCP-client component
   connects to the e2e test's loopback listener and echoes a line through
   zwasm (matching wasmtime).
