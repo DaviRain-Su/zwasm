@@ -1589,6 +1589,23 @@ fn emitEndInter(ctx: *ctx_mod.EmitCtx) Error!void {
         inst.patchRel32(ctx.buf.items, ctx.stack_probe_fixup, 6, disp);
     }
 
+    // ADR-0179 #3a / D-314 — cooperative-interruption stub (code 16). Mirrors
+    // the stack-overflow stub: the poll fires pre-frame (fb=0, no RSP restore),
+    // so POP R15 / POP RBP / RET unwinds cleanly. Gated on ctx.interrupt_fixup
+    // != 0 (= poll emitted, = uses_runtime_ptr was true).
+    if (ctx.interrupt_fixup != 0) {
+        const stub_byte: u32 = @intCast(ctx.buf.items.len);
+        try ctx.buf.appendSlice(ctx.allocator, inst.encStoreImm32MemDisp32(abi.runtime_ptr_save_gpr, jit_abi.trap_flag_off, 1).slice());
+        try ctx.buf.appendSlice(ctx.allocator, inst.encStoreImm32MemDisp32(abi.runtime_ptr_save_gpr, jit_abi.trap_kind_off, 16).slice());
+        try ctx.buf.appendSlice(ctx.allocator, inst.encXorRR(.d, .rax, .rax).slice());
+        try ctx.buf.appendSlice(ctx.allocator, inst.encPopR(.r15).slice());
+        try ctx.buf.appendSlice(ctx.allocator, inst.encPopR(.rbp).slice());
+        try ctx.buf.appendSlice(ctx.allocator, inst.encRet().slice());
+        const disp: i32 = @as(i32, @intCast(stub_byte)) -
+            @as(i32, @intCast(ctx.interrupt_fixup)) - 6;
+        inst.patchRel32(ctx.buf.items, ctx.interrupt_fixup, 6, disp);
+    }
+
     if (ctx.simd_const_fixups.items.len > 0) {
         while (ctx.buf.items.len % 16 != 0) try ctx.buf.append(ctx.allocator, 0);
         const pool_byte: u32 = @intCast(ctx.buf.items.len);

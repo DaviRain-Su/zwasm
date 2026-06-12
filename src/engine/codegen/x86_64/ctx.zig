@@ -81,6 +81,8 @@ pub const InitArgs = struct {
     local_disps: []const i32,
     /// ADR-0105 D2/D3 — see EmitCtx field of the same name.
     stack_probe_fixup: u32,
+    /// ADR-0179 #3a / D-314 — see EmitCtx field of the same name.
+    interrupt_fixup: u32,
     /// ADR-0111 D4 — see EmitCtx field of the same name.
     memory0_idx_type: sections.MemoryEntry.IdxType = .i32,
     /// EH integration IT-1 — see EmitCtx field of the same name.
@@ -290,6 +292,10 @@ pub const EmitCtx = struct {
     /// fires BEFORE the SUB RSP) and patches this fixup to its
     /// disp32.
     stack_probe_fixup: u32,
+    /// ADR-0179 #3a / D-314 — when non-zero, op_control.zig emits a
+    /// dedicated interrupted trap stub (kind 16, fb=0; the poll fires
+    /// BEFORE the SUB RSP, same as the probe) and patches this JNE fixup.
+    interrupt_fixup: u32,
     /// ADR-0111 D4 — memory 0's idx_type. `.i32` (legacy ≤ 4 GiB;
     /// byte-identical fast path) or `.i64` (memory64 64-bit MOV
     /// + u64 offset materialise). Per-module constant; codegen
@@ -374,6 +380,7 @@ pub const EmitCtx = struct {
             .total_locals = args.total_locals,
             .local_disps = args.local_disps,
             .stack_probe_fixup = args.stack_probe_fixup,
+            .interrupt_fixup = args.interrupt_fixup,
             .memory0_idx_type = args.memory0_idx_type,
             .exception_table_builder = args.exception_table_builder,
             .open_try_tables = args.open_try_tables,

@@ -542,7 +542,7 @@ test "compile: (i32.const 0) i32.load offset=0 end — ADR-0026 prologue + bound
     //   ...
     //
     // Total length: 139 (pre-A3) + 11 (the new trap_kind=6 store) = 150.
-    try testing.expectEqual(@as(usize, 150), out.bytes.len);
+    try testing.expectEqual(@as(usize, 208), out.bytes.len);
     // Spot-check the prologue (verifies ADR-0026 + ADR-0105 structure).
     // The MOV R15, <entry_arg0> byte differs by Cc; derive the
     // expected sequence dynamically so this works on both SysV
@@ -584,7 +584,12 @@ test "compile: (i32.const 0) i32.load offset=0 end — ADR-0026 prologue + bound
     off += exp_sub_rsp_8.len;
     try testing.expectEqual(@as(usize, 15), off);
     const body_start = prologue.body_start_offset(true, 8);
-    try testing.expectEqualSlices(u8, &post_probe, out.bytes[22..body_start]);
+    // D-314 interrupt poll (30 B) inserted between the JBE and the sentinel.
+    // Spot-check its leading MOV RAX,[R15+interrupt_ptr_off] opcode (49 8B 87);
+    // the 2 disp32s (JZ skip, JNE stub) are patched, so assert opcode-only.
+    try testing.expectEqualSlices(u8, &.{ 0x49, 0x8B, 0x87 }, out.bytes[22..25]);
+    // post-probe = sentinel + sub_rsp = the 15 bytes just before body_start.
+    try testing.expectEqualSlices(u8, &post_probe, out.bytes[body_start - 15 .. body_start]);
     // JA placeholder = body_start + 25 (after const + memory-load + LEA bytes per layout comment).
     const ja_off = body_start + 25;
     try testing.expectEqualSlices(u8, &.{ 0x0F, 0x87, 0x0F, 0x00, 0x00, 0x00 }, out.bytes[ja_off .. ja_off + 6]);
@@ -598,8 +603,14 @@ test "compile: (i32.const 0) i32.load offset=0 end — ADR-0026 prologue + bound
     // The tail stub is the last 35 bytes: 7 (INC) + 11 (MOV trap_flag)
     // + 11 (MOV trap_kind) + 2 (XOR) + 2 (POP R15) + 1 (POP RBP) +
     // 1 (RET).
-    const kind4_off: usize = out.bytes.len - 35;
+    // D-314 — the interrupt stub (28 B, kind=16, no INC) is emitted AFTER the
+    // kind=4 stack-overflow stub (35 B), so the kind=4 stub is now at len-63
+    // (was len-35). Its INC prefix is unchanged.
+    const kind4_off: usize = out.bytes.len - 35 - 28;
     try testing.expectEqualSlices(u8, &.{ 0x41, 0xFF, 0x87, 0xE8, 0x00, 0x00, 0x00 }, out.bytes[kind4_off .. kind4_off + 7]);
+    // The interrupt stub (last 28 B) begins with MOV [R15+trap_flag_off=40],1.
+    const intr_off: usize = out.bytes.len - 28;
+    try testing.expectEqualSlices(u8, &.{ 0x41, 0xC7, 0x87, 0x28, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00 }, out.bytes[intr_off .. intr_off + 11]);
 }
 
 test "compile: i32.load with stack underflow → AllocationMissing" {

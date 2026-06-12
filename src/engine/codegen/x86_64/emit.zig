@@ -317,6 +317,7 @@ pub fn compile(
     }
     try buf.appendSlice(allocator, inst.encMovRR(.q, .rbp, .rsp).slice());
     var stack_probe_fixup: u32 = 0;
+    var interrupt_fixup: u32 = 0;
     if (uses_runtime_ptr) {
         // MOV R15, <runtime_ptr_arg_gpr> — entry shim's runtime_ptr
         // snapshot. Cc-pivot per ADR-0026: SysV passes *const
@@ -349,6 +350,22 @@ pub fn compile(
         try buf.appendSlice(allocator, inst.encCmpR64MemDisp32(.rsp, .r15, @intCast(jit_abi.stack_limit_off)).slice());
         stack_probe_fixup = @intCast(buf.items.len);
         try buf.appendSlice(allocator, inst.encJccRel32(.be, 0).slice());
+        // ADR-0179 #3a / D-314 — cooperative-interruption poll (sibling to the
+        // arm64 poll). Same pre-frame position as the probe (stub fb=0, no RSP
+        // restore); reads via R15 so it lives inside the uses_runtime_ptr block.
+        // MOV RAX←interrupt_ptr; TEST RAX,RAX; JZ skip (null = not configured);
+        // MOV EAX←[RAX] (flag); TEST EAX,EAX; JNE → interrupted stub (kind 16).
+        try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, .r15, @intCast(jit_abi.interrupt_ptr_off)).slice());
+        try buf.appendSlice(allocator, inst.encTestRR(.q, .rax, .rax).slice());
+        const interrupt_skip_at: u32 = @intCast(buf.items.len);
+        try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice());
+        try buf.appendSlice(allocator, inst.encMovR32FromMemDisp32(.rax, .rax, 0).slice());
+        try buf.appendSlice(allocator, inst.encTestRR(.d, .rax, .rax).slice());
+        interrupt_fixup = @intCast(buf.items.len);
+        try buf.appendSlice(allocator, inst.encJccRel32(.ne, 0).slice());
+        // Patch the JZ skip to land just after the JNE (skip the poll when null).
+        const after_poll: u32 = @intCast(buf.items.len);
+        inst.patchRel32(buf.items, interrupt_skip_at, 6, @as(i32, @intCast(after_poll)) - (@as(i32, @intCast(interrupt_skip_at)) + 6));
         // §9.8a / 8a.2 (ADR-0034) — JIT-execution sentinel: write 1
         // to `JitRuntime.jit_executed_flag` so post-call readers can
         // distinguish "JIT body actually ran" from "compile-passed
@@ -837,6 +854,7 @@ pub fn compile(
         .total_locals = total_locals,
         .local_disps = layout.disps,
         .stack_probe_fixup = stack_probe_fixup,
+        .interrupt_fixup = interrupt_fixup,
         .memory0_idx_type = memory0_idx_type,
         .exception_table_builder = if (has_try_table) &eh_builder else null,
         .open_try_tables = if (has_try_table) &open_try_tables else null,

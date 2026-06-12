@@ -68,6 +68,11 @@ const sentinel_size: u32 = 11;
 /// (6 bytes: 0x0F 0x86 + disp32). Emitted inside the
 /// uses_runtime_ptr branch BEFORE the sentinel; total 13 bytes.
 const stack_probe_size: u32 = 13;
+/// ADR-0179 #3a / D-314 interrupt poll (inside the uses_runtime_ptr branch,
+/// after the stack probe, before the sentinel): MOV RAX,[R15+off] (7) +
+/// TEST RAX,RAX (3) + JZ rel32 (6) + MOV EAX,[RAX] (6) + TEST EAX,EAX (2) +
+/// JNE rel32 (6) = 30 bytes.
+const interrupt_poll_size: u32 = 30;
 
 /// SUB RSP, imm — picks imm8 (4 bytes) or imm32 (7 bytes) form
 /// per `frame_bytes` range. Matches `rbp_disp.rspSub` dispatch:
@@ -92,7 +97,7 @@ pub fn rsp_sub_size(frame_bytes: u32) u32 {
 /// When `frame_bytes == 0`, the SUB RSP step is omitted.
 pub fn body_start_offset(uses_runtime_ptr: bool, frame_bytes: u32) u32 {
     var off: u32 = push_rbp_size + mov_rbp_rsp_size;
-    if (uses_runtime_ptr) off += push_r15_size + mov_r15_argptr_size + stack_probe_size + sentinel_size;
+    if (uses_runtime_ptr) off += push_r15_size + mov_r15_argptr_size + stack_probe_size + interrupt_poll_size + sentinel_size;
     off += rsp_sub_size(frame_bytes);
     return off;
 }
@@ -147,17 +152,17 @@ test "body_start_offset: no runtime_ptr, imm32 frame → 11 bytes" {
     try testing.expectEqual(@as(u32, 11), body_start_offset(false, 4096));
 }
 
-test "body_start_offset: uses_runtime_ptr, no frame → 33 bytes (incl. ADR-0105 probe +13 + D-055 sentinel +11)" {
-    try testing.expectEqual(@as(u32, 33), body_start_offset(true, 0));
+test "body_start_offset: uses_runtime_ptr, no frame → 63 bytes (incl. ADR-0105 probe +13 + D-055 sentinel +11)" {
+    try testing.expectEqual(@as(u32, 63), body_start_offset(true, 0));
 }
 
-test "body_start_offset: uses_runtime_ptr, imm8 frame → 37 bytes (incl. ADR-0105 probe +13 + D-055 sentinel +11)" {
-    try testing.expectEqual(@as(u32, 37), body_start_offset(true, 16));
-    try testing.expectEqual(@as(u32, 37), body_start_offset(true, 127));
+test "body_start_offset: uses_runtime_ptr, imm8 frame → 67 bytes (incl. ADR-0105 probe +13 + D-055 sentinel +11)" {
+    try testing.expectEqual(@as(u32, 67), body_start_offset(true, 16));
+    try testing.expectEqual(@as(u32, 67), body_start_offset(true, 127));
 }
 
-test "body_start_offset: uses_runtime_ptr, imm32 frame → 40 bytes (incl. ADR-0105 probe +13 + D-055 sentinel +11)" {
-    try testing.expectEqual(@as(u32, 40), body_start_offset(true, 128));
+test "body_start_offset: uses_runtime_ptr, imm32 frame → 70 bytes (incl. ADR-0105 probe +13 + D-055 sentinel +11)" {
+    try testing.expectEqual(@as(u32, 70), body_start_offset(true, 128));
 }
 
 test "rsp_sub_size: 0 → 0, 1..127 → 4, >=128 → 7" {
