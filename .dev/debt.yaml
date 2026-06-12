@@ -760,6 +760,20 @@ entries:
     last_reviewed: "2026-05-29"
     refs: |-
       `src/runtime/instance/instantiate.zig` frontendValidate; `src/zwasm/engine.zig` compile; `src/diagnostic/diagnostic.zig` setDiag/lastDiagnostic; `.dev/lessons/2026-05-29-gc-corpus-block-is-validate-not-parse.md`
+  - id: "D-319"
+    layer: "wasi"
+    status: "note"
+    description: |-
+      note (ADR-0180 Phase-2 scope): wasi:sockets host backing (src/wasi/p2_sockets.zig)
+      is untested on the Windows host — the lifecycle/state-machine unit tests skip on
+      builtin.os.tag == .windows (WSAPoll/WSAStartup divergence; std.posix socket surface
+      on win is unverified at runtime, cross-compile only). Discharge: enable the tests on
+      windowsmini and see them green (likely alongside ADR-0180 Phase-2 listeners work).
+    first_raised: "2026-06-12"
+    last_reviewed: "2026-06-12"
+    refs: |-
+      ADR-0180 (Phase 2 scope); src/wasi/p2_sockets.zig (skip sites); skip.Blocker D-319
+
   - id: "D-318"
     layer: "test"
     status: "note"

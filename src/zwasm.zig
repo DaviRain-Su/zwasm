@@ -389,6 +389,7 @@ test {
     _ = @import("wasi/clocks.zig");
     _ = @import("wasi/jit_dispatch.zig");
     _ = @import("wasi/adapter.zig");
+    _ = @import("wasi/p2_sockets.zig");
     _ = @import("cli/run.zig");
     _ = @import("cli/invoke_args.zig");
     _ = @import("feature/component/decode.zig");

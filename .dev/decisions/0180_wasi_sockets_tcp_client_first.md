@@ -74,6 +74,18 @@ ordinals) — a sibling of the D-307 filesystem errno map.
 - A real Rust/Go TCP-client guest (connect + echo) becomes the proof
   fixture (gen-shell built, committed; loopback server provided by the
   e2e test harness on the host side).
+
+## Revisions
+
+- **2026-06-12 (impl-1)**: the PINNED Zig 0.16.0 stdlib has no raw
+  `std.posix` socket surface (the survey read a newer master clone) —
+  networking is `std.Io.net` (io-based, blocking under `Threaded`). The
+  Decision's "O_NONBLOCK + finish polls completion" mechanism is adjusted:
+  the synchronous connect executes inside `start-connect` with the result
+  cached for `finish-connect` (guest-observable two-phase contract
+  preserved); readiness stays poll(2)-honest via `posix.poll` on the
+  socket handle. Bound-socket connect = truthful `not-supported` until
+  Phase 2 (`std.Io.net` has no bound-connect).
 - `p2Poll`/`pollable.ready` gain a socket-aware branch — the always-ready
   fast path is unchanged for non-socket pollables.
 - Win64: `poll(2)` → `WSAPoll` divergence; gate via the existing platform
