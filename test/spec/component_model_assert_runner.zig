@@ -9,9 +9,18 @@
 //! `manifest.txt` with directives:
 //!
 //!   `component <path>`                     — decode (classify==component) + instantiate single component
+//!   `component_p2 <path>`                  — build via the WASI-P2 host graph (wit-bindgen components import wasi)
 //!   `graph <path>`                         — instantiate a multi-component graph (cross-module link)
 //!   `assert_string <export> <arg> -> <s>`  — invokeStringExport; compare UTF-8 result (<s> may contain spaces)
 //!   `assert_flat_i32 <export> <a..> -> <v>`— invokeFlat (i32 args); compare results[0].i32
+//!   `assert_typed <export> (<v>, ..) -> <v>` — TYPED invoke (ADR-0183): parse each arg against the export's
+//!                                          WIT param type, invokeTyped/invokeTypedBuilt, render the result
+//!                                          canonically and compare TEXT. Value syntax (canonical render):
+//!                                          ints/floats bare (`-5`, `1.5`), `true`/`false`, `"str"` (\\ \" \n \t \r),
+//!                                          `'c'`, lists `[v, v]`, records `{name: v, ..}` (declared field order),
+//!                                          tuples `(v, v)`, variant/option/result by case name (`ok(v)`, `none`,
+//!                                          `some(v)`); enum renders `enum<N>`, flags `flags<0xN>` (ordinals —
+//!                                          `ComponentValue` carries no label names for these).
 //!   `skip-impl <reason>`                   — implementation gap; counts toward the `skip-impl == 0` gate
 //!   `skip-adr-<id> <reason>`               — design-deferred per the named skip-ADR; waived from gate
 //!
@@ -35,12 +44,23 @@ const host = zwasm.feature.component.host;
 const cdecode = zwasm.feature.component.decode;
 const ctypes = zwasm.feature.component.types;
 const cvalidate = zwasm.feature.component.validate;
+const canon = zwasm.feature.component.canon;
+const wasi_host = zwasm.wasi.host;
 const Value = zwasm.Value;
+const ComponentValue = host.ComponentValue;
+
+/// A `component_p2`-loaded fixture: the WASI host must outlive the built
+/// graph (trampolines hold a pointer to it).
+const BuiltP2 = struct {
+    wh: *wasi_host.Host,
+    bc: host.BuiltComponent,
+};
 
 const Current = union(enum) {
     none,
     single: host.ComponentInstance,
     graph: host.ComponentGraph,
+    built: BuiltP2,
 };
 
 pub fn main(init: std.process.Init) !void {
@@ -116,11 +136,7 @@ fn runCorpus(
     var current: Current = .none;
     var current_bytes: ?[]u8 = null;
     defer {
-        switch (current) {
-            .none => {},
-            .single => |*ci| ci.deinit(),
-            .graph => |*g| g.deinit(),
-        }
+        deinitCurrent(gpa, &current);
         if (current_bytes) |b| gpa.free(b);
     }
 
@@ -138,16 +154,38 @@ fn runCorpus(
             continue;
         }
 
+        if (std.mem.startsWith(u8, line, "component_p2 ")) {
+            const path = std.mem.trim(u8, line["component_p2 ".len..], " ");
+            deinitCurrent(gpa, &current);
+            if (current_bytes) |b| gpa.free(b);
+            current_bytes = null;
+
+            const bytes = cwd.readFileAlloc(io, path, gpa, .limited(8 << 20)) catch |err| {
+                try stdout.print("FAIL  {s}: read '{s}': {s}\n", .{ name, path, @errorName(err) });
+                failed.* += 1;
+                continue;
+            };
+            current_bytes = bytes;
+
+            const wh = try gpa.create(wasi_host.Host);
+            wh.* = try wasi_host.Host.init(gpa);
+            wh.io = io;
+            const bc = host.buildWasiP2Component(engine, gpa, bytes, wh) catch |err| {
+                wh.deinit();
+                gpa.destroy(wh);
+                try stdout.print("FAIL  {s}: buildWasiP2Component '{s}': {s}\n", .{ name, path, @errorName(err) });
+                failed.* += 1;
+                continue;
+            };
+            current = .{ .built = .{ .wh = wh, .bc = bc } };
+            continue;
+        }
+
         if (std.mem.startsWith(u8, line, "component ") or std.mem.startsWith(u8, line, "graph ")) {
             const is_graph = line[0] == 'g';
             const path = std.mem.trim(u8, line[if (is_graph) 6 else 10..], " ");
             // Reset prior fixture state before loading the next one.
-            switch (current) {
-                .none => {},
-                .single => |*ci| ci.deinit(),
-                .graph => |*g| g.deinit(),
-            }
-            current = .none;
+            deinitCurrent(gpa, &current);
             if (current_bytes) |b| gpa.free(b);
             current_bytes = null;
 
@@ -194,6 +232,22 @@ fn runCorpus(
 
         if (std.mem.startsWith(u8, line, "assert_flat_i32 ")) {
             if (runAssertFlatI32(&current, line["assert_flat_i32 ".len..])) |ok| {
+                if (ok) {
+                    passed.* += 1;
+                    try stdout.print("PASS  {s}: {s}\n", .{ name, line });
+                } else {
+                    failed.* += 1;
+                    try stdout.print("FAIL  {s}: {s} (mismatch)\n", .{ name, line });
+                }
+            } else |err| {
+                failed.* += 1;
+                try stdout.print("FAIL  {s}: {s} (error {s})\n", .{ name, line, @errorName(err) });
+            }
+            continue;
+        }
+
+        if (std.mem.startsWith(u8, line, "assert_typed ")) {
+            if (runAssertTyped(gpa, &current, line["assert_typed ".len..], stdout, name)) |ok| {
                 if (ok) {
                     passed.* += 1;
                     try stdout.print("PASS  {s}: {s}\n", .{ name, line });
@@ -262,6 +316,372 @@ fn runAssertString(gpa: std.mem.Allocator, current: *Current, rest: []const u8) 
     const result = try ci.invokeStringExport(export_name, arg, gpa);
     defer gpa.free(result);
     return std.mem.eql(u8, result, expected);
+}
+
+/// Drop the active fixture (and its WASI host, for `component_p2`).
+fn deinitCurrent(gpa: std.mem.Allocator, current: *Current) void {
+    switch (current.*) {
+        .none => {},
+        .single => |*ci| ci.deinit(),
+        .graph => |*g| g.deinit(),
+        .built => |*b| {
+            b.bc.deinit();
+            b.wh.deinit();
+            gpa.destroy(b.wh);
+        },
+    }
+    current.* = .none;
+}
+
+/// `assert_typed <export> (<value>, ..) -> <expected>` — parse each arg
+/// against the export's WIT param type (from the self-describing binary),
+/// invoke TYPED, render the result canonically, compare text.
+fn runAssertTyped(
+    gpa: std.mem.Allocator,
+    current: *Current,
+    rest: []const u8,
+    stdout: *std.Io.Writer,
+    corpus_name: []const u8,
+) !bool {
+    const arrow = std.mem.find(u8, rest, " -> ") orelse return error.BadDirective;
+    const lhs = std.mem.trim(u8, rest[0..arrow], " ");
+    const expected = std.mem.trim(u8, rest[arrow + 4 ..], " ");
+    const sp = std.mem.findScalar(u8, lhs, ' ') orelse return error.BadDirective;
+    const export_name = lhs[0..sp];
+    const args_text = std.mem.trim(u8, lhs[sp + 1 ..], " ");
+    if (args_text.len < 2 or args_text[0] != '(' or args_text[args_text.len - 1] != ')')
+        return error.BadDirective;
+    const inner = args_text[1 .. args_text.len - 1];
+
+    const info: *const ctypes.TypeInfo = switch (current.*) {
+        .single => |*c| &c.info,
+        .built => |*b| &b.bc.info,
+        else => return error.NoComponent,
+    };
+    const ft = info.resolveFuncType(export_name) orelse return error.ExportNotResolved;
+
+    // Arena owns the parsed args AND the invoke result — dropped wholesale.
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+
+    const args = try a.alloc(ComponentValue, ft.params.len);
+    var pos: usize = 0;
+    for (ft.params, args, 0..) |param, *slot, i| {
+        skipWs(inner, &pos);
+        if (i != 0) {
+            try expectChar(inner, &pos, ',');
+            skipWs(inner, &pos);
+        }
+        const ct = try canon.canonTypeFromDecoded(a, info, param.ty);
+        slot.* = try parseTypedValue(a, inner, &pos, ct);
+    }
+    skipWs(inner, &pos);
+    if (pos != inner.len) return error.BadDirective;
+
+    const out = switch (current.*) {
+        .single => |*c| try c.invokeTyped(export_name, args, a),
+        .built => |*b| try host.invokeTypedBuilt(&b.bc, export_name, args, a),
+        else => unreachable,
+    };
+
+    var rendered: std.ArrayList(u8) = .empty;
+    if (out) |o| try renderValue(a, &rendered, o);
+    const ok = std.mem.eql(u8, rendered.items, expected);
+    if (!ok) try stdout.print("      {s}: actual = {s}\n", .{ corpus_name, rendered.items });
+    return ok;
+}
+
+// ---- typed value text: parser (CanonType-driven) + canonical renderer ----
+
+fn skipWs(text: []const u8, pos: *usize) void {
+    while (pos.* < text.len and (text[pos.*] == ' ' or text[pos.*] == '\t')) pos.* += 1;
+}
+
+fn expectChar(text: []const u8, pos: *usize, c: u8) !void {
+    if (pos.* >= text.len or text[pos.*] != c) return error.BadValue;
+    pos.* += 1;
+}
+
+/// Consume `c` if present; report whether it was.
+fn consumeChar(text: []const u8, pos: *usize, c: u8) bool {
+    if (pos.* < text.len and text[pos.*] == c) {
+        pos.* += 1;
+        return true;
+    }
+    return false;
+}
+
+/// kebab-case identifier (field / case names, `true`/`false`, `none`).
+fn parseIdent(text: []const u8, pos: *usize) ![]const u8 {
+    const start = pos.*;
+    while (pos.* < text.len) : (pos.* += 1) {
+        const c = text[pos.*];
+        if (!(std.ascii.isAlphanumeric(c) or c == '-' or c == '_')) break;
+    }
+    if (pos.* == start) return error.BadValue;
+    return text[start..pos.*];
+}
+
+/// Bare numeric token (until a delimiter); base prefixes via parseInt base-0.
+fn numberToken(text: []const u8, pos: *usize) ![]const u8 {
+    const start = pos.*;
+    while (pos.* < text.len) : (pos.* += 1) {
+        const c = text[pos.*];
+        if (c == ',' or c == ')' or c == ']' or c == '}' or c == ' ' or c == '\t') break;
+    }
+    if (pos.* == start) return error.BadValue;
+    return text[start..pos.*];
+}
+
+fn parseIntToken(comptime T: type, text: []const u8, pos: *usize) !T {
+    return std.fmt.parseInt(T, try numberToken(text, pos), 0);
+}
+
+/// `"…"` with \\ \" \n \t \r escapes; result is arena-owned.
+fn parseStringLit(a: std.mem.Allocator, text: []const u8, pos: *usize) ![]const u8 {
+    try expectChar(text, pos, '"');
+    var out: std.ArrayList(u8) = .empty;
+    while (pos.* < text.len) {
+        const c = text[pos.*];
+        pos.* += 1;
+        if (c == '"') return out.toOwnedSlice(a);
+        if (c == '\\') {
+            if (pos.* >= text.len) return error.BadValue;
+            const e = text[pos.*];
+            pos.* += 1;
+            try out.append(a, switch (e) {
+                '\\' => '\\',
+                '"' => '"',
+                'n' => '\n',
+                't' => '\t',
+                'r' => '\r',
+                else => return error.BadValue,
+            });
+        } else {
+            try out.append(a, c);
+        }
+    }
+    return error.BadValue; // unterminated
+}
+
+/// `'c'` (one Unicode scalar; same escapes as strings).
+fn parseCharLit(text: []const u8, pos: *usize) !u21 {
+    try expectChar(text, pos, '\'');
+    if (pos.* >= text.len) return error.BadValue;
+    var cp: u21 = undefined;
+    if (text[pos.*] == '\\') {
+        pos.* += 1;
+        if (pos.* >= text.len) return error.BadValue;
+        cp = switch (text[pos.*]) {
+            '\\' => '\\',
+            '\'' => '\'',
+            'n' => '\n',
+            't' => '\t',
+            'r' => '\r',
+            else => return error.BadValue,
+        };
+        pos.* += 1;
+    } else {
+        const len = std.unicode.utf8ByteSequenceLength(text[pos.*]) catch return error.BadValue;
+        if (pos.* + len > text.len) return error.BadValue;
+        cp = std.unicode.utf8Decode(text[pos.* .. pos.* + len]) catch return error.BadValue;
+        pos.* += len;
+    }
+    try expectChar(text, pos, '\'');
+    return cp;
+}
+
+/// Parse one value at `pos` against its WIT (despecialized) type. Records
+/// require declared field order; despecialized tuples (all-empty field
+/// names) use positional `(v, v)`; variant/option/result go by case name.
+fn parseTypedValue(a: std.mem.Allocator, text: []const u8, pos: *usize, ct: canon.CanonType) anyerror!ComponentValue {
+    skipWs(text, pos);
+    switch (ct) {
+        .prim => |p| switch (p) {
+            .bool => {
+                const id = try parseIdent(text, pos);
+                if (std.mem.eql(u8, id, "true")) return .{ .bool = true };
+                if (std.mem.eql(u8, id, "false")) return .{ .bool = false };
+                return error.BadValue;
+            },
+            .s8 => return .{ .s8 = try parseIntToken(i8, text, pos) },
+            .u8 => return .{ .u8 = try parseIntToken(u8, text, pos) },
+            .s16 => return .{ .s16 = try parseIntToken(i16, text, pos) },
+            .u16 => return .{ .u16 = try parseIntToken(u16, text, pos) },
+            .s32 => return .{ .s32 = try parseIntToken(i32, text, pos) },
+            .u32 => return .{ .u32 = try parseIntToken(u32, text, pos) },
+            .s64 => return .{ .s64 = try parseIntToken(i64, text, pos) },
+            .u64 => return .{ .u64 = try parseIntToken(u64, text, pos) },
+            .f32 => return .{ .f32 = try std.fmt.parseFloat(f32, try numberToken(text, pos)) },
+            .f64 => return .{ .f64 = try std.fmt.parseFloat(f64, try numberToken(text, pos)) },
+            .char => return .{ .char = try parseCharLit(text, pos) },
+            .string => return .{ .string = try parseStringLit(a, text, pos) },
+            .error_context => return error.BadValue,
+        },
+        .enum_ => |n| {
+            const v = try parseIntToken(u32, text, pos);
+            if (v >= n) return error.BadValue;
+            return .{ .@"enum" = v };
+        },
+        .flags => |n| {
+            const v = try parseIntToken(u32, text, pos);
+            if (n < 32 and v >= (@as(u32, 1) << @intCast(n))) return error.BadValue;
+            return .{ .flags = v };
+        },
+        .list => |elem| {
+            try expectChar(text, pos, '[');
+            var items: std.ArrayList(ComponentValue) = .empty;
+            skipWs(text, pos);
+            if (!consumeChar(text, pos, ']')) {
+                while (true) {
+                    try items.append(a, try parseTypedValue(a, text, pos, elem.*));
+                    skipWs(text, pos);
+                    if (consumeChar(text, pos, ',')) continue;
+                    try expectChar(text, pos, ']');
+                    break;
+                }
+            }
+            return .{ .list = try items.toOwnedSlice(a) };
+        },
+        .record => |fields| {
+            if (fields.len > 0 and fields[0].name.len == 0) {
+                // Despecialized tuple — positional.
+                try expectChar(text, pos, '(');
+                const out = try a.alloc(ComponentValue, fields.len);
+                for (fields, out, 0..) |f, *slot, i| {
+                    skipWs(text, pos);
+                    if (i != 0) {
+                        try expectChar(text, pos, ',');
+                        skipWs(text, pos);
+                    }
+                    slot.* = try parseTypedValue(a, text, pos, f.ty);
+                }
+                skipWs(text, pos);
+                try expectChar(text, pos, ')');
+                return .{ .tuple = out };
+            }
+            try expectChar(text, pos, '{');
+            const out = try a.alloc(ComponentValue.Field, fields.len);
+            for (fields, out, 0..) |f, *slot, i| {
+                skipWs(text, pos);
+                if (i != 0) {
+                    try expectChar(text, pos, ',');
+                    skipWs(text, pos);
+                }
+                const ident = try parseIdent(text, pos);
+                if (!std.mem.eql(u8, ident, f.name)) return error.BadValue;
+                skipWs(text, pos);
+                try expectChar(text, pos, ':');
+                slot.* = .{ .name = f.name, .value = try parseTypedValue(a, text, pos, f.ty) };
+            }
+            skipWs(text, pos);
+            try expectChar(text, pos, '}');
+            return .{ .record = out };
+        },
+        .variant => |cases| {
+            const ident = try parseIdent(text, pos);
+            for (cases, 0..) |c, i| {
+                if (!std.mem.eql(u8, c.name, ident)) continue;
+                var payload: ?*ComponentValue = null;
+                if (c.payload) |pt| {
+                    try expectChar(text, pos, '(');
+                    const slot = try a.create(ComponentValue);
+                    slot.* = try parseTypedValue(a, text, pos, pt);
+                    skipWs(text, pos);
+                    try expectChar(text, pos, ')');
+                    payload = slot;
+                }
+                return .{ .variant = .{ .case = @intCast(i), .payload = payload } };
+            }
+            return error.BadValue;
+        },
+    }
+}
+
+/// Render `v` in the canonical text form `parseTypedValue` reads (the
+/// directive's expected side is compared against exactly this output).
+fn renderValue(a: std.mem.Allocator, out: *std.ArrayList(u8), v: ComponentValue) anyerror!void {
+    switch (v) {
+        .bool => |b| try out.appendSlice(a, if (b) "true" else "false"),
+        inline .s8, .u8, .s16, .u16, .s32, .u32, .s64, .u64, .f32, .f64 => |x| {
+            try out.appendSlice(a, try std.fmt.allocPrint(a, "{d}", .{x}));
+        },
+        .char => |cp| {
+            try out.append(a, '\'');
+            var buf: [4]u8 = undefined;
+            const n = std.unicode.utf8Encode(cp, &buf) catch return error.BadValue;
+            try out.appendSlice(a, buf[0..n]);
+            try out.append(a, '\'');
+        },
+        .string => |s| {
+            try out.append(a, '"');
+            for (s) |c| switch (c) {
+                '\\' => try out.appendSlice(a, "\\\\"),
+                '"' => try out.appendSlice(a, "\\\""),
+                '\n' => try out.appendSlice(a, "\\n"),
+                '\t' => try out.appendSlice(a, "\\t"),
+                '\r' => try out.appendSlice(a, "\\r"),
+                else => try out.append(a, c),
+            };
+            try out.append(a, '"');
+        },
+        .list => |items| {
+            try out.append(a, '[');
+            for (items, 0..) |item, i| {
+                if (i != 0) try out.appendSlice(a, ", ");
+                try renderValue(a, out, item);
+            }
+            try out.append(a, ']');
+        },
+        .tuple => |items| {
+            try out.append(a, '(');
+            for (items, 0..) |item, i| {
+                if (i != 0) try out.appendSlice(a, ", ");
+                try renderValue(a, out, item);
+            }
+            try out.append(a, ')');
+        },
+        .record => |fields| {
+            try out.append(a, '{');
+            for (fields, 0..) |f, i| {
+                if (i != 0) try out.appendSlice(a, ", ");
+                try out.appendSlice(a, f.name);
+                try out.appendSlice(a, ": ");
+                try renderValue(a, out, f.value);
+            }
+            try out.append(a, '}');
+        },
+        // `ComponentValue` carries case ORDINALS only (names live in the
+        // type); option/result re-specialize so their names are structural.
+        .variant => |vr| {
+            try out.appendSlice(a, try std.fmt.allocPrint(a, "variant<{d}>", .{vr.case}));
+            if (vr.payload) |p| {
+                try out.append(a, '(');
+                try renderValue(a, out, p.*);
+                try out.append(a, ')');
+            }
+        },
+        .@"enum" => |c| try out.appendSlice(a, try std.fmt.allocPrint(a, "enum<{d}>", .{c})),
+        .option => |opt| {
+            if (opt) |p| {
+                try out.appendSlice(a, "some(");
+                try renderValue(a, out, p.*);
+                try out.append(a, ')');
+            } else {
+                try out.appendSlice(a, "none");
+            }
+        },
+        .result => |r| {
+            try out.appendSlice(a, if (r.is_ok) "ok" else "err");
+            if (r.payload) |p| {
+                try out.append(a, '(');
+                try renderValue(a, out, p.*);
+                try out.append(a, ')');
+            }
+        },
+        .flags => |bits| try out.appendSlice(a, try std.fmt.allocPrint(a, "flags<0x{x}>", .{bits})),
+    }
 }
 
 /// `assert_flat_i32 <export> <i32-arg>* -> <i32>` — invoke a flat

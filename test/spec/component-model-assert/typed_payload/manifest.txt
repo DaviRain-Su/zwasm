@@ -1,0 +1,8 @@
+# wit-bindgen rich-type round-trip through the TYPED invoke path
+# (ADR-0183 F3/F4). Fixture: test/component/README_typed_payload.md
+# (Rust wit-bindgen, imports wasi -> loaded via component_p2).
+# process(record{xs: list<u32>, label: string}) -> result<same-record, string>:
+# ok appends sum(xs) to xs and "!" to label; label "fail" -> err("boom: <label>").
+component_p2 test/component/typed_payload.wasm
+assert_typed process ({xs: [1, 2, 3], label: "sum"}) -> ok({xs: [1, 2, 3, 6], label: "sum!"})
+assert_typed process ({xs: [], label: "fail"}) -> err("boom: fail")
