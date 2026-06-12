@@ -168,6 +168,45 @@ pub const P2Op = enum {
     fs_descriptor_read_directory,
     fs_dir_entry_stream_read,
     fs_dir_entry_stream_drop,
+    // wasi:io / wasi:cli resource drops a full wasi:cli world imports
+    // directly (error / pollable / terminal handles); all route to the
+    // generic drop.
+    io_resource_drop,
+    // wasi:filesystem/types stream-mint + metadata methods rust-std links
+    // but a CLI/TCP guest never calls — honest err(unsupported), the
+    // FILESYSTEM error-code ordinal (28).
+    fs_stub_via_stream_offset,
+    fs_stub_via_stream,
+    fs_stub_get_flags,
+    fs_stub_metadata_hash,
+    // wasi:sockets (ADR-0180 Phase 1) — TCP-client subset with REAL
+    // implementations; everything else is an HONEST err(not-supported)
+    // stub op shared by core-signature shape (the spec's typed signal for
+    // an unavailable feature, not a silent skip).
+    sock_instance_network,
+    sock_create_tcp,
+    sock_tcp_start_bind,
+    sock_tcp_finish_bind,
+    sock_tcp_start_connect,
+    sock_tcp_finish_connect,
+    sock_tcp_subscribe,
+    sock_tcp_shutdown,
+    sock_tcp_is_listening,
+    sock_tcp_drop,
+    // not-supported stub shapes: unit results (err@+1) by core arity...
+    sock_stub_unit2,
+    sock_stub_unit3i,
+    sock_stub_unit3l,
+    sock_stub_unit15,
+    // ...and value results by err-payload offset (ok-arm alignment).
+    sock_stub_val1,
+    sock_stub_val4,
+    sock_stub_val8,
+    sock_stub_val15_4,
+    sock_stub_resolve,
+    sock_stub_recv,
+    sock_stub_send,
+    sock_stub_subscribe,
 };
 
 /// What P1 facility a `P2Op` ultimately drives (so the D1-2 integration maps
@@ -213,6 +252,9 @@ pub const P1Target = union(enum) {
     path_unlink_file,
     /// P1 `fd_readdir` (the entry-stream cursor lives host-side).
     fd_readdir,
+    /// No P1 facility — the wasi:sockets host backing is `std.Io.net`
+    /// (ADR-0180; `src/wasi/p2_sockets.zig`).
+    sockets_host,
 };
 
 pub fn p1Target(op: P2Op) P1Target {
@@ -247,6 +289,33 @@ pub fn p1Target(op: P2Op) P1Target {
         .fs_descriptor_unlink_file_at => .path_unlink_file,
         .fs_descriptor_read_directory, .fs_dir_entry_stream_read => .fd_readdir,
         .fs_dir_entry_stream_drop => .noop,
+        .io_resource_drop => .noop,
+        .fs_stub_via_stream_offset, .fs_stub_via_stream, .fs_stub_get_flags, .fs_stub_metadata_hash => .noop,
+        // wasi:sockets — no P1 facility; the host backing is std.Io.net
+        // (src/wasi/p2_sockets.zig), not a preview1 syscall.
+        .sock_instance_network,
+        .sock_create_tcp,
+        .sock_tcp_start_bind,
+        .sock_tcp_finish_bind,
+        .sock_tcp_start_connect,
+        .sock_tcp_finish_connect,
+        .sock_tcp_subscribe,
+        .sock_tcp_shutdown,
+        .sock_tcp_is_listening,
+        .sock_tcp_drop,
+        .sock_stub_unit2,
+        .sock_stub_unit3i,
+        .sock_stub_unit3l,
+        .sock_stub_unit15,
+        .sock_stub_val1,
+        .sock_stub_val4,
+        .sock_stub_val8,
+        .sock_stub_val15_4,
+        .sock_stub_resolve,
+        .sock_stub_recv,
+        .sock_stub_send,
+        .sock_stub_subscribe,
+        => .sockets_host,
         // Poll + subscribe: no P1 facility (always-ready host bookkeeping).
         .poll_pollable_ready,
         .poll_pollable_block,
@@ -328,6 +397,71 @@ const table = [_]Entry{
     .{ .iface = "wasi:filesystem/types", .func = "[method]descriptor.read-directory", .op = .fs_descriptor_read_directory },
     .{ .iface = "wasi:filesystem/types", .func = "[method]directory-entry-stream.read-directory-entry", .op = .fs_dir_entry_stream_read },
     .{ .iface = "wasi:filesystem/types", .func = "[resource-drop]directory-entry-stream", .op = .fs_dir_entry_stream_drop },
+
+    .{ .iface = "wasi:io/error", .func = "[resource-drop]error", .op = .io_resource_drop },
+    .{ .iface = "wasi:io/poll", .func = "[resource-drop]pollable", .op = .io_resource_drop },
+    .{ .iface = "wasi:cli/terminal-input", .func = "[resource-drop]terminal-input", .op = .io_resource_drop },
+    .{ .iface = "wasi:cli/terminal-output", .func = "[resource-drop]terminal-output", .op = .io_resource_drop },
+    .{ .iface = "wasi:filesystem/types", .func = "[method]descriptor.read-via-stream", .op = .fs_stub_via_stream_offset },
+    .{ .iface = "wasi:filesystem/types", .func = "[method]descriptor.write-via-stream", .op = .fs_stub_via_stream_offset },
+    .{ .iface = "wasi:filesystem/types", .func = "[method]descriptor.append-via-stream", .op = .fs_stub_via_stream },
+    .{ .iface = "wasi:filesystem/types", .func = "[method]descriptor.get-flags", .op = .fs_stub_get_flags },
+    .{ .iface = "wasi:filesystem/types", .func = "[method]descriptor.metadata-hash", .op = .fs_stub_metadata_hash },
+    .{ .iface = "wasi:sockets/instance-network", .func = "instance-network", .op = .sock_instance_network },
+    .{ .iface = "wasi:sockets/tcp-create-socket", .func = "create-tcp-socket", .op = .sock_create_tcp },
+    .{ .iface = "wasi:sockets/tcp", .func = "[method]tcp-socket.start-bind", .op = .sock_tcp_start_bind },
+    .{ .iface = "wasi:sockets/tcp", .func = "[method]tcp-socket.finish-bind", .op = .sock_tcp_finish_bind },
+    .{ .iface = "wasi:sockets/tcp", .func = "[method]tcp-socket.start-connect", .op = .sock_tcp_start_connect },
+    .{ .iface = "wasi:sockets/tcp", .func = "[method]tcp-socket.finish-connect", .op = .sock_tcp_finish_connect },
+    .{ .iface = "wasi:sockets/tcp", .func = "[method]tcp-socket.subscribe", .op = .sock_tcp_subscribe },
+    .{ .iface = "wasi:sockets/tcp", .func = "[method]tcp-socket.shutdown", .op = .sock_tcp_shutdown },
+    .{ .iface = "wasi:sockets/tcp", .func = "[method]tcp-socket.is-listening", .op = .sock_tcp_is_listening },
+    .{ .iface = "wasi:sockets/tcp", .func = "[resource-drop]tcp-socket", .op = .sock_tcp_drop },
+    .{ .iface = "wasi:sockets/tcp", .func = "[method]tcp-socket.accept", .op = .sock_stub_val4 },
+    .{ .iface = "wasi:sockets/tcp", .func = "[method]tcp-socket.start-listen", .op = .sock_stub_unit2 },
+    .{ .iface = "wasi:sockets/tcp", .func = "[method]tcp-socket.finish-listen", .op = .sock_stub_unit2 },
+    .{ .iface = "wasi:sockets/tcp", .func = "[method]tcp-socket.hop-limit", .op = .sock_stub_val1 },
+    .{ .iface = "wasi:sockets/tcp", .func = "[method]tcp-socket.keep-alive-enabled", .op = .sock_stub_val1 },
+    .{ .iface = "wasi:sockets/tcp", .func = "[method]tcp-socket.keep-alive-count", .op = .sock_stub_val4 },
+    .{ .iface = "wasi:sockets/tcp", .func = "[method]tcp-socket.keep-alive-idle-time", .op = .sock_stub_val8 },
+    .{ .iface = "wasi:sockets/tcp", .func = "[method]tcp-socket.keep-alive-interval", .op = .sock_stub_val8 },
+    .{ .iface = "wasi:sockets/tcp", .func = "[method]tcp-socket.receive-buffer-size", .op = .sock_stub_val8 },
+    .{ .iface = "wasi:sockets/tcp", .func = "[method]tcp-socket.send-buffer-size", .op = .sock_stub_val8 },
+    .{ .iface = "wasi:sockets/tcp", .func = "[method]tcp-socket.local-address", .op = .sock_stub_val4 },
+    .{ .iface = "wasi:sockets/tcp", .func = "[method]tcp-socket.remote-address", .op = .sock_stub_val4 },
+    .{ .iface = "wasi:sockets/tcp", .func = "[method]tcp-socket.set-hop-limit", .op = .sock_stub_unit3i },
+    .{ .iface = "wasi:sockets/tcp", .func = "[method]tcp-socket.set-keep-alive-enabled", .op = .sock_stub_unit3i },
+    .{ .iface = "wasi:sockets/tcp", .func = "[method]tcp-socket.set-keep-alive-count", .op = .sock_stub_unit3i },
+    .{ .iface = "wasi:sockets/tcp", .func = "[method]tcp-socket.set-keep-alive-idle-time", .op = .sock_stub_unit3l },
+    .{ .iface = "wasi:sockets/tcp", .func = "[method]tcp-socket.set-keep-alive-interval", .op = .sock_stub_unit3l },
+    .{ .iface = "wasi:sockets/tcp", .func = "[method]tcp-socket.set-listen-backlog-size", .op = .sock_stub_unit3l },
+    .{ .iface = "wasi:sockets/tcp", .func = "[method]tcp-socket.set-receive-buffer-size", .op = .sock_stub_unit3l },
+    .{ .iface = "wasi:sockets/tcp", .func = "[method]tcp-socket.set-send-buffer-size", .op = .sock_stub_unit3l },
+    .{ .iface = "wasi:sockets/udp-create-socket", .func = "create-udp-socket", .op = .sock_stub_val4 },
+    .{ .iface = "wasi:sockets/udp", .func = "[method]udp-socket.start-bind", .op = .sock_stub_unit15 },
+    .{ .iface = "wasi:sockets/udp", .func = "[method]udp-socket.finish-bind", .op = .sock_stub_unit2 },
+    .{ .iface = "wasi:sockets/udp", .func = "[method]udp-socket.stream", .op = .sock_stub_val15_4 },
+    .{ .iface = "wasi:sockets/udp", .func = "[method]udp-socket.local-address", .op = .sock_stub_val4 },
+    .{ .iface = "wasi:sockets/udp", .func = "[method]udp-socket.remote-address", .op = .sock_stub_val4 },
+    .{ .iface = "wasi:sockets/udp", .func = "[method]udp-socket.receive-buffer-size", .op = .sock_stub_val8 },
+    .{ .iface = "wasi:sockets/udp", .func = "[method]udp-socket.send-buffer-size", .op = .sock_stub_val8 },
+    .{ .iface = "wasi:sockets/udp", .func = "[method]udp-socket.set-receive-buffer-size", .op = .sock_stub_unit3l },
+    .{ .iface = "wasi:sockets/udp", .func = "[method]udp-socket.set-send-buffer-size", .op = .sock_stub_unit3l },
+    .{ .iface = "wasi:sockets/udp", .func = "[method]udp-socket.unicast-hop-limit", .op = .sock_stub_val1 },
+    .{ .iface = "wasi:sockets/udp", .func = "[method]udp-socket.set-unicast-hop-limit", .op = .sock_stub_unit3i },
+    .{ .iface = "wasi:sockets/udp", .func = "[method]udp-socket.subscribe", .op = .sock_stub_subscribe },
+    .{ .iface = "wasi:sockets/udp", .func = "[resource-drop]udp-socket", .op = .sock_tcp_drop },
+    .{ .iface = "wasi:sockets/udp", .func = "[method]incoming-datagram-stream.receive", .op = .sock_stub_recv },
+    .{ .iface = "wasi:sockets/udp", .func = "[method]incoming-datagram-stream.subscribe", .op = .sock_stub_subscribe },
+    .{ .iface = "wasi:sockets/udp", .func = "[resource-drop]incoming-datagram-stream", .op = .sock_tcp_drop },
+    .{ .iface = "wasi:sockets/udp", .func = "[method]outgoing-datagram-stream.check-send", .op = .sock_stub_val8 },
+    .{ .iface = "wasi:sockets/udp", .func = "[method]outgoing-datagram-stream.send", .op = .sock_stub_send },
+    .{ .iface = "wasi:sockets/udp", .func = "[method]outgoing-datagram-stream.subscribe", .op = .sock_stub_subscribe },
+    .{ .iface = "wasi:sockets/udp", .func = "[resource-drop]outgoing-datagram-stream", .op = .sock_tcp_drop },
+    .{ .iface = "wasi:sockets/ip-name-lookup", .func = "resolve-addresses", .op = .sock_stub_resolve },
+    .{ .iface = "wasi:sockets/ip-name-lookup", .func = "[method]resolve-address-stream.resolve-next-address", .op = .sock_stub_val4 },
+    .{ .iface = "wasi:sockets/ip-name-lookup", .func = "[method]resolve-address-stream.subscribe", .op = .sock_stub_subscribe },
+    .{ .iface = "wasi:sockets/ip-name-lookup", .func = "[resource-drop]resolve-address-stream", .op = .sock_tcp_drop },
 };
 
 /// Classify a P2 import `(interface, func)` → the `P2Op` it maps to, or null if

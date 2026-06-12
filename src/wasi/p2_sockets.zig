@@ -74,6 +74,18 @@ pub fn errorToCode(err: anyerror) ErrorCode {
     };
 }
 
+/// poll(2) interest bits, re-exported comptime-gated so consumers compile on
+/// Windows where `std.posix.POLL` is absent (the values are never read there
+/// — `pollOnce` panics per D-319 until the WSAPoll wiring lands in Phase 2).
+pub const POLL_IN: i16 = switch (builtin.os.tag) {
+    .windows => 1,
+    else => posix.POLL.IN,
+};
+pub const POLL_OUT: i16 = switch (builtin.os.tag) {
+    .windows => 4,
+    else => posix.POLL.OUT,
+};
+
 /// `wasi:sockets/tcp` documented state machine (client subset; `listening`
 /// arrives with ADR-0180 Phase 2).
 pub const TcpState = enum { unbound, bind_started, bound, connect_started, connected, closed };
@@ -168,6 +180,12 @@ pub const TcpSocket = struct {
     pub fn ready(self: *TcpSocket, interest: i16) !bool {
         const stream = self.connectedStream() orelse return error.InvalidState;
         return pollOnce(stream.socket.handle, interest);
+    }
+
+    /// `tcp.shutdown(shutdown-type)` — half/full-close a connected socket.
+    pub fn shutdown(self: *TcpSocket, io: std.Io, how: net.ShutdownHow) !void {
+        const stream = self.connectedStream() orelse return error.InvalidState;
+        try stream.shutdown(io, how);
     }
 
     fn connectedStream(self: *TcpSocket) ?net.Stream {

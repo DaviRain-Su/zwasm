@@ -117,6 +117,13 @@ pub const ResourceTable = struct {
         return h.rep;
     }
 
+    /// Non-destructive typed lookup: the handle's (rt, rep) without removing
+    /// it. Lets a trampoline shared across resource types (stream read/write,
+    /// subscribe, drop) branch on the handle's actual type.
+    pub fn peek(self: *ResourceTable, i: u32) Error!ResourceHandle {
+        return (try self.handlePtr(i)).*;
+    }
+
     /// `canon resource.drop` — remove the handle. Returns the `rep` to destroy
     /// when the handle was owning (the caller runs the destructor), or `null`
     /// for a `borrow` (which instead decrements its lender's `num_lends`).
