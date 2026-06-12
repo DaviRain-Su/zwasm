@@ -22,7 +22,7 @@ const std = @import("std");
 const types = @import("types.zig");
 const core = @import("../../runtime/value.zig");
 
-const CoreValue = core.Value;
+pub const CoreValue = core.Value;
 const PrimValType = types.PrimValType;
 
 /// A component-level runtime value. B1: flat scalars; B2 enum/flags; B4 adds
@@ -1184,4 +1184,81 @@ test "lowerFlat/liftFlat round-trip: record{u32, string} + variant payload conve
     const vback = try liftFlat(cx, arena, var_ty, flats.items, &idx);
     try testing.expectEqual(@as(u32, 0), vback.variant.case);
     try testing.expectEqual(@as(f32, 1.5), vback.variant.payload.?.f32);
+}
+
+// ============================================================
+// Decoded-type bridge (ADR-0183 F2b) — resolve the DECODED component
+// type model (TypeInfo's ValType/DefType) into the canon type model,
+// despecializing tuple→record and option/result→variant exactly as
+// `CanonicalABI.md` despecialize() prescribes.
+// ============================================================
+
+pub const TypeBridgeError = error{ UnsupportedType, InvalidTypeIndex } || std.mem.Allocator.Error;
+
+/// A decoded value type → `CanonType` (arena-allocated).
+pub fn canonTypeFromDecoded(arena: std.mem.Allocator, info: *const types.TypeInfo, vt: types.ValType) TypeBridgeError!CanonType {
+    switch (vt) {
+        .primitive => |p| return .{ .prim = p },
+        .type_index => |ti| {
+            if (ti >= info.type_space.items.len) return TypeBridgeError.InvalidTypeIndex;
+            switch (info.type_space.items[ti]) {
+                // Alias/import/export-minted signatures — deferred (a
+                // concrete leaf component defines its value types locally).
+                .named => return TypeBridgeError.UnsupportedType,
+                .def => |d| return canonTypeFromDefType(arena, info, info.deftypes.items[d]),
+            }
+        },
+    }
+}
+
+/// A decoded deftype → `CanonType` (value-type forms only).
+pub fn canonTypeFromDefType(arena: std.mem.Allocator, info: *const types.TypeInfo, dt: types.DefType) TypeBridgeError!CanonType {
+    switch (dt) {
+        .value => |vt| return canonTypeFromDecoded(arena, info, vt),
+        .record => |rec| {
+            const fields = try arena.alloc(CanonType.Field, rec.fields.len);
+            for (rec.fields, fields) |f, *slot| {
+                slot.* = .{ .name = f.name, .ty = try canonTypeFromDecoded(arena, info, f.ty) };
+            }
+            return .{ .record = fields };
+        },
+        .tuple => |t| {
+            // despecialize: tuple = record with positional (unnamed) fields.
+            const fields = try arena.alloc(CanonType.Field, t.types.len);
+            for (t.types, fields) |ty, *slot| {
+                slot.* = .{ .name = "", .ty = try canonTypeFromDecoded(arena, info, ty) };
+            }
+            return .{ .record = fields };
+        },
+        .list => |l| {
+            if (l.fixed_length != null) return TypeBridgeError.UnsupportedType; // fixed-length lists — later
+            const elem = try arena.create(CanonType);
+            elem.* = try canonTypeFromDecoded(arena, info, l.element.*);
+            return .{ .list = elem };
+        },
+        .option => |o| {
+            // despecialize: option<T> = variant { none, some(T) }.
+            const cases = try arena.alloc(CanonType.VCase, 2);
+            cases[0] = .{ .name = "none", .payload = null };
+            cases[1] = .{ .name = "some", .payload = try canonTypeFromDecoded(arena, info, o.payload.*) };
+            return .{ .variant = cases };
+        },
+        .result => |r| {
+            // despecialize: result<T, E> = variant { ok(T?), err(E?) }.
+            const cases = try arena.alloc(CanonType.VCase, 2);
+            cases[0] = .{ .name = "ok", .payload = if (r.ok) |ok| try canonTypeFromDecoded(arena, info, ok) else null };
+            cases[1] = .{ .name = "err", .payload = if (r.err) |er| try canonTypeFromDecoded(arena, info, er) else null };
+            return .{ .variant = cases };
+        },
+        .variant => |v| {
+            const cases = try arena.alloc(CanonType.VCase, v.cases.len);
+            for (v.cases, cases) |c, *slot| {
+                slot.* = .{ .name = c.name, .payload = if (c.payload) |p| try canonTypeFromDecoded(arena, info, p) else null };
+            }
+            return .{ .variant = cases };
+        },
+        .enum_ => |e| return .{ .enum_ = @intCast(e.labels.len) },
+        .flags => |fl| return .{ .flags = @intCast(fl.labels.len) },
+        .func, .own, .borrow, .instance_type, .component_type => return TypeBridgeError.UnsupportedType,
+    }
 }
