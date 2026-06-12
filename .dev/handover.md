@@ -33,9 +33,17 @@
   E3 error-path fixture `wasi_p2_fs_err_go` · sockets survey · ADR-0180.
   Phase 2 (listeners + windows WSAPoll D-319) + Phase 3 (UDP/name-lookup)
   deferred per ADR-0180.
-- **NEXT (CM campaign)**: E3 corpus growth (distil official `.wat`
-  fixtures into the component corpus) and/or ADR-0180 Phase-2 listeners.
-  Secondary (user-redirect only): D-318, D-314 follow-ons, D-251.
+- **E3 corpus growth LANDED**: 115 official assert_invalid cases
+  distilled verbatim into `official_distilled/`; gap-driven validator
+  extensions (rule-1 definition-order bounds, rule-8 nested-scope
+  names, NEW rule-9 instantiate/inline-export/sortidx bounds, rule-3/6
+  count-0 outer-alias existence) → **corpus 105 pass / 0 fail / 30
+  reasoned skip-impl** (was 18 pass). test-all+lint green.
+- **NEXT (CM campaign)**: ADR-0180 Phase-2 listeners (accept/listen +
+  windows WSAPoll D-319), or close the 30 skip-impl gaps (nested-scope
+  deep refs is the biggest cluster). Secondary: D-318, D-314, D-251.
+- **USER STOP 2026-06-13**: loop paused on user request after this
+  chunk (no re-arm); resume via `/continue`.
 
 ## Sandboxing bundle d314-jit-sandbox — CLOSED 2026-06-12
 
