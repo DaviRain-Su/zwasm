@@ -66,10 +66,13 @@
   — winsock structurally unusable on the stdlib's raw NT/AFD handles.
   FIX LANDED: pollOnce windows branch = IOCTL_AFD_POLL via
   ntdll.NtDeviceIoControlFile (wepoll approach; zero-timeout snapshot;
-  winsock externs removed). PROBE #5 in flight → /tmp/win_probe5.log at
-  Step 0.7: lifecycle tests green ⇒ only residual = the stdlib
-  connect-refused NTSTATUS mapping (test expectation), then de-skip e2e
-  and re-verify the hang.
+  winsock externs removed). PROBE #5: 2700/2832 PASSED —
+  AFD-poll readiness WORKS (client+listener lifecycles green on
+  windows); single residual = stdlib connect-refused mapping, now an
+  expected-on-windows arm with the D-319 citation. PROBE #6 in flight
+  (/tmp/win_probe6.log): e2e re-enabled under the flag — green ⇒ remove
+  ALL D-319 gates + close D-319 ('CLOSED <sha>' + drop skip.Blocker arm)
+  + windows batch returns to normal.
 - **D-322 CORE LANDED @3cf52d80**: resource defs (0x3f) decode (raw-byte
   peek — 0x3f is sleb-positive) + dtor core-func bounds + rule 12
   resource generativity (nested-component recursive scan; the corpus
