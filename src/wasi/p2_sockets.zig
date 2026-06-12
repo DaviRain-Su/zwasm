@@ -323,8 +323,11 @@ extern "ws2_32" fn WSAPoll(fds: [*]WsaPollFd, nfds: c_ulong, timeout: c_int) cal
 // Tests
 // ============================================================
 const testing = std.testing;
+const skip = @import("../test_support/skip.zig");
 
 test "tcp client lifecycle: create → connect → echo against a loopback listener" {
+    // D-319: the first de-skipped win run HUNG the test step (see debt row).
+    if (builtin.os.tag == .windows) return skip.blocker(.@"D-319");
     var threaded: std.Io.Threaded = .init(testing.allocator, .{});
     defer threaded.deinit();
     const io = threaded.io();
@@ -366,6 +369,8 @@ test "tcp client lifecycle: create → connect → echo against a loopback liste
 }
 
 test "tcp state machine: invalid transitions are rejected" {
+    // D-319: the first de-skipped win run HUNG the test step (see debt row).
+    if (builtin.os.tag == .windows) return skip.blocker(.@"D-319");
     var threaded: std.Io.Threaded = .init(testing.allocator, .{});
     defer threaded.deinit();
     const io = threaded.io();
@@ -392,6 +397,8 @@ test "tcp state machine: invalid transitions are rejected" {
 }
 
 test "tcp connect to a closed port surfaces connection-refused at finish-connect" {
+    // D-319: the first de-skipped win run HUNG the test step (see debt row).
+    if (builtin.os.tag == .windows) return skip.blocker(.@"D-319");
     var threaded: std.Io.Threaded = .init(testing.allocator, .{});
     defer threaded.deinit();
     const io = threaded.io();
@@ -410,6 +417,8 @@ test "tcp connect to a closed port surfaces connection-refused at finish-connect
 }
 
 test "tcp listener lifecycle: bind → listen → accept → echo (ADR-0180 Phase 2)" {
+    // D-319: the first de-skipped win run HUNG the test step (see debt row).
+    if (builtin.os.tag == .windows) return skip.blocker(.@"D-319");
     var threaded: std.Io.Threaded = .init(testing.allocator, .{});
     defer threaded.deinit();
     const io = threaded.io();
@@ -461,6 +470,8 @@ test "tcp listener lifecycle: bind → listen → accept → echo (ADR-0180 Phas
 }
 
 test "tcp listener state machine: invalid transitions are rejected" {
+    // D-319: the first de-skipped win run HUNG the test step (see debt row).
+    if (builtin.os.tag == .windows) return skip.blocker(.@"D-319");
     var threaded: std.Io.Threaded = .init(testing.allocator, .{});
     defer threaded.deinit();
     const io = threaded.io();

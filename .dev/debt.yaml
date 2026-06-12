@@ -778,15 +778,26 @@ entries:
     layer: "wasi"
     status: "note"
     description: |-
-      note (ADR-0180 Phase-2): WSAPoll readiness LANDED (extern "ws2_32"; pollOnce real on
-      windows; POLLRDNORM/POLLWRNORM interest bits) and ALL windows skips removed — the
-      sockets unit tests + both rust e2e (client/listener) now run on windowsmini.
-      Discharge: the next windows batch reports them green (win cross-compile already
-      green locally). Red => re-run once per D7; reproduces => real Win64 bug, fix here.
+      note (ADR-0180 Phase-2): WSAPoll readiness landed (extern "ws2_32") but the first
+      de-skipped windowsmini run HUNG the unit-test step (timeout 3600 exit 124; every
+      RUNNER suite completed first, so the hang is inside `zig build test` = the socket
+      lifecycle tests and/or the rust client/listener e2e — all first-ever win
+      executions). Windows test gating RESTORED on the 7 sites pending root cause.
+      Hypotheses (investigation_discipline §1):
+        1. WSAPoll never reports readiness (bad fd cast/flags) — unit lifecycle tests
+           would FAIL fast (~1s loops), not hang => predicts hang is NOT here.
+        2. Threaded netAccept/io.concurrent deadlock on windows in the e2e harness
+           (host echo thread blocks in accept forever when the guest side errored;
+           future.cancel cannot interrupt a blocking accept) — predicts e2e hang.
+        3. Guest poll infinite-retry: p2Poll caps one call at 30s but rust std retries
+           forever when readiness never fires — predicts e2e hang with idle CPU.
+      Distinguishing probe: targeted windowsmini run of ONLY `zig build test` with the
+      skips selectively removed (unit-only first, then e2e-only).
+      Discharge: socket tests green on windowsmini.
     first_raised: "2026-06-12"
     last_reviewed: "2026-06-13"
     refs: |-
-      ADR-0180 (Phase 2 Revision); src/wasi/p2_sockets.zig pollOnce/WSAPoll
+      ADR-0180 (Phase 2 Revision); src/wasi/p2_sockets.zig pollOnce/WSAPoll; lesson windows-test-compile-gate
 
   - id: "D-318"
     layer: "test"
