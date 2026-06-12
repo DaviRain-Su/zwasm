@@ -58,21 +58,14 @@
   @d039d727, D-319 row re-scoped to the named hang barrier (3-hypothesis
   list + targeted-probe plan in the row). D-320 size datapoint: base
   1.97 MB (+37.6 KB), lean unchanged.
-- **D-319 ROOT CAUSES FOUND (probes #2/#3)**: (a) WSAPoll failed WSA
-  10093 WSANOTINITIALISED — the pinned std.Io.net windows backend is
-  pure NT/AFD, winsock never initialized; FIX LANDED (lazy WSAStartup in
-  pollOnce). (b) netConnect maps NTSTATUS 0xC0000236 (CONNECTION_REFUSED)
-  to error.Unexpected — pinned-stdlib gap, recorded. PROBE #4: WSAENOTSOCK
-  — winsock structurally unusable on the stdlib's raw NT/AFD handles.
-  FIX LANDED: pollOnce windows branch = IOCTL_AFD_POLL via
-  ntdll.NtDeviceIoControlFile (wepoll approach; zero-timeout snapshot;
-  winsock externs removed). PROBE #5: 2700/2832 PASSED —
-  AFD-poll readiness WORKS (client+listener lifecycles green on
-  windows); single residual = stdlib connect-refused mapping, now an
-  expected-on-windows arm with the D-319 citation. PROBE #6 in flight
-  (/tmp/win_probe6.log): e2e re-enabled under the flag — green ⇒ remove
-  ALL D-319 gates + close D-319 ('CLOSED <sha>' + drop skip.Blocker arm)
-  + windows batch returns to normal.
+- **D-319 DISCHARGED** (probe chain #1–#6): windows wasi:sockets
+  readiness = IOCTL_AFD_POLL via NtDeviceIoControlFile (winsock is
+  unusable on the pinned stdlib's raw NT/AFD handles — lesson
+  winsock-vs-nt-afd-handles). Probe #6 full-green on windowsmini incl.
+  both rust e2e; the old hang was a guest poll loop on never-ready
+  readiness. All gates + probe flag removed — windowsmini runs the full
+  socket suite per batch. Residual: D-323 (stdlib unmapped
+  connection-refused NTSTATUS; degraded `unknown` error-code pinned).
 - **D-322 CORE LANDED @3cf52d80**: resource defs (0x3f) decode (raw-byte
   peek — 0x3f is sleb-positive) + dtor core-func bounds + rule 12
   resource generativity (nested-component recursive scan; the corpus
