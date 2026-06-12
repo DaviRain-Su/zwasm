@@ -40,7 +40,10 @@ pub fn validate(info: *const TypeInfo) Error!void {
     // final size below.
     for (info.type_space.items, 0..) |entry, pos| {
         switch (entry) {
-            .def => |d| try checkDefTypeIndices(info.deftypes.items[d], @intCast(pos)),
+            .def => |d| {
+                try checkDefTypeIndices(info.deftypes.items[d], @intCast(pos));
+                try checkNestedTypeScope(info.deftypes.items[d], outerSizesOne(@intCast(pos)));
+            },
             .named => {},
         }
     }
@@ -126,6 +129,261 @@ fn componentDeclInstanceDecl(decl: types.ComponentDecl) ?types.InstanceDecl {
         .import_decl => null,
         .instance_decl => |id| id,
     };
+}
+
+// ============================================================
+// Rule 10 — nested type-scope deep validation (ADR-0176; the corpus
+// types.wast / type-export-restrictions.wast nested classes). Each
+// `instance`/`component` type declaration carries its OWN local type
+// index space, minted in decl order by: a `type` decl (a local DEF), a
+// type-sort alias (NAMED), and an import/export decl with a type bound
+// (NAMED — the re-bind is named by construction, mirroring the
+// top-level `.named` type_space entries). Checks per decl, all in
+// definition order:
+//   - structural type refs in a local `type` def bound by the local
+//     space size at the decl (rule-1 shape, local space);
+//   - import/export externdesc indices (func/component/instance/value)
+//     bound by the local space;
+//   - outer-alias (count k) targets bound by the ENCLOSING scope's size
+//     at its definition point (count 0 = this scope so far);
+//   - an exported `(type (eq t))` whose `t` is a local structural DEF
+//     must reference only NAMED local entries (the top-level rule-7
+//     export restriction, applied in-scope).
+// Core (module) decl scopes stay deferred — the core-type section
+// bodies are not decoded yet (the instantiate_* skip cluster).
+// ============================================================
+
+/// Enclosing-scope type-space sizes, innermost LAST (fixed depth cap;
+/// deeper nesting defers the outer-alias bound check, never a false
+/// positive).
+const OuterSizes = struct {
+    buf: [16]u32 = undefined,
+    len: usize = 0,
+
+    fn pushed(self: OuterSizes, size: u32) OuterSizes {
+        var next = self;
+        if (next.len < next.buf.len) {
+            next.buf[next.len] = size;
+            next.len += 1;
+        }
+        return next;
+    }
+};
+
+fn outerSizesOne(size: u32) OuterSizes {
+    return (OuterSizes{}).pushed(size);
+}
+
+const LocalTypeRef = union(enum) { def: *const DefType, named };
+
+/// What local type entry (if any) `decl` mints in its scope's space.
+fn instanceDeclMint(decl: types.InstanceDecl) ?LocalTypeRef {
+    return switch (decl) {
+        .type_def => |td| .{ .def = td },
+        .alias => |al| if (std.meta.activeTag(al.sort) == .type) .named else null,
+        .export_decl => |ed| switch (ed.desc) {
+            .type_bound => .named,
+            else => null,
+        },
+    };
+}
+
+fn componentDeclMint(decl: types.ComponentDecl) ?LocalTypeRef {
+    return switch (decl) {
+        .import_decl => |id| switch (id.desc) {
+            .type_bound => .named,
+            else => null,
+        },
+        .instance_decl => |inner| instanceDeclMint(inner),
+    };
+}
+
+fn checkNestedTypeScope(dt: DefType, outer: OuterSizes) Error!void {
+    switch (dt) {
+        // Instance-type scopes get NO definition-time export restriction
+        // (wasm-tools `ComponentKind::InstanceType => return true`); the
+        // restriction applies when the instance type is exported
+        // (`checkExportedTypes` walks it with `restrict = true`).
+        .instance_type => |it| try checkInstanceDeclScope(it.decls, outer, false),
+        .component_type => |ct| try checkComponentDeclScope(ct.decls, outer),
+        else => {},
+    }
+}
+
+fn checkInstanceDeclScope(decls: []const types.InstanceDecl, outer: OuterSizes, restrict_exports: bool) Error!void {
+    var local_n: u32 = 0;
+    for (decls) |decl| {
+        try checkOneInstanceDecl(decl, decls, local_n, outer, restrict_exports);
+        if (instanceDeclMint(decl) != null) local_n += 1;
+    }
+}
+
+fn checkComponentDeclScope(decls: []const types.ComponentDecl, outer: OuterSizes) Error!void {
+    var local_n: u32 = 0;
+    for (decls) |decl| {
+        switch (decl) {
+            .import_decl => |id| try checkDeclExternDesc(id.desc, decls, local_n, true),
+            .instance_decl => |inner| try checkOneInstanceDecl(inner, decls, local_n, outer, true),
+        }
+        if (componentDeclMint(decl) != null) local_n += 1;
+    }
+}
+
+/// `decls` is the scope (only entries BEFORE the current decl are
+/// consulted, via `local_n` and the `upto`-style lookups below).
+fn checkOneInstanceDecl(decl: types.InstanceDecl, scope: anytype, local_n: u32, outer: OuterSizes, restrict_exports: bool) Error!void {
+    switch (decl) {
+        .type_def => |td| {
+            // rule-1 shape against the LOCAL space at this decl.
+            try checkDefTypeIndices(td.*, local_n);
+            try checkNestedTypeScope(td.*, outer.pushed(local_n));
+        },
+        .alias => |al| {
+            if (std.meta.activeTag(al.sort) != .type) return;
+            switch (al.target) {
+                .outer => |o| {
+                    if (o.count == 0) {
+                        if (o.index >= local_n) return Error.InvalidAlias;
+                    } else if (o.count <= outer.len) {
+                        if (o.index >= outer.buf[outer.len - o.count]) return Error.InvalidAlias;
+                    }
+                    // counts beyond the tracked depth are rejected by the
+                    // rule-6 depth walk (checkDefTypeOuterAliases).
+                },
+                .core_export, .component_export => {},
+            }
+        },
+        .export_decl => |ed| try checkDeclExternDesc(ed.desc, scope, local_n, restrict_exports),
+    }
+}
+
+/// Extern-desc indices in a decl reference the scope's LOCAL type space.
+/// `restrict_named` additionally applies the named-types export
+/// restriction (wasm-tools `validate_and_register_named_types`): the
+/// IMMEDIATE refs of a named type/func must resolve to NAMED local
+/// entries, where record/variant/enum/flags are never anonymous and
+/// tuple/list/option/result recurse into their components.
+fn checkDeclExternDesc(desc: types.ExternDesc, scope: anytype, local_n: u32, restrict_named: bool) Error!void {
+    switch (desc) {
+        .func, .component, .instance => |ti| {
+            if (ti >= local_n) return Error.InvalidTypeIndex;
+            if (restrict_named) {
+                if (desc == .func) switch (localTypeAt(scope, ti)) {
+                    .def => |dt| switch (dt.*) {
+                        .func => |ft| {
+                            for (ft.params) |prm| try checkDeclValTypeNamed(prm.ty, scope);
+                            if (ft.result) |r| try checkDeclValTypeNamed(r, scope);
+                        },
+                        else => {},
+                    },
+                    .named => {},
+                };
+            }
+        },
+        .type_bound => |tb| switch (tb) {
+            .eq => |ti| {
+                if (ti >= local_n) return Error.InvalidTypeIndex;
+                if (restrict_named) {
+                    switch (localTypeAt(scope, ti)) {
+                        .def => |dt| try checkDeclDefTypeRefsNamed(dt.*, scope),
+                        .named => {},
+                    }
+                }
+            },
+            .sub_resource => {},
+        },
+        .value_bound => |vb| if (vb) |vt| switch (vt) {
+            .primitive => {},
+            .type_index => |ti| if (ti >= local_n) return Error.InvalidTypeIndex,
+        },
+        .core_module => {}, // local core-type space — deferred (module decls undecoded)
+    }
+}
+
+/// The `want`-th minted local type entry of `scope` (bounds already
+/// validated by the caller).
+fn localTypeAt(scope: anytype, want: u32) LocalTypeRef {
+    var n: u32 = 0;
+    for (scope) |decl| {
+        const minted = switch (@TypeOf(decl)) {
+            types.InstanceDecl => instanceDeclMint(decl),
+            types.ComponentDecl => componentDeclMint(decl),
+            else => @compileError("unsupported decl scope"),
+        } orelse continue;
+        if (n == want) return minted;
+        n += 1;
+    }
+    unreachable; // caller bounds-checked `want < local_n`
+}
+
+/// The named-types restriction over a decl-scope def being exported
+/// under a name: its IMMEDIATE refs must be named
+/// (`all_valtypes_named_in_defined` shape — the def itself is being
+/// named by the export, so only components are checked).
+fn checkDeclDefTypeRefsNamed(dt: DefType, scope: anytype) Error!void {
+    switch (dt) {
+        .value => |vt| try checkDeclValTypeNamed(vt, scope),
+        .func => |ft| {
+            for (ft.params) |p| try checkDeclValTypeNamed(p.ty, scope);
+            if (ft.result) |r| try checkDeclValTypeNamed(r, scope);
+        },
+        .record => |rec| for (rec.fields) |f| try checkDeclValTypeNamed(f.ty, scope),
+        .tuple => |t| for (t.types) |vt| try checkDeclValTypeNamed(vt, scope),
+        .list => |l| try checkDeclValTypeNamed(l.element.*, scope),
+        .option => |o| try checkDeclValTypeNamed(o.payload.*, scope),
+        .variant => |v| for (v.cases) |c| {
+            if (c.payload) |pl| try checkDeclValTypeNamed(pl, scope);
+        },
+        .result => |res| {
+            if (res.ok) |ok| try checkDeclValTypeNamed(ok, scope);
+            if (res.err) |er| try checkDeclValTypeNamed(er, scope);
+        },
+        .own, .borrow => |idx| try checkDeclRefNamed(idx, scope),
+        .enum_, .flags => {},
+        .instance_type, .component_type => {},
+    }
+}
+
+fn checkDeclValTypeNamed(vt: ValType, scope: anytype) Error!void {
+    switch (vt) {
+        .primitive => {},
+        .type_index => |idx| try checkDeclRefNamed(idx, scope),
+    }
+}
+
+/// `type_named_type_id` semantics: a ref to a NAMED entry passes; a ref
+/// to an anonymous local def passes only for the structurally-anonymous
+/// forms (tuple/list/option/result — components recurse), never for
+/// record/variant/enum/flags.
+fn checkDeclRefNamed(idx: u32, scope: anytype) Error!void {
+    var n: u32 = 0;
+    for (scope) |decl| {
+        const minted = switch (@TypeOf(decl)) {
+            types.InstanceDecl => instanceDeclMint(decl),
+            types.ComponentDecl => componentDeclMint(decl),
+            else => @compileError("unsupported decl scope"),
+        } orelse continue;
+        if (n == idx) {
+            switch (minted) {
+                .named => return,
+                .def => |dt| return switch (dt.*) {
+                    .record, .variant, .enum_, .flags => Error.InvalidExternDesc,
+                    .value => |vt| checkDeclValTypeNamed(vt, scope),
+                    .tuple => |t| for (t.types) |vt| try checkDeclValTypeNamed(vt, scope),
+                    .list => |l| checkDeclValTypeNamed(l.element.*, scope),
+                    .option => |o| checkDeclValTypeNamed(o.payload.*, scope),
+                    .result => |res| {
+                        if (res.ok) |ok| try checkDeclValTypeNamed(ok, scope);
+                        if (res.err) |er| try checkDeclValTypeNamed(er, scope);
+                    },
+                    .own, .borrow => |ri| checkDeclRefNamed(ri, scope),
+                    .func, .instance_type, .component_type => Error.InvalidExternDesc,
+                },
+            }
+        }
+        n += 1;
+    }
+    return Error.InvalidTypeIndex;
 }
 
 /// Rule 9: instantiate-section bounds + names (corpus instantiate.wast
@@ -280,7 +538,16 @@ fn checkExportedTypes(info: *const TypeInfo) Error!void {
         if (ex.index >= entries.len) return Error.InvalidTypeIndex;
         switch (entries[ex.index]) {
             .named => {},
-            .def => |d| try checkDefTypeRefsNamed(info, info.deftypes.items[d]),
+            .def => |d| {
+                try checkDefTypeRefsNamed(info, info.deftypes.items[d]);
+                // Exporting an instance TYPE applies the named-types
+                // restriction to its decl scope (definition time skipped
+                // it — wasm-tools recurses at the export instead).
+                switch (info.deftypes.items[d]) {
+                    .instance_type => |it| try checkInstanceDeclScope(it.decls, .{}, true),
+                    else => {},
+                }
+            },
         }
     }
 }

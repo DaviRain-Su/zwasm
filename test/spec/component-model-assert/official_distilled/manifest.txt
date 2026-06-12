@@ -205,11 +205,9 @@ assert_invalid test/spec/component-model-assert/official_distilled/type-export-r
 # type-export-restrictions.wast: "type not valid to be used as export"
 assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_12.wasm
 # type-export-restrictions.wast: "type not valid to be used as export"
-# (fixture type-export-restrictions_13.wasm kept for when the gap closes)
-skip-impl type-export-restrictions_13: rule-7 export-type-named inside nested type scopes deferred (ADR-0176)
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_13.wasm
 # type-export-restrictions.wast: "type not valid to be used as export"
-# (fixture type-export-restrictions_14.wasm kept for when the gap closes)
-skip-impl type-export-restrictions_14: rule-7 export-type-named inside nested type scopes deferred (ADR-0176)
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_14.wasm
 # type-export-restrictions.wast: "type not valid to be used as export"
 assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_15.wasm
 # types.wast: "module index out of bounds"
@@ -220,8 +218,7 @@ assert_invalid test/spec/component-model-assert/official_distilled/types_02.wasm
 # (fixture types_03.wasm kept for when the gap closes)
 skip-impl types_03: nested type-scope deep validation deferred (decl-internal refs; ADR-0176)
 # types.wast: "type index out of bounds"
-# (fixture types_04.wasm kept for when the gap closes)
-skip-impl types_04: nested type-scope deep validation deferred (decl-internal refs; ADR-0176)
+assert_invalid test/spec/component-model-assert/official_distilled/types_04.wasm
 # types.wast: "export name `A` conflicts with previous name `a`"
 assert_invalid test/spec/component-model-assert/official_distilled/types_05.wasm
 # types.wast: "import name `a` conflicts with previous name `A`"
@@ -230,8 +227,7 @@ assert_invalid test/spec/component-model-assert/official_distilled/types_06.wasm
 # (fixture types_07.wasm kept for when the gap closes)
 skip-impl types_07: nested type-scope deep validation deferred (decl-internal refs; ADR-0176)
 # types.wast: "type index out of bounds"
-# (fixture types_08.wasm kept for when the gap closes)
-skip-impl types_08: nested type-scope deep validation deferred (decl-internal refs; ADR-0176)
+assert_invalid test/spec/component-model-assert/official_distilled/types_08.wasm
 # types.wast: "invalid outer alias count of 100"
 assert_invalid test/spec/component-model-assert/official_distilled/types_09.wasm
 # types.wast: "type index out of bounds"
@@ -239,8 +235,7 @@ assert_invalid test/spec/component-model-assert/official_distilled/types_10.wasm
 # types.wast: "export name `FOO-bar-BAZ` conflicts with previous name `foo-BAR-baz`"
 assert_invalid test/spec/component-model-assert/official_distilled/types_11.wasm
 # types.wast: "type index out of bounds"
-# (fixture types_12.wasm kept for when the gap closes)
-skip-impl types_12: nested type-scope deep validation deferred (decl-internal refs; ADR-0176)
+assert_invalid test/spec/component-model-assert/official_distilled/types_12.wasm
 # types.wast: "invalid outer alias count of 100"
 assert_invalid test/spec/component-model-assert/official_distilled/types_13.wasm
 # types.wast: "type index out of bounds"
