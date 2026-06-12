@@ -559,7 +559,7 @@ entries:
     description: |-
       blocked-by: `private/dbg/<task>` reaches 5 entries | `zig build run-repro -Dtask=<name>` step has no listing (`--help` shows no enumerated tasks). Add `scripts/list_repros.sh` when the corpus grows.
     first_raised: "2026-05-04"
-    last_reviewed: "2026-05-28"
+    last_reviewed: "2026-06-13"
     refs: |-
       `build.zig` run-repro step, ADR-0015
   - id: "D-021"
@@ -577,7 +577,7 @@ entries:
     description: |-
       blocked-by: ADR-0028 M3-a-2 (trap event runtime write) + interp trap-location wiring | `wast_runtime_runner` cannot localise `result[0] mismatch` — needs M3 (interp trap location + trace ringbuffer). 5 deferred misc-runtime fixtures' silent-failure path is gated on this. **2026-05-05 follow-up**: ADR-0028 superseded ADR-0016's M3 deferral; M3-a-1 (ringbuffer infra + compile-time bounds writes) landed. The remaining barrier is M3-a-2 (trap stub → ring buffer write at runtime; needs trap-stub helper-call calling-convention coordination per ADR-0028 §"Trap-time JIT register state") + interp trap-location capture. Once those land, the runner can correlate result mismatches with the actual trap site.
     first_raised: "2026-05-04"
-    last_reviewed: "2026-05-28"
+    last_reviewed: "2026-06-13"
     refs: |-
       `test/runners/wast_runtime_runner.zig`, `src/diagnostic/trace.zig`, ADR-0028
   - id: "D-028"
@@ -586,7 +586,7 @@ entries:
     description: |-
       blocked-by: Windows resource exhaustion / SSH stall at test-all runner-transition (leading hypothesis per 2026-05-22 W1 measure); originally framed as zig 0.16 IPC stability — superseded by enumerated hypotheses in body | `bash scripts/run_remote_windows.sh test-all` occasionally aborts with `error: test runner failed to respond for 1m4ms` even though 795/805+ tests passed in the failed run (only `test runner failed to respond` itself is the failure). Observed twice during §9.7 / 7.5d sub-b chunk 9 + §9.7 / 7.7-alu (commit `741a9b4`). Retry succeeds every time. **Trigger condition (named in concrete terms per `extended_challenge.md` Step 1)**: long-running test executable on Windows (zig 0.16's MSVC-spawned test process), exit code 1 with the IPC-timeout message rather than test failures. **Reproduction**: re-run after a successful run; flake rate observed 2/30 commits ≈ 6%. Workaround: retry once. The /continue loop's "windowsmini transient" treatment lets it slip past, but root-cause investigation needs upstream zig issue search (extended_challenge.md Step 4 — WebFetch ziglang/zig issues for "test runner failed to respond" + "Windows IPC"). **2026-05-05 follow-up**: 10 連続 (private/d028-logs/run-1..10.log @ commit eea7e75) で 0 fail。WebSearch も upstream 報告ゼロ → 汎用 zig 0.16 + Windows 問題ではない。再現条件は (a) 特定の commit 内容、(b) windowsmini ホスト側の I/O 状況、(c) test count 増加に伴う confluence の何れか。**2026-05-22 W1 partial-measure follow-up** (private/notes/p9-d028-flake-rate.md @ HEAD `1b4a5b5a`): 2/2 failures collected before subagent loop terminated. Run 1 = exit 3 (binary failure) after 1692/1721 tests, NOT IPC-timeout signature. Run 2 = WEDGED > 120 min mid-corpus (wast_runner completed 1158/1158, never reached spec_assert_runner). Both failures occur LATE in corpus (post-1600 tests). **Hypotheses** (numbered; predicted signatures + probes per hypothesis_enumeration.md): 1. ~~IPC-timeout (original D-028 framing)~~ — not refuted but signature does not match 2026-05-22 evidence; no `test runner failed to respond` line observed; downgraded from leading. 2. Specific-commit dependency (`1b4a5b5a` vs `eea7e75`) — partially supported (signatures differ across commits); distinguishing probe: re-run 5× at HEAD `eea7e75` to compare. 3. **Windows resource exhaustion / SSH buffering stall at runner transition** (active, leading from W1) — predicted signature: hang occurs at spec_assert_runner spawn (large child-process creation); fd-table or SSH buffer fullness during test-all orchestration; probe: add per-runner timestamp + peak fd/memory logging in test-all, run 5× and inspect logs. 4. Test-count confluence / cumulative resource drift (active, weakly supported) — predicted signature: failures cluster after N=1600+ tests regardless of which runner is active; probe: bisect by running `test-spec` vs `test-realworld` standalone. 5. **Windows Defender real-time scan interference at process spawn / JIT page** — **CONFIRMED** (refinement of #3 at the mechanism level). Distinguishing probe: clean up the Defender exclusion list (4 stale `*_runner_non_simd.exe`-style basenames that didn't match real `zwasm-*-runner.exe` PE/COFF names were ineffective no-ops) → register correct exclusion process names + add `C:\Program Files\LLVM` / `%LOCALAPPDATA%\zwasm-tools\sysinternals-*` / `%LOCALAPPDATA%\CrashDumps` to ExclusionPath → reboot → re-run test-all. Result @ `ba68a896` post-Defender-fix run: completed without wedge (1692/1721 tests, 37/39 build steps; only D-161 Win64 entry helper @panic failed — separate bug class). **Discharge plan**: N=5 consecutive `bash scripts/run_remote_windows.sh test-all` runs without wedge (per `.claude/rules/heisenbug_discharge.md` empirical-streak rule). Currently N=1; needs 4 more confirming runs (after D-161 lands so test-all can complete green, OR with D-161-tolerant counting that distinguishes wedge-class from runtime-panic-class failures). **Leading hypothesis**: #5 (CONFIRMED by post-fix run). **Next probe**: track 4 more consecutive runs once D-161 land or via filter-out-D-161 measurement.
     first_raised: "2026-05-05"
-    last_reviewed: "2026-05-28"
+    last_reviewed: "2026-06-13"
     refs: |-
       `scripts/run_remote_windows.sh`, observed in commits `741a9b4` (chunk 9) + likely earlier 7.5d-era runs, `private/notes/p9-d028-flake-rate.md` (2026-05-22 W1 partial)
   - id: "D-074"
@@ -595,7 +595,7 @@ entries:
     description: |-
       blocked-by: no Phase row currently scheduled for the tier-provisioning machinery; Phase 11 (WASI 0.1 full + bench infra) is the natural carrier (per Track A Option (3) decision 2026-05-12, Phase 11 row prose now also enumerates SIMD per-op gap analysis as exit criterion — folded with this cohort). 2026-05-17 re-eval per ADR-0065: tier-provisioning infra is orthogonal to Wasm 1.0 instance / Cat III work; barrier holds. | **ADR-0012 §1–§3 infrastructure remainder unimplemented** (per 2026-05-11 audit, SUMMARY §2.3 / batch_A `## ADR-0012_first_principles_test_bench_redesign`). The §6 work items strict-closed at Phase 6 boundary; the §1–§3 tier-provisioning promises did not. Concretely missing: `test/spec/testsuite/` git submodule + `test/spec/legacy/` directory (§1 / §3); `versions.lock` + `setup_corpora.sh` + `install_tools.ps1` (§2); `bench/{wat, custom, embenchen}/` directories (§3); `-Dwith-realworld-rebuild` / `-Dwith-realworld-diff` / `-Dwith-bench-compare` build flags (§2); `build_realworld.sh` + `record_phase_bench.sh` (§1 / §7). **2026-05-12 update (Track A Option (3))**: Phase 11 now ALSO carries the SIMD per-op gap analysis (migrated from §9.10 per ADR-0043 Revision history); the `-Dwith-bench-compare` flag + wazero/wasmer flake additions in this row are the direct prerequisites of that gap-analysis run — single design pass at Phase 11 open. Operationally fine (no Phase blocked) but ADR-0012 is honest-recorded as having unfinished §1–§3 surface. Discharge: split into per-piece sub-rows when Phase 11 expansion lands.
     first_raised: "2026-05-11"
-    last_reviewed: "2026-05-28"
+    last_reviewed: "2026-06-13"
     refs: |-
       ADR-0012 §1–§3 + Amendment log, ADR-0043 Revision history 2026-05-12 row, ADR-0065, ROADMAP §9.10 (`[~]` moved row) + Phase 11 row, `.dev/phase10_prep/track_a_9.10_scope.md`, `flake.nix` (the `versions.lock` integration target)
   - id: "D-206"
@@ -676,7 +676,7 @@ entries:
     description: |-
       blocked-by: cw v1 dogfooding feedback over ≥ 1 minor version per ADR-0109 Removal condition. **Implementation tracker duty discharged J.close 2026-05-25** (ROADMAP §10 / 10.J `[x]` 6 cycles J.2..J.7: `017193bc` / `698c23ce` / `995270cf` / `b10922d2` / `97434726` / `05c47829`). Discharge predicate tightened: ADR-0109 Status flips `Accepted → Closed (implemented)` after cw v1 dogfooding survives ≥ 1 minor version cycle without surfacing a fundamental shape problem; this debt row then retires. | **Native Zig API (ADR-0109) — dogfooding gate only**: implementation landed across 6 cycles J.2..J.7 per ROADMAP §10 / 10.J `[x]`. Engine + Linker + TypedFunc(comptime Sig) + Memory + Caller + full 12-variant Trap set + allocator strict-pass + defineWasi skeleton all shipped + tested (T1.1..T1.13). Coverage matrix audit at J.close: every shipped public symbol carries ≥ 1 Tier-1 test; `defineGlobal` / `defineTable` / `Instance.global` / `.table` / `Instance.call` sugar / `engine.linker()` factory / `Module.exports().imports()` iterators carved out as Phase 11 D6 follow-up (plan §4.2 "deferred" + S-4 reframe). Remaining barrier is the dogfooding wait per ADR-0109 Removal condition; D-075 retires when ADR-0109 flips Closed.
     first_raised: "2026-05-11"
-    last_reviewed: "2026-05-28"
+    last_reviewed: "2026-06-13"
     refs: |-
       ADR-0109 (Accepted 2026-05-25; impl-complete Revision row 2026-05-25), `docs/zig_api_design.md`, ROADMAP §10 / 10.J `[x]`, `src/zwasm/{engine,module,instance,typed_func,memory,linker,caller,host_func_marshal}.zig`, `test/api/zig_facade_runner.zig`, plan §4.2 audit
   - id: "D-082"
@@ -685,7 +685,7 @@ entries:
     description: |-
       blocked-by: Phase 11 embenchen full-perf-suite scope (sub-row a; 4 fixtures; emcc env-shim runtime distinct from ADR-0065 Cat III spectest host imports); externref segment bug root-cause investigation (sub-row b; 1 fixture; Phase 10 GC-touch or Phase 11 alongside (a)). 2026-05-17 re-eval per ADR-0065: barriers hold; emcc-env-shim and externref segment are NOT in Phase 9 Cat III scope. | **D-072 (c)-path: actual root-cause fixes for 5 `wasmtime_misc` realruntime fixtures**. Path B's vocab migration in chunk 9.9-h-23 discharged the runner-side enforcement gap (the 5 fixtures now correctly skip via prefix vocab → `0 skip-impl + 5 skip-adr` on `test-wasmtime-misc-runtime`). This row tracks the downstream task: **actually fix the fixtures** so the skip-ADRs can retire. **Sub-row (a) — 4 embenchen fixtures** (`skip_embenchen_emcc_env_imports.md` scope; fannkuch / fasta / ifs / primes). Discharge trigger: Phase 11 embenchen full-perf-suite work item (per ADR-0012 §6 "Out of Phase-6 scope" table) lands the `emcc env imports` shim; retire `skip_embenchen_emcc_env_imports.md` in same chunk (delete the ADR file + delete the prefix lines from the 4 manifests). **Sub-row (b) — 1 externref segment fixture** (`skip_externref_segment.md` scope). Discharge trigger: case-by-case — if Phase 10 GC work touches externref segment handling, fix in same chunk and retire the ADR. Otherwise defer to Phase 11 alongside (a). Barrier re-walked each resume per `/continue` Step 0.5 (no vague phrasing).
     first_raised: "2026-05-12"
-    last_reviewed: "2026-05-28"
+    last_reviewed: "2026-06-13"
     refs: |-
       D-072 (closes (a/b)-path runner enforcement at chunk 9.9-h-23; this row inherits (c)-path), ADR-0029, ADR-0050 D-2, ADR-0012 §6, ADR-0065, `skip_embenchen_emcc_env_imports.md`, `skip_externref_segment.md`, ROADMAP Phase 10 + Phase 11 rows
   - id: "D-177"
@@ -694,7 +694,7 @@ entries:
     description: |-
       blocked-by: Phase 11 WASI full coverage — `lookupWasiThunk` only registers 16 of WASI 0.1's ~50 syscalls (fd_filestat_get / path_filestat_get / fd_prestat_get / etc. missing). Discharge: Phase 11 adds the remaining thunks + Host fields per WASI 0.1 spec; current 10 SKIP-WASI fixtures in zig_facade_runner (all Go-toolchain emcc-style WASI consumers) flip to PASS or proper-FAIL. Barrier holds until Phase 11 opens. | **Phase 11 WASI 0.1 full coverage**: native facade's `Linker.defineWasi` (J.7 skeleton) routes through `api/wasi.zig::lookupWasiThunk` which covers 16 names; the 10 Go-toolchain realworld fixtures import additional WASI names (fd_filestat_get etc.) that surface as `UnsupportedWasiImport` and SKIP-WASI in the runner. Phase 11 closes the gap.
     first_raised: "2026-05-25"
-    last_reviewed: "2026-05-25"
+    last_reviewed: "2026-06-13"
     refs: |-
       ADR-0109 §3.8, `src/api/wasi.zig::lookupWasiThunk`, `src/wasi/host.zig`, `test/api/zig_facade_runner.zig`, plan §3 J.7
   - id: "D-148"
@@ -703,7 +703,7 @@ entries:
     description: |-
       blocked-by: upstream Zig fix for self-hosted x86_64 backend miscompile (Codeberg ziglang/zig#35343) | **`func/large-sig` 16-result `callconv(.c)` miscompile on self-hosted x86_64 Debug backend** (Mac aarch64 PASSES; ubuntunote x86_64 PASSES via LLVM workaround). Investigation 2026-05-18 (cycles 1-3, commits `99703992` / `e8439935` / `68fdf388`) ruled out spill-slot collision / regalloc bug / JIT emit bug / Apple-arm64-style ABI mismatch via sentinel probes + raw `alloc.slots[]` dump + direct local-read bypass + XMM5/6/7 inspection. Minimal Zig-only repro at `private/spikes/d148-zig-sysv-fp-args/main.zig` reproduces the bug without any JIT involvement: `callconv(.c) fn(*T, ...17 args incl 9 FP scalars, MEMORY-class struct return)` on `x86_64-linux` Debug routes the 8th FP scalar arg (XMM7 slot) to receive the 9th's f32 bits, losing the original. `-fllvm` / `-O ReleaseSafe` / `-O ReleaseFast` all PASS. **Workaround landed (commit `a8474d1a`)**: `build.zig` forces `.use_llvm = true` on the non-simd spec_assert runner exe so the buggy backend is bypassed for the only signature that triggers it (`callLargesig`). Scope is exactly one test binary; JIT codegen + zwasm lib for other runners stay self-hosted Debug. Upstream filed at [Codeberg ziglang/zig#35343](https://codeberg.org/ziglang/zig/issues/35343) with the minimal Zig-only repro. **Removal condition**: upstream fix lands → drop `.use_llvm = true` from `build.zig` non-simd runner section. Related upstream: [#35329](https://codeberg.org/ziglang/zig/issues/35329) (aggregate-arg form on same backend); [ziglang/zig#22515](https://github.com/ziglang/zig/issues/22515) (legacy MEMORY/INTEGER aggregate split).
     first_raised: "2026-05-18"
-    last_reviewed: "2026-05-28"
+    last_reviewed: "2026-06-13"
     refs: |-
       Codeberg ziglang/zig#35343 (upstream report), `build.zig::test-spec-wasm-2.0-assert` (workaround site), `src/engine/codegen/shared/entry.zig::callLargesig`, `private/spikes/d148-zig-sysv-fp-args/` (minimal repro + CODEBERG-ISSUE-DRAFT.md), commits `0cba220b` / `15f55120` / `a8474d1a`
   - id: "D-179"
@@ -712,7 +712,7 @@ entries:
     description: |-
       blocked-by: wabt version in flake.nix (current 1.0.40 / `wast2json --version` 1.0.39 lacks newer GC type syntax — i8 / i16 packed fields / anyref / `(ref 0)`). Discharge: bump `wabt` derivation in flake.nix to a version that supports the spec-current GC type syntax (HEAD has it; check wabt 1.0.41+ when released) OR pre-bake offline from a wabt build. Trigger: 10.G impl row activation (needs full GC corpus bake). | **wabt 1.0.39 cannot bake `gc/struct.wast`** — flake-pinned wabt rejects newer GC type syntax (i8 / i16 packed fields / anyref / typed refs). The other 4 proposals (memory64 / tail-call / EH / function-references) bake green at 10.T-2a smoke (commit `433967fb`). The GC corpus is autonomous-discoverable; impact is bounded to the GC bake step.
     first_raised: "2026-05-25"
-    last_reviewed: "2026-05-25"
+    last_reviewed: "2026-06-13"
     refs: |-
       `scripts/regen_spec_3_0_assert.sh` (smoke skipped gc/struct), 10.T-2a commit, `flake.nix` wabt pin
   - id: "D-178"
@@ -721,7 +721,7 @@ entries:
     description: |-
       blocked-by: v0.2 host-side construction surface (NOT v0.1.0 RC scope; the audit's A1 / A2 / B1 / B2 / B3 cross-module tests all use Instance-derived Globals / Tables / Memories via `wasm_extern_as_*`, which already work). | **wasm_global_new host-side standalone construction** — `wasm_globaltype_new(*wasm_valtype_t, wasm_mutability_t)` + `wasm_valtype_new` + `wasm_global_new(*Store, *GlobalType, *Val)` per include/wasm.h:453-456 + 223-227 + 200-205. Requires Store-anchored Global storage (new lifetime model — Global with `instance = null` + `owned_value: *Value` field) and a follow-on `wasm_globaltype_*` / `wasm_valtype_*` minimal surface. Industry: wasmtime / wasmer expose these for host-defined globals in imports[]. v2 use case: Zig native facade already covers host fns via `Linker.defineFunc` (J.5); host-defined Globals analogous via a future `Linker.defineGlobal`.
     first_raised: "2026-05-25"
-    last_reviewed: "2026-05-25"
+    last_reviewed: "2026-06-13"
     refs: |-
       include/wasm.h:453-456 + 223-227 + 200-205, `src/api/instance.zig::Global` (current shape), 10.F-c commit `3889661b` (D-171 close note), v0.2 c_api completion
   - id: "D-195"
@@ -730,7 +730,7 @@ entries:
     description: |-
       blocked-by: (a) ADR-0123 Accept flip — typed-function-reference ValType bytes `0x64` (ref ht) / `0x63` (ref null ht) in the type section. 12 of the 14 newly-baked function-references modules fail with `ParseFailed` because their type sections declare `(ref null 0)` style indexed-function refs (e.g. `ref_null.0.wasm`'s type `(func (result (ref null 0)))`). Touches Zone-1 ValType enum + parser; ADR-grade deviation. (b) Cross-module `(register …)` — sibling to D-192's runner gap; ref_func.1.wasm imports a func from ref_func.0.wasm via `register`. Sub-gap (c) (`ref.func N` declared-funcrefs gate) DISCHARGED cycle 60 (`e7666598`). | **DISCHARGED cyc235** — ADR-0123 ACCEPTED 2026-05-28 ("user-delegated autonomous flip"); typed-funcref ValType `0x63/0x64` parser landed (`zir.zig:191`); the function-references corpus is GREEN (ubuntu `return 39/0, trap 4/0, invalid 18/0, skip 1`). This row's "gated on ADR-0123 Accept" framing was STALE — see lesson `2026-05-30-stale-debt-rows-misroute-the-loop`. (Original: ) **Function-references spec return/trap fixtures gated on ADR-0123 typed-ref parser + cross-module register** — 36/39 assert_return fails + 4/4 assert_trap fails in `function-references/{br_on_null, br_on_non_null, ref_as_non_null, ref_null, ref_is_null, ref_func}/*` (cycle 59 corpus expansion). Per-module breakdown via spec runner's per-module stderr emit. The 3 ADR-independent null-ops are JIT-green on both arches as of cycle 58 (`9a134d78`); pass-rate of the corpus remains gated on ADR-0123 Accept (12 modules) + runner registry (2 modules). Sub-gap (c) closed cycle 60: `frontendValidate` now builds declared-funcrefs bitset (globals init / elements / func-kind exports) and threads it into `validateFunctionWithMemIdxAndTags`; opRefFunc rejects undeclared `ref.func N` → ref_func.4 + ref_func.5 now properly invalid.
     first_raised: "2026-05-28"
-    last_reviewed: "2026-05-28"
+    last_reviewed: "2026-06-13"
     refs: |-
       `test/spec/wasm-3.0-assert/function-references/{br_on_null,br_on_non_null,ref_as_non_null,ref_null,ref_is_null,ref_func}/manifest.txt` + .wasm fixtures (cycle-59 bake), `test/spec/spec_assert_runner_wasm_3_0.zig` (per-module FAIL stderr emit added cycle 59), `src/parse/sections.zig::readValType` (typed-ref bytes 0x63/0x64 reject), `src/runtime/instance/instantiate.zig::frontendValidate` (sub-gap c discharge `e7666598`), ADR-0123 (Proposed), D-188 (sibling — EH invalid-accepted gap), D-192 (sibling — cross-module register), ROADMAP §10 row 10.R
   - id: "D-196"
@@ -739,7 +739,7 @@ entries:
     description: |-
       blocked-by: (a) `Linker.defineGlobal` API absent (D-178 partial). Spec testsuite's `spectest.global_i32` / `global_i64` / `global_f32` / `global_f64` conventional exports needed for 2+ multi-memory fixtures (`data0.3`, `data0.5`) + several function-references fixtures. Substrate (`runtime.GlobalImport`) exists per ADR-0014 §6.K.3; the Linker.Payload + defineGlobal method are the missing pieces. (b) Upstream-baked corrupted fixtures — `multi-memory/{data0.2, data0.4, data0.6, imports1.0, imports2.3, imports2.4, linking1.1}` all `compile FAIL: ParseFailed`; wasm-tools itself rejects them with "unexpected end-of-file". Suggests wast2json output quirk with the v1.0.40 wabt for these specific .wast files. (c) Cross-module `(register "name" $module_id?)` form where `$module_id` names a non-most-recent module — sibling to D-192/D-195(b); a few imports2/imports4 sub-modules use this. | **10.M-D195b post-bundle tail — remaining ~25 multi-memory return fails** (post cycle 75 closure). Spec runner observable: `[multi-memory] return=407 (pass=382 fail=25) trap=238 (pass=237 fail=1)`. The bundle's autonomous portion closed cycles 71-75 (wired cross-instance memory + func + spectest stubs); the tail comprises (a) Linker.defineGlobal + spectest globals, (b) 7 upstream-corrupted fixtures (out-of-band fix; either re-bake offline or skip via manifest editing), (c) named-module register-as form. Discharge path A: file ADR for Linker.defineGlobal API extension (D-178 partial). Path B: skip corrupted fixtures via runner-side allowlist.
     first_raised: "2026-05-28"
-    last_reviewed: "2026-05-28"
+    last_reviewed: "2026-06-13"
     refs: |-
       `test/spec/wasm-3.0-assert/multi-memory/{data0,imports1,imports2,linking1}/*.wasm` (cycle-69/73 baked), `test/spec/spec_assert_runner_wasm_3_0.zig::register-arm` (cycle 71-75 substrate), `src/zwasm/linker.zig::defineMemory/defineMemoryBytes/defineCrossModuleFunc` (cycle 71-75 substrate), D-178 (Linker.defineGlobal absent), D-192 / D-195 (sibling cross-module register variants)
   - id: "D-186"
@@ -748,7 +748,7 @@ entries:
     description: |-
       blocked-by: ROADMAP §10 row 10.R (`call_ref` codegen + `(ref $sig)` typed-funcref Value shape) | `return_call_ref` (Wasm 3.0 §3.3.8.20) emit body deferred. The op pops a typed funcref `(ref $sig)` from the operand stack and tail-calls it; null-trap on null funcref. Same-module funcref tail-call could reuse the BR X16 / JMP R11 path with `MOV X0,X19` / `MOV RDI,R15`; cross-module funcref needs the bridge thunk shape (ADR-0066) with literal-pool callee_rt load. Pre-req: row 10.R sub-chunks 10.R-3 (br_on_non_null) + 10.R-4 (call_ref) + 10.R-5 (return_call_ref) land. call_ref codegen establishes the funcref-as-X16/R11 dispatch shape; return_call_ref reuses it minus capture + plus frame_teardown. arm64/x86_64 `ops/wasm_3_0/return_call_ref.zig` stubs stay `UnsupportedOp` until 10.R-5. Bundle 10.TC-emit-body closes at HEAD `ae2abab7` with return_call + return_call_indirect on both arches; return_call_ref carved out to its own future bundle once 10.R-3/4 unblock it.
     first_raised: "2026-05-26"
-    last_reviewed: "2026-05-26"
+    last_reviewed: "2026-06-13"
     refs: |-
       `src/engine/codegen/arm64/ops/wasm_3_0/return_call_ref.zig` (stub); `src/engine/codegen/x86_64/ops/wasm_3_0/return_call_ref.zig` (stub); ROADMAP §10 row 10.R; ADR-0112 D5 / ADR-0066 (cross-module bridge thunk)
   - id: "D-197"
@@ -757,7 +757,7 @@ entries:
     description: |-
       blocked-by: specific-validator-error surfacing. **PARSE-VS-VALIDATE AXIS DISCHARGED cyc127 (`e14380ec`)**: `Engine.CompileError` now splits `ParseFailed` vs `ValidateFailed` (runner shows which axis; revealed gc ParseFailed=0/ValidateFailed=51). REMAINING: surface the SPECIFIC validator error (opcode+cause) — plumb only if attribution churn recurs | The split resolved the costliest axis (parse-vs-validate misdiagnosis, ~3 cycles cyc110-113). Still discarded: the specific cause within validate (a throwaway cyc127 probe showed the histogram — StackTypeMismatch×51/InvalidAlignment×37/… — see lesson). The `Diagnostic` threadlocal (`setDiag`/`lastDiagnostic`, ADR-0016) exists but `frontendValidate` never populates it. Full discharge: validator `setDiag(pos+opcode+error)` at its error returns + `frontendValidate` clearDiag/propagate + the wasm-3.0 runner prints `lastDiagnostic()` on compile FAIL.
     first_raised: "2026-05-29"
-    last_reviewed: "2026-05-29"
+    last_reviewed: "2026-06-13"
     refs: |-
       `src/runtime/instance/instantiate.zig` frontendValidate; `src/zwasm/engine.zig` compile; `src/diagnostic/diagnostic.zig` setDiag/lastDiagnostic; `.dev/lessons/2026-05-29-gc-corpus-block-is-validate-not-parse.md`
   - id: "D-320"

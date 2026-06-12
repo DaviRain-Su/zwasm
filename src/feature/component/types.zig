@@ -12,14 +12,13 @@
 //! `valtype` is decoded by reading one SLEB128: negative → a primitive opcode
 //! (`v & 0x7f`), non-negative → a `typeidx` into the type index space.
 //!
-//! SCOPE (A2): primitive value types + `functype` (0x40 / async 0x43) + the
-//! type index space + top-level imports/exports referencing func/core-module/
-//! component/instance type indices. The compound `defvaltype` forms (record /
-//! variant / list / tuple / flags / enum / option / result / own / borrow) are
-//! decoded alongside their canonical-ABI lift/lower in the B-chunks; the
-//! recursive `componenttype` / `instancetype` / `resourcetype` forms land in
-//! the C-chunks (linking / resources). Until then the decoder returns a typed
-//! `UnsupportedTypeForm` (a spec-faithful deferral, never a silent skip).
+//! SCOPE (campaign close 2026-06-13): the full deftype family decodes —
+//! primitives, functype, compound defvaltypes (record/variant/list/tuple/
+//! flags/enum/option/result/own/borrow), componenttype/instancetype decl
+//! scopes, and resourcetype 0x3f (D-322; raw-byte peek — it is
+//! sleb-positive unlike every other deftype op). Still typed
+//! `UnsupportedTypeForm` (spec-faithful deferral, never a silent skip):
+//! 0x3e async-dtor resources and stream/future (async machinery).
 //!
 //! No-copy: v1 `component.zig` uses an OLDER component-model draft (e.g. its
 //! `0x41` is `func`, the current spec's `0x41` is `componenttype`). This is

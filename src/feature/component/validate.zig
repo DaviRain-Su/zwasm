@@ -7,11 +7,13 @@
 //! chunk under the E3-CM-validation bundle, driven by the official
 //! `WebAssembly/component-model/test/wasm-tools` `assert_invalid` corpus.
 //!
-//! Rule 1 (this file's first rule): **type-index bounds** for value types.
-//! Every `ValType.type_index` (recursively inside a top-level deftype) and
-//! every `own`/`borrow` resource-type index must be `<` the type-index-space
-//! length. Catches the most-frequent corpus category ("type index out of
-//! bounds", ~39 cases).
+//! Rules 1–12 (corpus 158/0/0 at campaign close 2026-06-13): 1 type-index
+//! bounds (def-order) · 2/3/6 alias + outer-alias existence · 4 extern
+//! descs · 5 extern-name grammar (kebab/dep/url/integrity/semver) · 7
+//! export named-types restriction · 8 name uniqueness (semantic method/
+//! static keys) · 9 instantiate/sortidx bounds · 10 nested type-scope deep
+//! validation · 11 core-type section (functype refs + module decls) · 12
+//! resource generativity across inline-component boundaries.
 //!
 //! Zone 1 (`feature/component/`): pure logic, no host orchestration (ADR-0172).
 
