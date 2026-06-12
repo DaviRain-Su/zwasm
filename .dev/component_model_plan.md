@@ -240,7 +240,7 @@ design forks. Update this doc's `[x]` + handover NEXT each chunk.
   signatures from the SELF-DESCRIBING binary (no `.wit` sidecar — CWFS
   ADR-0135). **Red**: greet's export introspects as `(param "name" string)
   (result string)`.
-- [ ] **F2 — typed invoke: lower.** `invokeTyped(name, args)` validates
+- [x] **F2 — typed invoke: lower.** `invokeTyped(name, args)` validates
   against the export type and lowers via the canonical ABI (flat when it
   fits; `cabi_realloc` + memory writes for strings/lists/records — reuse
   `canon.zig` size/align/flatten). **Red**: call greet with
