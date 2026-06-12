@@ -77,16 +77,15 @@
   `[export]<iface>` `[resource-new]/[resource-drop]` core imports → wire
   canon resource.new/drop/rep core_funcs to the C1 resource table in the
   graph builder, then ComponentValue own-handle arms for the typed path.
-- **NEXT**: D-322 runtime bundle — wiring plan SURVEYED: in
-  buildWasiP2Component, walk info.core_funcs .resource_new/.resource_drop
-  (CanonDef carries the resource type_index) and defineFuncCtx
-  trampolines under module `[export]<iface>` / names
-  `[resource-new/drop]<type>` (wit-component constants confirmed),
-  backed by a per-instance ResourceTable (C1 API: new(rt,rep)/rep/drop;
-  rt = the DEFTYPE index — the hardcoded WasiP2Ctx RT ids must not
-  collide; instance.zig:419-540 is the UnknownImport loop). Then
-  ComponentValue own-handle arms. After: D-319 probe #4 verdict ·
-  D-318 · D-251.
+- **D-322 RUNTIME LANDED**: guest-defined resource builtins wired
+  (synthDef resource_builtin defs + per-def trampolines over the NEW
+  ctx.guest_resources table + build-time dtor resolution); the
+  resource_counter fixture builds and round-trips through real
+  wit-bindgen code (methods take the REP — canon lift translates
+  handle→rep). D-322 residual: ComponentValue own-handle arms so
+  invokeTyped drives constructor→method BY HANDLE (incl. the lift-side
+  handle→rep translation for exported methods).
+- **NEXT**: D-322 typed own-handle slice · D-318 · D-251.
 
 ## Closed-work pointers (detail in git log / ADRs)
 
