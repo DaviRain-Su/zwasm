@@ -1,6 +1,6 @@
 # Component Model + WASI Preview 2 — campaign plan
 
-> **Doc-state**: ACTIVE
+> **Doc-state**: ARCHIVED-IN-PLACE (campaign closed 2026-06-13; Tier 2 exceeded)
 > Authoritative driver for the CM campaign (ADR-0170). The **§Work sequence**
 > below supersedes ROADMAP §17 row ordering for this campaign (close-plan
 > override): the loop follows the first unchecked chunk here. Per-chunk recipe
@@ -253,7 +253,25 @@ design forks. Update this doc's `[x]` + handover NEXT each chunk.
   component with rich types committed via gen shell; spec runner gains
   `assert_typed` directives; docs (`docs/` Zig API section) updated.
 
-## Retrospective (fill at campaign close)
+## Retrospective (campaign CLOSED 2026-06-13)
 
-_(Tier reached? new debt? spec-corpus pass rate? sample-projects green on 3
-hosts? Revision note on `component_model_survey.md`.)_
+- **Tier reached: 2 (wasmtime-equivalent), exceeded** — beyond the planned
+  scope, the campaign also shipped: the typed embedder API (ADR-0183:
+  introspection + invokeTyped + rich-type round-trips), wasi:sockets TCP
+  client AND listeners with NT-native readiness on windows (ADR-0180,
+  D-319 discharged via the probe chain), guest-defined RESOURCES end-to-end
+  (D-322: builtins + dtors + typed own/borrow handles + interface-wrapper
+  export resolution), component default-ON (ADR-0182), and validator rules
+  1–12 with core-type/nested-component decode.
+- **Spec corpus: 158 pass / 0 fail / 0 skip-impl** (official distilled +
+  local categories; reject REASONS printed for forensics).
+- **Sample projects**: rustc wasm32-wasip2 (hello / TCP client / TCP
+  listener / typed_payload / resource_counter), tinygo (hello / fs / fs-err)
+  — all green 3-host (windows verified post-D-319).
+- **New debt (open)**: D-323 (pinned-stdlib NTSTATUS connect-refused
+  mapping, blocked-by) · ADR-0184 Proposed (C-API engine-owned io,
+  awaiting user review). Demand-driven residuals named in rows/ADRs:
+  0x3e async resource form, sockets Phase-3 (UDP/name-lookup), own-param
+  transfer semantics, non-import-backed wrapper exports.
+- **Lessons promoted**: winsock-vs-nt-afd-handles ·
+  windows-test-compile-gate · the reject-reason forensics pattern.
