@@ -23,17 +23,29 @@
   POSIX-style dir opens in P1 pathOpen. Earlier this session:
   E3-CM-validation bundle CLOSED (validator rules 1–8; corpus 18/0 + 2
   reasoned skip-impl). Mac test-all+lint+cross-compile green per chunk.
-- Also landed: **E3 error-path boundary fixture** `wasi_p2_fs_err_go`
-  (exist/no-entry/empty-stream arms green, wasmtime-matched) + **D3-8
-  sockets survey** (`private/notes/p17-d3-8-sockets-survey.md`).
-- **NEXT (CM campaign)**: **D3-8 sockets design ADR** (architectural —
-  spike-first honoured; survey done). Fork to decide: (a) TCP-client
-  subset with blocking posix (dishonest at poll edges), (b) subset +
-  REAL socket-readiness pollable (poll(2) at p2Poll; honest, medium), or
-  (c) stay deferred (truthful unknown-import error, demand-driven). Draft
-  the ADR from the survey note, then implement per its decision. After:
-  E3 corpus growth (distil official `.wat` fixtures). Secondary
-  (user-redirect only): D-318, D-314 follow-ons, D-251.
+- Also landed: **E3 error-path fixture** `wasi_p2_fs_err_go` (wasmtime-
+  matched) · sockets survey · **ADR-0180** (sockets: TCP-client subset
+  first, REAL readiness via poll(2); listeners/UDP phased).
+- **NEXT**: bundle `d3-8-sockets-tcp` (see `## Active bundle`). After:
+  E3 corpus growth. Secondary (user-redirect only): D-318, D-314, D-251.
+
+## Active bundle
+
+- **Bundle-ID**: d3-8-sockets-tcp (ADR-0180 Phase 1)
+- **Cycles-remaining**: ~3
+- **Continuity-memo**: impl-1 `src/wasi/p2_sockets.zig` — TcpSocket state
+  machine (unbound→bound→connecting→connected) over `std.posix` O_NONBLOCK
+  + sockets error-code map (D-307 sibling); unit tests run the full client
+  lifecycle against an in-test loopback listener. impl-2: TCP_SOCKET_RT +
+  trampolines (create/start-bind/finish-bind/start-connect/finish-connect
+  → stream pair; instance-network singleton) + socket-aware
+  `pollable.ready`/`p2Poll` (poll(2) branch; non-socket pollables keep
+  always-ready). impl-3: tinygo/rust TCP-client guest fixture + e2e (host-
+  side loopback echo server in the test). Win64: WSAPoll divergence —
+  cross-compile before push.
+- **Exit-condition**: a committed real-toolchain TCP-client component
+  connects to the e2e test's loopback listener and echoes a line through
+  zwasm (matching wasmtime).
 
 ## Sandboxing bundle d314-jit-sandbox — CLOSED 2026-06-12
 
