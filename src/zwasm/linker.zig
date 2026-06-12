@@ -743,3 +743,34 @@ test "Linker.defineInstance: registers every export (func/table/memory/global) u
     try testing.expect(lk.findEntry("a", "g") != null);
     try testing.expect(lk.findEntry("a", "t") != null);
 }
+
+test "start function may be an IMPORTED host func (wit-component start-shim shape)" {
+    // (module (type (func)) (import "env" "tick" (func (type 0))) (start 0))
+    // — the start funcidx names the import itself (Wasm §4.5.4 allows it;
+    // wit-component's start-shim wraps `_initialize` exactly this way).
+    // Before the host_calls dispatch fix the placeholder `unreachable` body
+    // ran instead, failing instantiation.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // magic + version
+        0x01, 0x04, 0x01, 0x60, 0x00, 0x00, // type: ()->()
+        0x02, 0x0c, 0x01, 0x03, 'e', 'n', 'v', 0x04, 't', 'i', 'c', 'k', 0x00, 0x00, // import env.tick (func type 0)
+        0x08, 0x01, 0x00, // start: func 0
+    };
+    var eng = try _zwasm.Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var mod = try eng.compile(&bytes);
+    defer mod.deinit();
+
+    var lk = eng.linker();
+    defer lk.deinit();
+    var ticks: u32 = 0;
+    const H = struct {
+        fn tick(caller: *Caller) anyerror!void {
+            caller.data(u32).* += 1;
+        }
+    };
+    try lk.defineFuncCtx("env", "tick", &ticks, fn (*Caller) anyerror!void, H.tick);
+    var inst = try lk.instantiate(&mod);
+    defer inst.deinit();
+    try testing.expectEqual(@as(u32, 1), ticks);
+}

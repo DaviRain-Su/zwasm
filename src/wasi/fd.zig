@@ -796,6 +796,13 @@ pub fn pathOpen(
     const io = host.io orelse return .nosys;
 
     const dir: std.Io.Dir = .{ .handle = dir_handle };
+
+    // OFLAGS_DIRECTORY — open a sub-DIRECTORY (`fd_readdir` / further
+    // `path_*` calls resolve against it). The new slot mirrors a preopen's
+    // `.dir` shape so the descendant fd composes with every dir-taking op.
+    if ((oflags & p1.OFLAGS_DIRECTORY) != 0)
+        return openDirSlot(host, io, dir, path, fs_rights_base, fs_rights_inheriting, fdflags, mem, opened_fd_ptr);
+
     // WASI `oflags` select create/trunc/excl; `fs_rights_base` selects the
     // access mode. O_CREAT → createFile (a `std::fs::File::create` guest);
     // else openFile read-only / read-write per RIGHTS_FD_WRITE.
@@ -807,7 +814,13 @@ pub fn pathOpen(
             .exclusive = (oflags & p1.OFLAGS_EXCL) != 0,
         }) catch |err| return mapOpenError(err)
     else
-        dir.openFile(io, path, .{ .mode = if (wants_write) .read_write else .read_only }) catch |err| return mapOpenError(err);
+        dir.openFile(io, path, .{ .mode = if (wants_write) .read_write else .read_only }) catch |err| {
+            // POSIX-style guests (Go's os.Open before ReadDir) open a
+            // directory read-only WITHOUT OFLAGS_DIRECTORY; mirror the
+            // kernel by falling back to a directory open.
+            if (err == error.IsDir) return openDirSlot(host, io, dir, path, fs_rights_base, fs_rights_inheriting, fdflags, mem, opened_fd_ptr);
+            return mapOpenError(err);
+        };
 
     // Reserve the new fd_table slot.
     host.fd_table.append(host.alloc, .{
@@ -823,6 +836,35 @@ pub fn pathOpen(
     const new_fd: p1.Fd = @intCast(host.fd_table.items.len - 1);
 
     return writeU32LE(mem, opened_fd_ptr, new_fd);
+}
+
+/// `pathOpen` back-half for a DIRECTORY target: open `path` (relative to
+/// `dir`) iterable and append a `.dir` fd-table slot (the same shape a
+/// preopen root gets, so the descendant fd composes with every dir-taking op).
+fn openDirSlot(
+    host: *Host,
+    io: std.Io,
+    dir: std.Io.Dir,
+    path: []const u8,
+    fs_rights_base: p1.Rights,
+    fs_rights_inheriting: p1.Rights,
+    fdflags: p1.Fdflags,
+    mem: []u8,
+    opened_fd_ptr: u32,
+) p1.Errno {
+    const sub = dir.openDir(io, path, .{ .iterate = true }) catch |err| return mapOpenError(err);
+    host.fd_table.append(host.alloc, .{
+        .kind = .dir,
+        .rights_base = fs_rights_base,
+        .rights_inheriting = fs_rights_inheriting,
+        .fs_flags = fdflags,
+        .host_handle = sub.handle,
+    }) catch {
+        var d = sub;
+        d.close(io);
+        return .nomem;
+    };
+    return writeU32LE(mem, opened_fd_ptr, @intCast(host.fd_table.items.len - 1));
 }
 
 /// Map a host `std.Io.File.Kind` to the WASI preview1 `Filetype` tag.

@@ -764,6 +764,23 @@ pub fn instantiateInternal(store: *Store, module: *const Module, builder_state: 
     // The start funcidx was range/sig-validated at compile time.
     if (findStartFuncIdx(bytes)) |sfx| {
         if (sfx < inst.func_ptrs_storage.len) {
+            // The start function may be an IMPORTED func (wit-component's
+            // start-shim wraps `_initialize` exactly this way); its
+            // func_ptrs_storage slot is the `unreachable` placeholder, so
+            // dispatch through `host_calls` like any other imported call.
+            // Start sig is ()->() (validated), so no operand transfer.
+            if (sfx < inst_rt.host_calls.len) {
+                if (inst_rt.host_calls[sfx]) |hc| {
+                    hc.fn_ptr(inst_rt, hc.ctx) catch |err| {
+                        if (trap_out) |to| {
+                            if (storeAllocator(store)) |sa| to.* = allocTrap(sa, store, mapInterpTrap(err));
+                        }
+                        failBuiltInstance(alloc, store, inst, inst_rt);
+                        return null;
+                    };
+                    return inst;
+                }
+            }
             const zfunc = inst.func_ptrs_storage[sfx];
             const num_locals = zfunc.sig.params.len + zfunc.locals.len;
             const locals = alloc.alloc(runtime.Value, num_locals) catch {

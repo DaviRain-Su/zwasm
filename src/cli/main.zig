@@ -288,7 +288,7 @@ pub fn main(init: std.process.Init) !void {
                     try printlnErr(io, "zwasm run: --fuel/--timeout/--max-memory are not wired for components yet (core modules only)");
                     std.process.exit(2);
                 }
-                const code = cli_run.runComponentWasi(gpa, io, bytes, argv_list.items) catch |err| {
+                const code = cli_run.runComponentWasi(gpa, io, bytes, argv_list.items, preopen_list.items) catch |err| {
                     var buf: [256]u8 = undefined;
                     const msg = std.fmt.bufPrint(&buf, "zwasm run: cannot run component '{s}': {s}", .{ path, @errorName(err) }) catch "zwasm run: component run failed";
                     try printlnErr(io, msg);

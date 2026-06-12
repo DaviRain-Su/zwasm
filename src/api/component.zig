@@ -1362,3 +1362,56 @@ test "IT-1: a core module (not a component) is rejected as NotAComponent" {
     defer eng.deinit();
     try testing.expectError(decode.Error.NotAComponent, instantiate(&eng, testing.allocator, &core_run42));
 }
+
+test "E2: a real tinygo wasm32-wasip2 component runs end-to-end (Go cross-toolchain proof)" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/wasi_p2_hello_go.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+    host.io = io;
+    var capture: std.ArrayList(u8) = .empty;
+    defer capture.deinit(testing.allocator);
+    host.stdout_buffer = &capture;
+
+    // A real `tinygo build -target=wasip2` component (full wasi:cli world +
+    // filesystem/random interfaces, wit-component start-shim calling
+    // `_initialize` as an IMPORTED start function) runs end-to-end — the
+    // SECOND Phase E2 cross-toolchain existence proof beside Rust.
+    try runWasiP2Main(&eng, testing.allocator, bytes, &host);
+    try testing.expectEqualStrings("hello\n", capture.items);
+}
+
+test "E2: the tinygo fs component round-trips mkdir/write/stat/rename/readdir/remove" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/wasi_p2_fs_go.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+    host.io = io;
+    _ = try host.addPreopen(tmp.dir.handle, "/work");
+    var capture: std.ArrayList(u8) = .empty;
+    defer capture.deinit(testing.allocator);
+    host.stdout_buffer = &capture;
+
+    // Exercises the path-addressed descriptor trampolines end-to-end through
+    // Go's os package: create-directory-at, open-at (create + POSIX-style
+    // directory open without OFLAGS_DIRECTORY), descriptor.write, stat-at,
+    // rename-at, read-directory + directory-entry-stream, unlink-file-at,
+    // remove-directory-at. The guest asserts each step and prints the
+    // renamed entry it saw in the directory stream.
+    try runWasiP2Main(&eng, testing.allocator, bytes, &host);
+    try testing.expectEqualStrings("FS-OK b.txt\n", capture.items);
+}

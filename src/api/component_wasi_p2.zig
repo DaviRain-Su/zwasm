@@ -17,6 +17,7 @@ const ctypes = @import("../feature/component/types.zig");
 const cvalidate = @import("../feature/component/validate.zig");
 const wasi_host = @import("../wasi/host.zig");
 const wasi_fd = @import("../wasi/fd.zig");
+const wasi_path = @import("../wasi/path.zig");
 const wasi_proc = @import("../wasi/proc.zig");
 const wasi_clocks = @import("../wasi/clocks.zig");
 const wasi_p1 = @import("../wasi/preview1.zig");
@@ -64,6 +65,11 @@ pub const WasiP2Ctx = struct {
     /// lower reached via wit-bindgen's shim `call_indirect` has the memory-less
     /// shim as caller, so trampolines must source memory from here (D-310).
     mem_instance: ?*Instance = null,
+    /// Allocator backing `dir_streams` (the per-run cursor state below).
+    alloc: Allocator,
+    /// Live directory-entry-stream cursors; a DIR_STREAM_RT handle's rep
+    /// indexes this list.
+    dir_streams: std.ArrayList(DirStream) = .empty,
 
     /// Resource-type ids for the P2 resources the host models (`pub` for the
     /// in-tree tests that mint handles directly).
@@ -74,12 +80,22 @@ pub const WasiP2Ctx = struct {
     /// resource for a synchronous always-ready host), so the generic drop must
     /// NOT `fd_close` it — see `p2ResourceDrop`.
     pub const POLLABLE_RT: u32 = 4;
+    /// A `wasi:filesystem/types` directory-entry-stream. Its rep is an index
+    /// into `dir_streams` (NOT a P1 fd — the stream shares the minting
+    /// descriptor's fd, which the descriptor handle owns), so the generic drop
+    /// must NOT `fd_close` it either.
+    pub const DIR_STREAM_RT: u32 = 5;
+
+    /// Iteration state of one live directory-entry-stream: the directory's
+    /// P1 fd + the P1 readdir cookie to resume after.
+    pub const DirStream = struct { fd: wasi_p1.Fd, cookie: u64 };
 
     pub fn init(alloc: Allocator, host: *wasi_host.Host) !WasiP2Ctx {
-        return .{ .host = host, .resources = try resource_table.ResourceTable.init(alloc) };
+        return .{ .alloc = alloc, .host = host, .resources = try resource_table.ResourceTable.init(alloc) };
     }
 
     pub fn deinit(self: *WasiP2Ctx) void {
+        self.dir_streams.deinit(self.alloc);
         self.resources.deinit();
     }
 
@@ -115,7 +131,7 @@ fn ctxMemory(caller: *Caller) WasiP2Error!Memory {
     return caller.memory() orelse return WasiP2Error.NoMemory;
 }
 
-pub const WasiP2Error = error{ NoMemory, OutOfBounds, WriteFailed, NoRealloc, ReallocFailed, ProcExit } ||
+pub const WasiP2Error = error{ NoMemory, OutOfBounds, WriteFailed, NoRealloc, ReallocFailed, ProcExit, OutOfMemory } ||
     resource_table.Error || Memory.Error;
 
 const Memory = @import("../zwasm/memory.zig").Memory;
@@ -269,9 +285,11 @@ pub fn p2DescriptorDrop(caller: *Caller, self_handle: u32) WasiP2Error!void {
 fn p2ResourceDrop(caller: *Caller, self_handle: u32) WasiP2Error!void {
     const ctx = caller.data(WasiP2Ctx);
     // fd-backed resources (stdio/descriptor streams) close their fd; a pollable
-    // carries no host fd, so only its handle slot is released.
+    // carries no host fd and a directory-entry-stream borrows its descriptor's
+    // fd (rep = `dir_streams` index), so those only release the handle slot.
     if (try ctx.resources.dropAny(self_handle)) |h| {
-        if (h.rt != WasiP2Ctx.POLLABLE_RT) _ = wasi_fd.fdClose(ctx.host, @intCast(h.rep));
+        if (h.rt != WasiP2Ctx.POLLABLE_RT and h.rt != WasiP2Ctx.DIR_STREAM_RT)
+            _ = wasi_fd.fdClose(ctx.host, @intCast(h.rep));
     }
 }
 
@@ -398,11 +416,23 @@ fn filetypeToDescriptorType(ft: wasi_p1.Filetype) u8 {
     };
 }
 
+const FilestatResult = union(enum) { ok: wasi_p1.Filestat, err: wasi_p1.Errno };
+
 /// Stat the fd bound to `self` via P1 `fd_filestat_get` into a scratch buffer,
 /// returning the raw `Filestat` (the shared P1→P2 front-half for stat/get-type).
-fn descriptorFilestat(ctx: *WasiP2Ctx, mem: Memory, fd: wasi_p1.Fd) WasiP2Error!union(enum) { ok: wasi_p1.Filestat, err: wasi_p1.Errno } {
+fn descriptorFilestat(ctx: *WasiP2Ctx, mem: Memory, fd: wasi_p1.Fd) WasiP2Error!FilestatResult {
     const scratch = try ctx.reallocGuest(@sizeOf(wasi_p1.Filestat), 8);
     const errno = wasi_fd.fdFilestatGet(ctx.host, mem.slice(), fd, scratch);
+    if (errno != .success) return .{ .err = errno };
+    const bytes = mem.sliceAt(scratch, @sizeOf(wasi_p1.Filestat)) catch return WasiP2Error.OutOfBounds;
+    return .{ .ok = std.mem.bytesToValue(wasi_p1.Filestat, bytes) };
+}
+
+/// Path-addressed variant: stat `path` relative to the directory fd via P1
+/// `path_filestat_get` (the stat-at front-half).
+fn pathFilestat(ctx: *WasiP2Ctx, mem: Memory, dirfd: wasi_p1.Fd, lookupflags: u32, path_ptr: u32, path_len: u32) WasiP2Error!FilestatResult {
+    const scratch = try ctx.reallocGuest(@sizeOf(wasi_p1.Filestat), 8);
+    const errno = wasi_path.pathFilestatGet(ctx.host, mem.slice(), dirfd, lookupflags, path_ptr, path_len, scratch);
     if (errno != .success) return .{ .err = errno };
     const bytes = mem.sliceAt(scratch, @sizeOf(wasi_p1.Filestat)) catch return WasiP2Error.OutOfBounds;
     return .{ .ok = std.mem.bytesToValue(wasi_p1.Filestat, bytes) };
@@ -435,7 +465,13 @@ fn p2DescriptorStat(caller: *Caller, self_handle: u32, retptr: u32) WasiP2Error!
     const ctx = caller.data(WasiP2Ctx);
     const fd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.DESCRIPTOR_RT, self_handle));
     const mem = try ctxMemory(caller);
-    switch (try descriptorFilestat(ctx, mem, fd)) {
+    try writeStatResult(mem, retptr, try descriptorFilestat(ctx, mem, fd));
+}
+
+/// Store a `result<descriptor-stat, error-code>` at `retptr` (the shared
+/// back-half for stat / stat-at; layout per `p2DescriptorStat`'s docstring).
+fn writeStatResult(mem: Memory, retptr: u32, r: FilestatResult) WasiP2Error!void {
+    switch (r) {
         .ok => |fs| {
             try mem.write(retptr, @as(u8, 0)); // result disc: ok
             const base = retptr + 8; // descriptor-stat align-8 payload
@@ -454,6 +490,203 @@ fn p2DescriptorStat(caller: *Caller, self_handle: u32, retptr: u32) WasiP2Error!
             try mem.write(retptr + 8, @intFromEnum(adapter.errnoToP2ErrorCode(errno)));
         },
     }
+}
+
+/// `wasi:filesystem/types` `[method]descriptor.stat-at` (self, path_flags,
+/// path_ptr, path_len, retptr): stat `path` relative to the directory
+/// descriptor `self` via P1 `path_filestat_get`, honouring the P2
+/// `path-flags{symlink-follow}` bit (1:1 with P1 lookupflags), then store
+/// `result<descriptor-stat, error-code>` at `retptr` (same layout as `stat`).
+fn p2DescriptorStatAt(caller: *Caller, self_handle: u32, path_flags: u32, path_ptr: u32, path_len: u32, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const dirfd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.DESCRIPTOR_RT, self_handle));
+    const mem = try ctxMemory(caller);
+    try writeStatResult(mem, retptr, try pathFilestat(ctx, mem, dirfd, path_flags, path_ptr, path_len));
+}
+
+/// Store a `result<_, error-code>` at `retptr` — disc@0, error-code payload@1
+/// (both align 1; the unit ok-arm carries no payload). The shared back-half
+/// for the path-mutation `*-at` methods + `sync-data`.
+fn writeUnitResult(mem: Memory, retptr: u32, errno: wasi_p1.Errno) WasiP2Error!void {
+    if (errno == .success) {
+        try mem.write(retptr, @as(u8, 0));
+        return;
+    }
+    try mem.write(retptr, @as(u8, 1));
+    try mem.write(retptr + 1, @intFromEnum(adapter.errnoToP2ErrorCode(errno)));
+}
+
+/// `wasi:filesystem/types` `[method]descriptor.create-directory-at`
+/// (self, path_ptr, path_len, retptr) → P1 `path_create_directory`.
+fn p2DescriptorCreateDirectoryAt(caller: *Caller, self_handle: u32, path_ptr: u32, path_len: u32, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const dirfd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.DESCRIPTOR_RT, self_handle));
+    const mem = try ctxMemory(caller);
+    try writeUnitResult(mem, retptr, wasi_path.pathCreateDirectory(ctx.host, mem.slice(), dirfd, path_ptr, path_len));
+}
+
+/// `wasi:filesystem/types` `[method]descriptor.remove-directory-at`
+/// (self, path_ptr, path_len, retptr) → P1 `path_remove_directory`.
+fn p2DescriptorRemoveDirectoryAt(caller: *Caller, self_handle: u32, path_ptr: u32, path_len: u32, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const dirfd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.DESCRIPTOR_RT, self_handle));
+    const mem = try ctxMemory(caller);
+    try writeUnitResult(mem, retptr, wasi_path.pathRemoveDirectory(ctx.host, mem.slice(), dirfd, path_ptr, path_len));
+}
+
+/// `wasi:filesystem/types` `[method]descriptor.unlink-file-at`
+/// (self, path_ptr, path_len, retptr) → P1 `path_unlink_file`.
+fn p2DescriptorUnlinkFileAt(caller: *Caller, self_handle: u32, path_ptr: u32, path_len: u32, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const dirfd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.DESCRIPTOR_RT, self_handle));
+    const mem = try ctxMemory(caller);
+    try writeUnitResult(mem, retptr, wasi_fd.pathUnlinkFile(ctx.host, mem.slice(), dirfd, path_ptr, path_len));
+}
+
+/// `wasi:filesystem/types` `[method]descriptor.rename-at` (self, old_ptr,
+/// old_len, new_desc, new_ptr, new_len, retptr): rename old (relative to
+/// `self`) to new (relative to the borrowed `new_desc` directory descriptor)
+/// via P1 `path_rename`.
+fn p2DescriptorRenameAt(caller: *Caller, self_handle: u32, old_ptr: u32, old_len: u32, new_desc: u32, new_ptr: u32, new_len: u32, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const old_dirfd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.DESCRIPTOR_RT, self_handle));
+    const new_dirfd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.DESCRIPTOR_RT, new_desc));
+    const mem = try ctxMemory(caller);
+    try writeUnitResult(mem, retptr, wasi_path.pathRename(ctx.host, mem.slice(), old_dirfd, old_ptr, old_len, new_dirfd, new_ptr, new_len));
+}
+
+/// `wasi:filesystem/types` `[method]descriptor.link-at` (self, old_flags,
+/// old_ptr, old_len, new_desc, new_ptr, new_len, retptr): hard-link old
+/// (relative to `self`, honouring `path-flags{symlink-follow}` = P1
+/// lookupflags bit 0) as new (relative to `new_desc`) via P1 `path_link`.
+fn p2DescriptorLinkAt(caller: *Caller, self_handle: u32, old_flags: u32, old_ptr: u32, old_len: u32, new_desc: u32, new_ptr: u32, new_len: u32, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const old_dirfd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.DESCRIPTOR_RT, self_handle));
+    const new_dirfd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.DESCRIPTOR_RT, new_desc));
+    const mem = try ctxMemory(caller);
+    try writeUnitResult(mem, retptr, wasi_path.pathLink(ctx.host, mem.slice(), old_dirfd, old_flags, old_ptr, old_len, new_dirfd, new_ptr, new_len));
+}
+
+/// `wasi:filesystem/types` `[method]descriptor.symlink-at` (self, old_ptr,
+/// old_len, new_ptr, new_len, retptr): create a symlink at new (relative to
+/// `self`) pointing at the old-path TEXT via P1 `path_symlink`.
+fn p2DescriptorSymlinkAt(caller: *Caller, self_handle: u32, old_ptr: u32, old_len: u32, new_ptr: u32, new_len: u32, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const dirfd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.DESCRIPTOR_RT, self_handle));
+    const mem = try ctxMemory(caller);
+    try writeUnitResult(mem, retptr, wasi_path.pathSymlink(ctx.host, mem.slice(), old_ptr, old_len, dirfd, new_ptr, new_len));
+}
+
+/// `wasi:filesystem/types` `[method]descriptor.sync-data` (self, retptr) →
+/// P1 `fd_datasync`.
+fn p2DescriptorSyncData(caller: *Caller, self_handle: u32, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const fd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.DESCRIPTOR_RT, self_handle));
+    const mem = try ctxMemory(caller);
+    try writeUnitResult(mem, retptr, wasi_fd.fdDatasync(ctx.host, fd));
+}
+
+/// `wasi:filesystem/types` `[method]descriptor.readlink-at` (self, path_ptr,
+/// path_len, retptr): read the symlink target into a `cabi_realloc`'d buffer
+/// via P1 `path_readlink`, then store `result<string, error-code>` at `retptr`
+/// (disc@0; ok string ptr@+4 len@+8; err code@+4).
+fn p2DescriptorReadlinkAt(caller: *Caller, self_handle: u32, path_ptr: u32, path_len: u32, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const dirfd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.DESCRIPTOR_RT, self_handle));
+    const mem = try ctxMemory(caller);
+    const buf_len: u32 = 4096; // symlink-target cap (PATH_MAX class)
+    const buf_ptr = try ctx.reallocGuest(buf_len, 1);
+    const scratch = try ctx.reallocGuest(4, 4); // P1 bufused out-slot
+    const errno = wasi_path.pathReadlink(ctx.host, mem.slice(), dirfd, path_ptr, path_len, buf_ptr, buf_len, scratch);
+    if (errno != .success) {
+        try mem.write(retptr, @as(u8, 1)); // result disc: err
+        try mem.write(retptr + 4, @intFromEnum(adapter.errnoToP2ErrorCode(errno)));
+        return;
+    }
+    const used = try mem.read(u32, scratch);
+    try mem.write(retptr, @as(u8, 0)); // result disc: ok
+    try mem.write(retptr + 4, buf_ptr); // string data ptr
+    try mem.write(retptr + 8, used); // string length
+}
+
+/// `wasi:filesystem/types` `[method]descriptor.read-directory` (self, retptr):
+/// mint a directory-entry-stream over the directory descriptor `self` (state =
+/// `{fd, cookie 0}` in `ctx.dir_streams`; the handle rep is the state index)
+/// and store `result<own<directory-entry-stream>, error-code>` (ok handle@+4)
+/// at `retptr`.
+fn p2DescriptorReadDirectory(caller: *Caller, self_handle: u32, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const fd: wasi_p1.Fd = @intCast(try ctx.resources.rep(WasiP2Ctx.DESCRIPTOR_RT, self_handle));
+    const mem = try ctxMemory(caller);
+    const state_index: u32 = @intCast(ctx.dir_streams.items.len);
+    ctx.dir_streams.append(ctx.alloc, .{ .fd = fd, .cookie = 0 }) catch return WasiP2Error.OutOfMemory;
+    const handle = try ctx.resources.new(WasiP2Ctx.DIR_STREAM_RT, state_index);
+    try mem.write(retptr, @as(u8, 0)); // result disc: ok
+    try mem.write(retptr + 4, handle); // own<directory-entry-stream>
+}
+
+/// `wasi:filesystem/types` `[method]directory-entry-stream.read-directory-entry`
+/// (self, retptr): read ONE entry via P1 `fd_readdir` at the stream's cookie,
+/// skipping the P1-synthetic `.`/`..` (the P2 stream excludes them), then store
+/// `result<option<directory-entry>, error-code>` at `retptr`: disc@0; ok option
+/// disc@+4 (0 = stream end); entry record `%type`@+8, name ptr@+12, len@+16
+/// (name in a fresh `cabi_realloc` backing); err code@+4.
+fn p2DirEntryStreamReadEntry(caller: *Caller, self_handle: u32, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const state_index: u32 = @intCast(try ctx.resources.rep(WasiP2Ctx.DIR_STREAM_RT, self_handle));
+    if (state_index >= ctx.dir_streams.items.len) return WasiP2Error.InvalidHandle;
+    const state = &ctx.dir_streams.items[state_index];
+    const mem = try ctxMemory(caller);
+    // One dirent header (24 B) + a PATH-class name fits comfortably; P1 packs
+    // as many entries as fit, we parse only the first per call.
+    const buf_len: u32 = 4096;
+    const buf_ptr = try ctx.reallocGuest(buf_len, 8);
+    const used_ptr = try ctx.reallocGuest(4, 4);
+    while (true) {
+        const errno = wasi_fd.fdReaddir(ctx.host, mem.slice(), state.fd, buf_ptr, buf_len, state.cookie, used_ptr);
+        if (errno != .success) {
+            try mem.write(retptr, @as(u8, 1)); // result disc: err
+            try mem.write(retptr + 4, @intFromEnum(adapter.errnoToP2ErrorCode(errno)));
+            return;
+        }
+        const used = try mem.read(u32, used_ptr);
+        if (used < 24) { // not even one header — stream end
+            try mem.write(retptr, @as(u8, 0)); // result disc: ok
+            try mem.write(retptr + 4, @as(u8, 0)); // option disc: none
+            return;
+        }
+        const d_next = try mem.read(u64, buf_ptr);
+        const d_namlen = try mem.read(u32, buf_ptr + 16);
+        const d_type = try mem.read(u8, buf_ptr + 20);
+        if (used < 24 + d_namlen) return WasiP2Error.OutOfBounds; // truncated name (> 4 KiB path)
+        state.cookie = d_next;
+        const name = mem.sliceAt(buf_ptr + 24, d_namlen) catch return WasiP2Error.OutOfBounds;
+        // P1 synthesizes "." / ".."; the P2 stream excludes them.
+        if (std.mem.eql(u8, name, ".") or std.mem.eql(u8, name, "..")) continue;
+        const name_ptr = if (d_namlen == 0) 0 else try ctx.reallocGuest(d_namlen, 1);
+        if (d_namlen != 0) {
+            const dest = mem.sliceAt(name_ptr, d_namlen) catch return WasiP2Error.OutOfBounds;
+            // Re-slice the source: reallocGuest may have moved/grown memory.
+            const src = mem.sliceAt(buf_ptr + 24, d_namlen) catch return WasiP2Error.OutOfBounds;
+            @memcpy(dest, src);
+        }
+        try mem.write(retptr, @as(u8, 0)); // result disc: ok
+        try mem.write(retptr + 4, @as(u8, 1)); // option disc: some
+        try mem.write(retptr + 8, filetypeToDescriptorType(@enumFromInt(d_type)));
+        try mem.write(retptr + 12, name_ptr); // directory-entry.name ptr
+        try mem.write(retptr + 16, d_namlen); // directory-entry.name len
+        return;
+    }
+}
+
+/// `wasi:random/random` `get-random-u64` `() -> u64`: 8 secure-random bytes
+/// as the lowered `i64` return (no guest allocation).
+fn p2RandomGetU64(caller: *Caller) WasiP2Error!i64 {
+    const ctx = caller.data(WasiP2Ctx);
+    var buf: [8]u8 = undefined;
+    if (wasi_clocks.randomFill(ctx.host, &buf) != .success)
+        @panic("WASI-P2 get-random-u64: secure random unavailable (host.io unset)");
+    return @bitCast(std.mem.readInt(u64, &buf, .little));
 }
 
 /// `wasi:filesystem/types` `[method]descriptor.read` (self, length, offset,
@@ -606,6 +839,19 @@ fn defineClassifiedFunc(lk: *Linker, module: []const u8, name: []const u8, op: a
         .cli_get_environment, .cli_get_arguments => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!void, p2EmptyList),
         .cli_initial_cwd, .cli_get_terminal_stdin, .cli_get_terminal_stdout, .cli_get_terminal_stderr => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!void, p2ReturnNone),
         .out_stream_check_write => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32) WasiP2Error!void, p2CheckWrite),
+        .random_get_u64 => try lk.defineFuncCtx(module, name, ctx, fn (*Caller) WasiP2Error!i64, p2RandomGetU64),
+        .fs_descriptor_stat_at => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32, u32, u32, u32) WasiP2Error!void, p2DescriptorStatAt),
+        .fs_descriptor_create_directory_at => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32, u32, u32) WasiP2Error!void, p2DescriptorCreateDirectoryAt),
+        .fs_descriptor_remove_directory_at => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32, u32, u32) WasiP2Error!void, p2DescriptorRemoveDirectoryAt),
+        .fs_descriptor_unlink_file_at => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32, u32, u32) WasiP2Error!void, p2DescriptorUnlinkFileAt),
+        .fs_descriptor_rename_at => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32, u32, u32, u32, u32, u32) WasiP2Error!void, p2DescriptorRenameAt),
+        .fs_descriptor_link_at => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32, u32, u32, u32, u32, u32, u32) WasiP2Error!void, p2DescriptorLinkAt),
+        .fs_descriptor_symlink_at => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32, u32, u32, u32, u32) WasiP2Error!void, p2DescriptorSymlinkAt),
+        .fs_descriptor_sync_data => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32) WasiP2Error!void, p2DescriptorSyncData),
+        .fs_descriptor_readlink_at => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32, u32, u32) WasiP2Error!void, p2DescriptorReadlinkAt),
+        .fs_descriptor_read_directory => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32) WasiP2Error!void, p2DescriptorReadDirectory),
+        .fs_dir_entry_stream_read => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32) WasiP2Error!void, p2DirEntryStreamReadEntry),
+        .fs_dir_entry_stream_drop => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!void, p2ResourceDrop),
     }
 }
 

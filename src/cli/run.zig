@@ -141,8 +141,9 @@ pub fn runComponentWasi(
     io: std.Io,
     bytes: []const u8,
     argv: []const []const u8,
+    preopens: []const PreopenDir,
 ) !u8 {
-    return runComponentCaptured(alloc, io, bytes, argv, null);
+    return runComponentCaptured(alloc, io, bytes, argv, preopens, null);
 }
 
 /// `runComponentWasi` with an optional stdout capture buffer (tests assert on
@@ -152,6 +153,7 @@ pub fn runComponentCaptured(
     io: std.Io,
     bytes: []const u8,
     argv: []const []const u8,
+    preopens: []const PreopenDir,
     stdout_capture: ?*std.ArrayList(u8),
 ) !u8 {
     const component = @import("../api/component.zig");
@@ -164,6 +166,13 @@ pub fn runComponentCaptured(
     host.io = io;
     if (stdout_capture) |b| host.stdout_buffer = b;
     if (argv.len > 0) try host.setArgs(argv);
+    // `--dir` preopens feed the P2 host: `get-directories` enumerates them and
+    // the descriptor `*-at` methods resolve against their fds (CLI-scoped fd
+    // lifetime, like the core-module paths).
+    for (preopens) |pd| {
+        const dir = try std.Io.Dir.cwd().openDir(io, pd.host_path, .{ .iterate = true });
+        _ = try host.addPreopen(dir.handle, pd.guest_path);
+    }
 
     component.runWasiP2Main(&eng, alloc, bytes, &host) catch |err| {
         if (host.exit_code) |code| return @intCast(@min(code, std.math.maxInt(u8)));
@@ -635,7 +644,7 @@ test "runComponentWasi: a real WASI-P2 component runs from the CLI path + prints
     defer testing.allocator.free(bytes);
     var capture: std.ArrayList(u8) = .empty;
     defer capture.deinit(testing.allocator);
-    const code = try runComponentCaptured(testing.allocator, testing.io, bytes, &.{}, &capture);
+    const code = try runComponentCaptured(testing.allocator, testing.io, bytes, &.{}, &.{}, &capture);
     try testing.expectEqual(@as(u8, 0), code);
     try testing.expectEqualStrings("hello\n", capture.items);
 }

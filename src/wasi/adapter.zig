@@ -149,6 +149,25 @@ pub const P2Op = enum {
     // wasi:io/streams — output-stream.check-write: an always-writable sync host
     // returns a large byte permit.
     out_stream_check_write,
+    // wasi:random — free-func u64 variant.
+    random_get_u64,
+    // wasi:filesystem/types — path-addressed descriptor methods (the *-at
+    // family) + sync-data. Each maps onto the existing P1 path_* facility;
+    // the dirfd is resolved from the descriptor handle rep at call time.
+    fs_descriptor_stat_at,
+    fs_descriptor_create_directory_at,
+    fs_descriptor_link_at,
+    fs_descriptor_readlink_at,
+    fs_descriptor_remove_directory_at,
+    fs_descriptor_rename_at,
+    fs_descriptor_symlink_at,
+    fs_descriptor_sync_data,
+    fs_descriptor_unlink_file_at,
+    // wasi:filesystem/types — directory iteration (the entry stream is a
+    // host-modeled resource whose rep indexes per-run cursor state).
+    fs_descriptor_read_directory,
+    fs_dir_entry_stream_read,
+    fs_dir_entry_stream_drop,
 };
 
 /// What P1 facility a `P2Op` ultimately drives (so the D1-2 integration maps
@@ -181,6 +200,19 @@ pub const P1Target = union(enum) {
     fd_close,
     /// P1 preopens enumeration (`fd_prestat_get` / `fd_prestat_dir_name`).
     preopens_get_directories,
+    /// P1 path_* ops relative to a directory descriptor (dirfd from the
+    /// handle rep at call time) + fd_datasync.
+    path_filestat_get,
+    path_create_directory,
+    path_link,
+    path_readlink,
+    path_remove_directory,
+    path_rename,
+    path_symlink,
+    fd_datasync,
+    path_unlink_file,
+    /// P1 `fd_readdir` (the entry-stream cursor lives host-side).
+    fd_readdir,
 };
 
 pub fn p1Target(op: P2Op) P1Target {
@@ -203,6 +235,18 @@ pub fn p1Target(op: P2Op) P1Target {
         .fs_descriptor_get_type => .fd_fdstat_get,
         .fs_descriptor_drop => .fd_close,
         .fs_get_directories => .preopens_get_directories,
+        .random_get_u64 => .random_get,
+        .fs_descriptor_stat_at => .path_filestat_get,
+        .fs_descriptor_create_directory_at => .path_create_directory,
+        .fs_descriptor_link_at => .path_link,
+        .fs_descriptor_readlink_at => .path_readlink,
+        .fs_descriptor_remove_directory_at => .path_remove_directory,
+        .fs_descriptor_rename_at => .path_rename,
+        .fs_descriptor_symlink_at => .path_symlink,
+        .fs_descriptor_sync_data => .fd_datasync,
+        .fs_descriptor_unlink_file_at => .path_unlink_file,
+        .fs_descriptor_read_directory, .fs_dir_entry_stream_read => .fd_readdir,
+        .fs_dir_entry_stream_drop => .noop,
         // Poll + subscribe: no P1 facility (always-ready host bookkeeping).
         .poll_pollable_ready,
         .poll_pollable_block,
@@ -271,6 +315,19 @@ const table = [_]Entry{
     .{ .iface = "wasi:cli/terminal-stdout", .func = "get-terminal-stdout", .op = .cli_get_terminal_stdout },
     .{ .iface = "wasi:cli/terminal-stderr", .func = "get-terminal-stderr", .op = .cli_get_terminal_stderr },
     .{ .iface = "wasi:io/streams", .func = "[method]output-stream.check-write", .op = .out_stream_check_write },
+    .{ .iface = "wasi:random/random", .func = "get-random-u64", .op = .random_get_u64 },
+    .{ .iface = "wasi:filesystem/types", .func = "[method]descriptor.stat-at", .op = .fs_descriptor_stat_at },
+    .{ .iface = "wasi:filesystem/types", .func = "[method]descriptor.create-directory-at", .op = .fs_descriptor_create_directory_at },
+    .{ .iface = "wasi:filesystem/types", .func = "[method]descriptor.link-at", .op = .fs_descriptor_link_at },
+    .{ .iface = "wasi:filesystem/types", .func = "[method]descriptor.readlink-at", .op = .fs_descriptor_readlink_at },
+    .{ .iface = "wasi:filesystem/types", .func = "[method]descriptor.remove-directory-at", .op = .fs_descriptor_remove_directory_at },
+    .{ .iface = "wasi:filesystem/types", .func = "[method]descriptor.rename-at", .op = .fs_descriptor_rename_at },
+    .{ .iface = "wasi:filesystem/types", .func = "[method]descriptor.symlink-at", .op = .fs_descriptor_symlink_at },
+    .{ .iface = "wasi:filesystem/types", .func = "[method]descriptor.sync-data", .op = .fs_descriptor_sync_data },
+    .{ .iface = "wasi:filesystem/types", .func = "[method]descriptor.unlink-file-at", .op = .fs_descriptor_unlink_file_at },
+    .{ .iface = "wasi:filesystem/types", .func = "[method]descriptor.read-directory", .op = .fs_descriptor_read_directory },
+    .{ .iface = "wasi:filesystem/types", .func = "[method]directory-entry-stream.read-directory-entry", .op = .fs_dir_entry_stream_read },
+    .{ .iface = "wasi:filesystem/types", .func = "[resource-drop]directory-entry-stream", .op = .fs_dir_entry_stream_drop },
 };
 
 /// Classify a P2 import `(interface, func)` → the `P2Op` it maps to, or null if
@@ -360,6 +417,24 @@ test "p1Target: descriptor ops map to fd syscalls (fd from the handle rep at cal
     try testing.expectEqual(P1Target.fd_fdstat_get, p1Target(.fs_descriptor_get_type));
     try testing.expectEqual(P1Target.fd_close, p1Target(.fs_descriptor_drop));
     try testing.expectEqual(P1Target.preopens_get_directories, p1Target(.fs_get_directories));
+}
+
+test "classify: path-addressed descriptor methods + random u64 (E2 Go world)" {
+    try testing.expectEqual(P2Op.random_get_u64, classifyImport("wasi:random/random", "get-random-u64").?);
+    try testing.expectEqual(P2Op.fs_descriptor_stat_at, classifyImport("wasi:filesystem/types", "[method]descriptor.stat-at").?);
+    try testing.expectEqual(P2Op.fs_descriptor_create_directory_at, classifyImport("wasi:filesystem/types", "[method]descriptor.create-directory-at").?);
+    try testing.expectEqual(P2Op.fs_descriptor_link_at, classifyImport("wasi:filesystem/types", "[method]descriptor.link-at").?);
+    try testing.expectEqual(P2Op.fs_descriptor_readlink_at, classifyImport("wasi:filesystem/types", "[method]descriptor.readlink-at").?);
+    try testing.expectEqual(P2Op.fs_descriptor_remove_directory_at, classifyImport("wasi:filesystem/types", "[method]descriptor.remove-directory-at").?);
+    try testing.expectEqual(P2Op.fs_descriptor_rename_at, classifyImport("wasi:filesystem/types", "[method]descriptor.rename-at").?);
+    try testing.expectEqual(P2Op.fs_descriptor_symlink_at, classifyImport("wasi:filesystem/types", "[method]descriptor.symlink-at").?);
+    try testing.expectEqual(P2Op.fs_descriptor_sync_data, classifyImport("wasi:filesystem/types", "[method]descriptor.sync-data").?);
+    try testing.expectEqual(P2Op.fs_descriptor_unlink_file_at, classifyImport("wasi:filesystem/types", "[method]descriptor.unlink-file-at").?);
+    try testing.expectEqual(P1Target.path_filestat_get, p1Target(.fs_descriptor_stat_at));
+    try testing.expectEqual(P1Target.path_create_directory, p1Target(.fs_descriptor_create_directory_at));
+    try testing.expectEqual(P1Target.path_rename, p1Target(.fs_descriptor_rename_at));
+    try testing.expectEqual(P1Target.fd_datasync, p1Target(.fs_descriptor_sync_data));
+    try testing.expectEqual(P1Target.random_get, p1Target(.random_get_u64));
 }
 
 test "classify: unknown interface/func → null; isWasiP2Interface" {
