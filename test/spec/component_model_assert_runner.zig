@@ -502,6 +502,10 @@ fn parseCharLit(text: []const u8, pos: *usize) !u21 {
 fn parseTypedValue(a: std.mem.Allocator, text: []const u8, pos: *usize, ct: canon.CanonType) anyerror!ComponentValue {
     skipWs(text, pos);
     switch (ct) {
+        // Resource handles: bare integers `own<N>` semantics don't apply to
+        // manifest text — parse as a plain handle number.
+        .own => return .{ .own = try parseIntToken(u32, text, pos) },
+        .borrow => return .{ .borrow = try parseIntToken(u32, text, pos) },
         .prim => |p| switch (p) {
             .bool => {
                 const id = try parseIdent(text, pos);
@@ -685,6 +689,8 @@ fn renderValue(a: std.mem.Allocator, out: *std.ArrayList(u8), v: ComponentValue)
             }
         },
         .flags => |bits| try out.appendSlice(a, try std.fmt.allocPrint(a, "flags<0x{x}>", .{bits})),
+        .own => |h| try out.appendSlice(a, try std.fmt.allocPrint(a, "own<{d}>", .{h})),
+        .borrow => |h| try out.appendSlice(a, try std.fmt.allocPrint(a, "borrow<{d}>", .{h})),
     }
 }
 

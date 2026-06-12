@@ -44,6 +44,12 @@ pub const ComponentValue = union(enum) {
     result: Result,
     /// Bit-packed per the type's label order (≤ 32 labels per spec).
     flags: u32,
+    /// An OWNING resource handle (component-table index; D-322). The
+    /// handle's lifecycle belongs to the component instance's table —
+    /// `deinit` does not drop it.
+    own: u32,
+    /// A BORROWED resource handle (lowered to the rep at the call).
+    borrow: u32,
 
     pub const Field = struct {
         /// Borrows from the decoded `TypeInfo` (NOT owned by the tree).
@@ -85,7 +91,7 @@ pub const ComponentValue = union(enum) {
                 p.deinit(alloc);
                 alloc.destroy(p);
             },
-            .bool, .s8, .u8, .s16, .u16, .s32, .u32, .s64, .u64, .f32, .f64, .char, .@"enum", .flags => {},
+            .bool, .s8, .u8, .s16, .u16, .s32, .u32, .s64, .u64, .f32, .f64, .char, .@"enum", .flags, .own, .borrow => {},
         }
     }
 };

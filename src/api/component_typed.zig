@@ -149,6 +149,10 @@ pub fn invokeTypedCore(
 /// type — `toCanon` is called with the canon type to validate shapes).
 fn toCanonValue(arena: std.mem.Allocator, v: ComponentValue, ty: canon.CanonType) InvokeTypedError!canon.Value {
     switch (ty) {
+        // D-322: handles pass through as canon handle values (lowerFlat
+        // does the borrow->rep translation against the component table).
+        .own => return if (v == .own) .{ .handle = v.own } else InvokeTypedError.ValueShapeMismatch,
+        .borrow => return if (v == .borrow) .{ .handle = v.borrow } else InvokeTypedError.ValueShapeMismatch,
         .prim => |p| return switch (p) {
             .string => if (v == .string) .{ .string = v.string } else InvokeTypedError.ValueShapeMismatch,
             .bool => if (v == .bool) .{ .bool = v.bool } else InvokeTypedError.ValueShapeMismatch,
@@ -307,7 +311,9 @@ fn fromCanonDefType(out_alloc: std.mem.Allocator, scratch: std.mem.Allocator, in
         },
         .enum_ => return .{ .@"enum" = cv.enum_value },
         .flags => return .{ .flags = cv.flags },
-        .func, .own, .borrow, .instance_type, .component_type, .resource => return InvokeTypedError.UnsupportedType,
+        .own => return .{ .own = cv.handle },
+        // Borrow results are spec-invalid; func/type-scope forms aren't values.
+        .func, .borrow, .instance_type, .component_type, .resource => return InvokeTypedError.UnsupportedType,
     }
 }
 

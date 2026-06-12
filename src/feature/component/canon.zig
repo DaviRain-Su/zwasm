@@ -51,6 +51,8 @@ pub const Value = union(enum) {
     record: []const Value,
     /// `variant` value: the selected case index + its optional payload.
     variant: VariantValue,
+    /// A resource HANDLE (own/borrow) — a component-table index (D-322).
+    handle: u32,
 };
 
 /// A `variant`/`option`/`result` value: which case, and the (optional) payload.
@@ -73,6 +75,11 @@ pub const CanonType = union(enum) {
     record: []const Field,
     /// tagged union of cases (option/result/tuple despecialize to this/record).
     variant: []const VCase,
+    /// `own<i>` — an owning handle to resource type-space index `i` (D-322).
+    own: u32,
+    /// `borrow<i>` — a borrowed handle (lowered to the REP when the callee
+    /// component owns the resource type — `CanonicalABI.md` lower_borrow).
+    borrow: u32,
 
     pub const Field = struct {
         name: []const u8,
@@ -154,6 +161,7 @@ fn maxCaseAlignment(cases: []const CanonType.VCase) usize {
 /// In-memory alignment of a value type (recursive).
 pub fn alignmentOf(t: CanonType) usize {
     return switch (t) {
+        .own, .borrow => 4,
         .prim => |p| primAlignment(p),
         .enum_ => |n| discriminantSize(n),
         .flags => |n| flagsSize(n),
@@ -170,6 +178,7 @@ pub fn alignmentOf(t: CanonType) usize {
 /// In-memory size of a value type (recursive; `CanonicalABI.md` `elem_size`).
 pub fn sizeOf(t: CanonType) usize {
     return switch (t) {
+        .own, .borrow => 4,
         .prim => |p| primSize(p),
         .enum_ => |n| discriminantSize(n),
         .flags => |n| flagsSize(n),
@@ -218,6 +227,12 @@ pub const CanonContext = struct {
     realloc_ctx: *anyopaque,
     realloc_fn: ReallocFn,
     string_encoding: StringEncoding = .utf8,
+    /// OPTIONAL resource hook (D-322): translate a borrow HANDLE of
+    /// resource type-space index `ti` to its REP — `CanonicalABI.md`
+    /// lower_borrow's owner-component direct-rep rule. Null when the
+    /// embedding has no guest resources in play.
+    resource_ctx: ?*anyopaque = null,
+    borrow_rep_fn: ?*const fn (*anyopaque, ti: u32, handle: u32) BorrowRepError!u32 = null,
 
     pub fn mem(self: CanonContext) []u8 {
         return self.memory_fn(self.memory_ctx);
@@ -227,6 +242,11 @@ pub const CanonContext = struct {
         return self.realloc_fn(self.realloc_ctx, old_ptr, old_size, alignment, new_size);
     }
 
+    pub fn borrowRep(self: CanonContext, ti: u32, handle: u32) BorrowRepError!u32 {
+        const f = self.borrow_rep_fn orelse return BorrowRepError.NoResourceContext;
+        return f(self.resource_ctx.?, ti, handle);
+    }
+
     /// Test/fixed-buffer constructor half: a `memory_fn` reading a stable
     /// `*[]u8` holder (tests update the holder when their buffer "grows").
     pub fn sliceMemoryFn(p: *anyopaque) []u8 {
@@ -234,6 +254,8 @@ pub const CanonContext = struct {
         return holder.*;
     }
 };
+
+pub const BorrowRepError = error{ NoResourceContext, InvalidHandle };
 
 /// `CanonicalABI.md` `MAX_STRING_BYTE_LENGTH` — a string's byte length must fit
 /// 28 bits (leaves the high bit free as the latin1/utf16 tag).
@@ -298,6 +320,7 @@ pub const LowerError = error{
 /// bool → 0/1; char → its scalar value). Aggregates error (`NotFlatScalar`).
 pub fn lower(value: Value) LowerError!CoreValue {
     return switch (value) {
+        .handle => |h| CoreValue.fromI32(@bitCast(h)),
         .bool => |b| CoreValue.fromI32(if (b) 1 else 0),
         .s8 => |v| CoreValue.fromI32(v),
         .u8 => |v| CoreValue.fromI32(v),
@@ -345,6 +368,8 @@ pub fn lift(c: CoreValue, ty: PrimValType) LiftError!Value {
 /// single-value flat form (`NotFlatScalar`) — use `load`.
 pub fn liftTyped(c: CoreValue, t: CanonType) LiftError!Value {
     return switch (t) {
+        .own => .{ .handle = @bitCast(c.i32) },
+        .borrow => LiftError.NotFlatScalar,
         .prim => |p| lift(c, p),
         .enum_ => |n| blk: {
             const idx: u32 = @bitCast(c.i32);
@@ -388,6 +413,15 @@ fn loadInt(cx: CanonContext, ptr: u32, nbytes: usize) LoadError!u64 {
 /// (`CanonicalABI.md` `store`). Recursive over list/record.
 pub fn store(cx: CanonContext, value: Value, ty: CanonType, ptr: u32) StoreError!void {
     switch (ty) {
+        .own => {
+            const h = if (value == .handle) value.handle else return StoreError.ValueTypeMismatch;
+            try storeInt(cx, h, ptr, 4);
+        },
+        .borrow => |ti| {
+            const h = if (value == .handle) value.handle else return StoreError.ValueTypeMismatch;
+            const rep = cx.borrowRep(ti, h) catch return StoreError.ValueTypeMismatch;
+            try storeInt(cx, rep, ptr, 4);
+        },
         .prim => |p| switch (p) {
             .string => {
                 const s = if (value == .string) value.string else return StoreError.ValueTypeMismatch;
@@ -444,6 +478,8 @@ pub fn store(cx: CanonContext, value: Value, ty: CanonType, ptr: u32) StoreError
 /// list/record allocate their element/field slices from `arena`.
 pub fn load(cx: CanonContext, arena: std.mem.Allocator, ty: CanonType, ptr: u32) LoadError!Value {
     switch (ty) {
+        .own => return .{ .handle = @truncate(try loadInt(cx, ptr, 4)) },
+        .borrow => return LoadError.ValueTypeMismatch, // borrow results are spec-invalid
         .prim => |p| switch (p) {
             .string => {
                 const sptr: u32 = @intCast(try loadInt(cx, ptr, 4));
@@ -890,7 +926,7 @@ pub fn flattenType(alloc: std.mem.Allocator, t: CanonType, out: *std.ArrayList(C
             .string, .error_context => try out.appendSlice(alloc, &.{ .i32, .i32 }),
             .bool, .s8, .u8, .s16, .u16, .s32, .u32, .s64, .u64, .f32, .f64, .char => try out.append(alloc, flatCoreType(p).?),
         },
-        .enum_, .flags => try out.append(alloc, .i32),
+        .enum_, .flags, .own, .borrow => try out.append(alloc, .i32),
         .list => try out.appendSlice(alloc, &.{ .i32, .i32 }),
         .record => |fields| for (fields) |f| try flattenType(alloc, f.ty, out),
         .variant => |cases| {
@@ -989,6 +1025,18 @@ pub const LowerFlatError = StoreError || StringError || FlattenError;
 /// values (compound payloads land in guest memory via `cx.realloc`).
 pub fn lowerFlat(cx: CanonContext, alloc: std.mem.Allocator, value: Value, t: CanonType, out: *std.ArrayList(CoreValue)) LowerFlatError!void {
     switch (t) {
+        // D-322 guest resources: an OWN handle transfers as-is (the callee
+        // owns the table); a BORROW lowers to the REP when the callee
+        // component owns the resource type (`lower_borrow`).
+        .own => {
+            const h = if (value == .handle) value.handle else return StoreError.ValueTypeMismatch;
+            try out.append(alloc, CoreValue.fromI32(@bitCast(h)));
+        },
+        .borrow => |ti| {
+            const h = if (value == .handle) value.handle else return StoreError.ValueTypeMismatch;
+            const rep = cx.borrowRep(ti, h) catch return StoreError.ValueTypeMismatch;
+            try out.append(alloc, CoreValue.fromI32(@bitCast(rep)));
+        },
         .prim => |p| switch (p) {
             .string => {
                 const s = if (value == .string) value.string else return StoreError.ValueTypeMismatch;
@@ -1056,6 +1104,9 @@ pub const LiftFlatError = LoadError || StringError || FlattenError || error{Flat
 /// guest memory; slices allocate from `arena`.
 pub fn liftFlat(cx: CanonContext, arena: std.mem.Allocator, t: CanonType, flats: []const CoreValue, idx: *usize) LiftFlatError!Value {
     switch (t) {
+        .own => return .{ .handle = @bitCast((try takeFlat(flats, idx, .i32)).i32) },
+        .borrow => return LiftFlatError.ValueTypeMismatch, // borrow results are spec-invalid
+
         .prim => |p| switch (p) {
             .string => {
                 const ptr: u32 = @bitCast((try takeFlat(flats, idx, .i32)).i32);
@@ -1376,7 +1427,9 @@ fn canonTypeFromLocalDefType(arena: std.mem.Allocator, info: *const types.TypeIn
         },
         .enum_ => |e| return .{ .enum_ = @intCast(e.labels.len) },
         .flags => |fl| return .{ .flags = @intCast(fl.labels.len) },
-        .func, .own, .borrow, .instance_type, .component_type, .resource => return TypeBridgeError.UnsupportedType,
+        .own => |ti| return .{ .own = ti },
+        .borrow => |ti| return .{ .borrow = ti },
+        .func, .instance_type, .component_type, .resource => return TypeBridgeError.UnsupportedType,
     }
 }
 
@@ -1439,6 +1492,58 @@ pub fn canonTypeFromDefType(arena: std.mem.Allocator, info: *const types.TypeInf
         },
         .enum_ => |e| return .{ .enum_ = @intCast(e.labels.len) },
         .flags => |fl| return .{ .flags = @intCast(fl.labels.len) },
-        .func, .own, .borrow, .instance_type, .component_type, .resource => return TypeBridgeError.UnsupportedType,
+        .own => |ti| return .{ .own = ti },
+        .borrow => |ti| return .{ .borrow = ti },
+        .func, .instance_type, .component_type, .resource => return TypeBridgeError.UnsupportedType,
     }
+}
+
+test "D-322: own handles flatten/lower/lift as i32 pass-through; borrow lowers to the rep via the context hook" {
+    const testing_ = std.testing;
+    var arena = std.heap.ArenaAllocator.init(testing_.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var mem_buf = [_]u8{0} ** 64;
+    var mem_slice: []u8 = &mem_buf;
+    const Hook = struct {
+        fn borrowRep(_: *anyopaque, ti: u32, handle: u32) BorrowRepError!u32 {
+            if (ti != 7 or handle != 3) return BorrowRepError.InvalidHandle;
+            return 0xCAFE;
+        }
+        fn realloc(_: *anyopaque, _: u32, _: u32, _: u32, _: u32) ReallocError!u32 {
+            return ReallocError.AllocFailed;
+        }
+    };
+    var dummy: u8 = 0;
+    const cx = CanonContext{
+        .memory_ctx = @ptrCast(&mem_slice),
+        .memory_fn = CanonContext.sliceMemoryFn,
+        .realloc_ctx = @ptrCast(&dummy),
+        .realloc_fn = Hook.realloc,
+        .resource_ctx = @ptrCast(&dummy),
+        .borrow_rep_fn = Hook.borrowRep,
+    };
+
+    // flatten: both are single i32 slots.
+    var fl: std.ArrayList(CoreType) = .empty;
+    try flattenType(a, .{ .own = 7 }, &fl);
+    try flattenType(a, .{ .borrow = 7 }, &fl);
+    try testing_.expectEqual(@as(usize, 2), fl.items.len);
+
+    // lower: own passes the handle; borrow consults the hook for the rep.
+    var out: std.ArrayList(CoreValue) = .empty;
+    try lowerFlat(cx, a, .{ .handle = 9 }, .{ .own = 7 }, &out);
+    try lowerFlat(cx, a, .{ .handle = 3 }, .{ .borrow = 7 }, &out);
+    try testing_.expectEqual(@as(i32, 9), out.items[0].i32);
+    try testing_.expectEqual(@as(i32, 0xCAFE), out.items[1].i32);
+
+    // an unknown borrow handle is a shape error, not a silent pass-through.
+    var bad: std.ArrayList(CoreValue) = .empty;
+    try testing_.expectError(StoreError.ValueTypeMismatch, lowerFlat(cx, a, .{ .handle = 99 }, .{ .borrow = 7 }, &bad));
+
+    // lift: an own RESULT is the handle the guest minted.
+    var idx: usize = 0;
+    const lifted = try liftFlat(cx, a, .{ .own = 7 }, &.{CoreValue.fromI32(5)}, &idx);
+    try testing_.expectEqual(@as(u32, 5), lifted.handle);
 }
