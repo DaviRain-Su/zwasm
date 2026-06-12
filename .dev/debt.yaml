@@ -5,61 +5,39 @@
 entries:
   - id: "D-314"
     layer: "code"
-    status: "blocked-by"
+    status: "note"
     description: |-
-      blocked-by (multi-part effort, IN PROGRESS — Active bundle d314-jit-sandbox in
-      handover drives it): zwasm v0 sandboxing (ADR-0179, shipped
-      @1001fa0e/460210f1/7216e7b1/58479dd6) was **interp-engine ONLY** via the Zig
-      facade — `Instance.interrupt()`/`setFuel`/`setMemoryPagesLimit`. The JIT side
-      is being built. **DONE 2026-06-12 (3-host green, windowsmini verified)**:
-      `TrapKind.interrupted=16` + the interp `error.Interrupted`→binding_error
-      mis-surface fix (`5564c553`); **JIT prologue interrupt poll BOTH arches**
-      (`c1a9da15` arm64, `6d56f517` x86_64) — `JitRuntime.interrupt_ptr` (trailing
-      extern field) + `interrupt_ptr_off` + the `JitInstance.setInterruptFlag`
-      driving path; a recursive/call-bearing fn traps kind 16 on a host-set flag;
-      **arm64 loop BACK-EDGE poll** (`5b441f96`) — `emitBackEdgeInterruptPoll` at
-      the 3 br/br_if-to-loop sites → POST-frame stub (fb=frame_bytes, separate
-      `back_edge_interrupt_fixups`); a tight no-call `(loop)` traps on arm64. The
-      paired `skip.blocker(.@"D-314")` arch-gates the loop-trap test to aarch64.
-      (1) **REMAINING codegen: x86_64 loop back-edge poll** — mirror the arm64
-          helper at the x86_64 br/br_if-to-loop sites + a 2nd op_control stub with
-          `ADD RSP, frame_bytes` before POP/RET. GOTCHA: a no-call loop fn has NO
-          R15 (`uses_runtime_ptr=false`) → FORCE R15 setup when the fn contains a
-          loop (usage.usesRuntimePtr prescan). Win64-prologue-risk; the windows
-          gate is RESUMED (sentinel deleted 2026-06-12 — windowsmini is FREE, CWFS
-          uses tag refs, no contention). Then ungate the loop test + cover
-          br_table-to-loop (both arches). Facade `--engine jit` interrupt wiring
-          rides (2). Poll+stub are unconditional per fn — measure the code-size
-          bloat, consider an opt-in compile flag (perf-measure-first).
-      (2) **#3a-4 CLI/C-API surface** — `zwasm.h` setters + CLI `--fuel`/
-          `--timeout`(timer)/`--max-memory`. Small; the Zig facade already has it
-          (TrapKind.interrupted itself landed @5564c553).
-      (3) **Design upgrades** (ADR-0179 Revision): epoch-COUNTER (per-store deadline
-          ticks) over the v0 binary flag; pre-instantiate StoreLimits config over the
-          post-instantiate setter [FACADE done — `Module.InstantiateOpts.{fuel,
-          max_memory_pages}` (finite defaults) arm the Runtime before start + initial
-          mem alloc; C-API/CLI + a runtime-level StoreLimits struct remain]; a
-          table-elements limit.
-      SEAM: the facade budget mutators (`zwasm/instance.zig` setFuel/
-      setMemoryPagesLimit/interrupt) now `assert(handle.runtime != null)` — the
-      interp-only invariant is enforced, so when (1) wires a JIT-backed facade
-      instance (`runtime == null`) it MUST route to the JIT limit path, not no-op.
-      DISCHARGE: pick (2) anytime (cheap); (1)+(3-remainder) as a focused
-      windows-resumed bundle. SCOPE: the broader "JIT reachable from the facade/
-      C-API at all" effort (generic invoke-by-name-with-args ABI trampoline,
-      instantiate fork, accessor runtime==null branches, Linker host-import JIT
-      wiring, Win64 codegen) is assessed in
-      .dev/architecture/jit_facade_integration_scope.md — sandboxing (this row)
-      is one slice of it; the gating spike is the generic argument-ABI trampoline.
-      CW-V1 IMPACT = NONE (verified 2026-06-08): cw consumes via the Zig facade
-      (Engine.init -> compile -> Instance), which ALWAYS yields an interp instance
-      (the facade never produces a JIT instance), so cw's untrusted code already
-      runs sandboxed on interp. JIT sandboxing matters only for a future
-      --engine-jit-from-API path. Priority for cw v1: LOW.
+      note (RE-SCOPED 2026-06-12 — the sandboxing-triad bundle d314-jit-sandbox
+      CLOSED; what remains here is the long-tail design-upgrade list). SHIPPED,
+      3-host green: interrupt/cancel + fuel + memory-cap on BOTH engines + CLI +
+      C-API — JIT prologue interrupt poll both arches (c1a9da15/6d56f517), loop
+      back-edge interrupt polls + R15-forcing + RUNNING-loop thread-raiser tests
+      (72801881/b365c190), JIT fuel via fuel_metered/fuel_cell polls beside the
+      interrupt polls with kind 17 = TrapKind.out_of_fuel (a6d7ae72, design rev
+      in ADR-0179), JIT memory cap via MemGrowCtx.host_max_pages (866d784e), CLI
+      --fuel/--timeout/--max-memory on both engines (ce2ded2b, io-event-loop
+      timer -> shared interrupt flag), C-API zwasm_instance_* setters +
+      zwasm_trap_kind + real zwasm.h (f1a88e77).
+      REMAINING (design upgrades, demand-driven):
+      (a) epoch-COUNTER (per-store deadline ticks) over the v0 binary flag +
+          a runtime-level pre-instantiate StoreLimits struct (ADR-0179 draft).
+      (b) JIT-side table-elements limit (interp setTableElementsLimit = D-316;
+          jitTableGrow caps at descriptor .max only).
+      (c) .cwasm + component CLI limits threading (today the CLI REFUSES the
+          flags there loudly rather than running unsandboxed).
+      (d) facade/C-API JIT-backed instances (the SEAM asserts in
+          zwasm/instance.zig stay; rides
+          .dev/architecture/jit_facade_integration_scope.md — the gating spike
+          is the generic argument-ABI trampoline).
+      (e) JIT poll code-size: prologue ~60 B + per-back-edge 48 B (arm64) /
+          62 B (x86_64) + stubs, unconditional per fn — MEASURE on a realworld
+          corpus, consider an opt-in compile flag (perf-measure-first).
+      CW-V1 IMPACT = NONE (cw consumes the interp-only facade; its untrusted
+      code already runs sandboxed).
     first_raised: "2026-06-08"
-    last_reviewed: "2026-06-13"
+    last_reviewed: "2026-06-12"
     refs: |-
-      .dev/architecture/jit_facade_integration_scope.md (full scope assessment); .dev/decisions/0179_execution_interruption_resource_limits.md (Revision); docs/migration_v1_to_v2.md §1; src/zwasm/instance.zig (facade methods); src/runtime/runtime.zig (interrupt/fuel/store_memory_pages_max); src/engine/setup.zig (JIT mem_max_pages); commit fb18bd82 (bundle memo)
+      .dev/decisions/0179_execution_interruption_resource_limits.md (Revisions 2026-06-12); .dev/architecture/jit_facade_integration_scope.md; include/zwasm.h; src/api/zwasm_ext.zig; src/engine/runner.zig (RunLimits); src/cli/run.zig (Limits)
   - id: "D-315"
     layer: "code"
     status: "blocked-by"
