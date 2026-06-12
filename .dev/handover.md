@@ -18,21 +18,9 @@
   @2976e380 (tinygo hello + fs e2e; start-via-import fix; CLI --dir) ·
   d3-8-sockets-tcp @edd5eaad (ADR-0180 Phase 1: TcpSocket + real poll(2)
   readiness; rust TCP client e2e) · E3-CM-validation (rules 1-8).
-- **ADR-0181 LANDED (user-approved 2026-06-13)**: version lines retired
-  from the ROADMAP; §1.2 floor gained CM + WASI-0.2 wasmtime-equivalent
-  rows; §1.3→capability backlog; optimising tier → §3.2 permanent-out;
-  §3.3/§7/§8 reality-synced (atomics=instruction-set shipped, threaded
-  EXECUTION deferred; native P2 host described). New D-320 (note):
-  lightweight axis needs a binary-size/poll-code-size bench series.
-- **ADR-0182 LANDED**: component support default-ON (`-Dcomponent=false`
-  = real lean opt-out; CM subsystem measured at 156 KB / +8.3%). D-321
-  (gate rot) discharged; D-320 size series live
-  (`scripts/record_binary_size.sh`, base 1.94 MB / lean 1.78 MB).
-- **Rule-5 grammar COMPLETE** (dep/url/integrity/semver/projection +
-  import-only forms): corpus **136 pass / 0 fail / 19 skip-impl**. Win
-  batch at 43ab91a8: all suites green on win64 incl. component corpus;
-  the one red was the NEW TCP e2e lacking its D-319 gate — fixed
-  @d0cd9f67 (next batch verifies + --record).
+- ADR-0181 (ROADMAP reality-sync; version lines retired) + ADR-0182
+  (component default-ON; D-320 size series) + rule-5 grammar all LANDED
+  — detail in git log / the ADRs.
 - **typed-component-api bundle CLOSED (exit MET)**: ADR-0183 F1–F4
   shipped — ComponentValue + binary introspection + canonical-ABI call
   flattening (+ canon memory-staleness fix) + invokeTyped /
