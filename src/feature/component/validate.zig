@@ -16,6 +16,7 @@
 //! Zone 1 (`feature/component/`): pure logic, no host orchestration (ADR-0172).
 
 const std = @import("std");
+const decode = @import("decode.zig");
 const types = @import("types.zig");
 
 const TypeInfo = types.TypeInfo;
@@ -46,6 +47,63 @@ pub fn validate(info: *const TypeInfo) Error!void {
         if (ex.desc) |d| try checkExternDesc(d, type_space_len);
         try checkExternName(ex.name);
     }
+    try checkExportedTypes(info);
+}
+
+/// Rule 7: a type export must be "valid to be used as export"
+/// (type-export-restrictions.wast). When the exported index is a local
+/// structural def, every type reference inside it must resolve to a NAMED
+/// type-space entry (minted by a type import/export/alias) — referencing an
+/// anonymous local def leaks a nameless type. `.named` exports re-export an
+/// already-vetted name and pass. Nested instance/component type scopes stay
+/// deferred (consistent with rule 1).
+fn checkExportedTypes(info: *const TypeInfo) Error!void {
+    const entries = info.type_space.items;
+    for (info.exports.items) |ex| {
+        if (std.meta.activeTag(ex.sort) != .type) continue;
+        if (ex.index >= entries.len) return Error.InvalidTypeIndex;
+        switch (entries[ex.index]) {
+            .named => {},
+            .def => |d| try checkDefTypeRefsNamed(info, info.deftypes.items[d]),
+        }
+    }
+}
+
+fn checkDefTypeRefsNamed(info: *const TypeInfo, dt: DefType) Error!void {
+    switch (dt) {
+        .value => |vt| try checkValTypeNamed(info, vt),
+        .func => |ft| {
+            for (ft.params) |p| try checkValTypeNamed(info, p.ty);
+            if (ft.result) |r| try checkValTypeNamed(info, r);
+        },
+        .record => |rec| for (rec.fields) |f| try checkValTypeNamed(info, f.ty),
+        .tuple => |t| for (t.types) |vt| try checkValTypeNamed(info, vt),
+        .list => |l| try checkValTypeNamed(info, l.element.*),
+        .option => |o| try checkValTypeNamed(info, o.payload.*),
+        .variant => |v| for (v.cases) |c| {
+            if (c.payload) |p| try checkValTypeNamed(info, p);
+        },
+        .result => |res| {
+            if (res.ok) |ok| try checkValTypeNamed(info, ok);
+            if (res.err) |er| try checkValTypeNamed(info, er);
+        },
+        .own, .borrow => |idx| try checkRefNamed(info, idx),
+        .enum_, .flags => {},
+        // Nested type scopes — deferred (consistent with rule 1).
+        .instance_type, .component_type => {},
+    }
+}
+
+fn checkValTypeNamed(info: *const TypeInfo, vt: ValType) Error!void {
+    switch (vt) {
+        .primitive => {},
+        .type_index => |idx| try checkRefNamed(info, idx),
+    }
+}
+
+fn checkRefNamed(info: *const TypeInfo, idx: u32) Error!void {
+    if (idx >= info.type_space.items.len) return Error.InvalidTypeIndex;
+    if (std.meta.activeTag(info.type_space.items[idx]) != .named) return Error.InvalidExternDesc;
 }
 
 /// Rule 5: name format. Every label-carrying deftype member (func param,
@@ -241,6 +299,44 @@ fn checkValType(vt: ValType, type_space_len: u32) Error!void {
         .primitive => {},
         .type_index => |idx| if (idx >= type_space_len) return Error.InvalidTypeIndex,
     }
+}
+
+/// Decode a component binary (magic + layer preamble prepended) and validate.
+fn validateBytes(bytes: []const u8) !void {
+    var comp = try decode.decode(std.testing.allocator, bytes);
+    defer comp.deinit(std.testing.allocator);
+    var info = try types.decodeTypeInfo(std.testing.allocator, &comp);
+    defer info.deinit();
+    try validate(&info);
+}
+
+test "rule 7: exported local type may reference named types only" {
+    const preamble = [_]u8{ 0x00, 0x61, 0x73, 0x6d, 0x0d, 0x00, 0x01, 0x00 };
+    // type[0] = (record (field "f" u32)) — local def.
+    const type_a = [_]u8{ 0x01, 0x72, 0x01, 0x01, 'f', 0x79 };
+    // (export "t" (type 0)) — mints type[1] as NAMED.
+    const export_t = [_]u8{ 0x01, 0x00, 0x01, 't', 0x03, 0x00, 0x00 };
+
+    // VALID: type[2] = (record (field "g" (type 1))) references the NAMED
+    // export-minted index; exporting it is allowed.
+    const type_named_ref = [_]u8{ 0x01, 0x72, 0x01, 0x01, 'g', 0x01 };
+    const export_g2 = [_]u8{ 0x01, 0x00, 0x01, 'g', 0x03, 0x02, 0x00 };
+    const valid = preamble ++
+        [_]u8{ 7, type_a.len } ++ type_a ++
+        [_]u8{ 11, export_t.len } ++ export_t ++
+        [_]u8{ 7, type_named_ref.len } ++ type_named_ref ++
+        [_]u8{ 11, export_g2.len } ++ export_g2;
+    try validateBytes(&valid);
+
+    // INVALID: type[2] = (record (field "g" (type 0))) references the
+    // anonymous local def — "type not valid to be used as export".
+    const type_local_ref = [_]u8{ 0x01, 0x72, 0x01, 0x01, 'g', 0x00 };
+    const invalid = preamble ++
+        [_]u8{ 7, type_a.len } ++ type_a ++
+        [_]u8{ 11, export_t.len } ++ export_t ++
+        [_]u8{ 7, type_local_ref.len } ++ type_local_ref ++
+        [_]u8{ 11, export_g2.len } ++ export_g2;
+    try std.testing.expectError(Error.InvalidExternDesc, validateBytes(&invalid));
 }
 
 test "rule 5: label grammar boundaries" {

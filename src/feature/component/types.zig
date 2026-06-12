@@ -353,6 +353,15 @@ pub const ComponentInlineExport = struct {
     index: u32,
 };
 
+/// One entry in the component **type index space**, in definition order. A
+/// type index is minted by a `type`-section def (`.def` = index into
+/// `deftypes`) or by a type-sort `alias` / type `import` / type `export`
+/// (`.named` — the type is introduced under a name).
+pub const TypeSpaceEntry = union(enum) {
+    def: u32,
+    named,
+};
+
 /// One `instance` (`Binary.md` §Instance, component level): instantiate a child
 /// component with `with` args, or a synthetic instance of inline exports.
 pub const ComponentInstanceDef = union(enum) {
@@ -368,7 +377,15 @@ pub const TypeInfo = struct {
     /// `import`s, and type `export`s. `deftypes.len` alone counts only the type
     /// section, so a valid index pointing at an aliased/imported type would look
     /// out-of-bounds; validation (ADR-0176) bounds-checks against THIS instead.
+    /// Always `type_space.items.len`.
     type_space_len: u32,
+    /// The component type index space in definition order: each entry records
+    /// whether its index was minted by a `type`-section def (`.def` = index
+    /// into `deftypes`) or introduced under a name by a type-sort `alias` /
+    /// type `import` / type `export` (`.named`). ADR-0176 rule 7 ("type not
+    /// valid to be used as export") lets exported types reference `.named`
+    /// entries only.
+    type_space: std.ArrayList(TypeSpaceEntry),
     imports: std.ArrayList(Import),
     exports: std.ArrayList(Export),
     canons: std.ArrayList(Canon),
@@ -1106,6 +1123,7 @@ pub fn decodeTypeInfo(parent: Allocator, component: *const decode.Component) Err
     var core_tables: std.ArrayList(AliasTarget) = .empty;
     var component_funcs: std.ArrayList(ComponentFuncDef) = .empty;
     var instance_origins: std.ArrayList(InstanceOrigin) = .empty;
+    var type_space: std.ArrayList(TypeSpaceEntry) = .empty;
 
     for (component.sections.items) |sec| {
         // Track per-kind counts before this section so the newly-decoded entries
@@ -1117,6 +1135,8 @@ pub fn decodeTypeInfo(parent: Allocator, component: *const decode.Component) Err
         const canons_before = canons.items.len;
         const aliases_before = aliases.items.len;
         const cinst_before = component_instances.items.len;
+        const deftypes_before = deftypes.items.len;
+        const exports_before = exports.items.len;
         switch (sec.id) {
             .type => try decodeTypeSection(a, &deftypes, sec.body),
             .import => try decodeImportSection(a, &imports, sec.body),
@@ -1128,9 +1148,13 @@ pub fn decodeTypeInfo(parent: Allocator, component: *const decode.Component) Err
             else => {}, // other sections decoded in later chunks
         }
         switch (sec.id) {
+            .type => for (deftypes.items[deftypes_before..], deftypes_before..) |_, abs| {
+                try type_space.append(a, .{ .def = @intCast(abs) });
+            },
             .import => for (imports.items[imports_before..], imports_before..) |imp, abs| switch (imp.desc) {
                 .func => try component_funcs.append(a, .{ .import = @intCast(abs) }),
                 .instance => try instance_origins.append(a, .{ .import = imp.name }),
+                .type_bound => try type_space.append(a, .named),
                 else => {},
             },
             .canon => for (canons.items[canons_before..], canons_before..) |c, abs| switch (c) {
@@ -1148,30 +1172,24 @@ pub fn decodeTypeInfo(parent: Allocator, component: *const decode.Component) Err
                 },
                 .func => try component_funcs.append(a, .{ .alias = al.target }),
                 .instance => try instance_origins.append(a, .local),
+                .type => try type_space.append(a, .named),
                 else => {},
             },
             .instance => for (component_instances.items[cinst_before..]) |_| try instance_origins.append(a, .local),
+            .@"export" => for (exports.items[exports_before..]) |ex| {
+                if (std.meta.activeTag(ex.sort) == .type) try type_space.append(a, .named);
+            },
             else => {},
         }
-    }
-
-    // The type-index space = type-section defs + type-sort aliases + type
-    // imports + type exports (the four forms that mint a type index).
-    var type_space_len: u32 = @intCast(deftypes.items.len);
-    for (aliases.items) |al| {
-        if (std.meta.activeTag(al.sort) == .type) type_space_len += 1;
-    }
-    for (imports.items) |imp| {
-        if (std.meta.activeTag(imp.desc) == .type_bound) type_space_len += 1;
-    }
-    for (exports.items) |ex| {
-        if (std.meta.activeTag(ex.sort) == .type) type_space_len += 1;
     }
 
     return .{
         .arena = arena,
         .deftypes = deftypes,
-        .type_space_len = type_space_len,
+        // The type-index space = type-section defs + type-sort aliases + type
+        // imports + type exports (the four minting forms), in definition order.
+        .type_space_len = @intCast(type_space.items.len),
+        .type_space = type_space,
         .imports = imports,
         .exports = exports,
         .canons = canons,
@@ -1279,6 +1297,28 @@ test "round-trip: an imported AND exported func type resolves via the index spac
     // both the import and export resolve to the same func deftype.
     const dt = info.deftype(info.imports.items[0].desc.func).?;
     try testing.expectEqual(PrimValType.string, dt.func.params[0].ty.primitive);
+}
+
+test "type_space: definition order across def / import / export minting" {
+    // type[0] = (record (field "f" u32)) — local def.
+    const type_body = [_]u8{ 0x01, 0x72, 0x01, 0x01, 'f', 0x79 };
+    // import "t" (type (eq 0)) — mints type[1] as NAMED.
+    const import_body = [_]u8{ 0x01, 0x00, 0x01, 't', 0x03, 0x00, 0x00 };
+    // export "u" (type 1) — mints type[2] as NAMED.
+    const export_body = [_]u8{ 0x01, 0x00, 0x01, 'u', 0x03, 0x01, 0x00 };
+    const bytes = comptime buildComponent(&.{
+        .{ 7, &type_body },
+        .{ 10, &import_body },
+        .{ 11, &export_body },
+    });
+    var info = try decodeBoth(bytes);
+    defer info.deinit();
+
+    try testing.expectEqual(@as(u32, 3), info.type_space_len);
+    try testing.expectEqual(@as(usize, 3), info.type_space.items.len);
+    try testing.expectEqual(@as(u32, 0), info.type_space.items[0].def);
+    try testing.expectEqual(std.meta.Tag(TypeSpaceEntry).named, std.meta.activeTag(info.type_space.items[1]));
+    try testing.expectEqual(std.meta.Tag(TypeSpaceEntry).named, std.meta.activeTag(info.type_space.items[2]));
 }
 
 test "export with no externdesc (optional absent)" {
