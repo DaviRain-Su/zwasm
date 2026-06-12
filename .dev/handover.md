@@ -39,11 +39,17 @@
   names, NEW rule-9 instantiate/inline-export/sortidx bounds, rule-3/6
   count-0 outer-alias existence) → **corpus 105 pass / 0 fail / 30
   reasoned skip-impl** (was 18 pass). test-all+lint green.
+- **ADR-0181 LANDED (user-approved 2026-06-13)**: version lines retired
+  from the ROADMAP; §1.2 floor gained CM + WASI-0.2 wasmtime-equivalent
+  rows; §1.3→capability backlog; optimising tier → §3.2 permanent-out;
+  §3.3/§7/§8 reality-synced (atomics=instruction-set shipped, threaded
+  EXECUTION deferred; native P2 host described). New D-320 (note):
+  lightweight axis needs a binary-size/poll-code-size bench series.
 - **NEXT (CM campaign)**: ADR-0180 Phase-2 listeners (accept/listen +
   windows WSAPoll D-319), or close the 30 skip-impl gaps (nested-scope
-  deep refs is the biggest cluster). Secondary: D-318, D-314, D-251.
-- **USER STOP 2026-06-13**: loop paused on user request after this
-  chunk (no re-arm); resume via `/continue`.
+  deep refs is the biggest cluster), or D-320 size-series (cheap
+  infrastructure chunk). Secondary: D-318, D-314, D-251. Loop RESUMED
+  per user directive (2026-06-13 「どんどん進めて」).
 
 ## Sandboxing bundle d314-jit-sandbox — CLOSED 2026-06-12
 

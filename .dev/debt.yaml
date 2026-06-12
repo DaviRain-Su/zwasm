@@ -760,6 +760,21 @@ entries:
     last_reviewed: "2026-05-29"
     refs: |-
       `src/runtime/instance/instantiate.zig` frontendValidate; `src/zwasm/engine.zig` compile; `src/diagnostic/diagnostic.zig` setDiag/lastDiagnostic; `.dev/lessons/2026-05-29-gc-corpus-block-is-validate-not-parse.md`
+  - id: "D-320"
+    layer: "bench"
+    status: "note"
+    description: |-
+      note (ADR-0181): "lightweight" is the weakest-instrumented axis of the 完成形 bar —
+      no binary-size series exists in the bench history, and the JIT sandbox poll
+      code-size (D-314 item e) is unmeasured. Discharge: add a size series (release
+      zwasm binary + optionally per-feature -D builds) to bench/results recording, and
+      record the poll code-size measurement; then "lean-but-complete" is observed, not
+      assumed.
+    first_raised: "2026-06-13"
+    last_reviewed: "2026-06-13"
+    refs: |-
+      ADR-0181 Consequences; D-314 (e); bench/ history
+
   - id: "D-319"
     layer: "wasi"
     status: "note"
