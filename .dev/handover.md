@@ -21,17 +21,19 @@
   (both arches) — renamed that test to "R15-forcing"; the real back-edge net =
   2 RUNNING-loop tests (FlagRaiser thread + INFINITE loop/br_table guests;
   back-edge regression = hang-as-failure). TDD red observed for both chunks
-  (Rosetta completes-42 / arm64 hang exit-124). **NEXT = #3b fuel on JIT — design
-  PINNED in ADR-0179 rev 2026-06-12** (survey done): per-poll-site
-  decrement-by-1 (v1 parity; NOT wasmtime per-op costs — P3/P6 conflict),
-  `JitRuntime.fuel_ptr: ?*i64` TRAILING field + offset, poll folds in BESIDE
-  the #3a interrupt polls (prologue + back-edges, both arches; scratch R11 /
-  X16-X17), `SUB [ptr],1` + sign-check → code **17** = NEW
-  `TrapKind.out_of_fuel` (+ mapInterpTrap OutOfFuel arm + runner trapKindName
-  arm — TrapKind-widening lesson!), stubs mirror #3a (back-edge POST-frame /
-  prologue fb=0), facade setFuel + InstantiateOpts.fuel arm the cell when
-  engine=jit. Tests mirror #3a (fuel=small traps 17 / fuel=big completes +
-  remaining decreased). Then #3c-2 mem-cap → #3a-4 CLI. **Code-size**: poll
+  (Rosetta completes-42 / arm64 hang exit-124). **#3b fuel-on-JIT DONE
+  `a6d7ae72`** (both arches green 2678/0 + Rosetta; exact-crossing test pins
+  units = prologue + back-edge crossings; ADR-0179 rev refined in-commit:
+  `fuel_metered` u32 flag + `fuel_cell` i64 IN JitRuntime, NOT a self-ref
+  fuel_ptr — RuntimeOwned moves by value, D-215; new x86_64 encoder
+  `encSubMem64Disp32Imm8`; kind 17 = TrapKind.out_of_fuel wired interp+JIT+
+  runner). `JitInstance.setFuel/fuelRemaining`; facade engine=jit arming
+  joins #3a-4. **NEXT = #3c-2 mem-cap on JIT** — likely HOST-side only (JIT
+  memory.grow already callouts through `memory_grow_fn` [R15+off] → check
+  whether the grow host fn (MemGrowCtx / jitGrowMemory in setup.zig) can
+  honour the interp's `setMemoryPagesLimit` cap; survey first, probably no
+  codegen). Then #3a-4 CLI/C-API surface (--fuel/--timeout/--max-memory +
+  zwasm.h setters + facade engine=jit arming). **Code-size**: poll
   +stub unconditional per fn — measure, consider opt-in flag (perf-measure-first).
   **GATE NOTE**: the 3 D-311 raw-entry-call tests (linker×2/entry-f32,
   releasesafe_jit_failures.md) crash SEED-FLAKILY in `zig build test` (undefined-
@@ -53,32 +55,19 @@ gaps). **Now wasm-3.0 JIT mode = assert_return 880/0 on BOTH arm64 + x86_64**,
 matching interp. Commits `e758412a..9a9b46de` pushed, **ubuntu `test-all` OK
 @9a9b46de** (no release — ADR-0156; windows suspended ADR-0174 — now resumable).
 
-**Shipped (detail in git log)**: GC-ref-through-table JIT corruption `9a9b46de`
-(arm64 GcRef spill STR-W→STR-X + x86_64 table.set r10/r11 descriptor-vs-spill-stage
-clobber → snapshot idx/val first; D-317 re-framed from "call_indirect subtype");
-memory64 bounds `ea+size` 2^64-overflow `fc5be95e` (ADDS+carry, both arches;
-reopened+fixed D-234, mis-closed 6 cycles — lesson Rule 6: isolation must replay
-boundary INPUT values); test capture-allocator mismatch `008dc3be` (ubuntu RED);
-D-237 spec-runner double-free `314a0c97`; 36 stale multi-memory skips `93792696`;
-D-299 stale row `e758412a`. **D-318** (note): Rosetta x86_64-macos FULL corpus-JIT
-SEGVs (pre-existing, local-diagnostic only, not a gate). Remaining jit-mode skips
-are eligibility-gated (multi-memory/v128/multi-value/cross-module), NOT correctness.
+**Shipped (detail in git log)**: GC-ref-through-table JIT corruption `9a9b46de`;
+memory64 `ea+size` 2^64-overflow `fc5be95e` (reopened+fixed D-234); capture-
+allocator mismatch `008dc3be`; D-237 double-free `314a0c97`; 36 stale multi-
+memory skips `93792696`. **D-318** (note): Rosetta x86_64-macos FULL corpus-JIT
+SEGVs (pre-existing, local-diagnostic only). Remaining jit-mode skips are
+eligibility-gated, NOT correctness.
 
-**Prior pass — embedder-hardening (2026-06-08, `14de5430..d6699b00`, pushed,
-ubuntu-green @d6699b00)**: facade `InstantiateOpts` fuel + `max_memory_pages`
-budgets (ADR-0179 rev); decoder robustness (`checkVecCount`, locals cap,
-interp-path memory ceiling); table-min regression fix; D-315 plant-time symlink
-refuse; D-316 `setTableElementsLimit`; rec-group fuzz seeds; 18 Actions SHA-pinned.
-Detail in git log + `private/` (gitignored).
-
-**Prior Tier-1 / release-prep (all ubuntu-green, pushed)**: #2 static-lib + extlink hardening
-`45438b7a` (D-312, GNU-stack=zig-upstream); **ADR-0179** sandboxing design;
-**interp-engine sandboxing TRIAD** via the Zig facade — interrupt/cancel/timeout
-`Instance.interrupt()` (#3a-1/2 `1001fa0e`/`460210f1`), memory-limit
-`setMemoryPagesLimit` (#3c-1 `7216e7b1`), fuel `setFuel` (#3b `58479dd6`);
-**Phase B** honest gap analysis in `docs/migration_v1_to_v2.md`; **Phase D**
-README release polish. Earlier: musl (ADR-0178), test-noise cleanup,
-`docs/v1_contributor_history.md` + migration-guide rewrite.
+**Prior passes (all green, pushed; detail in git log)**: embedder-hardening
+2026-06-08 `14de5430..d6699b00` (InstantiateOpts budgets, decoder robustness,
+D-315/D-316, Actions SHA-pinned); Tier-1 release-prep — #2 static-lib `45438b7a`
+(D-312), **ADR-0179** design + **interp sandboxing TRIAD** via the facade
+(interrupt `1001fa0e`/`460210f1`, mem-limit `7216e7b1`, fuel `58479dd6`),
+migration-guide Phase B/D, musl (ADR-0178).
 
 **Documented follow-ons (need a user decision / focused effort — NOT v0.1-blocking)**:
 - **JIT-engine sandboxing**: extend interrupt/fuel/mem-cap to `--engine jit`.
