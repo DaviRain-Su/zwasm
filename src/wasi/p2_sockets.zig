@@ -16,6 +16,17 @@
 //! the poll(2)-honest pollables still comes from `posix.poll` on the
 //! socket handle (`ready`).
 //!
+//! Phase-2 DIVERGENCE (same root cause): the pinned stdlib has no
+//! separate bind/listen steps for stream sockets (`netListenIp` is
+//! socket+bind+listen atomically; `IpAddress.bind` is the DATAGRAM path),
+//! so `start-bind` only validates + stores the address and the OS bind
+//! executes inside `start-listen`. Consequences, both truthful:
+//! bind-level failures (address-in-use, ...) surface at `finish-listen`
+//! instead of `finish-bind`, and `local-address` of a `bound`-but-not-
+//! listening socket reports the REQUESTED port (an ephemeral `:0` stays 0
+//! until listen resolves it). A connected client's local-address is
+//! `not-supported` (no getsockname in the pinned stdlib).
+//!
 //! Zone 2 (`src/wasi/`). `std.Io.net` + `std.posix.poll` only — no new
 //! libc surface (`libc_boundary`).
 
@@ -86,45 +97,52 @@ pub const POLL_OUT: i16 = switch (builtin.os.tag) {
     else => posix.POLL.OUT,
 };
 
-/// `wasi:sockets/tcp` documented state machine (client subset; `listening`
-/// arrives with ADR-0180 Phase 2).
-pub const TcpState = enum { unbound, bind_started, bound, connect_started, connected, closed };
+/// `wasi:sockets/tcp` documented state machine.
+pub const TcpState = enum { unbound, bind_started, bound, connect_started, connected, listen_started, listening, closed };
 
 /// One live TCP socket: spec state + the `std.Io.net` objects backing it.
-/// The OS socket is created lazily by bind/connect (`std.Io.net` has no
+/// The OS socket is created lazily by connect/listen (`std.Io.net` has no
 /// bare-socket constructor; wasmtime is lazy the same way). The component
 /// layer owns the resource handle; this struct owns the OS handle(s).
 pub const TcpSocket = struct {
     family: AddressFamily,
     state: TcpState = .unbound,
-    /// Set from `.bound` (start-bind path).
-    socket: ?net.Socket = null,
+    /// Stored by start-bind; the OS bind executes inside start-listen
+    /// (see the Phase-2 DIVERGENCE note in the module docstring).
+    bound_addr: ?net.IpAddress = null,
     /// Set once the connect succeeded (start-connect path).
     stream: ?net.Stream = null,
+    /// Set once the listen succeeded (start-listen path).
+    server: ?net.Server = null,
     /// Establishment failure cached by start-connect, surfaced by
     /// finish-connect (the spec's two-phase contract).
     connect_err: ?anyerror = null,
+    /// Bind/listen failure cached by start-listen, surfaced by finish-listen.
+    listen_err: ?anyerror = null,
+    /// `set-listen-backlog-size` before listen; applied at the OS listen.
+    backlog: ?u31 = null,
 
     /// `tcp-create-socket.create-tcp-socket` — records the family; the OS
-    /// socket is created by the first bind/connect.
+    /// socket is created by the first connect/listen.
     pub fn create(family: AddressFamily) TcpSocket {
         return .{ .family = family };
     }
 
     pub fn deinit(self: *TcpSocket, io: std.Io) void {
         if (self.stream) |s| s.close(io);
-        if (self.socket) |s| s.close(io);
+        if (self.server) |*s| s.deinit(io);
         self.stream = null;
-        self.socket = null;
+        self.server = null;
         self.state = .closed;
     }
 
-    /// `tcp.start-bind`. The bind executes here; the two-step spec shape is
-    /// honoured by the state transitions.
+    /// `tcp.start-bind`. Validates + stores the address; the OS bind is
+    /// deferred to start-listen (Phase-2 DIVERGENCE, module docstring).
     pub fn startBind(self: *TcpSocket, io: std.Io, addr: net.IpAddress) !void {
+        _ = io;
         if (self.state != .unbound) return error.InvalidState;
         if (!familyMatches(self.family, addr)) return error.InvalidArgument;
-        self.socket = try addr.bind(io, .{ .mode = .stream, .protocol = .tcp });
+        self.bound_addr = addr;
         self.state = .bind_started;
     }
 
@@ -132,6 +150,68 @@ pub const TcpSocket = struct {
     pub fn finishBind(self: *TcpSocket) !void {
         if (self.state != .bind_started) return error.NotInProgress;
         self.state = .bound;
+    }
+
+    /// `tcp.start-listen`. The OS socket+bind+listen executes here
+    /// (`netListenIp` is atomic in the pinned stdlib); failures are cached
+    /// for finish-listen (the spec's two-phase contract).
+    pub fn startListen(self: *TcpSocket, io: std.Io) !void {
+        if (self.state != .bound) return error.InvalidState;
+        const addr = self.bound_addr.?; // .bound implies a stored address
+        self.state = .listen_started;
+        var opts: net.IpAddress.ListenOptions = .{ .mode = .stream, .protocol = .tcp };
+        if (self.backlog) |b| opts.kernel_backlog = b;
+        self.server = addr.listen(io, opts) catch |err| {
+            self.listen_err = err;
+            return;
+        };
+    }
+
+    /// `tcp.finish-listen` — the cached start-listen result.
+    pub fn finishListen(self: *TcpSocket) !void {
+        if (self.state != .listen_started) return error.NotInProgress;
+        if (self.listen_err) |err| {
+            self.state = .closed;
+            return err;
+        }
+        self.state = .listening;
+    }
+
+    /// `tcp.set-listen-backlog-size` — stored and applied at the OS listen.
+    /// Updating a LIVE listener is optional per spec; truthful not-supported.
+    pub fn setListenBacklog(self: *TcpSocket, value: u64) !void {
+        if (value == 0) return error.InvalidArgument;
+        switch (self.state) {
+            .listen_started, .listening => return error.OptionUnsupported,
+            .closed => return error.InvalidState,
+            .unbound, .bind_started, .bound, .connect_started, .connected => {},
+        }
+        self.backlog = std.math.cast(u31, value) orelse std.math.maxInt(u31);
+    }
+
+    /// `tcp.accept` — non-blocking: `would-block` unless poll(2) reports a
+    /// queued connection. On success mints the accepted socket as a fresh
+    /// `connected` TcpSocket (the component layer registers the resource
+    /// and pairs the streams, same as finish-connect).
+    pub fn accept(self: *TcpSocket, io: std.Io) !TcpSocket {
+        if (self.state != .listening) return error.InvalidState;
+        const srv = &self.server.?;
+        if (!try pollOnce(srv.socket.handle, POLL_IN)) return error.WouldBlock;
+        const stream = try srv.accept(io);
+        return .{ .family = self.family, .state = .connected, .stream = stream };
+    }
+
+    /// `tcp.local-address`. Listening sockets report the RESOLVED address
+    /// (ephemeral `:0` becomes the real port); `bound` reports the stored
+    /// request; connected clients are not-supported (no getsockname in the
+    /// pinned stdlib — module docstring).
+    pub fn localAddress(self: *TcpSocket) !net.IpAddress {
+        return switch (self.state) {
+            .listening => self.server.?.socket.address,
+            .bound => self.bound_addr.?,
+            .connected => error.OptionUnsupported,
+            .unbound, .bind_started, .connect_started, .listen_started, .closed => error.InvalidState,
+        };
     }
 
     /// `tcp.start-connect`. The synchronous `std.Io.net` connect executes
@@ -177,7 +257,9 @@ pub const TcpSocket = struct {
 
     /// Readiness for the poll(2)-honest pollable (ADR-0180): is the
     /// connected socket ready for `interest` (POLL.IN / POLL.OUT) now?
+    /// A listening socket's POLL.IN = "a connection is queued for accept".
     pub fn ready(self: *TcpSocket, interest: i16) !bool {
+        if (self.state == .listening) return pollOnce(self.server.?.socket.handle, interest);
         const stream = self.connectedStream() orelse return error.InvalidState;
         return pollOnce(stream.socket.handle, interest);
     }
@@ -308,6 +390,88 @@ test "tcp connect to a closed port surfaces connection-refused at finish-connect
     try sock.startConnect(io, .{ .ip4 = net.Ip4Address.loopback(port) });
     try testing.expectError(error.ConnectionRefused, sock.finishConnect());
     try testing.expectEqual(ErrorCode.connection_refused, errorToCode(error.ConnectionRefused));
+}
+
+test "tcp listener lifecycle: bind → listen → accept → echo (ADR-0180 Phase 2)" {
+    if (builtin.os.tag == .windows) return skip.blocker(.@"D-319");
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    var listener = TcpSocket.create(.ipv4);
+    defer listener.deinit(io);
+    try listener.setListenBacklog(8);
+    try listener.startBind(io, .{ .ip4 = net.Ip4Address.loopback(0) });
+    try listener.finishBind();
+    // bound (pre-listen): local-address reports the REQUESTED port (0 —
+    // the deferred-bind DIVERGENCE; resolution happens at listen).
+    try testing.expectEqual(@as(u16, 0), (try listener.localAddress()).getPort());
+    try listener.startListen(io);
+    try listener.finishListen();
+    try testing.expectEqual(TcpState.listening, listener.state);
+
+    // listening: local-address now carries the RESOLVED ephemeral port.
+    const local = try listener.localAddress();
+    const port = local.getPort();
+    try testing.expect(port != 0);
+
+    // No queued connection yet → accept is would-block, readiness false.
+    try testing.expect(!(try listener.ready(POLL_IN)));
+    try testing.expectError(error.WouldBlock, listener.accept(io));
+
+    // A client connects (kernel backlog completes the handshake).
+    var client = TcpSocket.create(.ipv4);
+    defer client.deinit(io);
+    try client.startConnect(io, .{ .ip4 = net.Ip4Address.loopback(port) });
+    try client.finishConnect();
+
+    var attempts: u32 = 0;
+    while (!(try listener.ready(POLL_IN)) and attempts < 500) : (attempts += 1) {
+        try io.sleep(.{ .nanoseconds = 2 * std.time.ns_per_ms }, .awake);
+    }
+    var accepted = try listener.accept(io);
+    defer accepted.deinit(io);
+    try testing.expectEqual(TcpState.connected, accepted.state);
+
+    // Echo through the accepted socket: client → accepted → client.
+    try testing.expectEqual(@as(usize, 4), try client.send(io, "ping"));
+    var srv_buf: [16]u8 = undefined;
+    const got = try accepted.recv(io, &srv_buf);
+    try testing.expectEqualStrings("ping", srv_buf[0..got]);
+    try testing.expectEqual(@as(usize, 4), try accepted.send(io, "pong"));
+    var cli_buf: [16]u8 = undefined;
+    const echoed = try client.recv(io, &cli_buf);
+    try testing.expectEqualStrings("pong", cli_buf[0..echoed]);
+}
+
+test "tcp listener state machine: invalid transitions are rejected" {
+    if (builtin.os.tag == .windows) return skip.blocker(.@"D-319");
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+
+    var sock = TcpSocket.create(.ipv4);
+    defer sock.deinit(io);
+    // listen before bound / finish before start / accept before listening.
+    try testing.expectError(error.InvalidState, sock.startListen(io));
+    try testing.expectError(error.NotInProgress, sock.finishListen());
+    try testing.expectError(error.InvalidState, sock.accept(io));
+    try testing.expectError(error.InvalidState, sock.localAddress());
+    // backlog 0 is invalid-argument per spec.
+    try testing.expectError(error.InvalidArgument, sock.setListenBacklog(0));
+
+    try sock.startBind(io, .{ .ip4 = net.Ip4Address.loopback(0) });
+    try sock.finishBind();
+    try sock.startListen(io);
+    try sock.finishListen();
+    // live listener: backlog update is truthful not-supported.
+    try testing.expectError(error.OptionUnsupported, sock.setListenBacklog(4));
+    // connected-client local-address: not-supported (no getsockname).
+    var client = TcpSocket.create(.ipv4);
+    defer client.deinit(io);
+    try client.startConnect(io, .{ .ip4 = net.Ip4Address.loopback((try sock.localAddress()).getPort()) });
+    try client.finishConnect();
+    try testing.expectError(error.OptionUnsupported, client.localAddress());
 }
 
 test "errorToCode: spec ordinals pinned" {
