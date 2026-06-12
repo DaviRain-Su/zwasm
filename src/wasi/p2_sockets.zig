@@ -356,10 +356,10 @@ test "tcp client lifecycle: create → connect → echo against a loopback liste
     const reply = [_][]const u8{"pong"};
     _ = try io.vtable.netWrite(io.userdata, conn.socket.handle, "", &reply, 1);
     var attempts: u32 = 0;
-    while (!(try client.ready(posix.POLL.IN)) and attempts < 500) : (attempts += 1) {
+    while (!(try client.ready(POLL_IN)) and attempts < 500) : (attempts += 1) {
         try io.sleep(.{ .nanoseconds = 2 * std.time.ns_per_ms }, .awake);
     }
-    try testing.expect(try client.ready(posix.POLL.IN));
+    try testing.expect(try client.ready(POLL_IN));
     var cli_buf: [16]u8 = undefined;
     const echoed = try client.recv(io, &cli_buf);
     try testing.expectEqualStrings("pong", cli_buf[0..echoed]);
@@ -379,7 +379,7 @@ test "tcp state machine: invalid transitions are rejected" {
     var buf: [4]u8 = undefined;
     try testing.expectError(error.InvalidState, sock.recv(io, &buf));
     try testing.expectError(error.InvalidState, sock.send(io, "x"));
-    try testing.expectError(error.InvalidState, sock.ready(posix.POLL.IN));
+    try testing.expectError(error.InvalidState, sock.ready(POLL_IN));
     // family mismatch → invalid-argument.
     try testing.expectError(error.InvalidArgument, sock.startConnect(io, .{ .ip6 = net.Ip6Address.loopback(1) }));
     // bind twice → invalid-state on the second start-bind.
