@@ -75,35 +75,25 @@ assert_invalid test/spec/component-model-assert/official_distilled/import_12.was
 # import.wast: "`HtTp` is not in kebab case"
 assert_invalid test/spec/component-model-assert/official_distilled/import_13.wasm
 # import.wast: "`` is not in kebab case"
-# (fixture import_14.wasm kept for when the gap closes)
-skip-impl import_14: depname/urlname grammar validation deferred (rule 5 accepts =-forms unchecked; ADR-0176)
+assert_invalid test/spec/component-model-assert/official_distilled/import_14.wasm
 # import.wast: "`` is not in kebab case"
-# (fixture import_15.wasm kept for when the gap closes)
-skip-impl import_15: depname/urlname grammar validation deferred (rule 5 accepts =-forms unchecked; ADR-0176)
+assert_invalid test/spec/component-model-assert/official_distilled/import_15.wasm
 # import.wast: "`` is not in kebab case"
-# (fixture import_16.wasm kept for when the gap closes)
-skip-impl import_16: depname/urlname grammar validation deferred (rule 5 accepts =-forms unchecked; ADR-0176)
+assert_invalid test/spec/component-model-assert/official_distilled/import_16.wasm
 # import.wast: "`` is not in kebab case"
-# (fixture import_17.wasm kept for when the gap closes)
-skip-impl import_17: depname/urlname grammar validation deferred (rule 5 accepts =-forms unchecked; ADR-0176)
+assert_invalid test/spec/component-model-assert/official_distilled/import_17.wasm
 # import.wast: "`` is not in kebab case"
-# (fixture import_18.wasm kept for when the gap closes)
-skip-impl import_18: depname/urlname grammar validation deferred (rule 5 accepts =-forms unchecked; ADR-0176)
+assert_invalid test/spec/component-model-assert/official_distilled/import_18.wasm
 # import.wast: "`` is not in kebab case"
-# (fixture import_19.wasm kept for when the gap closes)
-skip-impl import_19: depname/urlname grammar validation deferred (rule 5 accepts =-forms unchecked; ADR-0176)
+assert_invalid test/spec/component-model-assert/official_distilled/import_19.wasm
 # import.wast: "`` is not in kebab case"
-# (fixture import_20.wasm kept for when the gap closes)
-skip-impl import_20: depname/urlname grammar validation deferred (rule 5 accepts =-forms unchecked; ADR-0176)
+assert_invalid test/spec/component-model-assert/official_distilled/import_20.wasm
 # import.wast: "`` is not in kebab case"
-# (fixture import_21.wasm kept for when the gap closes)
-skip-impl import_21: depname/urlname grammar validation deferred (rule 5 accepts =-forms unchecked; ADR-0176)
+assert_invalid test/spec/component-model-assert/official_distilled/import_21.wasm
 # import.wast: "`` is not in kebab case"
-# (fixture import_22.wasm kept for when the gap closes)
-skip-impl import_22: depname/urlname grammar validation deferred (rule 5 accepts =-forms unchecked; ADR-0176)
+assert_invalid test/spec/component-model-assert/official_distilled/import_22.wasm
 # import.wast: "`` is not in kebab case"
-# (fixture import_23.wasm kept for when the gap closes)
-skip-impl import_23: depname/urlname grammar validation deferred (rule 5 accepts =-forms unchecked; ADR-0176)
+assert_invalid test/spec/component-model-assert/official_distilled/import_23.wasm
 # instance-type.wast: "export name `a` conflicts with previous name `a`"
 assert_invalid test/spec/component-model-assert/official_distilled/instance-type_01.wasm
 # instantiate.wast: "function index out of bounds"
@@ -260,3 +250,43 @@ assert_invalid test/spec/component-model-assert/official_distilled/types_13.wasm
 # types.wast: "type index out of bounds"
 # (fixture types_14.wasm kept for when the gap closes)
 skip-impl types_14: nested type-scope deep validation deferred (decl-internal refs; ADR-0176)
+# export.wast: "not a valid export name"
+assert_invalid test/spec/component-model-assert/official_distilled/export_101.wasm
+# export.wast: "not a valid export name"
+assert_invalid test/spec/component-model-assert/official_distilled/export_102.wasm
+# export.wast: "not a valid extern name"
+assert_invalid test/spec/component-model-assert/official_distilled/export_103.wasm
+# export.wast: "not a valid export name"
+assert_invalid test/spec/component-model-assert/official_distilled/export_104.wasm
+# export.wast: "not a valid export name"
+assert_invalid test/spec/component-model-assert/official_distilled/export_105.wasm
+# import.wast: "empty identifier segment"
+assert_invalid test/spec/component-model-assert/official_distilled/import_101.wasm
+# import.wast: "empty identifier segment"
+assert_invalid test/spec/component-model-assert/official_distilled/import_102.wasm
+# import.wast: "trailing characters found: `/qux`"
+assert_invalid test/spec/component-model-assert/official_distilled/import_103.wasm
+# import.wast: "trailing characters found: `x`"
+assert_invalid test/spec/component-model-assert/official_distilled/import_104.wasm
+# import.wast: "url cannot contain `<`"
+assert_invalid test/spec/component-model-assert/official_distilled/import_105.wasm
+# import.wast: "not a valid extern name"
+assert_invalid test/spec/component-model-assert/official_distilled/import_106.wasm
+# import.wast: "not a valid extern name"
+assert_invalid test/spec/component-model-assert/official_distilled/import_107.wasm
+# import.wast: "not a valid extern name"
+assert_invalid test/spec/component-model-assert/official_distilled/import_108.wasm
+# import.wast: "not a valid extern name"
+assert_invalid test/spec/component-model-assert/official_distilled/import_109.wasm
+# import.wast: "not valid base64"
+assert_invalid test/spec/component-model-assert/official_distilled/import_110.wasm
+# import.wast: "not valid base64"
+assert_invalid test/spec/component-model-assert/official_distilled/import_111.wasm
+# import.wast: "not valid base64"
+assert_invalid test/spec/component-model-assert/official_distilled/import_112.wasm
+# import.wast: "not valid base64"
+assert_invalid test/spec/component-model-assert/official_distilled/import_113.wasm
+# import.wast: "not valid base64"
+assert_invalid test/spec/component-model-assert/official_distilled/import_114.wasm
+# import.wast: "unrecognized hash algorithm"
+assert_invalid test/spec/component-model-assert/official_distilled/import_115.wasm

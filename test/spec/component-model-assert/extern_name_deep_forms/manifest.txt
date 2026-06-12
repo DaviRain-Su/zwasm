@@ -2,4 +2,4 @@
 # "not valid base64" / url / locked-dep / unlocked-dep (import.wast +
 # export.wast, ~12 cases). Representative fixture committed as
 # bad_integrity.{wat,wasm} for when the grammars land.
-skip-impl depname/urlname/hashname grammars deferred — validator rule 5 accepts `=`-carrying extern-name forms unchecked (ADR-0176 deferred; false-negative direction only)
+assert_invalid test/spec/component-model-assert/extern_name_deep_forms/bad_integrity.wasm

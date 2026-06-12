@@ -54,11 +54,11 @@ pub fn validate(info: *const TypeInfo) Error!void {
     try checkAliases(info);
     for (info.imports.items) |imp| {
         try checkExternDesc(imp.desc, type_space_len);
-        try checkExternName(imp.name);
+        try checkExternName(imp.name, .import);
     }
     for (info.exports.items) |ex| {
         if (ex.desc) |d| try checkExternDesc(d, type_space_len);
-        try checkExternName(ex.name);
+        try checkExternName(ex.name, .@"export");
         // Export sortidx bounds for the tracked index spaces (corpus
         // "module/instance index out of bounds" top-level classes).
         switch (ex.sort) {
@@ -84,7 +84,7 @@ fn checkDefTypeDeclDups(dt: DefType) Error!void {
             for (it.decls, 0..) |decl, i| {
                 if (decl == .type_def) try checkDefTypeDeclDups(decl.type_def.*);
                 const name = instanceDeclName(decl) orelse continue;
-                try checkExternName(name);
+                try checkExternName(name, .@"export");
                 for (it.decls[0..i]) |prev| {
                     const pn = instanceDeclName(prev) orelse continue;
                     if (std.ascii.eqlIgnoreCase(name, pn)) return Error.InvalidName;
@@ -96,7 +96,7 @@ fn checkDefTypeDeclDups(dt: DefType) Error!void {
                 const inner = componentDeclInstanceDecl(decl);
                 if (inner != null and inner.? == .type_def) try checkDefTypeDeclDups(inner.?.type_def.*);
                 const name = componentDeclName(decl) orelse continue;
-                try checkExternName(name);
+                try checkExternName(name, if (decl == .import_decl) .import else .@"export");
                 for (ct.decls[0..i]) |prev| {
                     const pn = componentDeclName(prev) orelse continue;
                     if (std.ascii.eqlIgnoreCase(name, pn)) return Error.InvalidName;
@@ -172,7 +172,7 @@ fn checkInstances(info: *const TypeInfo) Error!void {
                 }
             },
             .inline_exports => |exps| for (exps, 0..) |e, ei| {
-                try checkExternName(e.name);
+                try checkExternName(e.name, .@"export");
                 if (std.meta.activeTag(e.sort) == .instance and e.index >= i) return Error.InvalidInstance;
                 for (exps[0..ei]) |prev| {
                     if (std.ascii.eqlIgnoreCase(e.name, prev.name)) return Error.InvalidName;
@@ -321,21 +321,39 @@ fn checkDefTypeLabels(dt: DefType) Error!void {
 /// - `[constructor]l` / `[method]l.l` / `[static]l.l`: label parts checked;
 ///   other bracket forms (async) are deferred.
 /// - anything else is a `plainname` → plain kebab label.
-fn checkExternName(name: []const u8) Error!void {
+const ExternNameKind = enum { import, @"export" };
+
+fn checkExternName(name: []const u8, kind: ExternNameKind) Error!void {
     if (name.len == 0) return Error.InvalidName;
-    if (std.mem.findScalar(u8, name, '=') != null) return;
+    if (std.mem.findScalar(u8, name, '=') != null) {
+        // dep/url/integrity forms are IMPORT-ONLY (corpus "not a valid
+        // export name").
+        if (kind == .@"export") return Error.InvalidName;
+        return checkEqualsForm(name);
+    }
     if (std.mem.findScalar(u8, name, ':') != null) {
-        const base = if (std.mem.findScalar(u8, name, '@')) |at| name[0..at] else name;
+        // interfacename: namespace ':' pkg ('/' iface)? '@' version? — at
+        // most ONE projection (corpus "trailing characters found: `/qux`")
+        // and a valid semver after '@'.
+        const base = if (std.mem.findScalar(u8, name, '@')) |at| blk: {
+            try checkSemver(name[at + 1 ..]);
+            break :blk name[0..at];
+        } else name;
+        var slashes: u32 = 0;
+        for (base) |ch| {
+            if (ch == '/') slashes += 1;
+        }
+        if (slashes > 1) return Error.InvalidName;
         var it = std.mem.splitAny(u8, base, ":/");
         while (it.next()) |segment| try checkLabel(segment);
         return;
     }
     if (name[0] == '[') {
         const close = std.mem.findScalar(u8, name, ']') orelse return Error.InvalidName;
-        const kind = name[1..close];
+        const bracket = name[1..close];
         const rest = name[close + 1 ..];
-        if (std.mem.eql(u8, kind, "constructor")) return checkLabel(rest);
-        if (std.mem.eql(u8, kind, "method") or std.mem.eql(u8, kind, "static")) {
+        if (std.mem.eql(u8, bracket, "constructor")) return checkLabel(rest);
+        if (std.mem.eql(u8, bracket, "method") or std.mem.eql(u8, bracket, "static")) {
             const dot = std.mem.findScalar(u8, rest, '.') orelse return Error.InvalidName;
             try checkLabel(rest[0..dot]);
             return checkLabel(rest[dot + 1 ..]);
@@ -343,6 +361,119 @@ fn checkExternName(name: []const u8) Error!void {
         return; // other bracket forms (async lift/lower) — deferred
     }
     return checkLabel(name);
+}
+
+/// Rule 5 completion: the `=`-carrying importname/exportname forms
+/// (Explainer.md `depname` / `urlname` / `hashname` grammars). Dispatch by
+/// prefix; an unknown `=` form is invalid (the spec defines exactly these).
+fn checkEqualsForm(name: []const u8) Error!void {
+    if (std.mem.startsWith(u8, name, "unlocked-dep=")) {
+        const body = try angled(name["unlocked-dep=".len..], true);
+        return checkPkgPath(body, .query);
+    }
+    if (std.mem.startsWith(u8, name, "locked-dep=")) {
+        const rest = name["locked-dep=".len..];
+        if (rest.len < 2 or rest[0] != '<') return Error.InvalidName;
+        const close = std.mem.findScalar(u8, rest, '>') orelse return Error.InvalidName;
+        try checkPkgPath(rest[1..close], .exact);
+        const tail = rest[close + 1 ..];
+        if (tail.len == 0) return;
+        if (!std.mem.startsWith(u8, tail, ",integrity=")) return Error.InvalidName;
+        return checkIntegrity(try angled(tail[",integrity=".len..], true));
+    }
+    if (std.mem.startsWith(u8, name, "url=")) {
+        const body = try angled(name["url=".len..], true);
+        if (body.len == 0) return Error.InvalidName;
+        // The angled parse already rejects a stray '>'; reject embedded '<'.
+        if (std.mem.findScalar(u8, body, '<') != null) return Error.InvalidName;
+        return;
+    }
+    if (std.mem.startsWith(u8, name, "integrity=")) {
+        return checkIntegrity(try angled(name["integrity=".len..], true));
+    }
+    return Error.InvalidName; // unknown `=` form
+}
+
+/// `'<' body '>'` consuming the WHOLE string (the closing bracket is the
+/// final character — a version-range body like `{>=1.2.3}` may itself
+/// contain `>`); returns the body.
+fn angled(s: []const u8, exact: bool) Error![]const u8 {
+    _ = exact;
+    if (s.len < 2 or s[0] != '<' or s[s.len - 1] != '>') return Error.InvalidName;
+    return s[1 .. s.len - 1];
+}
+
+const PkgVersionKind = enum { exact, query };
+
+/// `pkgname(query)` inside a dep form: `namespace ':' pkg ('/' iface)*`
+/// segments are kebab labels; an optional `'@' version` must be non-empty
+/// (semver / range grammars deferred beyond non-emptiness).
+fn checkPkgPath(body: []const u8, kind: PkgVersionKind) Error!void {
+    _ = kind;
+    const path = if (std.mem.findScalar(u8, body, '@')) |at| blk: {
+        if (at + 1 >= body.len) return Error.InvalidName; // empty version
+        break :blk body[0..at];
+    } else body;
+    var colon_parts: u32 = 0;
+    var it = std.mem.splitAny(u8, path, ":/");
+    while (it.next()) |segment| {
+        try checkLabel(segment); // empty segment -> InvalidName via checkLabel
+        colon_parts += 1;
+    }
+    if (colon_parts < 2) return Error.InvalidName; // at least namespace:pkg
+}
+
+/// Minimal semver: `major '.' minor '.' patch` (digits), optional
+/// non-empty `-prerelease` then optional non-empty `+build` (corpus
+/// "@2.0.0+"/"@2.0.0-" trailing-empty classes are invalid).
+fn checkSemver(v: []const u8) Error!void {
+    if (v.len == 0) return Error.InvalidName;
+    var core = v;
+    if (std.mem.findScalar(u8, v, '+')) |plus| {
+        if (plus + 1 >= v.len) return Error.InvalidName;
+        core = v[0..plus];
+    }
+    if (std.mem.findScalar(u8, core, '-')) |dash| {
+        if (dash + 1 >= core.len) return Error.InvalidName;
+        core = core[0..dash];
+    }
+    var parts: u32 = 0;
+    var it = std.mem.splitScalar(u8, core, '.');
+    while (it.next()) |p| {
+        if (p.len == 0) return Error.InvalidName;
+        for (p) |ch| if (!std.ascii.isDigit(ch)) return Error.InvalidName;
+        parts += 1;
+    }
+    if (parts != 3) return Error.InvalidName;
+}
+
+/// `integrity-metadata` (SRI subset): whitespace-separated `alg '-' base64
+/// ('?' options)?` entries; alg in {sha256, sha384, sha512}; at least one.
+fn checkIntegrity(body: []const u8) Error!void {
+    var any = false;
+    var it = std.mem.splitScalar(u8, body, ' ');
+    while (it.next()) |tok| {
+        if (tok.len == 0) continue;
+        any = true;
+        const dash = std.mem.findScalar(u8, tok, '-') orelse return Error.InvalidName;
+        const alg = tok[0..dash];
+        if (!std.mem.eql(u8, alg, "sha256") and !std.mem.eql(u8, alg, "sha384") and !std.mem.eql(u8, alg, "sha512"))
+            return Error.InvalidName;
+        var b64 = tok[dash + 1 ..];
+        if (std.mem.findScalar(u8, b64, '?')) |q| b64 = b64[0..q];
+        // base64: data chars then at most 2 trailing '='; '=' only at end;
+        // must contain at least one data char (corpus "not valid base64").
+        var pad: u32 = 0;
+        while (pad < b64.len and b64[b64.len - 1 - pad] == '=') pad += 1;
+        if (pad > 2) return Error.InvalidName;
+        const data = b64[0 .. b64.len - pad];
+        if (data.len == 0) return Error.InvalidName;
+        for (data) |ch| {
+            if (!(std.ascii.isAlphanumeric(ch) or ch == '+' or ch == '/'))
+                return Error.InvalidName;
+        }
+    }
+    if (!any) return Error.InvalidName;
 }
 
 /// Explainer.md `label` grammar: `label ::= <fragment> ('-' <fragment>)*`
@@ -561,19 +692,35 @@ test "rule 5: label grammar boundaries" {
 
 test "rule 5: extern name forms" {
     // interfacename: segments label-checked, @version skipped.
-    try checkExternName("wasi:cli/environment@0.2.3");
-    try checkExternName("wasi:io/streams");
-    try std.testing.expectError(Error.InvalidName, checkExternName("wasi:cLi/x"));
+    try checkExternName("wasi:cli/environment@0.2.3", .import);
+    try checkExternName("wasi:io/streams", .import);
+    try std.testing.expectError(Error.InvalidName, checkExternName("wasi:cLi/x", .import));
     // bracket forms.
-    try checkExternName("[constructor]blob");
-    try checkExternName("[method]blob.get-size");
-    try checkExternName("[static]blob.merge");
-    try std.testing.expectError(Error.InvalidName, checkExternName("[method]no-dot"));
-    try std.testing.expectError(Error.InvalidName, checkExternName("[constructor]Bad"));
-    // deferred `=` forms accepted unchecked.
-    try checkExternName("unlocked-dep=<a:b/c>");
+    try checkExternName("[constructor]blob", .import);
+    try checkExternName("[method]blob.get-size", .import);
+    try checkExternName("[static]blob.merge", .import);
+    try std.testing.expectError(Error.InvalidName, checkExternName("[method]no-dot", .import));
+    try std.testing.expectError(Error.InvalidName, checkExternName("[constructor]Bad", .import));
+    // `=` forms now follow the dep/url/integrity grammars.
+    try checkExternName("unlocked-dep=<a:b/c>", .import);
+    try checkExternName("unlocked-dep=<a:b@{>=1.2.3}>", .import);
+    try checkExternName("locked-dep=<a:b@1.2.3>", .import);
+    try checkExternName("locked-dep=<a:b>,integrity=<sha256-abc123+/=>", .import);
+    try checkExternName("url=<https://example.com/x.wasm>", .import);
+    try checkExternName("integrity=<sha512-AAAA sha256-BBBB>", .import);
+    try std.testing.expectError(Error.InvalidName, checkExternName("unlocked-dep=<", .import));
+    try std.testing.expectError(Error.InvalidName, checkExternName("unlocked-dep=<>", .import));
+    try std.testing.expectError(Error.InvalidName, checkExternName("unlocked-dep=<:a>", .import));
+    try std.testing.expectError(Error.InvalidName, checkExternName("locked-dep=<a:>", .import));
+    try std.testing.expectError(Error.InvalidName, checkExternName("locked-dep=<a:a@>", .import));
+    try std.testing.expectError(Error.InvalidName, checkExternName("locked-dep=<a:a@1.2.3>x", .import));
+    try std.testing.expectError(Error.InvalidName, checkExternName("integrity=<>", .import));
+    try std.testing.expectError(Error.InvalidName, checkExternName("integrity=<md5-ABC>", .import));
+    try std.testing.expectError(Error.InvalidName, checkExternName("integrity=<sha256-***>", .import));
+    try std.testing.expectError(Error.InvalidName, checkExternName("url=<>", .import));
+    try std.testing.expectError(Error.InvalidName, checkExternName("csv=hello", .import));
     // plainname falls through to the label grammar.
-    try checkExternName("hello");
-    try std.testing.expectError(Error.InvalidName, checkExternName("NevEr"));
-    try std.testing.expectError(Error.InvalidName, checkExternName(""));
+    try checkExternName("hello", .import);
+    try std.testing.expectError(Error.InvalidName, checkExternName("NevEr", .import));
+    try std.testing.expectError(Error.InvalidName, checkExternName("", .import));
 }
