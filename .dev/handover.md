@@ -19,12 +19,26 @@
   `TypeInfo.type_space`, case-insensitive dup-names) on top of rules 1–4;
   corpus runner **18 pass / 0 fail / 2 reasoned skip-impl** (triage in
   `component_model_plan.md` E3 row). Mac test-all+lint green per chunk.
-- **NEXT (CM campaign, plan Work sequence)**: **E2 Go proof** — tinygo +
-  wit-bindgen-go cross-toolchain component; toolchain-gated, so the first
-  step is `extended_challenge` Step 1–2 self-provision (wit-bindgen-go into
-  the gen shell / `go install`). Then: more WASI-P2 boundary fixtures
-  (trap/handle-invalid paths, E3 remainder) · D3-8 sockets (spike-first).
-  Secondary (user-redirect only): D-318, D-314 follow-ons, D-251.
+- **NEXT (CM campaign)**: E2 Go proof bundle — see `## Active bundle`.
+  Then: WASI-P2 boundary fixtures (E3 remainder) · D3-8 sockets
+  (spike-first). Secondary (user-redirect only): D-318, D-314, D-251.
+
+## Active bundle
+
+- **Bundle-ID**: e2-go-wasip2-host (campaign E2 Go proof)
+- **Cycles-remaining**: ~3
+- **Continuity-memo**: toolchain gate DISSOLVED — tinygo 0.40.1 in the gen
+  shell builds `-target=wasip2` natively (no wit-bindgen-go needed; go.mod
+  must pin `go 1.25`, the shell's go1.26 trips tinygo). The built hello
+  component (730 KB, /tmp/tinygo_hello) wires-FAILs `UnsupportedWasiImport`:
+  ~12 unclassified funcs — chunk A (mechanical, P1 facilities exist):
+  random.get-random-u64 + descriptor.{stat-at,create-directory-at,link-at,
+  readlink-at,remove-directory-at,rename-at,symlink-at,sync-data,
+  unlink-file-at} → adapter table + trampolines + `wasi_p2_fs_path` fixture;
+  chunk B: read-directory + directory-entry-stream resource (cursor state in
+  WasiP2Ctx, rep = state index); chunk C: commit Go fixture + e2e + README.
+- **Exit-condition**: tinygo-built `wasi_p2_hello_go.wasm` runs e2e through
+  `zwasm run` printing "hello" (cross-toolchain proof beside Rust @96e1ccce).
 
 ## Sandboxing bundle d314-jit-sandbox — CLOSED 2026-06-12
 
