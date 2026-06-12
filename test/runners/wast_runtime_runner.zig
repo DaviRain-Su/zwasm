@@ -982,6 +982,7 @@ fn trapKindName(k: wasm_c_api.TrapKind) []const u8 {
         .uncaught_exception => "UncaughtException",
         .unaligned_atomic => "UnalignedAtomic", // Wasm threads (ADR-0168)
         .expected_shared_memory => "ExpectedSharedMemory", // Wasm threads (ADR-0168)
+        .interrupted => "Interrupted", // sandboxing host cancel/timeout (ADR-0179 #3a)
     };
 }
 
