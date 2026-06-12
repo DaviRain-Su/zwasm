@@ -67,28 +67,21 @@
   The LAST skip-impl = `nested_component_resource_refs` (inner inline
   component outer-aliasing the parent's RESOURCE type) — genuinely needs
   recursive nested-component section decode.
-- **NEXT**: the Active bundle below (windows D-319 verify #2 verdict at
-  Step 0.7 — the run started 03:50, expect ~30-40 min). Then: recursive
-  nested-component decode (last validator skip) or D-318 / D-314
-  follow-ons / D-251.
-
-## Active bundle
-
-- **Bundle-ID**: adr0180-phase2-listeners
-- **Cycles-remaining**: ~1
-- **Continuity-memo**: ALL impl chunks LANDED — impl-1 @c13bbdc2,
-  impl-2/3 @c8efdd1a (rust TcpListener e2e green on Mac), impl-4
-  @8c0bb8f1 (WSAPoll; windows skips removed). Verify #1 went RED on a
-  real windows TEST-COMPILE error (posix.POLL → missing ws2_32.POLL in
-  pinned stdlib) — fixed (tests use module POLL_IN) + lesson
-  windows-test-compile-gate; `zig build test -Dtarget=x86_64-windows-gnu`
-  compiles clean. Verify #2 kicked in background (tail -2 /tmp/win.log
-  at Step 0.7) — green ⇒ mark D-319 'CLOSED <sha>' in debt.yaml + drop
-  skip.Blocker @"D-319" arm + close the bundle
-  (check_bundle_active.sh --close). Red ⇒ D7 protocol.
-- **Exit-condition**: a rust wasip2 listener guest accepts a host
-  connection and echoes e2e (test green — MET @c8efdd1a), AND D-319
-  discharged (windows batch green over the de-skipped socket tests).
+- **adr0180-phase2-listeners bundle CLOSED (exit MET on the re-scope
+  arm)**: listeners/accept/local+remote-address/backlog + WSAPoll all
+  LANDED (rust TcpListener e2e green Mac+ubuntu); windows verification
+  HUNG (timeout 3600) in the de-skipped test step → tests re-gated
+  @d039d727, D-319 row re-scoped to the named hang barrier (3-hypothesis
+  list + targeted-probe plan in the row). D-320 size datapoint: base
+  1.97 MB (+37.6 KB), lean unchanged.
+- **NEXT**: recursive nested-component decode (LAST validator skip;
+  design brief from survey: decode component-section bodies recursively
+  in decodeTypeInfo via decode.decode(sec.body) — body includes inner
+  preamble; add nested TypeInfo list + resource-type tracking — NOTE
+  resource DEFTYPE decode itself is still deferred at types.zig ~888 and
+  must land with it; validate inner outer-type-aliases of count==1
+  against parent resource entries, recurse). Then: D-319 windows probe
+  (one targeted `zig build test`-only remote run), D-318, D-251.
 
 ## Closed-work pointers (detail in git log / ADRs)
 
