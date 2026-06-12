@@ -444,6 +444,13 @@ fn emitBranchToDepth(ctx: *EmitCtx, depth: u32) Error!void {
                 }
             }
         }
+        // D-314 — back-edge poll before the backward B (a br_table whose
+        // taken case/default is a loop header is a back edge too; without
+        // this a br_table-driven tight loop is uninterruptible). Sits inside
+        // the per-case B.NE-skipped body; the poll's CMP clobbers NZCV but
+        // the next case re-CMPs, and X16/X17 never hold the br_table index
+        // (allocatable pool + X14/X15 stages only).
+        try emitBackEdgeInterruptPoll(ctx);
         const fixup_at: u32 = @intCast(ctx.buf.items.len);
         const tgt_byte = ctx.labels.items[tgt_idx].target_byte_offset;
         const disp_words: i32 = @as(i32, @intCast(tgt_byte)) -

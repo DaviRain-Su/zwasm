@@ -367,17 +367,18 @@ test "JIT interrupt poll: prologue traps interrupted (trap_kind 16) on a host-se
     try testing.expectEqual(@as(?u64, 42), try inst.invoke(testing.allocator, "f", &.{}));
 }
 
-test "JIT loop back-edge interrupt poll: a tight loop traps interrupted (D-314 #3a)" {
-    // BOTH arches: arm64 polls at each br/br_if-to-loop site; x86_64 mirrors it
-    // AND forces uses_runtime_ptr for loop-containing fns (a no-call loop fn
-    // otherwise has no R15 to read interrupt_ptr through).
+test "JIT loop fn with flag raised BEFORE invoke traps interrupted (D-314 #3a R15-forcing)" {
+    // The flag is set BEFORE invoke, so on both arches the PROLOGUE poll traps
+    // at entry (never reaching a back-edge poll). What this pins on x86_64 is
+    // the R15-FORCING: a no-call loop fn only has a prologue poll because
+    // usage.usesRuntimePtr lists `.loop` — drop that and there is NO poll at
+    // all and the countdown completes with 42 (the observed TDD red). The
+    // RUNNING-loop back-edge case is the thread-raiser tests below.
     // (func (export "f") (result i32) (local $i i32)
     //   (local.set $i (i32.const 1000000))
     //   (loop $L (local.set $i (i32.sub (local.get $i) (i32.const 1)))
     //            (br_if $L (local.get $i)))    ;; backward br_if = a back-edge
     //   (i32.const 42))
-    // No `call` → no prologue-poll coverage on a tight loop; the BACK-EDGE poll
-    // is what catches it (the whole point of this chunk).
     const loop_wasm = [_]u8{
         0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60,
         0x00, 0x01, 0x7f, 0x03, 0x02, 0x01, 0x00, 0x07, 0x05, 0x01, 0x01, 0x66,
@@ -400,4 +401,62 @@ test "JIT loop back-edge interrupt poll: a tight loop traps interrupted (D-314 #
     flag.store(0, .monotonic);
     inst.owned.rt.trap_flag = 0;
     try testing.expectEqual(@as(?u64, 42), try inst.invoke(testing.allocator, "f", &.{}));
+}
+
+/// Raises the interrupt flag from a sibling thread after a spin-wait long
+/// enough that the main thread is already INSIDE the guest loop (past the
+/// prologue poll, which sees flag=0 at entry) — so only a BACK-EDGE poll can
+/// deliver the trap. No clock dependency: ~50M spin hints ≈ tens of ms; the
+/// guest loop is infinite, so "too late" cannot happen. If the back-edge poll
+/// regressed, the invoke spins forever (test hang = failure, mirroring the
+/// interp back-edge test's hang-as-failure contract; gate timeouts bound it).
+const FlagRaiser = struct {
+    fn run(flag_ptr: *std.atomic.Value(u32)) void {
+        var i: u64 = 0;
+        while (i < 50_000_000) : (i += 1) std.atomic.spinLoopHint();
+        flag_ptr.store(1, .monotonic);
+    }
+};
+
+test "JIT back-edge poll interrupts a RUNNING infinite loop (br back edge, D-314 #3a)" {
+    // (func (export "f") (result i32) (loop (br 0)) (i32.const 42)) — the
+    // backward `br 0` is the only exit-capable site (emitBr loop path on both
+    // arches). Flag is 0 at entry; the raiser thread sets it mid-spin.
+    const inf_loop_wasm = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60,
+        0x00, 0x01, 0x7f, 0x03, 0x02, 0x01, 0x00, 0x07, 0x05, 0x01, 0x01, 0x66,
+        0x00, 0x00, 0x0a, 0x0b, 0x01, 0x09, 0x00, 0x03, 0x40, 0x0c, 0x00, 0x0b,
+        0x41, 0x2a, 0x0b,
+    };
+    var inst = try runner.JitInstance.init(testing.allocator, &inf_loop_wasm);
+    defer inst.deinit(testing.allocator);
+    var flag = std.atomic.Value(u32).init(0);
+    inst.setInterruptFlag(&flag);
+    var th = try std.Thread.spawn(.{}, FlagRaiser.run, .{&flag});
+    try testing.expectError(entry.Error.Trap, inst.invoke(testing.allocator, "f", &.{}));
+    th.join();
+    try testing.expectEqual(@as(u32, 16), inst.owned.rt.trap_kind);
+    try testing.expectEqual(trap_surface.TrapKind.interrupted, trap_surface.jitTrapCode(inst.owned.rt.trap_kind).?);
+}
+
+test "JIT back-edge poll interrupts a RUNNING infinite br_table loop (D-314 #3a)" {
+    // (func (export "f") (result i32) (loop $L (br_table $L (i32.const 0)))
+    //   (i32.const 42)) — br_table with an empty case vector + default $L: the
+    // default tail IS the back edge (arm64: emitBranchToDepth loop path;
+    // x86_64: emitBrTableJmp loop path). Same raiser contract as above.
+    const brtable_wasm = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60,
+        0x00, 0x01, 0x7f, 0x03, 0x02, 0x01, 0x00, 0x07, 0x05, 0x01, 0x01, 0x66,
+        0x00, 0x00, 0x0a, 0x0e, 0x01, 0x0c, 0x00, 0x03, 0x40, 0x41, 0x00, 0x0e,
+        0x00, 0x00, 0x0b, 0x41, 0x2a, 0x0b,
+    };
+    var inst = try runner.JitInstance.init(testing.allocator, &brtable_wasm);
+    defer inst.deinit(testing.allocator);
+    var flag = std.atomic.Value(u32).init(0);
+    inst.setInterruptFlag(&flag);
+    var th = try std.Thread.spawn(.{}, FlagRaiser.run, .{&flag});
+    try testing.expectError(entry.Error.Trap, inst.invoke(testing.allocator, "f", &.{}));
+    th.join();
+    try testing.expectEqual(@as(u32, 16), inst.owned.rt.trap_kind);
+    try testing.expectEqual(trap_surface.TrapKind.interrupted, trap_surface.jitTrapCode(inst.owned.rt.trap_kind).?);
 }
