@@ -171,10 +171,16 @@ design forks. Update this doc's `[x]` + handover NEXT each chunk.
     generic drop skips fd_close for non-fd pollables. Fixture `wasi_p2_poll`.
   - **D-309 extraction** @ccdee2fa — WASI-P2 trampolines + runWasiP2Main split to
     `api/component_wasi_p2.zig` (component.zig 1922→1250 LOC), behavior-preserving.
-  - **NEXT = D3-8**: **sockets** (tcp/udp — spike-first per plan). OR Phase E
-    (E1 conformance corpus + E2 Rust/Go real-toolchain proof — the campaign's
-    wasmtime-equivalent existence proof). **D-308**: runWasiP2Main error-cleanup
-    SEGVs on a failed-import wire (unknown-interface error path only).
+  - **D3-8 sockets DONE (ADR-0180 Phase 1)**: TCP-client subset with REAL
+    poll(2) readiness — `src/wasi/p2_sockets.zig` (TcpSocket over
+    `std.Io.net`) + component trampolines (create/bind/connect → socket-
+    backed stream pair; socket-aware pollable/poll/check-write; honest
+    not-supported stubs for listen/accept/options/UDP/name-lookup; real
+    get-arguments/get-environment). Proof: `wasi_p2_tcp_rust.wasm` (rustc
+    wasip2 std::net) echoes through a loopback server e2e. Phase 2
+    (listeners/WSAPoll-windows D-319) + Phase 3 (UDP/name-lookup) deferred
+    per ADR-0180. **D-308**: runWasiP2Main error-cleanup SEGVs on a
+    failed-import wire (unknown-interface error path only).
 
 ### Phase E — conformance + proof (Tier 2 = wasmtime-equivalent)
 
