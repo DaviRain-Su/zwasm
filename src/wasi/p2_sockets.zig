@@ -86,14 +86,15 @@ pub fn errorToCode(err: anyerror) ErrorCode {
 }
 
 /// poll(2) interest bits, comptime-gated: `std.posix.POLL` is absent on
-/// Windows, where WSAPoll wants POLLRDNORM/POLLWRNORM (POLLIN/POLLOUT
-/// composites in `events` are rejected with WSAEINVAL for the BAND halves).
+/// Windows. The windows values are LOCAL tags only — `afdPollOnce` maps
+/// them onto AFD_POLL_* event masks (winsock is unusable on the pinned
+/// stdlib's raw NT/AFD socket handles; see the AFD section below).
 pub const POLL_IN: i16 = switch (builtin.os.tag) {
-    .windows => 0x0100, // POLLRDNORM
+    .windows => 0x0001,
     else => posix.POLL.IN,
 };
 pub const POLL_OUT: i16 = switch (builtin.os.tag) {
-    .windows => 0x0010, // POLLWRNORM
+    .windows => 0x0004,
     else => posix.POLL.OUT,
 };
 
@@ -295,29 +296,7 @@ fn familyMatches(family: AddressFamily, addr: net.IpAddress) bool {
 /// (or an error/hup condition, which also unblocks a waiter) is pending.
 fn pollOnce(handle: net.Socket.Handle, interest: i16) !bool {
     switch (builtin.os.tag) {
-        // The pinned stdlib has no WSAPoll binding — declared here per the
-        // platform-layer `extern "kernel32"` precedent (ADR-0180 Phase 2,
-        // discharges D-319). Winsock is already initialized: the handle
-        // came from an `std.Io.net` socket op.
-        .windows => {
-            // The pinned `std.Io.net` windows backend drives sockets via
-            // raw NT/AFD handles and never calls WSAStartup (probe #3: WSA
-            // error 10093 WSANOTINITIALISED) — initialize winsock lazily
-            // before the first WSAPoll. Double-init is benign (ref-counted).
-            ensureWsaStartup();
-            const POLLERR: i16 = 0x0001;
-            const POLLHUP: i16 = 0x0002;
-            var fds = [_]WsaPollFd{.{ .fd = handle, .events = interest, .revents = 0 }};
-            const n = WSAPoll(&fds, 1, 0);
-            if (n < 0) {
-                // D-319 probe diagnostic: the WSA error code names the
-                // failure mode (10022 WSAEINVAL = bad events/fd, 10038
-                // WSAENOTSOCK = handle is not a SOCKET, ...).
-                std.log.scoped(.zwasm_sockets).warn("WSAPoll failed: WSA error {d} (fd=0x{x}, events=0x{x})", .{ WSAGetLastError(), @intFromPtr(fds[0].fd), interest });
-                return error.Unexpected;
-            }
-            return n > 0 and (fds[0].revents & (interest | POLLERR | POLLHUP)) != 0;
-        },
+        .windows => return afdPollOnce(handle, interest),
         else => {
             var fds = [_]posix.pollfd{.{ .fd = handle, .events = interest, .revents = 0 }};
             const n = try posix.poll(&fds, 0);
@@ -326,21 +305,79 @@ fn pollOnce(handle: net.Socket.Handle, interest: i16) !bool {
     }
 }
 
-/// winsock2 `WSAPOLLFD` (fd is SOCKET = handle-sized).
-const WsaPollFd = extern struct { fd: net.Socket.Handle, events: i16, revents: i16 };
-extern "ws2_32" fn WSAPoll(fds: [*]WsaPollFd, nfds: c_ulong, timeout: c_int) callconv(.winapi) c_int;
-extern "ws2_32" fn WSAGetLastError() callconv(.winapi) c_int;
-extern "ws2_32" fn WSAStartup(version: u16, wsadata: *anyopaque) callconv(.winapi) c_int;
+// ---- Windows readiness: IOCTL_AFD_POLL (D-319 probes #3/#4) ----
+//
+// The pinned `std.Io.net` windows backend drives sockets as raw NT/AFD
+// handles: winsock is never initialized AND the handles are not
+// winsock-registered SOCKETs (WSAPoll fails WSAENOTSOCK even after
+// WSAStartup). Readiness therefore uses the NT-native AFD poll ioctl on
+// the socket handle itself — the wepoll/libuv/mio approach — with a
+// zero timeout (snapshot semantics: STATUS_TIMEOUT/0 handles = not
+// ready).
 
-var wsa_initialized = std.atomic.Value(bool).init(false);
+const win = std.os.windows;
 
-fn ensureWsaStartup() void {
-    if (wsa_initialized.load(.acquire)) return;
-    // WSADATA is ~400 bytes on win64; an opaque buffer avoids declaring
-    // the layout. Failure surfaces at the WSAPoll call site's diagnostic.
-    var wsadata: [512]u8 align(8) = undefined;
-    _ = WSAStartup(0x0202, @ptrCast(&wsadata));
-    wsa_initialized.store(true, .release);
+const AFD_POLL_RECEIVE: u32 = 0x0001;
+const AFD_POLL_SEND: u32 = 0x0004;
+const AFD_POLL_DISCONNECT: u32 = 0x0008;
+const AFD_POLL_ABORT: u32 = 0x0010;
+const AFD_POLL_ACCEPT: u32 = 0x0080;
+const AFD_POLL_CONNECT_FAIL: u32 = 0x0100;
+
+const AfdPollHandleInfo = extern struct {
+    handle: win.HANDLE,
+    events: u32,
+    status: win.NTSTATUS,
+};
+
+const AfdPollInfo = extern struct {
+    timeout: i64,
+    number_of_handles: u32,
+    exclusive: u32,
+    handles: [1]AfdPollHandleInfo,
+};
+
+/// IOCTL_AFD_POLL (0x00012024).
+const AFD_POLL_CTL: win.CTL_CODE = @bitCast(@as(u32, 0x00012024));
+
+fn afdPollOnce(handle: net.Socket.Handle, interest: i16) !bool {
+    if (builtin.os.tag != .windows) unreachable;
+    const want: u32 = blk: {
+        var w: u32 = 0;
+        if (interest & POLL_IN != 0) w |= AFD_POLL_RECEIVE | AFD_POLL_DISCONNECT | AFD_POLL_ABORT | AFD_POLL_ACCEPT | AFD_POLL_CONNECT_FAIL;
+        if (interest & POLL_OUT != 0) w |= AFD_POLL_SEND;
+        break :blk w;
+    };
+    var info: AfdPollInfo = .{
+        .timeout = 0, // snapshot: expire immediately when nothing is ready
+        .number_of_handles = 1,
+        .exclusive = 0,
+        .handles = .{.{ .handle = handle, .events = want, .status = .SUCCESS }},
+    };
+    var iosb: win.IO_STATUS_BLOCK = undefined;
+    const status = win.ntdll.NtDeviceIoControlFile(
+        handle,
+        null,
+        null,
+        null,
+        &iosb,
+        AFD_POLL_CTL,
+        &info,
+        @sizeOf(AfdPollInfo),
+        &info,
+        @sizeOf(AfdPollInfo),
+    );
+    switch (status) {
+        .SUCCESS => {},
+        .TIMEOUT => return false, // nothing ready within the zero timeout
+        else => {
+            // D-319 probe diagnostic: name the NTSTATUS on failure.
+            std.log.scoped(.zwasm_sockets).warn("IOCTL_AFD_POLL failed: NTSTATUS=0x{x} (handle=0x{x}, want=0x{x})", .{ @intFromEnum(status), @intFromPtr(handle), want });
+            return error.Unexpected;
+        },
+    }
+    if (info.number_of_handles == 0) return false;
+    return (info.handles[0].events & want) != 0;
 }
 
 // ============================================================
