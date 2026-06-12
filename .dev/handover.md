@@ -12,18 +12,21 @@
   case); **arm64 loop BACK-EDGE poll** `5b441f96` (poll at each br/br_if-to-loop
   site → POST-frame stub fb=frame_bytes via the SEPARATE `back_edge_interrupt_fixups`
   list; helper `emitBackEdgeInterruptPoll`; a tight `(loop)` now traps on arm64).
-  **x86_64 loop back-edge poll DONE `72801881`** — 32-byte R11-scratch poll at
-  the 3 backward sites (emitBr / branchOnReg br_if+br_on_cast / emitBrTableJmp;
-  no-params br_if re-TESTs cond after the flag-clobbering poll), POST-frame
-  `emitTrapExitStub(16)` via new `back_edge_interrupt_fixups`;
-  `usage.usesRuntimePtr += .loop` (R15-forcing); loop test ungated (TDD red→green
-  on Rosetta; standalone 2673/0 both arches); 2 loop byte tests re-anchored.
-  **NEXT = br_table-to-loop back-edge test (both arches) + arm64 br_table poll** —
-  x86_64 emitBrTableJmp already polls (this chunk); arm64's `emitBranchToDepth`
-  loop path (op_control.zig:433, used by br_table at :513/:518) has NO poll yet —
-  add `emitBackEdgeInterruptPoll(ctx)` there + a br_table-to-loop runner test
-  (mirror the loop test with `br_table 0` as the back edge). Then #3b fuel →
-  #3c-2 mem-cap → #3a-4 CLI. **Code-size**: poll
+  **#3a interrupt COMPLETE both arches**: x86_64 back-edge poll `72801881`
+  (32-byte R11-scratch poll at emitBr / branchOnReg / emitBrTableJmp backward
+  sites; POST-frame `emitTrapExitStub(16)` via `back_edge_interrupt_fixups`;
+  `usage.usesRuntimePtr += .loop` R15-forcing; 2 loop byte tests re-anchored) +
+  arm64 br_table-to-loop poll `b365c190` (emitBranchToDepth loop path). Test
+  honesty fix in b365c190: flag-set-BEFORE-invoke traps at the PROLOGUE poll
+  (both arches) — renamed that test to "R15-forcing"; the real back-edge net =
+  2 RUNNING-loop tests (FlagRaiser thread + INFINITE loop/br_table guests;
+  back-edge regression = hang-as-failure). TDD red observed for both chunks
+  (Rosetta completes-42 / arm64 hang exit-124). **NEXT = #3b fuel on JIT** —
+  survey how interp fuel (`setFuel`, 58479dd6) maps onto JIT codegen: likely a
+  back-edge/call-site fuel decrement via [R15/X19 + fuel_off] mirroring the
+  interrupt poll shape (reuse the poll sites; trap kind TBD vs interp Fuel
+  trap), or a documented interp-only stance + debt row if codegen-cost is
+  disproportionate (perf-measure-first). Then #3c-2 mem-cap → #3a-4 CLI. **Code-size**: poll
   +stub unconditional per fn — measure, consider opt-in flag (perf-measure-first).
   **GATE NOTE**: the 3 D-311 raw-entry-call tests (linker×2/entry-f32,
   releasesafe_jit_failures.md) crash SEED-FLAKILY in `zig build test` (undefined-
@@ -35,8 +38,8 @@
   `failed command:` but the step (and `zig build test`) still exits 0; the same
   binary standalone = 2673/0. Same D-311 residual; don't chase it as a new bug.
 - **Exit-condition**: a JIT looping/recursive fn traps `error.Interrupted` when the
-  host raises the flag. Recursion: DONE both arches. Tight loop: DONE arm64,
-  pending x86_64 back-edge.
+  host raises the flag. **MET for #3a** (recursion + tight loop + br_table loop,
+  both arches, RUNNING-loop verified). Bundle stays open for #3b/#3c-2/#3a-4.
 
 ## JIT-correctness pass (2026-06-12) — LANDED, 2-host green
 
