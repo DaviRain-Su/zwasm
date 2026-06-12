@@ -57,19 +57,20 @@
 - **Typed-API polish LANDED**: `assert_typed` + `component_p2` corpus
   directives · typed-invoke core deduped into `api/component_typed.zig`
   (P1 split) · docs `zig_api_design.md` §3.9.
-- **Validator skips 19→6 (corpus 152/0/6)**: index spaces + def-order
+- **Validator skips 19→1 (corpus 157/0/1)**: index spaces + def-order
   alias_space_before + semantic extern-name keys @6c895983 · rule 10
   nested type-scope deep validation (named-types restriction per
-  wasm-tools model — instance scopes checked at EXPORT not definition)
-  @09c4d520 · rule 11 core-type section decode + module-decl validation
-  (functype (ref N) refs, module-local space, outer type alias ct
-  semantics; GC forms pass through counted-but-unmodeled) @785acfaf.
-  Remaining 6 skip-impl = nested CONCRETE-component decode (inner
-  component sections: instantiate_08/09/11/13/14 + inline-component
-  outer-alias of parent resource).
+  wasm-tools model) @09c4d520 · rule 11 core-type section decode +
+  module-decl validation @785acfaf · rule-9 sortidx bounds (instantiate
+  args + inline exports; new core_global_count; the instantiate_* skips
+  were misdiagnosed — plain bounds, no nested decode needed) @7ee5c997.
+  The LAST skip-impl = `nested_component_resource_refs` (inner inline
+  component outer-aliasing the parent's RESOURCE type) — genuinely needs
+  recursive nested-component section decode.
 - **NEXT**: the Active bundle below (windows D-319 verify #2 verdict at
-  Step 0.7). Then: nested-component decode cluster (6 skips) or D-318 /
-  D-314 follow-ons / D-251.
+  Step 0.7 — the run started 03:50, expect ~30-40 min). Then: recursive
+  nested-component decode (last validator skip) or D-318 / D-314
+  follow-ons / D-251.
 
 ## Active bundle
 
