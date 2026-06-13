@@ -5,25 +5,21 @@
 
 ## Active campaign — spec re-vendor → alpha.3 tag (USER-AUTHORIZED; option A chosen 2026-06-14)
 
-User chose option A (full re-vendor; git history = safety net) + added a
-requirement: leave a SUSTAINABLE wasm-tools/spec-following mechanism
-(nightly-check style, NOT CI-wired yet). FULL PLAN + findings + the verified
-ref-dialect solution: **`private/spec_revendor_campaign.md`** (read first on
-resume). ADR-0156 user-only tag → `v2.0.0-alpha.3` tag-only (memory
-`project_zwasm_v2_prerelease_tagging`).
-Proven multi-cycle: re-baking from latest surfaces (1) new wasm-tools JSON ref
-dialect (typed-null `{"type":"refnull"|"null*ref"}` + bare funcref/externref =
-any-non-null, no `value`), (2) distiller `allowed_scalar`/`supported` gates +
-runner lack ref-result support, (3) spec relocated bulk-op .wast (memory_copy/
-fill/init, table_copy/fill/init gone from test/core) — ×8 brittle distillers,
-3.0 GC heaviest. Verified fix slice: null→`i64:0`, bare-ref→`i64:nonnull`
-sentinel + runner `got!=0` arm (15 baked OK), then reverted to clean.
-Phases (see plan doc): P1 framework (shared distiller helper + runbook +
-check_spec_bump wasm-tools-pin/dry-run), P2 modernize distillers, P3 re-bake +
-test-all (fix REAL conformance gaps, keep 0-skip), P4 3-host + bump spec_pin,
-P5 commit + tag. Tree CLEAN; current corpus known-green 0-skip @ spec-as-of-pin
-(test/core unchanged since pin 2026-06-04). Proceed autonomously; checkpoint at
-milestones. NEXT cycle: P1 — start the framework (shared ref-dialect helper).
+Option A (full re-vendor; git = safety net) + leave a SUSTAINABLE
+wasm-tools/spec-following mechanism (nightly-check, NOT CI yet). FULL plan +
+findings + verified ref-dialect solution: **`private/spec_revendor_campaign.md`**
+(read first). Phases: P1 framework, P2 modernize distillers, P3 re-bake+test-all
+(fix REAL gaps, keep 0-skip), P4 3-host+bump spec_pin, P5 commit+tag
+(`v2.0.0-alpha.3` tag-only, user-only ADR-0156). Multi-cycle: latest spec needs
+distiller modernization for the new wasm-tools JSON ref dialect + relocated
+bulk-op .wast + GC ref-results, ×8 bakers.
+P1 DONE: shared ref-dialect lib `scripts/spec_distill/refdialect.py` (self-test,
+gate-guarded) `44711469` + runbook `.dev/spec_revendor_runbook.md` `56e17dc4`.
+NEXT: P1-finish (check_spec_bump wasm-tools pin + `--dry-run-revendor`), then P2
+— wire refdialect into regen_spec_2_0 (swap inline fmt/kind_alias; admit ref
+types in allowed_scalar/supported; fix relocated NAMES memory_copy/fill/init +
+table_copy/fill/init) → re-bake → 0-skip verify. Current corpus known-green
+0-skip @ spec-as-of-pin (test/core unchanged since pin 2026-06-04).
 
 ## Current state
 
