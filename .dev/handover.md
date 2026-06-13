@@ -13,13 +13,21 @@ proposal repos, trailing the Wasm 3.0 Recommendation. SOURCE for re-vendor =
 subdirs, tail-call/func-refs = merged top-level). Mechanism DONE: refdialect.py
 `44711469` + runbook. Discipline = VALIDATE-then-REVERT (commit only semantic
 deltas, never byte-churn — D-290).
-SLICE 1 DONE `335a0107`: gc re-vendored from wg-3.0 — array/array_init_data/
-array_new_data/type-subtyping additions incorporated, runtime PASSES (test-spec-
-wasm-3.0-assert green, 0 new skip-impl). Known gap: wg-3.0 `extern` multi-value
-asserts fail (the runner's documented multi-value-exec gap) → DEFERRED, not a
-regression. NEXT: slices 2-6 (exceptions/memory64/multi-memory/tail-call/
-func-refs), same pattern (commit passing deltas, defer known-gap asserts) →
-3-host → surface alpha.3 (outward-facing; user-only).
+SLICE 1 DONE `335a0107`(→`b8e8b16c`): gc wg-3.0 deltas incorporated, runtime
+PASSES, green. SLICE 2 (eh): wg-3.0 try_table additions are ENTIRELY
+multi-value-result → 5 new fails → fully DEFERRED (reverted).
+CEILING IDENTIFIED → **D-327**: the spec-assert RUNNER's result-dispatch handles
+single-scalar/void + a few 2-result shapes, NOT generic N-tuple multi-value. So
+the wg-3.0 incremental asserts that are multi-value (eh try_table +5, gc extern
++13, likely more in mem64/tail-call/func-refs) cannot pass — full "全合格 to
+wg-3.0" is BLOCKED on D-327 (a TEST-HARNESS gap; runtime multi-value is sound).
+DECISION (surfaced to user 2026-06-14): (A) implement D-327 (extend runner to
+N-tuple multi-value + assert_trap-class) → unlocks deferred asserts → complete
+per-proposal re-vendor → full wg-3.0; multi-cycle. (B) tag alpha.3 NOW (gc
+updated; substantial curated 3.0 corpus 3-host green) + D-327 + remaining
+proposal-drift tracked for beta/rc; honest "passes wg-3.0 except documented
+multi-value asserts". Recommend B for an alpha. AWAITING user pick before the
+outward-facing tag.
 
 ## Current state
 
