@@ -173,6 +173,8 @@ pub const feature = struct {
             pub const canon = @import("feature/component/canon.zig");
             pub const resource_table = @import("feature/component/resource_table.zig");
             pub const value = @import("feature/component/value.zig");
+            /// REQ-3 (cw CM-API) — public WIT type-tree introspection.
+            pub const wit_type = @import("feature/component/wit_type.zig");
             pub const wit = struct {
                 pub const lexer = @import("feature/component/wit/lexer.zig");
                 pub const parser = @import("feature/component/wit/parser.zig");

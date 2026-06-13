@@ -14,6 +14,7 @@ const std = @import("std");
 
 const decode = @import("../feature/component/decode.zig");
 const ctypes = @import("../feature/component/types.zig");
+const wit_type = @import("../feature/component/wit_type.zig");
 const cvalidate = @import("../feature/component/validate.zig");
 const wasi_host = @import("../wasi/host.zig");
 const wasi_fd = @import("../wasi/fd.zig");
@@ -1622,6 +1623,14 @@ pub const BuiltComponent = struct {
         alloc.destroy(self.ctx);
         self.info.deinit();
         self.decoded.deinit(alloc);
+    }
+
+    /// REQ-3 (cw CM-API) — introspect a func export's full typed signature
+    /// to the `WitType` tree (specialization-preserving + labels). `arena`
+    /// owns the tree; names borrow from this build's `TypeInfo`. Mirrors
+    /// `ComponentInstance.resolveFuncSig` for the WASI-P2 graph path.
+    pub fn resolveFuncSig(self: *const BuiltComponent, arena: Allocator, name: []const u8) wit_type.Error!?wit_type.FuncSig {
+        return wit_type.resolveFuncSig(arena, &self.info, name);
     }
 
     /// The guest `*Instance` a core-instance index resolved to (null for

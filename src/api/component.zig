@@ -75,6 +75,15 @@ pub const ComponentInstance = struct {
         return self.info.exportedFuncs(alloc);
     }
 
+    /// REQ-3 (cw CM-API) — resolve a func export's full typed signature to
+    /// the specialization-preserving, label-carrying `WitType` tree. `arena`
+    /// owns the returned tree (free it all at once); label/field names borrow
+    /// from this instance's `TypeInfo`. Returns `null` when `name` does not
+    /// resolve to a concrete func. Accepts top-level + `<iface>#<func>` paths.
+    pub fn resolveFuncSig(self: *const ComponentInstance, arena: Allocator, name: []const u8) wit_type.Error!?FuncSig {
+        return wit_type.resolveFuncSig(arena, &self.info, name);
+    }
+
     /// ADR-0183 F2b/F3 — TYPED invoke through the canonical ABI: validates
     /// `args` against the export's WIT signature (from the self-describing
     /// binary), lowers them flat (compound payloads via the guest's
@@ -490,6 +499,14 @@ pub fn instantiate(engine: *Engine, alloc: Allocator, bytes: []const u8, opts: I
 // keep the same surface.
 /// ADR-0183 — the public component-level value tree (rich typed invoke).
 pub const ComponentValue = @import("../feature/component/value.zig").ComponentValue;
+
+/// REQ-3 (cw CM-API) — the public component-level TYPE tree + resolver
+/// (specialization-preserving, label-carrying; the type counterpart to
+/// `ComponentValue`). `resolveType` / `resolveFuncSig` chase the decoded
+/// 2-space rule internally so consumers don't reconstruct a TypeCtx.
+pub const wit_type = @import("../feature/component/wit_type.zig");
+pub const WitType = wit_type.WitType;
+pub const FuncSig = wit_type.FuncSig;
 
 const cwasi = @import("component_wasi_p2.zig");
 pub const runWasiP2Main = cwasi.runWasiP2Main;
@@ -1814,6 +1831,65 @@ test "ADR-0183 F1: greet introspects as (param string) -> string from the binary
     try testing.expectEqual(@as(usize, 1), funcs[0].ty.params.len);
     try testing.expectEqual(ctypes.PrimValType.string, funcs[0].ty.params[0].ty.primitive);
     try testing.expectEqual(ctypes.PrimValType.string, funcs[0].ty.result.?.primitive);
+}
+
+test "REQ-3 (cw CM-API): resolveFuncSig — greet resolves to (string) -> string WitType" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/greet_component.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var ci = try instantiate(&eng, testing.allocator, bytes, .{});
+    defer ci.deinit();
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const sig = (try ci.resolveFuncSig(arena.allocator(), "greet")).?;
+    try testing.expectEqual(@as(usize, 1), sig.params.len);
+    try testing.expect(sig.params[0].name.len > 0); // a borrowed WIT param name
+    try testing.expectEqual(WitType{ .prim = .string }, sig.params[0].ty);
+    try testing.expectEqual(WitType{ .prim = .string }, sig.result.?);
+    // A non-resolving name returns null, not an error.
+    try testing.expect((try ci.resolveFuncSig(arena.allocator(), "nope")) == null);
+}
+
+test "REQ-3 (cw CM-API): resolveFuncSig — rich types keep specialization + carry labels" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/typed_payload.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    // typed_payload imports wasi, so it goes through the WASI-P2 graph path.
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+    host.io = io;
+    var built = try cwasi.buildWasiP2Component(&eng, testing.allocator, bytes, &host, .{});
+    defer built.deinit();
+
+    const funcs = try built.info.exportedFuncs(testing.allocator);
+    defer ctypes.TypeInfo.freeExportedFuncs(testing.allocator, funcs);
+    try testing.expect(funcs.len >= 1);
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const sig = (try built.resolveFuncSig(arena.allocator(), funcs[0].name)).?;
+    // param 0 is a record{ xs: list<u32>, label: string } — record stays a
+    // record (NOT despecialized), field names + list element resolved.
+    try testing.expectEqual(@as(usize, 1), sig.params.len);
+    const rec = sig.params[0].ty.record;
+    try testing.expectEqual(@as(usize, 2), rec.len);
+    try testing.expectEqualStrings("xs", rec[0].name);
+    try testing.expectEqual(WitType{ .prim = .u32 }, rec[0].ty.list.*);
+    try testing.expectEqualStrings("label", rec[1].name);
+    try testing.expectEqual(WitType{ .prim = .string }, rec[1].ty);
+    // result stays a `result<…>` (specialization preserved, not a variant).
+    try testing.expect(sig.result.? == .result);
 }
 
 test "ADR-0183 F2b: greet invoked TYPED — string arg in, owned string result out" {
