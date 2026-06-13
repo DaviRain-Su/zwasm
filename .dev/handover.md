@@ -46,7 +46,13 @@
   `std.process.Environ` over the engine io; (4) C-API preopen smoke
   test (C host opens temp dir, guest reads a file) 3-host. inherit_argv
   stays deferred per the ADR. D-255 discharges at the end.
-- **AFTER that**: D-290 re-curation distillers (regen_wasmtime_misc /
+- **AFTER that (CWFS north-star gap, user-surfaced 2026-06-13)**:
+  extend `TypeInfo.exportedFuncs` to ENUMERATE interface-nested funcs
+  (walk exported instances; emit path-qualified `<iface>#<func>`
+  entries — the resolution machinery exists in exportedFuncIndex, only
+  enumeration is missing). Required for CWFS's require-like automatic
+  component intake; small chunk + test over resource_counter.wasm.
+- **THEN**: D-290 re-curation distillers (regen_wasmtime_misc /
   regen_spec_simd_assert — per-fixture work, evidence in the row) ·
   debt long-tail · §1.3 backlog demand-driven · D-323 blocked-by.
 - **Open user-decision item**: ADR-0184 Proposed (C-API engine-owned io
