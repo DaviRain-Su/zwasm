@@ -6,13 +6,11 @@
 ## Active campaign — spec re-vendor → alpha.3 tag (USER-AUTHORIZED; option A chosen 2026-06-14)
 
 Full plan/findings: **`private/spec_revendor_campaign.md`**. Verified (web 裏取り
-+ local): 1.0/2.0/simd/threads CURRENT (frozen `wg` tags; baking 2.0 from `main`
-was MY error). Only the **3.0 corpus** is behind — it baked from PRE-MERGE frozen
-proposal repos, trailing the Wasm 3.0 Recommendation. SOURCE for re-vendor =
-**`wg-3.0` tag** (2025-09-26; gc/exceptions/memory64/multi-memory = clean
-subdirs, tail-call/func-refs = merged top-level). Mechanism DONE: refdialect.py
-`44711469` + runbook. Discipline = VALIDATE-then-REVERT (commit only semantic
-deltas, never byte-churn — D-290).
++ local): 1.0/2.0/simd/threads CURRENT (frozen `wg` tags). Only the **3.0 corpus**
+is behind (baked from PRE-MERGE frozen proposal repos). SOURCE = **`wg-3.0` tag**
+(2025-09-26; gc/exceptions/memory64/multi-memory = subdirs, tail-call/func-refs =
+merged top-level). Mechanism DONE: refdialect.py `44711469` + runbook. Discipline
+= VALIDATE-then-REVERT (commit only semantic deltas, never byte-churn — D-290).
 SLICE 1 DONE `335a0107`(→`b8e8b16c`): gc wg-3.0 deltas incorporated, runtime
 PASSES, green. SLICE 2 (eh): wg-3.0 try_table additions are ENTIRELY
 multi-value-result → 5 new fails → fully DEFERRED (reverted).
