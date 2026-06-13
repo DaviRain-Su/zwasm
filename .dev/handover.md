@@ -3,20 +3,28 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Active task — spec re-vendor → alpha.3 tag (USER-AUTHORIZED 2026-06-13)
+## Active task — spec re-vendor → alpha.3 tag (USER-AUTHORIZED 2026-06-13; PAUSED for user decision 2026-06-14)
 
-User authorized (ADR-0156 user-only tag): refresh reference specs to latest,
-re-vendor corpus, verify FULL 3-host pass against latest spec, then create +
-push tag **`v2.0.0-alpha.3`** (tag-only, NO GitHub Release — memory
-`project_zwasm_v2_prerelease_tagging`). Steps: (1) refresh clones
-`OSS/WebAssembly/{spec→b1c5da6a,testsuite→0dc0343}` + proposals; (2) re-run ALL
-`scripts/regen_spec_*.sh` + `regen_test_data*.sh` + `regen_wasmtime_misc.sh` in
-`nix develop .#gen`; (3) review `test/spec/` corpus diff + `zig build test-all`
-Mac; (4) 3-host green (ubuntu + windows; `--resume` windows gate for the tag);
-(5) bump `.dev/spec_pin.yaml` (spec→b1c5da6a, date 2026-06-13); (6) commit
-re-vendor; (7) tag+push. NOTE: pin(21b053f7)→latest(b1c5da6a) test/core EMPTY,
-but local clones trailed the pin (spec Aug-2025) so corpus MAY be stale ~150
-files — re-vendor reveals truth. Don't rush (user: じっくり).
+User authorized (ADR-0156 user-only tag) a spec re-vendor → `v2.0.0-alpha.3`
+(tag-only, NO Release — memory `project_zwasm_v2_prerelease_tagging`). On
+investigation the re-vendor is a **multi-cycle campaign**, so PAUSED awaiting a
+user steer (user: 解説を表示して止めて).
+FINDINGS (2026-06-14): clones refreshed (spec→b1c5da6a, testsuite→0dc0343;
+5 proposal repos frozen at post-3.0-Rec HEADs). spec `test/core` UNCHANGED since
+pin 21b053f7 (2026-06-04). BUT committed corpus baked from an OLDER snapshot →
+re-vendor surfaces ~8 semantic manifest deltas + NEW test cases (func.64-66,
+memory.27-36, br_if.30, ref_null.1, …) + ~1150 byte-churn files. Distillers need
+modernizing: regen_spec_2_0_assert baker dies `KeyError 'value'` on newer
+wasm-tools 1.247.0 json-from-wast shape (likely more across scripts). Tree
+reverted CLEAN. Current corpus = known-green 0-skip 3-host @ spec-as-of-pin.
+OPTIONS surfaced: (A) full re-vendor campaign first (correct, multi-cycle, may
+surface real conformance fixes); (B) tag alpha.3 now on known-green + re-vendor
+as tracked follow-up; (C) re-bake only the new/changed semantic tests, validate
+runtime passes, commit just those + tag. AWAITING USER PICK.
+Runbook (when resumed): `import_proposal_corpus.sh --copy-all` (3.0 raw is
+STATIC) → `nix develop .#gen` → regen_spec_{1_0,2_0,simd,threads,3_0}_assert +
+regen_test_data{,_2_0} + regen_wasmtime_misc → fix distiller shape-gates →
+`zig build test-all` → 3-host (--resume windows) → bump spec_pin → commit → tag.
 
 ## Current state
 
