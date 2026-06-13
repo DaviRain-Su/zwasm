@@ -29,11 +29,45 @@
 - Mac test/lint green per commit; ubuntu test-all green 2026-06-13;
   **windows batch green 2026-06-13** (`beb2g2d5a`, 55/55 realworld + all).
 
-## NEXT — ClojureWasm CM-API finished-form requirements (USER-SURFACED 2026-06-13)
+## Active bundle
+
+- **Bundle-ID**: cljw-cm-api-finished-form
+- **Cycles-remaining**: ~6
+- **Continuity-memo**: 6 cw CM-API requests (below). USER GO GIVEN
+  2026-06-13 ("finished-form priority over impl difficulty; you decide
+  the shape / provide both"). Design decisions made (finished-form):
+  REQ-1 = `comp.open(engine,alloc,bytes,host)` + unified `Opened` union
+  handle (delegating exportedFuncs/invokeTyped/dropResource/deinit) +
+  `componentNeedsWasi(bytes)` predicate. REQ-2 = enum/variant/flags
+  labels **borrow** from TypeInfo (consistent w/ record field names) in
+  the value tree, BOTH directions (output carries label; input accepts
+  label→ordinal resolve). REQ-3 = NEW public `WitType` type-tree
+  (specialization-preserving — option/result/tuple distinct — + labels)
+  via `resolveType`/`resolveFuncSig` (parallels ComponentValue; NOT the
+  despecialized CanonType). REQ-4 = thread `InstantiateLimits` into
+  component instantiate/open/buildWasiP2Component (2 hardcoded `.{}` at
+  component.zig:435/468). REQ-5 = `Opened.dropResource(handle)` host-
+  facing, reaches guest_resources + runs destructor. REQ-6 = setDiag at
+  component_typed.zig invoke error sites (arg/field blame).
+  ORDER: 4 → 3(WitType) → 2(labels) → 6(diag) → 1(open spine) →
+  5(drop). Each TDD red→green, commit pair, chain in-turn.
+  Key files: src/api/component.zig (instantiate:455, BuiltComponent
+  re-export:487), src/api/component_wasi_p2.zig (buildWasiP2Component:
+  1642, BuiltComponent:1590, WasiP2Ctx.guest_resources:61), src/api/
+  component_typed.zig (fromCanonDefType:260 — labels available in dt;
+  InvokeTypedError:30), src/feature/component/value.zig (ComponentValue),
+  src/feature/component/canon.zig (CanonType:68, resolveTypeIndex:1295,
+  canonTypeFromLocalDefType:1386), src/feature/component/types.zig
+  (EnumType.labels:81, FlagsType.labels:86, VariantType.cases:114),
+  src/api/instance.zig (InstantiateLimits:698).
+- **Exit-condition**: all 6 implemented + tested; cljw handover written
+  to `$MY/ClojureWasmFromScratch/private/20260613_handover_from_zwasm/
+  handover.md` with `COMPLETED` marker; 3-host green.
+
+## The 6 cw CM-API requests (USER-SURFACED 2026-06-13)
 
 cw dogfooding (D-404 / ADR-0135) surfaced 6 component-model API requests.
-**User directed: assess + report first, then await go.** When implementing,
-write the response handover to
+When done, write the response handover to
 `$MY/ClojureWasmFromScratch/private/20260613_handover_from_zwasm/handover.md`
 with a `COMPLETED` marker so cw resumes. The 6 (priority order):
 1. **Unified open API** — `comp.open(engine,alloc,bytes,host)` auto-selecting
