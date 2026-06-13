@@ -3,6 +3,34 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
+  - id: "D-325"
+    layer: "code"
+    status: "now"
+    description: |-
+      Latent guest-resource DESTRUCTOR-run bug, surfaced by REQ-5 (cw CM-API host-facing
+      `dropResource`) 2026-06-13 — the FIRST exercise of the destructor path (no prior test
+      drove a guest resource destructor; D-322 only constructs/get/increment). Running the
+      `resource_counter.wasm` (wit-bindgen Rust) destructor via `guest_dtors` traps with
+      `globalGet idx >= rt.globals.len` (mvp.zig:988). Symptom points to the dtor being
+      invoked on the WRONG instance: `guest_dtors` stores `inst = self.built[ce.instance]`
+      (component_wasi_p2.zig:1791, the dtor core-export's instance), which for a wit-bindgen
+      graph appears to be a shim/fixup instance with fewer globals than the main guest
+      instance that owns the resource's backing. SHARED path: the guest-driven
+      `p2GuestResourceDrop` (component_wasi_p2.zig:1545) uses the same `guest_dtors` table, so
+      a guest-side `canon resource.drop` of an own handle would trap identically — equally
+      latent/untested. SCOPE: `dropResource` correctly REMOVES the handle (dropAny runs BEFORE
+      the dtor), so the host-drop contract (table slot freed; double-drop → InvalidHandle) is
+      sound and tested; only the destructor-run is affected (surfaced as DestructorTrapped).
+      FIX: resolve the dtor's true owning instance (follow the shim re-export to the instance
+      that actually exports the dtor core func + its globals), or thread the dtor through the
+      same path the constructor's instance uses. Then flip the REQ-5 test from
+      "tolerate DestructorTrapped" to "drop succeeds + dtor side-effect observed".
+      DISCHARGE: resource_counter own-handle drop runs its destructor cleanly (no trap) from
+      BOTH host `dropResource` and a guest-side `resource.drop`.
+    first_raised: "2026-06-13"
+    last_reviewed: "2026-06-13"
+    refs: |-
+      `src/api/component_wasi_p2.zig:1791` (guest_dtors.append — inst resolution) `:1545` (p2GuestResourceDrop) `:1652` (dropResource); `src/feature/component/resource_table.zig:146` (dropAny); `src/interp/mvp.zig:988` (globalGet trap site); `test/component/resource_counter.wasm`; REQ-5 test in `src/api/component_tests.zig`; D-322 (resource builtins)
   - id: "D-314"
     layer: "code"
     status: "note"

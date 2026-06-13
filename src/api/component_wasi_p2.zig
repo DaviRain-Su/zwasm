@@ -1588,6 +1588,11 @@ fn defineSynth(lk: *Linker, ns: []const u8, e: SynthExport, ctx: *WasiP2Ctx) !vo
 /// wiring intact — the reusable seam under `runWasiP2Main` and the typed
 /// embedder invoke (ADR-0183 F3: real-toolchain components import wasi, so
 /// typed calls need the same build the CLI run uses).
+/// REQ-5 — the failure set of `BuiltComponent.dropResource`: the resource
+/// table's own errors (stale handle / still-borrowed) plus a guest
+/// destructor trap.
+pub const DropResourceError = resource_table.Error || error{DestructorTrapped};
+
 pub const BuiltComponent = struct {
     alloc: Allocator,
     decoded: decode.Component,
@@ -1631,6 +1636,26 @@ pub const BuiltComponent = struct {
     /// `ComponentInstance.resolveFuncSig` for the WASI-P2 graph path.
     pub fn resolveFuncSig(self: *const BuiltComponent, arena: Allocator, name: []const u8) wit_type.Error!?wit_type.FuncSig {
         return wit_type.resolveFuncSig(arena, &self.info, name);
+    }
+
+    /// REQ-5 (cw CM-API) — host-facing drop of a guest-defined resource
+    /// `handle` (typically an `own` handle a host cached from a constructor
+    /// result and frees in a finaliser). Removes it from the guest resource
+    /// table and, for an `own` handle, runs the resource's declared
+    /// destructor over its rep — the same effect as the guest calling
+    /// `canon resource.drop`, but driven from the host without knowing the
+    /// resource type (the table's stored `rt` selects the destructor).
+    /// Traps on a stale/double-drop or a still-borrowed owning handle.
+    pub fn dropResource(self: *BuiltComponent, handle: u32) DropResourceError!void {
+        const removed = try self.ctx.guest_resources.dropAny(handle);
+        if (removed) |h| {
+            for (self.ctx.guest_dtors.items) |gd| {
+                if (gd.type_index != h.rt) continue;
+                var args = [_]Value{.{ .i32 = @bitCast(h.rep) }};
+                gd.inst.invoke(gd.name, &args, &.{}) catch return DropResourceError.DestructorTrapped;
+                break;
+            }
+        }
     }
 
     /// The guest `*Instance` a core-instance index resolved to (null for

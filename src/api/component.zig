@@ -587,7 +587,22 @@ pub const Opened = union(enum) {
             .wasi => |*bc| invokeTypedBuilt(bc, name, args, out_alloc),
         };
     }
+
+    /// REQ-5 — host-facing drop of a guest-defined resource handle (runs the
+    /// declared destructor for an `own` handle). Only the graph path carries
+    /// guest resources; a single-module component has none, so a drop on it
+    /// is a `NoResourceTable` misuse error.
+    pub fn dropResource(self: *Opened, handle: u32) DropResourceError!void {
+        return switch (self.*) {
+            .single => DropResourceError.NoResourceTable,
+            .wasi => |*bc| bc.dropResource(handle),
+        };
+    }
 };
+
+/// REQ-5 — `Opened.dropResource` failure set: the build's drop errors plus
+/// the single-module "no resource table" misuse.
+pub const DropResourceError = cwasi.DropResourceError || error{NoResourceTable};
 
 /// REQ-1 — open a component into a unified handle, auto-selecting the
 /// instantiation path. `host` is wired into the WASI-P2 path and ignored by

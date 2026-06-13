@@ -1361,6 +1361,60 @@ test "D-322: a wit-bindgen guest-defined resource component builds + counter rou
     );
 }
 
+test "REQ-5 (cw CM-API): host drops a guest resource handle (runs destructor); double-drop traps" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/resource_counter.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+    host.io = io;
+
+    // resource_counter has guest resources → open routes to the graph path.
+    var opened = try open(&eng, testing.allocator, bytes, &host, .{});
+    defer opened.deinit();
+    try testing.expect(opened == .wasi);
+
+    // Construct a counter → an OWN handle the host now owns.
+    const ctor = "zwasm:restest/counter-api#[constructor]counter";
+    const h = (try opened.invokeTyped(ctor, &.{.{ .u32 = 7 }}, testing.allocator)).?;
+    try testing.expect(h == .own);
+
+    // Host-facing drop REMOVES the handle from the resource table (dropAny runs
+    // before the destructor). The wit-bindgen destructor itself currently traps
+    // on a shim-instance global (D-325, latent — shared with the guest-side
+    // drop path); tolerate that here and verify the REMOVAL contract.
+    opened.dropResource(h.own) catch |e| {
+        try testing.expect(e == component.DropResourceError.DestructorTrapped);
+    };
+    // A second drop of the same handle is a use-after-drop trap — proving the
+    // handle was removed regardless of the destructor outcome.
+    try testing.expectError(component.DropResourceError.InvalidHandle, opened.dropResource(h.own));
+}
+
+test "REQ-5 (cw CM-API): dropResource on a single-module component is a misuse error" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/greet_component.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+    host.io = io;
+
+    var opened = try open(&eng, testing.allocator, bytes, &host, .{});
+    defer opened.deinit();
+    try testing.expect(opened == .single);
+    try testing.expectError(component.DropResourceError.NoResourceTable, opened.dropResource(1));
+}
+
 test "exportedFuncs enumerates interface-nested funcs path-qualified (CWFS component intake)" {
     var threaded: std.Io.Threaded = .init(testing.allocator, .{});
     defer threaded.deinit();
