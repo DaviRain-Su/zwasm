@@ -298,6 +298,56 @@ test "runVoidExportWasi: JIT ref.cast subtype mismatch → precise cast_failure 
     try testing.expectEqual(trap_surface.TrapKind.cast_failure, trap_surface.jitTrapCode(cf).?);
 }
 
+// D-293 slice-4e: the null-deref siblings slice-4c missed. `struct.get_s`
+// (separate handler from `struct.get`), `i31.get_s`, `i31.get_u` each trap with
+// a SINGLE failure mode = null reference (Wasm 3.0 GC §4.4.5 / §4.4.6) but still
+// appended to the generic `bounds_fixups` channel (mislabel). The interp raises
+// NullReference; these now route to `null_ref_fixups` → code 10, matching
+// `struct.get`/`ref.as_non_null`. (The GC array.* trampolines stay generic —
+// their single 0-return mixes ≥6 failure modes, so they need a kinded helper
+// return, not mechanical routing; D-293 row.)
+
+// `(module (type $s (struct (field i8))) (func (export "_start")
+//  ref.null $s struct.get_s $s 0 drop))` — struct.get_s on a null structref.
+const structgets_null_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x01, 0x08, 0x02, 0x5f, 0x01, 0x78, 0x00, 0x60,
+    0x00, 0x00, 0x03, 0x02, 0x01, 0x01, 0x07, 0x0a,
+    0x01, 0x06, 0x5f, 0x73, 0x74, 0x61, 0x72, 0x74,
+    0x00, 0x00, 0x0a, 0x0b, 0x01, 0x09, 0x00, 0xd0,
+    0x00, 0xfb, 0x03, 0x00, 0x00, 0x1a, 0x0b,
+};
+
+// `(module (func (export "_start") ref.null i31 i31.get_s drop))`.
+const i31gets_null_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03, 0x02,
+    0x01, 0x00, 0x07, 0x0a, 0x01, 0x06, 0x5f, 0x73,
+    0x74, 0x61, 0x72, 0x74, 0x00, 0x00, 0x0a, 0x09,
+    0x01, 0x07, 0x00, 0xd0, 0x6c, 0xfb, 0x1d, 0x1a,
+    0x0b,
+};
+
+// `(module (func (export "_start") ref.null i31 i31.get_u drop))`.
+const i31getu_null_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x01, 0x04, 0x01, 0x60, 0x00, 0x00, 0x03, 0x02,
+    0x01, 0x00, 0x07, 0x0a, 0x01, 0x06, 0x5f, 0x73,
+    0x74, 0x61, 0x72, 0x74, 0x00, 0x00, 0x0a, 0x09,
+    0x01, 0x07, 0x00, 0xd0, 0x6c, 0xfb, 0x1e, 0x1a,
+    0x0b,
+};
+
+test "runVoidExportWasi: JIT struct.get_s / i31.get_s / i31.get_u null → null_reference code 10 (D-293 slice-4e)" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    for ([_][]const u8{ &structgets_null_wasm, &i31gets_null_wasm, &i31getu_null_wasm }) |wasm| {
+        var tk: u32 = 99;
+        try testing.expectError(entry.Error.Trap, runner.runVoidExportWasi(testing.allocator, wasm, "_start", null, &tk));
+        try testing.expectEqual(@as(u32, 10), tk);
+        try testing.expectEqual(trap_surface.TrapKind.null_reference, trap_surface.jitTrapCode(tk).?);
+    }
+}
+
 // `(module (tag $e) (func (export "_start") (throw $e)))` — `throw` with no
 // enclosing `try_table` catch → the exception escapes the outermost function
 // (Wasm 3.0 EH §4.5). D-292 C: uncaught_exception code 12. NOTE this fixed a

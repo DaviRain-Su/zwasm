@@ -13,7 +13,7 @@
 //! alias the popped ref (xref) nor the result reg.
 //!
 //! Lowering mirrors i31_get_s (null-trap via TEST + JE rel32 →
-//! bounds_fixups generic trap stub, ADR-0123 D2). Intel SDM Vol.2
+//! null_ref_fixups → code 10, D-293 slice-4c/4e). Intel SDM Vol.2
 //! (TEST 0x85, JE 0x0F 0x84, MOV 0x8B, ADD 0x01).
 
 const meta = @import("../../../../../instruction/wasm_3_0/struct_get.zig");

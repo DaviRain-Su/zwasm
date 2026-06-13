@@ -8,8 +8,8 @@
 //! Heap.bytes slice `.ptr` (the first 8 bytes at offsetOf(Heap,bytes)).
 //! Re-loaded each get because the slab realloc-moves on grow.
 //!
-//! Lowering mirrors i31_get_s (null-trap via CMP + B.EQ → bounds_fixups
-//! generic trap stub, ADR-0123 D2) + struct_new_default (X19/jit_abi
+//! Lowering mirrors i31_get_s (null-trap via CMP + B.EQ → null_ref_fixups
+//! → code 10, D-293 slice-4c/4e) + struct_new_default (X19/jit_abi
 //! addressing + result-vreg capture). Encoders: Arm IHI 0055 §C6.2.65
 //! (CMP imm = SUBS), §C6.2.26 (B.cond), §C6.2.131 (LDR imm), §C6.2.4
 //! (ADD reg).

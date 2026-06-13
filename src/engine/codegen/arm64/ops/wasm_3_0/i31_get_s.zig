@@ -6,8 +6,8 @@
 //! both fail `isI31Ref` and trap. Non-allocating.
 //!
 //! Lowering: TST Wn, #1 (Z set when bit 0 clear → null/non-i31);
-//! B.EQ → generic trap stub (bounds_fixups, ADR-0123 D2). Else
-//! ASR Wd, Wn, #1 (sign-replicating). Arm IHI 0055 §C6.2.15 (TST)
+//! B.EQ → null_reference stub (null_ref_fixups → code 10; D-293 slice-4e).
+//! Else ASR Wd, Wn, #1 (sign-replicating). Arm IHI 0055 §C6.2.15 (TST)
 //! + §C6.2.13 (ASR immediate).
 
 const meta = @import("../../../../../instruction/wasm_3_0/i31_get_s.zig");
@@ -28,7 +28,7 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, _: *const zir.ZirInstr) ctx_mod.Error!void {
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encTstImm1W(wn));
     const fixup_at: u32 = @intCast(ctx.buf.items.len);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.eq, 0));
-    try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+    try ctx.null_ref_fixups.append(ctx.allocator, fixup_at); // D-293 slice-4e null_reference (code 10)
     const wd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAsrImmW(wd, wn, 1));
     try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);

@@ -4,9 +4,9 @@
 //! 0x7FFFFFFF`. The .d (32-bit) logical SHR by 1 already zeroes
 //! bit 31, so SHR alone realises the mask. Non-allocating.
 //!
-//! Lowering: TEST src, 1; JE rel32 → generic trap stub
-//! (bounds_fixups, ADR-0123 D2). Else MOV dst, src (skip if same
-//! reg); SHR dst, 1. Intel SDM Vol.2 (TEST 0xF7 /0, SHR 0xC1 /5).
+//! Lowering: TEST src, 1; JE rel32 → null_reference stub
+//! (null_ref_fixups → code 10; D-293 slice-4e). Else MOV dst, src (skip
+//! if same reg); SHR dst, 1. Intel SDM Vol.2 (TEST 0xF7 /0, SHR 0xC1 /5).
 
 const meta = @import("../../../../../instruction/wasm_3_0/i31_get_u.zig");
 const ctx_mod = @import("../../ctx.zig");
@@ -24,7 +24,7 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, _: *const zir.ZirInstr) ctx_mod.Error!void {
     try ctx.buf.appendSlice(ctx.allocator, inst.encTestRImm32(.d, src_r, 1).slice());
     const fixup_at: u32 = @intCast(ctx.buf.items.len);
     try ctx.buf.appendSlice(ctx.allocator, inst.encJccRel32(.e, 0).slice());
-    try ctx.bounds_fixups.append(ctx.allocator, fixup_at);
+    try ctx.null_ref_fixups.append(ctx.allocator, fixup_at); // D-293 slice-4e null_reference (code 10)
     const dst_r = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
     if (dst_r != src_r) try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.d, dst_r, src_r).slice());
     try ctx.buf.appendSlice(ctx.allocator, inst.encShrRImm8(.d, dst_r, 1).slice());
