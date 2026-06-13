@@ -5,7 +5,7 @@
 > re-evaluated when they advance. Phase 4 non-web proposals are the
 > v0.2.0 line.
 
-Last reviewed: **2026-04-30**.
+Last reviewed: **2026-06-13**.
 
 ## Phase 5 — W3C Recommendation (zwasm v2 v0.1.0 MUST implement)
 
@@ -75,7 +75,7 @@ Text Encoding Builtins` (skip).
 |----------------|---------------|-----------------------------------------|
 | 0.1 (preview1) | Phases 4 / 11 | de-facto baseline; complete in Phase 11 |
 | 0.2 (preview2) | **Phase 17 (ACTIVE)** | Component Model required; full campaign per ADR-0170 (`component_model_plan.md`) |
-| 0.3            | post-v0.1.0   | async / streams; needs stack-switching  |
+| 0.3            | post-v0.1.0 (post-v0.2.0) | **released 2026-06-11**; rebases WASI on CM async — streams/futures replace 0.2 poll/`pollable`; breaking vs 0.2; impl gated on CM-async + stack-switching (D-300, DEFER) |
 
 ## Toolchain proposals (non-Wasm; trigger zwasm scaffolding changes)
 
@@ -102,3 +102,12 @@ Text Encoding Builtins` (skip).
   this satisfies "a conformant runtime may ignore it." OPTIONAL future QoI:
   consume the hints to bias JIT branch layout (likely/unlikely). Not scheduled
   (no behaviour/conformance gain); revisit only if a perf campaign wants it.
+- **2026-06-13** — **WASI 0.3.0 released** (2026-06-11): rebases WASI on the
+  Component Model's async primitives — first-class streams/futures replace the
+  0.2 poll/`pollable` pattern; breaking vs 0.2. Stays **post-v0.1.0 (post-v0.2.0)**:
+  its async core is gated on CM-async + stack-switching (D-300, still DEFER —
+  format unstable per the 2026-06-07 survey). v0.1.0 scope = Wasm 3.0 + WASI 0.2
+  (Phase 17) UNCHANGED; no current-scope drift. Reference-clone note: local
+  `WebAssembly/{spec,testsuite,WASI}` clones trail `.dev/spec_pin.yaml` (pinned
+  2026-06-04, NEWER than the clones) — the tested/vendored corpus is current for
+  the targeted scope; refresh the clones for manual lookups when convenient.
