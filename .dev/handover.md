@@ -40,11 +40,32 @@
   `localInstanceDef` helper shared with exportedFuncIndex). Contract
   change: names alloc-owned, free via `TypeInfo.freeExportedFuncs`
   (docs §3.9 synced). Test over resource_counter.wasm; corpus 158/0/0.
-- **NEXT (first chunk): D-290 re-curation distillers** —
-  regen_wasmtime_misc.sh / regen_spec_simd_assert.sh (per-fixture
-  re-curation work; the D-290 row has the full evidence + approach).
-- **THEN**: debt long-tail · §1.3 backlog demand-driven · D-323
-  blocked-by.
+- **D-290 progressed `065fa116`**: regen_wasmtime_misc.sh swapped to
+  wasm-tools (signed fold + .wat parse + strip + embenchen skip
+  curation in-script). Regenerated corpus surfaced ONE root cause for
+  all 31 runtime + 1 basic fails → rowed as **D-324** (memory64 ×
+  multi-memory bulk-op gap: validator memAddrType is module-wide;
+  interp bulk ops pop .i32 unconditionally; memory64 bulk corpora
+  never distilled). Corpus regen+commit lands when D-324 closes.
+- **THEN (after bundle)**: D-290 regen_spec_simd_assert.sh + flake
+  wabt-pin drop · debt long-tail · §1.3 backlog · D-323 blocked-by.
+
+## Active bundle
+
+- **Bundle-ID**: d324-mem64-bulk
+- **Cycles-remaining**: ~3
+- **Continuity-memo**: D-324 row has full evidence. Order: (B1)
+  validator per-memory idx_types slice (replace memAddrType uses in
+  copy/init/fill/size/grow/load/store; copy = [it_dst it_src it_min])
+  + unit tests; (B2) interp bulk pops keyed on
+  rt.memories[memidx].idx_type + 64-bit bounds; verify JIT
+  single-memory64 bulk path; (B3) distill memory64 memory_copy/fill/
+  init raw→active corpus (regen_spec_3_0_assert.sh); (B4)
+  `bash scripts/regen_wasmtime_misc.sh` → commit corpus (expect basic
+  74/0, runtime ~359/0/5) + D-324/D-290 row updates.
+- **Exit-condition**: memory-copy.1.wasm validates+runs green via
+  wast_runtime_runner; memory64 bulk corpora in active set 3-host
+  green; wasmtime_misc corpus committed at the new gate-state.
 - **Other open**: D-323 (stdlib NTSTATUS, blocked-by) · D-318 (note,
   non-gating Rosetta limitation) · §1.3 backlog demand-driven.
 
