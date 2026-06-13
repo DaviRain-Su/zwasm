@@ -28,21 +28,27 @@
   supported_multi staleness fixed). Remaining blocked distillers =
   regen_wasmtime_misc.sh + regen_spec_simd_assert.sh (re-curation
   class — per-fixture work, the D-290 row has the full evidence).
-- **STOPPED 2026-06-13 by user (weekly rate limit)** after a
-  resume-wiring audit: handover clean (no forbidden phrases, links
-  resolve), SessionStart/PostCompact hooks verified, continue-skill
-  file chain complete, ROADMAP §1.2 CM row reality-synced (was still
-  "opt-in/campaign-NOW"). A fresh session resumes with `/continue`
-  ALONE: it reads this file → the widget row 17 NOW-pointer
-  (completion-refinement) → next candidates below. All gates green at
-  stop (mac test/lint, ubuntu test-all @357a019e, windows batch
-  recorded @0a84e770; post-stop commits are mac-gated, ubuntu verifies
-  on first resume).
-- **NOW-pointer: completion-refinement continues** — NEXT candidates
-  (pick one): D-290 re-curation distillers (above) · debt long-tail
-  re-evaluation · §1.3 backlog stays demand-driven · D-323 blocked-by.
-  Open USER item: ADR-0184 (Proposed — C-API engine-owned io) awaits
-  review; the loop does not implement it meanwhile.
+- **STOPPED 2026-06-13 by user (weekly rate limit)**; re-audited the
+  resume wiring at stop. A fresh session resumes with `/continue`
+  ALONE: read this file → first chunk below. All gates green at stop
+  (mac test/lint per commit; ubuntu test-all green through @357a019e;
+  windows batch recorded @0a84e770; the few post-audit commits are
+  docs/ADR/debt-only — ubuntu re-verifies on first resume).
+- **ADR-0184 ACCEPTED (user, 2026-06-13)** — C-API engine-owned
+  `std.Io` (wasm.h stays upstream-verbatim; wasi.h extension surface;
+  full 裏取り in the ADR's Investigation addendum).
+- **NEXT (first chunk of the fresh session): implement ADR-0184** in
+  order: (1) `zwasm_engine_new` constructs+owns `std.Io.Threaded`
+  (deinit at `engine_delete`; wire to `Host.io`); (2) re-add
+  `wasi_config_preopen_dir` to include/wasi.h + src/api/wasi.zig
+  (open via engine io at INSTANTIATION time — preopen precedent at
+  src/cli/run.zig:99-110, the `--dir` loop); (3) `inherit_env` via
+  `std.process.Environ` over the engine io; (4) C-API preopen smoke
+  test (C host opens temp dir, guest reads a file) 3-host. inherit_argv
+  stays deferred per the ADR. D-255 discharges at the end.
+- **AFTER that**: D-290 re-curation distillers (regen_wasmtime_misc /
+  regen_spec_simd_assert — per-fixture work, evidence in the row) ·
+  debt long-tail · §1.3 backlog demand-driven · D-323 blocked-by.
 - **Open user-decision item**: ADR-0184 Proposed (C-API engine-owned io
   — ADR-0143 surface reversal; loop does NOT implement until reviewed).
 - **Other open**: D-323 (stdlib NTSTATUS, blocked-by) · D-318 (note,

@@ -1,9 +1,9 @@
 # ADR-0184 — C-API: engine-owned `std.Io` for WASI preopens / inherit-env
 
 > **Doc-state**: ACTIVE
-> Status: Proposed (autonomous draft for the D-255 carry; user review
-> requested before implementation — this re-adds REMOVED public C-API
-> surface, an ADR-0143 reversal)
+> Status: Accepted (user-approved 2026-06-13 after the investigation
+> addendum; supersedes the ADR-0143 removal of the preopen/inherit-env
+> declarations — implementation scheduled as the next /continue chunk)
 
 ## Context
 
@@ -68,7 +68,11 @@ instance at `zwasm_engine_new`, exposed internally as `engine.io()`.**
 
 ## Revisions
 
-- (none yet)
+- 2026-06-13 — **Accepted** (user-approved after the 裏取り addendum
+  below). Implementation order confirmed: engine-owned
+  `std.Io.Threaded` at `zwasm_engine_new` → `preopen_dir` →
+  `inherit_env` → C-API preopen smoke test 3-host; `inherit_argv`
+  stays gated on a vetted cross-platform helper.
 
 ## Investigation addendum (2026-06-13, user-requested 裏取り)
 
