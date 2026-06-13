@@ -224,6 +224,15 @@ test "6.K.1: two runtimes share a table; FuncEntity routes to source" {
     try testing.expectEqual(@as(u32, 42), rt_b.popOperand().u32);
 }
 
+// D-325 — cross-instance `call_indirect` must run the callee in ITS runtime
+// context (own globals/memory), not the caller's. The `6.K.1` test above pins
+// cross-runtime table DISPATCH (value routing); the GLOBALS-context boundary is
+// pinned end-to-end by the REQ-5 dropResource test (component_tests.zig): a
+// wit-bindgen guest destructor reached via the shim's `$imports` table accesses
+// module 0's globals, which trapped pre-fix. A synthetic two-runtime unit test
+// would need a fully-instantiated source runtime (heap-owned globals + frame
+// storage) — the real e2e test is the authentic, ownership-correct fixture.
+
 // ============================================================
 // Wasm 3.0 function-references: call_ref (10.R-4)
 // ============================================================

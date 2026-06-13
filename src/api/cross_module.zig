@@ -45,46 +45,10 @@ pub fn thunk(rt: *runtime.Runtime, ctx: *anyopaque) anyerror!void {
     const source_rt = cmc.source_rt;
     if (cmc.source_funcidx >= source_rt.funcs.len) return runtime.Trap.Unreachable;
     const callee = source_rt.funcs[cmc.source_funcidx];
-
-    // Transfer args importer-stack → source-stack. Args sit at the
-    // top of the importer's operand_buf in left-to-right order.
-    const num_params: u32 = @intCast(callee.sig.params.len);
-    if (rt.operand_len < num_params) return runtime.Trap.StackOverflow;
-    const args_start = rt.operand_len - num_params;
-    var i: u32 = 0;
-    while (i < num_params) : (i += 1) {
-        try source_rt.pushOperand(rt.operand_buf[args_start + i]);
-    }
-    rt.operand_len = args_start;
-
-    interp_mvp.invoke(source_rt, cmc.dispatch_table, callee) catch |err| {
-        // Cross-module exception propagation (ADR-0114 D1; 10.E-eh-tail
-        // cycle 120). An uncaught throw in the source instance leaves
-        // its `Exception` in `source_rt.pending_exception`; hand it to
-        // the CALLER's runtime so the caller's `findAndDispatchCatch`
-        // (which reads its own `pending_exception`) can match the catch.
-        // The exc's `*TagInstance` identity is module-independent
-        // (cyc119), so the cross-module catch matches by pointer. The
-        // exc object stays owned by `source_rt.live_exceptions` (freed
-        // at source teardown); the source instance outlives the
-        // importing call, so the borrowed pointer + inline payload stay
-        // valid through the caller's catch.
-        if (err == runtime.Trap.UncaughtException) {
-            if (source_rt.pending_exception) |exc| {
-                rt.pending_exception = exc;
-                source_rt.pending_exception = null;
-            }
-        }
-        return err;
-    };
-
-    // Transfer results source-stack → importer-stack.
-    const num_results: u32 = @intCast(callee.sig.results.len);
-    if (source_rt.operand_len < num_results) return runtime.Trap.StackOverflow;
-    const results_start = source_rt.operand_len - num_results;
-    i = 0;
-    while (i < num_results) : (i += 1) {
-        try rt.pushOperand(source_rt.operand_buf[results_start + i]);
-    }
-    source_rt.operand_len = results_start;
+    // The cross-runtime arg/result transfer + run-in-source-context (+ uncaught
+    // cross-module exception hand-off per ADR-0114 D1, cyc119/120: the exc's
+    // `*TagInstance` identity is module-independent, so the caller's
+    // `findAndDispatchCatch` matches it by pointer) is shared with the
+    // `call_indirect` / `call_ref` cross-instance path (D-325).
+    try interp_mvp.invokeCrossRuntime(rt, source_rt, cmc.dispatch_table, callee);
 }

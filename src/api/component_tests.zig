@@ -1384,15 +1384,12 @@ test "REQ-5 (cw CM-API): host drops a guest resource handle (runs destructor); d
     const h = (try opened.invokeTyped(ctor, &.{.{ .u32 = 7 }}, testing.allocator)).?;
     try testing.expect(h == .own);
 
-    // Host-facing drop REMOVES the handle from the resource table (dropAny runs
-    // before the destructor). The wit-bindgen destructor itself currently traps
-    // on a shim-instance global (D-325, latent — shared with the guest-side
-    // drop path); tolerate that here and verify the REMOVAL contract.
-    opened.dropResource(h.own) catch |e| {
-        try testing.expect(e == component.DropResourceError.DestructorTrapped);
-    };
-    // A second drop of the same handle is a use-after-drop trap — proving the
-    // handle was removed regardless of the destructor outcome.
+    // Host-facing drop removes the handle AND runs the guest destructor
+    // cleanly — the destructor (module 0's `[dtor]counter`) is reached via the
+    // wit-bindgen shim's cross-instance `call_indirect` and now executes in its
+    // OWN runtime context (D-325 fix).
+    try opened.dropResource(h.own);
+    // A second drop of the same handle is a use-after-drop trap.
     try testing.expectError(component.DropResourceError.InvalidHandle, opened.dropResource(h.own));
 }
 

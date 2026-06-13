@@ -477,7 +477,15 @@ fn callIndirectOp(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
         }
     }
 
+    // D-325 — a funcref whose owning runtime differs from this one (a
+    // cross-instance guest func wired into a table, e.g. a wit-bindgen shim's
+    // `$imports` dispatch table) must run in ITS runtime's context, not ours.
+    // The interp DispatchTable (ZirOp→handler) is shared, so pass ours.
     const dispatch_tbl = rt.table orelse return Trap.Unreachable;
+    if (callee_rt != rt) {
+        try invokeCrossRuntime(rt, callee_rt, dispatch_tbl, callee);
+        return;
+    }
     try invoke(rt, dispatch_tbl, callee);
 }
 
@@ -527,7 +535,13 @@ fn callRefOp(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
         }
     }
 
+    // D-325 — same cross-instance routing as call_indirect: a foreign-runtime
+    // funcref runs in ITS context (own globals/memory), not the caller's.
     const dispatch_tbl = rt.table orelse return Trap.Unreachable;
+    if (callee_rt != rt) {
+        try invokeCrossRuntime(rt, callee_rt, dispatch_tbl, callee);
+        return;
+    }
     try invoke(rt, dispatch_tbl, callee);
 }
 
@@ -728,6 +742,53 @@ pub fn invoke(rt: *Runtime, table: *const DispatchTable, callee: *const zir.ZirF
         }
         return err;
     };
+}
+
+/// Invoke `callee` (which belongs to `callee_rt`) from `caller_rt` when the two
+/// runtimes differ — the callee must execute in ITS OWN runtime context (own
+/// globals / memory / tables), not the caller's. Transfers the args from the
+/// caller's operand stack to the callee's, runs `invoke` against `callee_rt`,
+/// and transfers the results back (mirrors `cross_module.thunk`; both share
+/// this so the cross-runtime contract has a single home). Used by
+/// `call_indirect` / `call_ref` / their tail-call variants when a table /
+/// stack funcref carries a foreign `fe.runtime` (D-325 — wit-bindgen shim
+/// tables hold cross-instance guest funcrefs; without this the callee runs
+/// against the shim's globals and traps).
+pub fn invokeCrossRuntime(
+    caller_rt: *Runtime,
+    callee_rt: *Runtime,
+    callee_dispatch: *const DispatchTable,
+    callee: *const zir.ZirFunc,
+) anyerror!void {
+    const num_params: u32 = @intCast(callee.sig.params.len);
+    if (caller_rt.operand_len < num_params) return Trap.StackOverflow;
+    const args_start = caller_rt.operand_len - num_params;
+    var i: u32 = 0;
+    while (i < num_params) : (i += 1) {
+        try callee_rt.pushOperand(caller_rt.operand_buf[args_start + i]);
+    }
+    caller_rt.operand_len = args_start;
+
+    invoke(callee_rt, callee_dispatch, callee) catch |err| {
+        // Cross-runtime exception propagation (mirrors cross_module.thunk):
+        // hand an uncaught throw to the caller so ITS catch search matches.
+        if (err == Trap.UncaughtException) {
+            if (callee_rt.pending_exception) |exc| {
+                caller_rt.pending_exception = exc;
+                callee_rt.pending_exception = null;
+            }
+        }
+        return err;
+    };
+
+    const num_results: u32 = @intCast(callee.sig.results.len);
+    if (callee_rt.operand_len < num_results) return Trap.StackOverflow;
+    const results_start = callee_rt.operand_len - num_results;
+    i = 0;
+    while (i < num_results) : (i += 1) {
+        try caller_rt.pushOperand(callee_rt.operand_buf[results_start + i]);
+    }
+    callee_rt.operand_len = results_start;
 }
 
 /// Wasm 3.0 EH `throw tag_idx` (§3.3.10.7 / §4.5). Pops the
