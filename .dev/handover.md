@@ -34,15 +34,17 @@
 - Mac test/lint green per commit; ubuntu test-all baseline green
   2026-06-13 (exit 0, post-account-switch re-kick); windows batch not
   due (last batch landed pre-stop).
-- **NEXT (first chunk): CWFS north-star gap (user-surfaced 2026-06-13)**
-  — extend `TypeInfo.exportedFuncs` to ENUMERATE interface-nested funcs
-  (walk exported instances; emit path-qualified `<iface>#<func>`
-  entries — the resolution machinery exists in exportedFuncIndex, only
-  enumeration is missing). Required for CWFS's require-like automatic
-  component intake; small chunk + test over resource_counter.wasm.
-- **THEN**: D-290 re-curation distillers (regen_wasmtime_misc /
-  regen_spec_simd_assert — per-fixture work, evidence in the row) ·
-  debt long-tail · §1.3 backlog demand-driven · D-323 blocked-by.
+- **CWFS exportedFuncs gap CLOSED `af112e9a` (2026-06-13)** —
+  `TypeInfo.exportedFuncs` now enumerates interface-nested funcs
+  path-qualified `<iface>#<func>` (exactly the `invokeTyped` form;
+  `localInstanceDef` helper shared with exportedFuncIndex). Contract
+  change: names alloc-owned, free via `TypeInfo.freeExportedFuncs`
+  (docs §3.9 synced). Test over resource_counter.wasm; corpus 158/0/0.
+- **NEXT (first chunk): D-290 re-curation distillers** —
+  regen_wasmtime_misc.sh / regen_spec_simd_assert.sh (per-fixture
+  re-curation work; the D-290 row has the full evidence + approach).
+- **THEN**: debt long-tail · §1.3 backlog demand-driven · D-323
+  blocked-by.
 - **Other open**: D-323 (stdlib NTSTATUS, blocked-by) · D-318 (note,
   non-gating Rosetta limitation) · §1.3 backlog demand-driven.
 
