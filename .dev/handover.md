@@ -3,27 +3,27 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Active task — spec re-vendor → alpha.3 tag (USER-AUTHORIZED 2026-06-13; PAUSED for user decision 2026-06-14)
+## Active campaign — spec re-vendor → alpha.3 tag (USER-AUTHORIZED; option A chosen 2026-06-14)
 
-User authorized (ADR-0156 user-only tag) a spec re-vendor → `v2.0.0-alpha.3`
-(tag-only, NO Release — memory `project_zwasm_v2_prerelease_tagging`). On
-investigation the re-vendor is a **multi-cycle campaign**, so PAUSED awaiting a
-user steer (user: 解説を表示して止めて).
-FINDINGS (2026-06-14): clones refreshed (spec→b1c5da6a, testsuite→0dc0343;
-5 proposal repos frozen at post-3.0-Rec HEADs). spec `test/core` UNCHANGED since
-pin 21b053f7 (2026-06-04). BUT committed corpus baked from an OLDER snapshot →
-re-vendor surfaces ~8 semantic manifest deltas + NEW test cases (func.64-66,
-memory.27-36, br_if.30, ref_null.1, …) + ~1150 byte-churn files. Distillers need
-modernizing: regen_spec_2_0_assert baker dies `KeyError 'value'` on newer
-wasm-tools 1.247.0 json-from-wast shape (likely more across scripts). Tree
-reverted CLEAN. Current corpus = known-green 0-skip 3-host @ spec-as-of-pin.
-OPTIONS surfaced: (A) full re-vendor campaign first (correct, multi-cycle, may
-surface real conformance fixes); (B) tag alpha.3 now on known-green + re-vendor
-as tracked follow-up; (C) re-bake only the new/changed semantic tests, validate
-runtime passes, commit just those + tag. AWAITING USER PICK.
-Runbook (resume): `import_proposal_corpus.sh --copy-all` (3.0 raw STATIC) →
-`nix develop .#gen` → all regen_spec_*/regen_test_data*/regen_wasmtime_misc →
-fix distiller shape-gates → `zig build test-all` → 3-host → bump spec_pin → tag.
+User chose option A (full re-vendor; git history = safety net) + added a
+requirement: leave a SUSTAINABLE wasm-tools/spec-following mechanism
+(nightly-check style, NOT CI-wired yet). FULL PLAN + findings + the verified
+ref-dialect solution: **`private/spec_revendor_campaign.md`** (read first on
+resume). ADR-0156 user-only tag → `v2.0.0-alpha.3` tag-only (memory
+`project_zwasm_v2_prerelease_tagging`).
+Proven multi-cycle: re-baking from latest surfaces (1) new wasm-tools JSON ref
+dialect (typed-null `{"type":"refnull"|"null*ref"}` + bare funcref/externref =
+any-non-null, no `value`), (2) distiller `allowed_scalar`/`supported` gates +
+runner lack ref-result support, (3) spec relocated bulk-op .wast (memory_copy/
+fill/init, table_copy/fill/init gone from test/core) — ×8 brittle distillers,
+3.0 GC heaviest. Verified fix slice: null→`i64:0`, bare-ref→`i64:nonnull`
+sentinel + runner `got!=0` arm (15 baked OK), then reverted to clean.
+Phases (see plan doc): P1 framework (shared distiller helper + runbook +
+check_spec_bump wasm-tools-pin/dry-run), P2 modernize distillers, P3 re-bake +
+test-all (fix REAL conformance gaps, keep 0-skip), P4 3-host + bump spec_pin,
+P5 commit + tag. Tree CLEAN; current corpus known-green 0-skip @ spec-as-of-pin
+(test/core unchanged since pin 2026-06-04). Proceed autonomously; checkpoint at
+milestones. NEXT cycle: P1 — start the framework (shared ref-dialect helper).
 
 ## Current state
 
