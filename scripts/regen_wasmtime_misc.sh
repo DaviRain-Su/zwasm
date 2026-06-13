@@ -3,12 +3,20 @@
 # (BATCH1 basic + BATCH2 reftypes + BATCH3 embenchen + issues)
 # under test/wasmtime_misc/wast/<category>/<fixture>/.
 #
-# Phase 6 / §9.6 / 6.C per ADR-0012. Each .wast is wast2json'd
-# into a per-fixture subdir; the manifest.txt distils to the
+# Phase 6 / §9.6 / 6.C per ADR-0012. Each .wast is distilled (D-290
+# tool swap: wabt wast2json → `wasm-tools json-from-wast`) into a
+# per-fixture subdir; the manifest.txt distils to the
 # valid/invalid/malformed directives the wast_runner consumes
-# (parse + validate gate). assert_return / assert_trap / etc.
-# wire when 6.D drives the same corpus through the runtime-
-# asserting runner.
+# (parse + validate gate). manifest_runtime.txt drives the runtime-
+# asserting runner (6.D).
+#
+# D-290 tool-difference rules (same as regen_spec_2_0_assert.sh):
+#   - wasm-tools emits i32/i64 values SIGNED (sometimes as JSON
+#     numbers); fold to the unsigned decimals the runner expects.
+#   - some valid text modules come out as `.wat`; `wasm-tools parse`
+#     them to .wasm.
+#   - valid modules carry a `name` custom section; `strip --all`
+#     recovers wabt byte-parity. invalid/malformed copy RAW.
 #
 # Usage:
 #   bash scripts/regen_wasmtime_misc.sh
@@ -25,8 +33,8 @@ cd "$(dirname "$0")/.."
 UPSTREAM=${WASMTIME_REPO:-$HOME/Documents/OSS/wasmtime}
 DEST=test/wasmtime_misc/wast
 
-if ! command -v wast2json >/dev/null 2>&1; then
-  echo "[regen_wasmtime_misc] wast2json not found (need wabt in PATH or dev shell)" >&2
+if ! command -v wasm-tools >/dev/null 2>&1; then
+  echo "[regen_wasmtime_misc] wasm-tools not found (need it in PATH or dev shell)" >&2
   exit 1
 fi
 if ! command -v python3 >/dev/null 2>&1; then
@@ -95,14 +103,10 @@ vendor_one() {
   local TMP
   TMP=$(mktemp -d)
 
-  if ! ( cd "$TMP" && wast2json \
-      --enable-function-references \
-      --enable-tail-call \
-      --enable-extended-const \
-      --enable-multi-memory \
-      --enable-threads \
-      "$src" -o "$name.json" >/dev/null 2>&1 ); then
-    skipped+=("$cat/$name (wast2json failed)")
+  # D-290: wasm-tools enables all proposals by default (no
+  # --enable-* flags; the wabt flag set drops).
+  if ! ( cd "$TMP" && wasm-tools json-from-wast "$src" -o "$name.json" --wasm-dir . >/dev/null 2>&1 ); then
+    skipped+=("$cat/$name (json-from-wast failed)")
     rm -rf "$TMP"
     return
   fi
@@ -120,37 +124,43 @@ rt_lines = []
 def encode_value(v):
   ty = v.get('type', '')
   raw = v.get('value', '')
-  # wast2json emits ints as decimal strings; floats as bit-pattern
-  # decimal strings (e.g. f32: "1234567890" representing the u32
-  # IEEE 754 bit pattern). Wrap in TLV per ADR-0013 §2 syntax.
+  # Values are bit-pattern decimals (ints: the value; floats: the
+  # IEEE 754 bit pattern). D-290 baker normalization: wabt emitted
+  # them UNSIGNED as strings; wasm-tools emits SIGNED, sometimes as
+  # JSON numbers — fold negatives into the unsigned width. Wrap in
+  # TLV per ADR-0013 §2 syntax.
   if ty == 'i32':
     try:
-      return f'i32:{int(raw)}'
+      return f'i32:{int(raw) & 0xffffffff}'
     except Exception:
       return None
   if ty == 'i64':
     try:
-      return f'i64:{int(raw)}'
+      return f'i64:{int(raw) & 0xffffffffffffffff}'
     except Exception:
       return None
   if ty == 'f32':
-    # raw is a u32 decimal of the bit pattern → emit hex form the
-    # runner's parseValue accepts via the `f32:0xHEX` path.
+    # bit pattern → emit hex form the runner's parseValue accepts
+    # via the `f32:0xHEX` path.
     try:
-      bits = int(raw)
-      return f'f32:0x{bits:08x}'
+      return f'f32:0x{int(raw) & 0xffffffff:08x}'
     except Exception:
       return None
   if ty == 'f64':
     try:
-      bits = int(raw)
-      return f'f64:0x{bits:016x}'
+      return f'f64:0x{int(raw) & 0xffffffffffffffff:016x}'
     except Exception:
       return None
   # v128 / externref / funcref / null refs deferred — runtime
   # runner doesn't compare those yet. Returning None causes the
   # entire directive to be skipped from manifest_runtime.txt.
   return None
+
+def norm_wasm(fn):
+  # wasm-tools emits some valid TEXT modules as `.wat` where wabt
+  # compiled `.wasm`; the copy loop converts via `wasm-tools parse`,
+  # so normalize the manifest name to its `.wasm` form here.
+  return fn[:-4] + '.wasm' if fn.endswith('.wat') else fn
 
 def encode_args(values):
   out = []
@@ -173,7 +183,7 @@ def quote_field(field):
 for c in d['commands']:
   t = c.get('type')
   if t == 'module':
-    fn = c['filename']
+    fn = norm_wasm(c['filename'])
     parse_lines.append('valid ' + fn)
     line = 'module ' + fn
     name = c.get('name')
@@ -278,21 +288,64 @@ PY
     return
   fi
 
-  # Walk both manifests so .wasm files referenced only by
-  # manifest_runtime.txt directives (e.g. `assert_uninstantiable`)
-  # also get copied into out_dir.
-  for src_manifest in "$out_dir/manifest.txt" "$out_dir/manifest_runtime.txt"; do
-    [ -f "$src_manifest" ] || continue
-    while read -r line; do
-      for tok in $line; do
-        if [[ "$tok" == *.wasm ]]; then
-          if [ -f "$TMP/$tok" ] && [ ! -f "$out_dir/$tok" ]; then
-            cp "$TMP/$tok" "$out_dir/"
-          fi
+  # Materialize referenced .wasm files (D-290 tool-difference rules):
+  #   - valid / module / assert_uninstantiable / assert_unlinkable:
+  #     valid binaries — strip wasm-tools' name section; a `.wat`
+  #     text-module emission is parsed to .wasm first.
+  #   - invalid / malformed: intentionally broken — copy RAW (never
+  #     re-encode/strip). Walk both manifests so .wasm files
+  #     referenced only by manifest_runtime.txt also land.
+  while read -r d1 file _; do
+    [ -f "$out_dir/$file" ] && continue
+    case "$d1" in
+      valid)
+        base="${file%.wasm}"
+        if [ -f "$TMP/$file" ]; then
+          wasm-tools strip --all "$TMP/$file" -o "$out_dir/$file"
+        elif [ -f "$TMP/$base.wat" ]; then
+          wasm-tools parse "$TMP/$base.wat" -o "$TMP/$base.fromwat.wasm"
+          wasm-tools strip --all "$TMP/$base.fromwat.wasm" -o "$out_dir/$file"
         fi
-      done
-    done < "$src_manifest"
-  done
+        ;;
+      invalid|malformed)
+        if [ -f "$TMP/$file" ]; then
+          cp "$TMP/$file" "$out_dir/"
+        fi
+        ;;
+    esac
+  done < "$out_dir/manifest.txt"
+  if [ -f "$out_dir/manifest_runtime.txt" ]; then
+    while read -r d1 file _; do
+      case "$d1" in
+        module|assert_uninstantiable|assert_unlinkable)
+          [ -f "$out_dir/$file" ] && continue
+          base="${file%.wasm}"
+          if [ -f "$TMP/$file" ]; then
+            wasm-tools strip --all "$TMP/$file" -o "$out_dir/$file"
+          elif [ -f "$TMP/$base.wat" ]; then
+            wasm-tools parse "$TMP/$base.wat" -o "$TMP/$base.fromwat.wasm"
+            wasm-tools strip --all "$TMP/$base.fromwat.wasm" -o "$out_dir/$file"
+          fi
+          ;;
+      esac
+    done < "$out_dir/manifest_runtime.txt"
+  fi
+
+  # Curation: embenchen `.1.wasm` modules are emcc guests importing
+  # env.* glue that no directive registers/provides — keep the
+  # committed skip (token validated by check_skip_adrs.sh) instead
+  # of letting them fail instantiation.
+  if [ "$cat" = embenchen ] && [ -f "$out_dir/manifest_runtime.txt" ]; then
+    python3 - "$out_dir/manifest_runtime.txt" <<'PY'
+import re, sys
+p = sys.argv[1]
+lines = open(p).read().splitlines()
+out = [re.sub(r'^module (\S+\.1\.wasm)$',
+              r'skip-adr-skip_embenchen_emcc_env_imports \1', l)
+       for l in lines]
+open(p, 'w').write('\n'.join(out) + '\n')
+PY
+  fi
 
   landed+=("$cat/$name")
   rm -rf "$TMP"
