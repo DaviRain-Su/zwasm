@@ -15,6 +15,7 @@ const std = @import("std");
 
 const canon = @import("../feature/component/canon.zig");
 const ctypes = @import("../feature/component/types.zig");
+const diagnostic = @import("../diagnostic/diagnostic.zig");
 const runtime_value = @import("../runtime/value.zig");
 const value_conv = @import("../zwasm/value_conv.zig");
 const zwasm = @import("../zwasm.zig");
@@ -48,6 +49,18 @@ pub fn coreToFacade(rv: runtime_value.Value, ct: canon.CoreType) Value {
     };
 }
 
+/// REQ-6 (cw CM-API) — set a per-argument diagnostic (which arg index, the
+/// expected WIT type kind, the actual host-value kind) before re-returning
+/// the lowering error. Lets a host render "arg 2: expected u32, got list".
+fn diagArg(err: InvokeTypedError, idx: usize, expected: canon.CanonType, got: ComponentValue) InvokeTypedError {
+    diagnostic.setDiag(.execute, .other, .unknown, "typed invoke arg {d}: expected {s}, got {s}", .{
+        idx,
+        @tagName(std.meta.activeTag(expected)),
+        @tagName(std.meta.activeTag(got)),
+    });
+    return err;
+}
+
 /// The shared typed-invoke pipeline (`CanonicalABI.md` canon_lift of a
 /// canon-lowered call, host side): validate arity, lower the typed args
 /// flat (spilling > MAX_FLAT_PARAMS to a guest-memory tuple), invoke the
@@ -68,7 +81,12 @@ pub fn invokeTypedCore(
     args: []const ComponentValue,
     out_alloc: Allocator,
 ) InvokeTypedError!?ComponentValue {
-    if (args.len != ft.params.len) return InvokeTypedError.ArgArityMismatch;
+    // REQ-6 (cw CM-API): name the arity in the diagnostic so a host can
+    // turn the bare error into a user-facing message.
+    if (args.len != ft.params.len) {
+        diagnostic.setDiag(.execute, .other, .unknown, "typed invoke: expected {d} argument(s), got {d}", .{ ft.params.len, args.len });
+        return InvokeTypedError.ArgArityMismatch;
+    }
 
     var arena_state = std.heap.ArenaAllocator.init(gpa);
     defer arena_state.deinit();
@@ -83,8 +101,10 @@ pub fn invokeTypedCore(
     }
     var flats: std.ArrayList(canon.CoreValue) = .empty;
     if (flat_param_types.items.len <= canon.MAX_FLAT_PARAMS) {
-        for (args, ptypes) |arg, pt| {
-            try canon.lowerFlat(cx, a, try toCanonValue(a, arg, pt), pt, &flats);
+        for (args, ptypes, 0..) |arg, pt, i| {
+            // REQ-6: blame the specific arg index + its expected/actual shape.
+            const lowered = toCanonValue(a, arg, pt) catch |e| return diagArg(e, i, pt, arg);
+            try canon.lowerFlat(cx, a, lowered, pt, &flats);
         }
     } else {
         // Spill: the params become one record stored in guest memory,
@@ -93,7 +113,7 @@ pub fn invokeTypedCore(
         for (ptypes, spill_fields) |pt, *f| f.* = .{ .name = "", .ty = pt };
         const spill_ty: canon.CanonType = .{ .record = spill_fields };
         const spill_vals = try a.alloc(canon.Value, args.len);
-        for (args, ptypes, spill_vals) |arg, pt, *slot| slot.* = try toCanonValue(a, arg, pt);
+        for (args, ptypes, spill_vals, 0..) |arg, pt, *slot, i| slot.* = toCanonValue(a, arg, pt) catch |e| return diagArg(e, i, pt, arg);
         const size: u32 = @intCast(canon.sizeOf(spill_ty));
         const base = try cx.realloc(0, 0, @intCast(canon.alignmentOf(spill_ty)), size);
         try canon.store(cx, .{ .record = spill_vals }, spill_ty, base);
