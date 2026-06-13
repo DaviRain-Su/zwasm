@@ -5,21 +5,24 @@
 
 ## Active campaign — spec re-vendor → alpha.3 tag (USER-AUTHORIZED; option A chosen 2026-06-14)
 
-Option A (full re-vendor; git = safety net) + leave a SUSTAINABLE
-wasm-tools/spec-following mechanism (nightly-check, NOT CI yet). FULL plan +
-findings + verified ref-dialect solution: **`private/spec_revendor_campaign.md`**
-(read first). Phases: P1 framework, P2 modernize distillers, P3 re-bake+test-all
-(fix REAL gaps, keep 0-skip), P4 3-host+bump spec_pin, P5 commit+tag
-(`v2.0.0-alpha.3` tag-only, user-only ADR-0156). Multi-cycle: latest spec needs
-distiller modernization for the new wasm-tools JSON ref dialect + relocated
-bulk-op .wast + GC ref-results, ×8 bakers.
-P1 DONE: shared ref-dialect lib `scripts/spec_distill/refdialect.py` (self-test,
-gate-guarded) `44711469` + runbook `.dev/spec_revendor_runbook.md` `56e17dc4`.
-NEXT: P1-finish (check_spec_bump wasm-tools pin + `--dry-run-revendor`), then P2
-— wire refdialect into regen_spec_2_0 (swap inline fmt/kind_alias; admit ref
-types in allowed_scalar/supported; fix relocated NAMES memory_copy/fill/init +
-table_copy/fill/init) → re-bake → 0-skip verify. Current corpus known-green
-0-skip @ spec-as-of-pin (test/core unchanged since pin 2026-06-04).
+MAJOR FINDING (2026-06-14): the committed corpus is ALREADY current for the
+latest spec (Wasm 3.0 Rec). The earlier "stale ~150 files / big campaign" was an
+ARTIFACT of baking the 2.0 corpus from spec `main` (which now carries post-3.0
+content → false elem/data/ref_null failures). Version corpora bake from frozen
+W3C-Rec TAGS: 1.0/2.0 ← `wg-2.0` (re-bake = semantically identical, only cosmetic
+`$`-sigil + benign wasm-tools byte-churn), 3.0 ← frozen proposal repos. Re-bake
+is VALIDATE-then-REVERT (corpus is a snapshot; never commit byte-churn — D-290
+practice, now in runbook). So "全合格" precondition is essentially MET (corpus
+3-host green 0-skip, unchanged since `54d332ad`).
+Sustainable mechanism DONE: `scripts/spec_distill/refdialect.py` (self-test,
+gate-guarded) `44711469` + runbook `.dev/spec_revendor_runbook.md` (now w/
+version-tag + validate-then-revert findings). check_spec_bump wasm-tools-pin
+enhancement = optional follow-up.
+NEXT (for tag rigor): verify the 3.0 corpus against the spec `wg-3.0` tag (the
+one genuinely-latest surface; confirm no missing Rec tests vs the frozen
+proposal bake) → if current, fresh full 3-host gate = the 全合格 proof → tag
+`v2.0.0-alpha.3` (tag-only, user-only ADR-0156). REPORTED finding to user
+2026-06-14; tag is outward-facing → surface before the push.
 
 ## Current state
 

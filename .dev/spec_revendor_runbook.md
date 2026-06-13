@@ -18,17 +18,25 @@ Drift = upstream `WebAssembly/{spec,testsuite}` advanced beyond
 (`wasm-tools` version drift — the byte-churn + JSON-dialect driver — is the
 other axis; track the flake's pinned version against the corpus's last bake.)
 
-## 1. Refresh the reference clones (read-only mirrors)
+## 1. Check out the CORRECT spec ref per corpus (NOT `main`)
+
+**CRITICAL**: the version corpora bake from their W3C Recommendation TAGS, not
+the evolving `spec` `main`. Baking from `main` pulls post-3.0 content into the
+2.0 corpus → false failures (`elem`/`data`/`ref_null` reject 3.0 init-exprs /
+heap types). Map:
+- **wasm-1.0 / wasm-2.0 corpora** ← `git -C <spec> checkout wg-2.0` (the 2.0
+  Recommendation; frozen). These specs are DONE — the corpora are already current.
+- **wasm-3.0 corpus** ← the frozen proposal repos `~/Documents/OSS/WebAssembly/
+  {gc,exception-handling,tail-call,function-references,memory64}` (at their
+  post-Rec HEADs) via `import_proposal_corpus.sh`, OR the spec `wg-3.0` tag.
+- **simd / threads** ← `testsuite` (`checkout origin/main` — these track the suite).
 
 ```sh
-for r in spec testsuite; do
-  git -C ~/Documents/OSS/WebAssembly/$r fetch origin && \
-  git -C ~/Documents/OSS/WebAssembly/$r checkout -q origin/main
-done
+git -C ~/Documents/OSS/WebAssembly/spec fetch --tags
+git -C ~/Documents/OSS/WebAssembly/spec checkout wg-2.0   # for 1.0/2.0 bakes
+git -C ~/Documents/OSS/WebAssembly/testsuite checkout origin/main
 ```
-The 5 GC/EH/tail-call/function-references/memory64 proposal repos are FROZEN at
-their post-Wasm-3.0-Recommendation HEADs (their tests merged into mainline
-`spec`); they don't move. Never edit/commit from these mirror paths.
+Never edit/commit from these read-only mirror paths.
 
 ## 2. Refresh the Wasm-3.0 static `raw/` corpus (only if proposal sources moved)
 
@@ -66,6 +74,15 @@ git status --short test/spec test/wasmtime_misc | wc -l                # incl. b
 Manifest changes = real assertion deltas (validate these). `.wasm`-only churn =
 benign re-encoding by a newer `wasm-tools` (semantically equivalent). Keep the
 corpus **0-skip**: no new `skip-impl` lines (see `grep -rh skip-impl test/spec`).
+
+**VALIDATE-then-REVERT discipline** (the established D-290 practice): the
+committed corpus is a SNAPSHOT. Re-baking with a newer `wasm-tools` churns the
+`.wasm` bytes (semantically null) — do NOT commit that churn. Re-bake to PROVE
+the suite still passes against the current sources/tooling, then `git checkout
+-- test/` the data back. Commit data ONLY when a genuine SEMANTIC delta (a real
+new/changed assertion) is incorporated. Cosmetic JSON shifts (e.g. newer
+wasm-tools dropping the `$` sigil from module names in skipped cross-module
+lines) are not semantic — leave them reverted.
 
 ## 5. Verify + gate
 
