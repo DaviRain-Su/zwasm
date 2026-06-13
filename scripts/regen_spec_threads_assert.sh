@@ -21,8 +21,8 @@ UPSTREAM=${WASM_TESTSUITE_REPO:-$HOME/Documents/OSS/WebAssembly/testsuite}
 DEST=test/spec/threads-assert
 SRC="$UPSTREAM/proposals/threads/atomic.wast"
 
-if ! command -v wast2json >/dev/null 2>&1; then
-  echo "[regen_spec_threads_assert] wast2json not found (need wabt / nix dev shell)" >&2
+if ! command -v wasm-tools >/dev/null 2>&1; then
+  echo "[regen_spec_threads_assert] wasm-tools not found (need it / nix dev shell)" >&2
   exit 1
 fi
 if [ ! -f "$SRC" ]; then
@@ -34,8 +34,10 @@ n=atomic
 TMP=$(mktemp -d)
 trap "rm -rf '$TMP'" EXIT
 
-if ! ( cd "$TMP" && wast2json --enable-threads "$SRC" -o "$n.json" >/dev/null 2>&1 ); then
-  echo "[regen_spec_threads_assert] wast2json rejected $SRC" >&2
+# D-290: wasm-tools enables all proposals by default (the wabt --enable-threads
+# flag drops).
+if ! ( cd "$TMP" && wasm-tools json-from-wast "$SRC" -o "$n.json" --wasm-dir . >/dev/null 2>&1 ); then
+  echo "[regen_spec_threads_assert] json-from-wast rejected $SRC" >&2
   exit 1
 fi
 
@@ -51,11 +53,25 @@ d = json.load(open(src))
 
 SCALARS = ("i32", "i64", "f32", "f64")
 
+def norm_wasm(fn):
+    return fn[:-4] + ".wasm" if fn.endswith(".wat") else fn
+
 def tok(v):
-    """`<type>:<value>` for a scalar arg/result; `!` prefix = unsupported."""
+    """`<type>:<value>` for a scalar arg/result; `!` prefix = unsupported.
+    D-290 baker normalization: wasm-tools emits i32/i64 SIGNED; the runner +
+    committed baseline use unsigned decimals — fold negatives to the width."""
     t = v["type"]
     if t in SCALARS:
-        return f"{t}:{v['value']}"
+        val = v["value"]
+        if t in ("i32", "i64"):
+            try:
+                nn = int(val)
+                if nn < 0:
+                    nn += (1 << 32) if t == "i32" else (1 << 64)
+                val = str(nn)
+            except (TypeError, ValueError):
+                pass
+        return f"{t}:{val}"
     return f"!unsupported-type:{t}"
 
 def toks(items):
@@ -67,7 +83,7 @@ lines = []
 for c in d["commands"]:
     t = c.get("type")
     if t == "module":
-        lines.append("module " + c["filename"])
+        lines.append("module " + norm_wasm(c["filename"]))
     elif t in ("assert_return", "action"):
         # Both nest the invoke under `.action`; `action` commands have
         # `expected:[]` (void invoke run for its side effect — store/init).
@@ -121,12 +137,25 @@ for c in d["commands"]:
 open(dst, "w").write("\n".join(lines) + "\n")
 PY
 
-# Copy referenced .wasm files (module / assert_invalid / assert_malformed).
+# Materialize referenced .wasm files (D-290 tool-difference rules): valid
+# `module` → strip wasm-tools' name section (+ .wat→parse); invalid/malformed
+# copy RAW (intentionally broken).
 while read -r line; do
   set -- $line
-  if [ "$1" = "module" ] || [ "$1" = "assert_invalid" ] || [ "$1" = "assert_malformed" ]; then
-    cp "$TMP/$2" "$out_dir/"
-  fi
+  case "$1" in
+    module)
+      base="${2%.wasm}"
+      if [ -f "$TMP/$2" ]; then
+        wasm-tools strip --all "$TMP/$2" -o "$out_dir/$2"
+      elif [ -f "$TMP/$base.wat" ]; then
+        wasm-tools parse "$TMP/$base.wat" -o "$TMP/$base.fromwat.wasm"
+        wasm-tools strip --all "$TMP/$base.fromwat.wasm" -o "$out_dir/$2"
+      fi
+      ;;
+    assert_invalid|assert_malformed)
+      [ -f "$TMP/$2" ] && cp "$TMP/$2" "$out_dir/"
+      ;;
+  esac
 done < "$out_dir/manifest.txt"
 
 echo "[regen_spec_threads_assert] re-baked: $n → $DEST/"

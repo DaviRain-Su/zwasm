@@ -25,8 +25,8 @@ cd "$(dirname "$0")/.."
 
 DEST_ROOT=test/spec/wasm-3.0-assert
 
-if ! command -v wast2json >/dev/null 2>&1; then
-    echo "[regen_spec_3_0_assert] wast2json not in PATH (need wabt; nix develop?)" >&2
+if ! command -v wasm-tools >/dev/null 2>&1; then
+    echo "[regen_spec_3_0_assert] wasm-tools not in PATH (nix develop?)" >&2
     exit 1
 fi
 if ! command -v python3 >/dev/null 2>&1; then
