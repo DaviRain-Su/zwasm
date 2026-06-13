@@ -54,16 +54,15 @@
 
 ## NEXT (autonomous)
 
-**D-326 (cw REQ-7) FIXED + closed `33e0100c`** — opened component owns its bytes
-(see Current state). No `now` debt. Next actionable:
-- **D-293 — array trap demux** (no rush, conformance-
-  neutral, lower-freq). ⚠️ Recipe NEEDS RECONCILING before opening: slice-4c
-  (`8980bebe`) ALREADY maps array.get/set OOB → code 6 oob_memory (deliberate,
-  NO new TrapKind), so a fresh `array_oob` kind would CONTRADICT it. Real
-  "remaining" = the array.* trampolines (`array_init_data/copy/fill/init_elem/
-  new_*`) + `i31_get_s/u` + `struct_get_s` still on generic `bounds_fixups`
-  with AMBIGUOUS return semantics — re-survey the actual appenders first.
-  Deliberate architectural chunk (open fresh, 3-cycle cap).
+No `now` debt. Recent closes: D-326 (cw REQ-7) `33e0100c`; D-293 slice-4e
+`b5af6e2b`. Next actionable (demand-driven long-tail — pick by signal):
+- **D-293 remainder** = the GC array.* trampolines only (`array_init_data/copy/
+  fill/init_elem/new_data/new_elem`). Each single 0-return from `jitGcArray*`
+  mixes ≥6 failure modes (null/OOM/segidx-OOB/dropped-seg/dst+src-OOB) → NOT a
+  fixup re-route; proper fix = helper RETURNS A KIND the stub maps. LOW priority,
+  conformance-neutral, interp already precise — "else leave" until a GC-on-JIT
+  program needs precise array-trap codes. (slice-4e corrected the stale
+  `array_oob`-TrapKind recipe: contradicted slice-4c's array-OOB=oob_memory.)
 - D-245 → note (RESOLVED, re-audit 2026-06-13; see row).
 - Else: §1.3 backlog demand-driven · blocked-by long-tail · D-323.
 

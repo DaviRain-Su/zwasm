@@ -244,11 +244,19 @@ entries:
       operand is itself a cast failure per spec §4.4.5, so the single 0-return maps cleanly; ref.cast_null's
       null-passthrough is a local control-flow branch, untouched). TrapKind.cast_failure + wast_runner arm
       already exist (slice-4a). Test: ref.cast mismatch → 11.
-      STATUS: D-293 JIT trap precision SUBSTANTIALLY COMPLETE (all common + GC null/bounds/cast precise both
-      arches; interp surface complete). REMAINING (low-priority partial, interp ALREADY precise so no user-facing
-      gap on the default engine): array.len/fill/copy/init/new trampolines (TEST RAX on a runtime-result with
-      AMBIGUOUS failure semantics — needs per-site investigation of jitGcArray* return contracts, NOT mechanical
-      routing) + i31 non-i31 check. next free JIT code = 12. Reopen if a GC-on-JIT program needs it; else leave.
+      SLICE-4e DONE (`b5af6e2b`): struct.get_s + i31.get_s + i31.get_u null → code 10 null_reference (was
+      generic code 1), both arches (routed the 6 sites' null-branch from bounds_fixups → existing
+      null_ref_fixups). struct.get_s was the signed sibling slice-4c MISSED (it fixed struct.get/set); i31.get_s/u
+      were never demuxed. Each has a SINGLE null failure mode → mechanical re-route, no new TrapKind. Re-survey
+      (2026-06-13) CORRECTED the stale "array_oob TrapKind" recipe: that would contradict slice-4c (array index OOB
+      = oob_memory code 6, deliberate); AND the GC array.* trampolines are NOT mechanically routable.
+      STATUS: D-293 JIT trap precision SUBSTANTIALLY COMPLETE (all common + GC null/bounds/cast + struct_s/i31
+      precise both arches; interp surface complete). REMAINING (low-priority, interp ALREADY precise so no
+      user-facing gap on the default engine): the GC array.* trampolines (array.init_data/copy/fill/init_elem/
+      new_data/new_elem) — each single 0-return from jitGcArray* mixes ≥6 distinct failure modes (null-ref / OOM /
+      segidx-OOB / dropped-segment / dst-OOB / src-OOB), so they CANNOT be routed by re-channeling a fixup. The
+      proper (larger, low-priority) fix = have the helper RETURN A KIND discriminant the stub maps. next free JIT
+      code = 12. Reopen if a GC-on-JIT program needs precise array-trap codes; else leave.
       (Below: the original slice-1 survey, kept as the method template.)
       SLICE-1 PLAN — oob_table (code 2), surveyed 2026-06-06 (DO BOTH ARCHES TOGETHER; a runVoidExportWasi test
       asserting code 2 FAILS the x86_64/ubuntu gate if x86_64 stays generic → the test enforces parity).
@@ -266,7 +274,7 @@ entries:
       kinds (a subagent plan mis-classified them). Test: hand-assembled `_start` doing `table.get` (or
       call_indirect into a 0/under-sized table) with OOB idx → runVoidExportWasi trap_code==2==oob_table.
     first_raised: "2026-06-06"
-    last_reviewed: "2026-06-06"
+    last_reviewed: "2026-06-13"
     refs: |-
       D-292 (parent program, ADR-0164) + D-165 (trap-code infra); src/api/trap_surface.zig (jitTrapCode);
       src/engine/codegen/{arm64,x86_64}/{op_table,op_convert,op_call,op_tail_call,ops/wasm_3_0/*}.zig +
