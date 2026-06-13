@@ -32,7 +32,14 @@
 ## Active bundle
 
 - **Bundle-ID**: cljw-cm-api-finished-form
-- **Cycles-remaining**: ~6
+- **Cycles-remaining**: ~4
+- **Progress**: REQ-4 DONE (`8a647a2b` — InstantiateOpts budget threaded
+  into all component instantiate entries + Linker.instantiate;
+  component.InstantiateOpts re-export). REQ-3 DONE (`ef1bdbb0` — public
+  `WitType` tree + `resolveType`/`resolveFuncSig` in new
+  feature/component/wit_type.zig; methods on ComponentInstance +
+  BuiltComponent). NEXT: REQ-2 (labels) → REQ-6 (diag) → REQ-1 (open) →
+  REQ-5 (drop).
 - **Continuity-memo**: 6 cw CM-API requests (below). USER GO GIVEN
   2026-06-13 ("finished-form priority over impl difficulty; you decide
   the shape / provide both"). Design decisions made (finished-form):
