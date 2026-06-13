@@ -315,9 +315,41 @@ fn runOne(gpa: std.mem.Allocator, module: *runtime.Module) !void {
         };
     }
 
+    // D-324 — decode memories (imports first, then defined) so
+    // memory64 / mixed multi-memory bodies validate against each
+    // memory's idx_type. Modules with NO memories keep the legacy
+    // lenient default (memory_count = 1, i32) this runner always had.
+    var memories_owned: ?sections.Memories = if (module.find(.memory)) |s|
+        try sections.decodeMemory(gpa, s.body)
+    else
+        null;
+    defer if (memories_owned) |*m| m.deinit();
+    var imp_memory_count: usize = 0;
+    if (imports_owned) |im| for (im.items) |it| if (it.kind == .memory) {
+        imp_memory_count += 1;
+    };
+    const def_memory_count: usize = if (memories_owned) |m| m.items.len else 0;
+    const total_memories = imp_memory_count + def_memory_count;
+    const memory_idx_types = try gpa.alloc(sections.MemoryEntry.IdxType, total_memories);
+    defer gpa.free(memory_idx_types);
+    {
+        var cursor: usize = 0;
+        if (imports_owned) |im| for (im.items) |it| if (it.kind == .memory) {
+            memory_idx_types[cursor] = it.payload.memory.idx_type;
+            cursor += 1;
+        };
+        if (memories_owned) |m| for (m.items) |me| {
+            memory_idx_types[cursor] = me.idx_type;
+            cursor += 1;
+        };
+    }
+    const memory_count: u32 = if (total_memories == 0) 1 else @intCast(total_memories);
+    const memory0_idx_type: sections.MemoryEntry.IdxType =
+        if (memory_idx_types.len > 0) memory_idx_types[0] else .i32;
+
     for (codes.items, defined_func_indices) |code, type_idx| {
         const sig = types_owned.items[type_idx];
-        try validator.validateFunction(
+        try validator.validateFunctionWithMemIdxAndTags(
             sig,
             code.locals,
             code.body,
@@ -327,6 +359,17 @@ fn runOne(gpa: std.mem.Allocator, module: *runtime.Module) !void {
             0,
             table_entries,
             0,
+            memory_count,
+            memory0_idx_type,
+            memory_idx_types,
+            &.{}, // tags
+            &.{}, // declared_funcs
+            &.{}, // func_type_indices
+            &.{}, // module_types_kinds
+            &.{}, // struct_defs
+            &.{}, // array_defs
+            &.{}, // supertypes
+            &.{}, // elem_types
         );
     }
 }

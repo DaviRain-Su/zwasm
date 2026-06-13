@@ -10,7 +10,7 @@ assert_return fib i32:7 -> i32:21
 assert_return fib i32:8 -> i32:34
 assert_return fib i32:9 -> i32:55
 assert_return fib i32:10 -> i32:89
-module fib.1.wasm
+skip-adr-skip_embenchen_emcc_env_imports fib.1.wasm
 assert_return fib i32:0 -> i32:1
 assert_return fib i32:1 -> i32:1
 assert_return fib i32:2 -> i32:2

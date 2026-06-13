@@ -1,1 +1,1 @@
-skip-adr-skip_externref_segment externref-segment.0.wasm
+module externref-segment.0.wasm

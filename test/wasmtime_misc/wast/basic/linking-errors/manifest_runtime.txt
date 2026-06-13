@@ -1,4 +1,4 @@
-module linking-errors.0.wasm as $m
+module linking-errors.0.wasm as m
 assert_unlinkable linking-errors.1.wasm
 assert_unlinkable linking-errors.2.wasm
 assert_unlinkable linking-errors.3.wasm

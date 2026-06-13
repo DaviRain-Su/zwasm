@@ -1,1 +1,3 @@
 valid memory-copy.0.wasm
+valid memory-copy.1.wasm
+valid memory-copy.2.wasm

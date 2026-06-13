@@ -1,6 +1,6 @@
 # Skip — `externref-segment.0.wasm` (externref element segment)
 
-- **Status**: Accepted (skip until externref reftype lands). Operationally effective via `skip-adr-skip_externref_segment` prefix per ADR-0029 Path B (since chunk 9.9-h-23, 2026-05-12); see §"Implementation" below.
+- **Status**: Closed/Superseded (2026-06-13) — externref reftype landed in a later phase; the fixture now PASSES end-to-end as a plain `module` directive (the D-290 wasm-tools regen dropped the skip-line, and the runtime gate reports `externref-segment.0.wasm` PASS). The "Removal plan" / machine-checkable "Removal condition" below is satisfied; this ADR stays as historical record. The prior "Accepted (skip until externref reftype lands)" status is retained for context below.
 - **Date**: 2026-05-04
 - **Author**: zwasm v2 / continue loop
 - **Tags**: phase-6, skip-adr, misc-runtime, externref, reftypes

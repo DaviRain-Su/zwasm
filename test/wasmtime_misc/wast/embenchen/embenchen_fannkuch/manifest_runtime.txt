@@ -1,2 +1,2 @@
-module embenchen_fannkuch.0.wasm as $env
+module embenchen_fannkuch.0.wasm as env
 skip-adr-skip_embenchen_emcc_env_imports embenchen_fannkuch.1.wasm

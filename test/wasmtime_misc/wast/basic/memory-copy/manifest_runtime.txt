@@ -11,3 +11,96 @@ invoke memory.copy i32:2000 i32:1998 i32:5
 assert_return "is olleh?" i32:2000 -> i32:1
 invoke memory.copy i32:2000 i32:2000 i32:5
 assert_return "is olleh?" i32:2000 -> i32:1
+module memory-copy.1.wasm
+assert_return m32_to_same i32:0 i32:0 i32:0 ->
+assert_return m32_to_same i32:0 i32:0 i32:65536 ->
+assert_trap m32_to_same i32:0 i32:0 i32:65537 !! OutOfBounds
+assert_return m32_to_same i32:100 i32:200 i32:65336 ->
+assert_return m32_to_same i32:200 i32:100 i32:65336 ->
+assert_trap m32_to_same i32:201 i32:100 i32:65336 !! OutOfBounds
+assert_return m32_to_same i32:200 i32:101 i32:65336 ->
+assert_trap m32_to_same i32:200 i32:100 i32:65337 !! OutOfBounds
+assert_trap m32_to_same i32:4294967295 i32:0 i32:0 !! OutOfBounds
+assert_trap m32_to_same i32:0 i32:4294967295 i32:0 !! OutOfBounds
+assert_trap m32_to_same i32:0 i32:0 i32:4294967295 !! OutOfBounds
+assert_trap m32_to_same i32:100 i32:0 i32:4294967295 !! OutOfBounds
+assert_trap m32_to_same i32:0 i32:100 i32:4294967295 !! OutOfBounds
+assert_trap m32_to_same i32:4294967295 i32:0 i32:100 !! OutOfBounds
+assert_trap m32_to_same i32:0 i32:4294967295 i32:100 !! OutOfBounds
+assert_return m32_to_m32 i32:0 i32:0 i32:0 ->
+assert_return m32_to_m32 i32:0 i32:0 i32:65536 ->
+assert_trap m32_to_m32 i32:0 i32:0 i32:65537 !! OutOfBounds
+assert_return m32_to_m32 i32:100 i32:200 i32:65336 ->
+assert_return m32_to_m32 i32:200 i32:100 i32:65336 ->
+assert_trap m32_to_m32 i32:201 i32:100 i32:65336 !! OutOfBounds
+assert_return m32_to_m32 i32:200 i32:101 i32:65336 ->
+assert_trap m32_to_m32 i32:200 i32:100 i32:65337 !! OutOfBounds
+assert_trap m32_to_m32 i32:4294967295 i32:0 i32:0 !! OutOfBounds
+assert_trap m32_to_m32 i32:0 i32:4294967295 i32:0 !! OutOfBounds
+assert_trap m32_to_m32 i32:0 i32:0 i32:4294967295 !! OutOfBounds
+assert_trap m32_to_m32 i32:100 i32:0 i32:4294967295 !! OutOfBounds
+assert_trap m32_to_m32 i32:0 i32:100 i32:4294967295 !! OutOfBounds
+assert_trap m32_to_m32 i32:4294967295 i32:0 i32:100 !! OutOfBounds
+assert_trap m32_to_m32 i32:0 i32:4294967295 i32:100 !! OutOfBounds
+assert_return m32_to_m64 i64:0 i32:0 i32:0 ->
+assert_return m32_to_m64 i64:0 i32:0 i32:65536 ->
+assert_trap m32_to_m64 i64:0 i32:0 i32:65537 !! OutOfBounds
+assert_return m32_to_m64 i64:100 i32:200 i32:65336 ->
+assert_return m32_to_m64 i64:200 i32:100 i32:65336 ->
+assert_trap m32_to_m64 i64:201 i32:100 i32:65336 !! OutOfBounds
+assert_return m32_to_m64 i64:200 i32:101 i32:65336 ->
+assert_trap m32_to_m64 i64:200 i32:100 i32:65337 !! OutOfBounds
+assert_trap m32_to_m64 i64:18446744073709551615 i32:0 i32:0 !! OutOfBounds
+assert_trap m32_to_m64 i64:0 i32:4294967295 i32:0 !! OutOfBounds
+assert_trap m32_to_m64 i64:0 i32:0 i32:4294967295 !! OutOfBounds
+assert_trap m32_to_m64 i64:100 i32:0 i32:4294967295 !! OutOfBounds
+assert_trap m32_to_m64 i64:0 i32:100 i32:4294967295 !! OutOfBounds
+assert_trap m32_to_m64 i64:18446744073709551615 i32:0 i32:100 !! OutOfBounds
+assert_trap m32_to_m64 i64:0 i32:4294967295 i32:100 !! OutOfBounds
+assert_return m64_to_same i64:0 i64:0 i64:0 ->
+assert_return m64_to_same i64:0 i64:0 i64:65536 ->
+assert_trap m64_to_same i64:0 i64:0 i64:65537 !! OutOfBounds
+assert_return m64_to_same i64:100 i64:200 i64:65336 ->
+assert_return m64_to_same i64:200 i64:100 i64:65336 ->
+assert_trap m64_to_same i64:201 i64:100 i64:65336 !! OutOfBounds
+assert_return m64_to_same i64:200 i64:101 i64:65336 ->
+assert_trap m64_to_same i64:200 i64:100 i64:65337 !! OutOfBounds
+assert_trap m64_to_same i64:18446744073709551615 i64:0 i64:0 !! OutOfBounds
+assert_trap m64_to_same i64:0 i64:18446744073709551615 i64:0 !! OutOfBounds
+assert_trap m64_to_same i64:0 i64:0 i64:18446744073709551615 !! OutOfBounds
+assert_trap m64_to_same i64:100 i64:0 i64:18446744073709551615 !! OutOfBounds
+assert_trap m64_to_same i64:0 i64:100 i64:18446744073709551615 !! OutOfBounds
+assert_trap m64_to_same i64:18446744073709551615 i64:0 i64:100 !! OutOfBounds
+assert_trap m64_to_same i64:0 i64:18446744073709551615 i64:100 !! OutOfBounds
+assert_return m64_to_m64 i64:0 i64:0 i64:0 ->
+assert_return m64_to_m64 i64:0 i64:0 i64:65536 ->
+assert_trap m64_to_m64 i64:0 i64:0 i64:65537 !! OutOfBounds
+assert_return m64_to_m64 i64:100 i64:200 i64:65336 ->
+assert_return m64_to_m64 i64:200 i64:100 i64:65336 ->
+assert_trap m64_to_m64 i64:201 i64:100 i64:65336 !! OutOfBounds
+assert_return m64_to_m64 i64:200 i64:101 i64:65336 ->
+assert_trap m64_to_m64 i64:200 i64:100 i64:65337 !! OutOfBounds
+assert_trap m64_to_m64 i64:18446744073709551615 i64:0 i64:0 !! OutOfBounds
+assert_trap m64_to_m64 i64:0 i64:18446744073709551615 i64:0 !! OutOfBounds
+assert_trap m64_to_m64 i64:0 i64:0 i64:18446744073709551615 !! OutOfBounds
+assert_trap m64_to_m64 i64:100 i64:0 i64:18446744073709551615 !! OutOfBounds
+assert_trap m64_to_m64 i64:0 i64:100 i64:18446744073709551615 !! OutOfBounds
+assert_trap m64_to_m64 i64:18446744073709551615 i64:0 i64:100 !! OutOfBounds
+assert_trap m64_to_m64 i64:0 i64:18446744073709551615 i64:100 !! OutOfBounds
+assert_return m64_to_m32 i32:0 i64:0 i32:0 ->
+assert_return m64_to_m32 i32:0 i64:0 i32:65536 ->
+assert_trap m64_to_m32 i32:0 i64:0 i32:65537 !! OutOfBounds
+assert_return m64_to_m32 i32:100 i64:200 i32:65336 ->
+assert_return m64_to_m32 i32:200 i64:100 i32:65336 ->
+assert_trap m64_to_m32 i32:201 i64:100 i32:65336 !! OutOfBounds
+assert_return m64_to_m32 i32:200 i64:101 i32:65336 ->
+assert_trap m64_to_m32 i32:200 i64:100 i32:65337 !! OutOfBounds
+assert_trap m64_to_m32 i32:4294967295 i64:0 i32:0 !! OutOfBounds
+assert_trap m64_to_m32 i32:0 i64:18446744073709551615 i32:0 !! OutOfBounds
+assert_trap m64_to_m32 i32:0 i64:0 i32:4294967295 !! OutOfBounds
+assert_trap m64_to_m32 i32:100 i64:0 i32:4294967295 !! OutOfBounds
+assert_trap m64_to_m32 i32:0 i64:100 i32:4294967295 !! OutOfBounds
+assert_trap m64_to_m32 i32:4294967295 i64:0 i32:100 !! OutOfBounds
+assert_trap m64_to_m32 i32:0 i64:18446744073709551615 i32:100 !! OutOfBounds
+module memory-copy.2.wasm
+assert_return run -> i32:187
