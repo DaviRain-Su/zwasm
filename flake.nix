@@ -52,7 +52,10 @@
             pkgs.hyperfine
             pkgs.yq-go
             pkgs.python3
-            pkgs.wabt          # wat2wasm / wast2json — required by Phase 1+ spec runner
+            # wabt DROPPED (D-290, 2026-06-13): every distiller now bakes with
+            # `wasm-tools json-from-wast`; the spec RUNNERS consume pre-baked
+            # committed corpora (no wast2json/wat2wasm at test time), and
+            # build.zig's spectest uses `wasm-tools parse`. One modern wasm CLI.
             pkgs.wasmtime      # reference runtime — drives the §9.6 / 6.2 differential gate
             pkgs.wazero        # §11.3 SIMD gap comparator (run_bench.sh --compare=wazero); D-074
             pkgs.wasm-tools    # dump / validate / print / strip / smith / shrink — Phase 6+ debug + Phase 7 fuzz corpus (per ADR-0015 candidate)
