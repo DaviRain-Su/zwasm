@@ -198,6 +198,22 @@ if [ -x scripts/check_lesson_citing.sh ]; then
     fi
 fi
 
+# --- gate: spec-distill library self-tests (when staged) ----------------
+#
+# The shared distiller value-dialect lib (`scripts/spec_distill/`) absorbs
+# wasm-tools `json-from-wast` JSON-shape evolution in ONE place; its self-tests
+# pin the encoding so a future tool/spec bump can't silently mis-bake the
+# conformance corpus. Each module is self-testing via `__main__`.
+
+if echo "$STAGED" | grep -q '^scripts/spec_distill/.*\.py$'; then
+    if command -v python3 >/dev/null 2>&1; then
+        echo "[gate_commit] spec_distill self-tests ..."
+        for t in scripts/spec_distill/*.py; do
+            python3 "$t" > /dev/null || { echo "[gate_commit] spec_distill self-test FAILED: $t" >&2; exit 1; }
+        done
+    fi
+fi
+
 # --- gates: A1 checks (informational; skipped on docs-only) -------------
 #
 # Per §9.12-A / A7: wire as informational, not --gate, until the
