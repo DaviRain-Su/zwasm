@@ -62,8 +62,10 @@ pub const ComponentInstance = struct {
     realloc_name: []const u8 = "cabi_realloc",
 
     /// ADR-0183 F1 — introspect the typed func exports from the
-    /// SELF-DESCRIBING binary (no `.wit` sidecar; CWFS ADR-0135). Caller
-    /// frees the slice; names/types borrow from the instance's `TypeInfo`.
+    /// SELF-DESCRIBING binary (no `.wit` sidecar; CWFS ADR-0135),
+    /// including interface-nested funcs path-qualified `<iface>#<func>`.
+    /// Free via `TypeInfo.freeExportedFuncs` (names alloc-owned; types
+    /// borrow from the instance's `TypeInfo`).
     pub fn exportedFuncs(self: *const ComponentInstance, alloc: Allocator) Allocator.Error![]ctypes.TypeInfo.ExportedFunc {
         return self.info.exportedFuncs(alloc);
     }
@@ -1729,6 +1731,46 @@ test "D-322: a wit-bindgen guest-defined resource component builds + counter rou
     );
 }
 
+test "exportedFuncs enumerates interface-nested funcs path-qualified (CWFS component intake)" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/resource_counter.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+    host.io = io;
+    var built = try cwasi.buildWasiP2Component(&eng, testing.allocator, bytes, &host);
+    defer built.deinit();
+
+    // The component exports NO top-level funcs — everything lives inside
+    // the exported `zwasm:restest/counter-api` instance. Enumeration must
+    // surface those, path-qualified exactly as `invokeTyped` accepts them.
+    const funcs = try built.info.exportedFuncs(testing.allocator);
+    defer ctypes.TypeInfo.freeExportedFuncs(testing.allocator, funcs);
+
+    const expected = [_][]const u8{
+        "zwasm:restest/counter-api#[constructor]counter",
+        "zwasm:restest/counter-api#[method]counter.get",
+        "zwasm:restest/counter-api#[method]counter.increment",
+    };
+    for (expected) |want| {
+        for (funcs) |f| {
+            if (std.mem.eql(u8, f.name, want)) break;
+        } else return error.TestUnexpectedResult;
+    }
+    // Signatures came along: the constructor takes one u32 param.
+    for (funcs) |f| {
+        if (std.mem.eql(u8, f.name, expected[0])) {
+            try testing.expectEqual(@as(usize, 1), f.ty.params.len);
+            try testing.expectEqual(ctypes.PrimValType.u32, f.ty.params[0].ty.primitive);
+        }
+    }
+}
+
 test "ADR-0183 F1: greet introspects as (param string) -> string from the binary" {
     var threaded: std.Io.Threaded = .init(testing.allocator, .{});
     defer threaded.deinit();
@@ -1742,7 +1784,7 @@ test "ADR-0183 F1: greet introspects as (param string) -> string from the binary
     defer ci.deinit();
 
     const funcs = try ci.exportedFuncs(testing.allocator);
-    defer testing.allocator.free(funcs);
+    defer ctypes.TypeInfo.freeExportedFuncs(testing.allocator, funcs);
     try testing.expectEqual(@as(usize, 1), funcs.len);
     try testing.expectEqualStrings("greet", funcs[0].name);
     try testing.expectEqual(@as(usize, 1), funcs[0].ty.params.len);

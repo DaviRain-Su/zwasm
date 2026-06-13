@@ -571,11 +571,20 @@ pub const TypeInfo = struct {
 
     /// One introspected func export: the name + its WIT-typed signature,
     /// taken from the SELF-DESCRIBING binary (ADR-0183 / CWFS ADR-0135 —
-    /// no `.wit` sidecar). Slices borrow from this `TypeInfo`.
+    /// no `.wit` sidecar). `name` is owned by the `exportedFuncs` caller
+    /// (interface-nested funcs need a synthesized `<iface>#<func>` path);
+    /// `ty` borrows from this `TypeInfo`. Free via `freeExportedFuncs`.
     pub const ExportedFunc = struct {
         name: []const u8,
         ty: FuncType,
     };
+
+    /// Free a slice returned by `exportedFuncs` (names are alloc-owned;
+    /// the types still borrow from the `TypeInfo`).
+    pub fn freeExportedFuncs(alloc: Allocator, funcs: []ExportedFunc) void {
+        for (funcs) |f| alloc.free(f.name);
+        alloc.free(funcs);
+    }
 
     /// The WIT `functype` of a lifted func export, or null when the export
     /// does not resolve to a concrete local functype (alias-minted types
@@ -583,6 +592,21 @@ pub const TypeInfo = struct {
     /// Resolve a func-export PATH to its component-func index: a top-level
     /// func export name, or `<instance-export>#<func>` addressing a func
     /// inside an exported INSTANCE (wit-bindgen interface exports; D-322).
+    /// Map an instance-space index to its LOCAL component-instance
+    /// definition; null for import-originated or out-of-range indices.
+    /// (The instance space mints indices for imports too — count only
+    /// the `.local` origins below the index to find the defs ordinal.)
+    fn localInstanceDef(self: *const TypeInfo, instance_index: u32) ?ComponentInstanceDef {
+        if (instance_index >= self.instance_origins.items.len) return null;
+        if (std.meta.activeTag(self.instance_origins.items[instance_index]) != .local) return null;
+        var local_ord: usize = 0;
+        for (self.instance_origins.items[0..instance_index]) |o| {
+            if (std.meta.activeTag(o) == .local) local_ord += 1;
+        }
+        if (local_ord >= self.component_instances.items.len) return null;
+        return self.component_instances.items[local_ord];
+    }
+
     fn exportedFuncIndex(self: *const TypeInfo, path: []const u8) ?u32 {
         if (std.mem.findScalar(u8, path, '#')) |hash| {
             const iface = path[0..hash];
@@ -590,16 +614,7 @@ pub const TypeInfo = struct {
             for (self.exports.items) |e| {
                 if (std.meta.activeTag(e.sort) != .instance) continue;
                 if (!std.mem.eql(u8, e.name, iface)) continue;
-                // e.index indexes the full instance space (imports mint
-                // indices too); map to the LOCAL-defs ordinal.
-                if (e.index >= self.instance_origins.items.len) return null;
-                if (std.meta.activeTag(self.instance_origins.items[e.index]) != .local) return null;
-                var local_ord: usize = 0;
-                for (self.instance_origins.items[0..e.index]) |o| {
-                    if (std.meta.activeTag(o) == .local) local_ord += 1;
-                }
-                if (local_ord >= self.component_instances.items.len) return null;
-                switch (self.component_instances.items[local_ord]) {
+                switch (self.localInstanceDef(e.index) orelse return null) {
                     .inline_exports => |exps| for (exps) |ie| {
                         if (std.meta.activeTag(ie.sort) == .func and std.mem.eql(u8, ie.name, fname)) return ie.index;
                     },
@@ -667,17 +682,58 @@ pub const TypeInfo = struct {
         return null;
     }
 
-    /// Introspect every typed func export (ADR-0183 F1). Caller frees the
-    /// returned slice; the names/types borrow from this `TypeInfo`.
+    /// Introspect every typed func export (ADR-0183 F1): top-level func
+    /// exports AND funcs nested in exported instances (wit-bindgen
+    /// interface exports), the latter path-qualified `<iface>#<func>` —
+    /// exactly the form `resolveFuncType` / `invokeTyped` accept. Free
+    /// the result via `freeExportedFuncs` (names are alloc-owned; types
+    /// borrow from this `TypeInfo`).
     pub fn exportedFuncs(self: *const TypeInfo, alloc: Allocator) Allocator.Error![]ExportedFunc {
         var out: std.ArrayList(ExportedFunc) = .empty;
-        errdefer out.deinit(alloc);
+        errdefer {
+            for (out.items) |f| alloc.free(f.name);
+            out.deinit(alloc);
+        }
         for (self.exports.items) |e| {
-            if (e.sort != .func) continue;
-            const ft = self.resolveFuncType(e.name) orelse continue;
-            try out.append(alloc, .{ .name = e.name, .ty = ft });
+            switch (std.meta.activeTag(e.sort)) {
+                .func => {
+                    const ft = self.resolveFuncType(e.name) orelse continue;
+                    try out.append(alloc, .{ .name = try alloc.dupe(u8, e.name), .ty = ft });
+                },
+                .instance => switch (self.localInstanceDef(e.index) orelse continue) {
+                    .inline_exports => |exps| for (exps) |ie| {
+                        if (std.meta.activeTag(ie.sort) != .func) continue;
+                        try self.appendQualifiedFunc(&out, alloc, e.name, ie.name);
+                    },
+                    .instantiate => |it| {
+                        if (it.component >= self.nested_scans.items.len) continue;
+                        for (self.nested_scans.items[it.component].func_exports) |fe| {
+                            try self.appendQualifiedFunc(&out, alloc, e.name, fe.name);
+                        }
+                    },
+                },
+                else => {},
+            }
         }
         return out.toOwnedSlice(alloc);
+    }
+
+    /// Append `<iface>#<func>` when the path resolves to a concrete
+    /// functype (non-resolving entries are skipped, mirroring the
+    /// top-level walk — alias-minted signatures stay deferred).
+    fn appendQualifiedFunc(
+        self: *const TypeInfo,
+        out: *std.ArrayList(ExportedFunc),
+        alloc: Allocator,
+        iface: []const u8,
+        fname: []const u8,
+    ) Allocator.Error!void {
+        const path = try std.fmt.allocPrint(alloc, "{s}#{s}", .{ iface, fname });
+        const ft = self.resolveFuncType(path) orelse {
+            alloc.free(path);
+            return;
+        };
+        try out.append(alloc, .{ .name = path, .ty = ft });
     }
 
     /// Resolve a component `func` export (by name) to its `canon lift` and the

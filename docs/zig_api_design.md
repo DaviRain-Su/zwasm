@@ -349,10 +349,13 @@ no `.wit` sidecar is needed (CWFS ADR-0135 "the binary IS the interface").
 const comp = zwasm.feature.component.host;
 
 // 1. Introspect: what typed funcs does this component export?
+//    Includes interface-nested funcs, path-qualified `<iface>#<func>`
+//    (e.g. "zwasm:restest/counter-api#[method]counter.get") — names
+//    are returned in exactly the form `invokeTyped` accepts.
 var ci = try comp.instantiate(&engine, alloc, bytes); // single-module component
 defer ci.deinit();
 const funcs = try ci.exportedFuncs(alloc); // []ExportedFunc{name, params, result}
-defer alloc.free(funcs);
+defer zwasm.feature.component.types.TypeInfo.freeExportedFuncs(alloc, funcs);
 
 // 2. Typed invoke through the canonical ABI. Args are `ComponentValue`
 //    trees validated against the export's WIT signature.
