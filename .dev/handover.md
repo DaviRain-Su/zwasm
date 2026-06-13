@@ -5,24 +5,25 @@
 
 ## Active campaign — spec re-vendor → alpha.3 tag (USER-AUTHORIZED; option A chosen 2026-06-14)
 
-MAJOR FINDING (2026-06-14): the committed corpus is ALREADY current for the
-latest spec (Wasm 3.0 Rec). The earlier "stale ~150 files / big campaign" was an
-ARTIFACT of baking the 2.0 corpus from spec `main` (which now carries post-3.0
-content → false elem/data/ref_null failures). Version corpora bake from frozen
-W3C-Rec TAGS: 1.0/2.0 ← `wg-2.0` (re-bake = semantically identical, only cosmetic
-`$`-sigil + benign wasm-tools byte-churn), 3.0 ← frozen proposal repos. Re-bake
-is VALIDATE-then-REVERT (corpus is a snapshot; never commit byte-churn — D-290
-practice, now in runbook). So "全合格" precondition is essentially MET (corpus
-3-host green 0-skip, unchanged since `54d332ad`).
-Sustainable mechanism DONE: `scripts/spec_distill/refdialect.py` (self-test,
-gate-guarded) `44711469` + runbook `.dev/spec_revendor_runbook.md` (now w/
-version-tag + validate-then-revert findings). check_spec_bump wasm-tools-pin
-enhancement = optional follow-up.
-NEXT (for tag rigor): verify the 3.0 corpus against the spec `wg-3.0` tag (the
-one genuinely-latest surface; confirm no missing Rec tests vs the frozen
-proposal bake) → if current, fresh full 3-host gate = the 全合格 proof → tag
-`v2.0.0-alpha.3` (tag-only, user-only ADR-0156). REPORTED finding to user
-2026-06-14; tag is outward-facing → surface before the push.
+VERIFIED FINDING (2026-06-14, web-裏取り): Wasm 3.0 is a LIVING spec (latest
+release dated 2026-06-13 = spec `main` b1c5da6a), NOT a frozen 2025 Rec.
+Consequences, confirmed empirically:
+- **1.0/2.0 corpora**: correctly frozen (bake from `wg-2.0`; re-bake = semantically
+  identical, only cosmetic `$`-sigil + benign wasm-tools byte-churn). CURRENT.
+  Baking 2.0 from `main` was MY ERROR (pulled post-3.0 content → false failures).
+- **3.0 corpus**: BEHIND. It bakes from the frozen proposal repos (Dec-2024/
+  Mar-2025), but the living-3.0 `main` test/core/{gc,…} has evolved — gc
+  `array.wast` 47 vs 39 asserts (+8), `type-subtyping.wast` 73 vs 47 (+26), a
+  renamed file. So the 3.0 corpus genuinely trails the latest 3.0 by real new
+  assertions. THIS is the legitimate re-vendor work.
+Re-bake = VALIDATE-then-REVERT (corpus is a snapshot; never commit byte-churn —
+D-290, in runbook). Mechanism DONE: refdialect.py `44711469` + runbook.
+1.0/2.0/simd/threads current; only 3.0 needs re-vendor.
+NEXT (P-3.0): re-point 3.0 source frozen-proposals → spec `main` test/core/{gc,
+exceptions,tail-call,function-references,memory64,multi-memory} → re-bake
+regen_spec_3_0 via refdialect → test-spec-wasm-3.0-assert; NEW asserts may
+surface REAL conformance gaps (fix runtime, keep 0-skip) → 3-host → bump
+spec_pin → surface alpha.3 tag (outward-facing; user-only).
 
 ## Current state
 
