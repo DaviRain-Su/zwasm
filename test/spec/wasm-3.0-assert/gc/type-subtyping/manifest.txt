@@ -100,3 +100,18 @@ assert_invalid type-subtyping.64.wasm
 assert_invalid type-subtyping.65.wasm
 assert_invalid type-subtyping.66.wasm
 assert_invalid type-subtyping.67.wasm
+assert_invalid type-subtyping.68.wasm
+assert_invalid type-subtyping.69.wasm
+assert_invalid type-subtyping.70.wasm
+assert_invalid type-subtyping.71.wasm
+assert_invalid type-subtyping.72.wasm
+assert_invalid type-subtyping.73.wasm
+assert_invalid type-subtyping.74.wasm
+assert_invalid type-subtyping.75.wasm
+module type-subtyping.76.wasm
+assert_return f1 () -> f32:0
+assert_return f2 () -> f32:0
+assert_return f3 () -> f32:0
+assert_return f4 () -> f32:0
+assert_return f5 () -> f32:0
+assert_return f6 () -> f32:0

@@ -26,9 +26,13 @@ assert_return get_u i32:2 -> i32:255
 assert_return get_s i32:2 -> i32:4294967295
 assert_return set_get i32:1 i32:7 -> i32:7
 assert_return len () -> i32:3
+assert_trap new-overflow ()
 assert_trap get_u i32:10
 assert_trap get_s i32:10
 assert_trap set_get i32:10 i32:7
+assert_return drop_segs () -> ()
+assert_trap new ()
+assert_trap new-overflow ()
 module array.8.wasm
 assert_return new () -> arrayref:?
 assert_return new () -> eqref:?
@@ -36,8 +40,12 @@ assert_return get i32:0 i32:0 -> i32:7
 assert_return get i32:1 i32:0 -> i32:1
 assert_return set_get i32:0 i32:1 i32:1 -> i32:2
 assert_return len () -> i32:2
+assert_trap new-overflow ()
 assert_trap get i32:10 i32:0
 assert_trap set_get i32:10 i32:0 i32:0
+assert_return drop_segs () -> ()
+assert_trap new ()
+assert_trap new-overflow ()
 assert_invalid array.9.wasm
 assert_invalid array.10.wasm
 assert_invalid array.11.wasm
