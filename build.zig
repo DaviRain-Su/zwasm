@@ -236,7 +236,7 @@ pub fn build(b: *std.Build) void {
     //
     // Pipeline:
     //   test/spec/spectest.wat (committed source)
-    //     → wat2wasm (Nix-managed; flake.nix lists wabt)
+    //     → `wasm-tools parse` (Nix-managed; flake.nix lists wasm-tools)
     //     → spectest.wasm (in build cache; never committed)
     //     → WriteFiles bundles {spectest.wasm, spectest_module.zig}
     //     → createModule wraps it; `@embedFile("spectest.wasm")`
