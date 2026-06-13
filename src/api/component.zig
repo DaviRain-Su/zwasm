@@ -20,6 +20,7 @@ const diagnostic = @import("../diagnostic/diagnostic.zig");
 const cvalidate = @import("../feature/component/validate.zig");
 const value_conv = @import("../zwasm/value_conv.zig");
 const zwasm = @import("../zwasm.zig");
+const wasi_host = @import("../wasi/host.zig");
 const Caller = @import("../zwasm/caller.zig").Caller;
 
 const Allocator = std.mem.Allocator;
@@ -524,3 +525,90 @@ pub const runWasiP2Main = cwasi.runWasiP2Main;
 pub const BuiltComponent = cwasi.BuiltComponent;
 pub const buildWasiP2Component = cwasi.buildWasiP2Component;
 const WasiP2Ctx = cwasi.WasiP2Ctx;
+
+// ============================================================
+// REQ-1 (cw CM-API) — unified open + handle
+// ============================================================
+
+/// REQ-1 — does this component import any `wasi:*` interface? A cheap
+/// pre-instantiation predicate (decode + scan the component import names)
+/// so a host can inspect a component without attempting instantiation.
+pub fn componentNeedsWasi(alloc: Allocator, bytes: []const u8) !bool {
+    var decoded = try decode.decode(alloc, bytes);
+    defer decoded.deinit(alloc);
+    var info = try ctypes.decodeTypeInfo(alloc, &decoded);
+    defer info.deinit();
+    for (info.imports.items) |imp| {
+        if (std.mem.startsWith(u8, imp.name, "wasi:")) return true;
+    }
+    return false;
+}
+
+/// REQ-1 — the unified opened-component handle. `open` auto-selects the
+/// single-embedded-module fast path (`ComponentInstance`) or the general
+/// WASI-P2 / multi-instance graph (`BuiltComponent`); the consumer drives
+/// BOTH through one set of methods (no try-catch fallback, no two-way
+/// dispatch). Free with `deinit`.
+pub const Opened = union(enum) {
+    /// Single embedded core module, no host imports.
+    single: ComponentInstance,
+    /// General graph (WASI-P2 host wiring and/or multiple core instances).
+    wasi: BuiltComponent,
+
+    pub fn deinit(self: *Opened) void {
+        switch (self.*) {
+            inline else => |*x| x.deinit(),
+        }
+    }
+
+    /// Borrow this handle's decoded `TypeInfo` (label/name lifetimes).
+    pub fn typeInfo(self: *const Opened) *const ctypes.TypeInfo {
+        return switch (self.*) {
+            inline else => |*x| &x.info,
+        };
+    }
+
+    /// Introspect the typed func exports (path-qualified interface funcs
+    /// included). Free via `ctypes.TypeInfo.freeExportedFuncs`.
+    pub fn exportedFuncs(self: *const Opened, alloc: Allocator) Allocator.Error![]ctypes.TypeInfo.ExportedFunc {
+        return self.typeInfo().exportedFuncs(alloc);
+    }
+
+    /// Resolve a func export's signature to the `WitType` tree (REQ-3).
+    pub fn resolveFuncSig(self: *const Opened, arena: Allocator, name: []const u8) wit_type.Error!?FuncSig {
+        return wit_type.resolveFuncSig(arena, self.typeInfo(), name);
+    }
+
+    /// Typed invoke through the canonical ABI (REQ-2 labels on the result;
+    /// REQ-6 diagnostics on failure). Caller frees the result tree.
+    pub fn invokeTyped(self: *Opened, name: []const u8, args: []const ComponentValue, out_alloc: Allocator) InvokeTypedError!?ComponentValue {
+        return switch (self.*) {
+            .single => |*ci| ci.invokeTyped(name, args, out_alloc),
+            .wasi => |*bc| invokeTypedBuilt(bc, name, args, out_alloc),
+        };
+    }
+};
+
+/// REQ-1 — open a component into a unified handle, auto-selecting the
+/// instantiation path. `host` is wired into the WASI-P2 path and ignored by
+/// the single-module path (pass a host regardless — the consumer always has
+/// one). `opts` is the per-instance budget (REQ-4). The selection is
+/// structural: a component with host imports OR more than one embedded core
+/// module needs the general graph builder; otherwise the single-module fast
+/// path suffices.
+pub fn open(engine: *Engine, alloc: Allocator, bytes: []const u8, host: *wasi_host.Host, opts: InstantiateOpts) anyerror!Opened {
+    var decoded = try decode.decode(alloc, bytes);
+    var core_count: u32 = 0;
+    for (decoded.sections.items) |sec| {
+        if (sec.id == .core_module) core_count += 1;
+    }
+    var info = try ctypes.decodeTypeInfo(alloc, &decoded);
+    const needs_general = info.imports.items.len > 0 or core_count != 1;
+    info.deinit();
+    decoded.deinit(alloc);
+
+    if (needs_general) {
+        return .{ .wasi = try buildWasiP2Component(engine, alloc, bytes, host, opts) };
+    }
+    return .{ .single = try instantiate(engine, alloc, bytes, opts) };
+}

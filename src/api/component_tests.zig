@@ -38,6 +38,70 @@ const FuncSig = component.FuncSig;
 const InvokeTypedError = component.InvokeTypedError;
 const Error = component.Error;
 const MAX_FLAT_PARAMS = component.MAX_FLAT_PARAMS;
+const Opened = component.Opened;
+const open = component.open;
+const componentNeedsWasi = component.componentNeedsWasi;
+
+test "REQ-1 (cw CM-API): open auto-selects single path for a pure component + unified methods" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/greet_component.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    // greet imports no wasi → predicate false → open routes to the single path.
+    try testing.expect(!(try componentNeedsWasi(testing.allocator, bytes)));
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+    host.io = io;
+
+    var opened = try open(&eng, testing.allocator, bytes, &host, .{});
+    defer opened.deinit();
+    try testing.expect(opened == .single);
+
+    // Unified methods work regardless of the underlying path.
+    const funcs = try opened.exportedFuncs(testing.allocator);
+    defer ctypes.TypeInfo.freeExportedFuncs(testing.allocator, funcs);
+    try testing.expectEqual(@as(usize, 1), funcs.len);
+    try testing.expectEqualStrings("greet", funcs[0].name);
+
+    const out = (try opened.invokeTyped("greet", &.{.{ .string = "zwasm" }}, testing.allocator)).?;
+    defer out.deinit(testing.allocator);
+    try testing.expectEqualStrings("Hello, zwasm!", out.string);
+}
+
+test "REQ-1 (cw CM-API): open auto-selects the WASI graph for a wasip2 component" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/typed_payload.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    // typed_payload imports wasi → predicate true → open routes to the graph.
+    try testing.expect(try componentNeedsWasi(testing.allocator, bytes));
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+    host.io = io;
+
+    var opened = try open(&eng, testing.allocator, bytes, &host, .{});
+    defer opened.deinit();
+    try testing.expect(opened == .wasi);
+
+    // The same unified surface drives the graph path: resolveFuncSig works.
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const funcs = try opened.exportedFuncs(testing.allocator);
+    defer ctypes.TypeInfo.freeExportedFuncs(testing.allocator, funcs);
+    try testing.expect(funcs.len >= 1);
+    const sig = (try opened.resolveFuncSig(arena.allocator(), funcs[0].name)).?;
+    try testing.expectEqual(@as(usize, 1), sig.params.len);
+}
 
 const WasiP2Error = cwasi.WasiP2Error;
 const p2GetStdout = cwasi.p2GetStdout;
