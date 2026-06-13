@@ -636,7 +636,7 @@ pub fn main(init: std.process.Init) !void {
                 var spectest_mod = spectest_mod_compiled;
                 if (modules_list.append(gpa, spectest_mod)) |_| {
                     const m_ptr = &modules_list.items[modules_list.items.len - 1];
-                    if (cur_linker.instantiate(m_ptr)) |inst| {
+                    if (cur_linker.instantiate(m_ptr, .{})) |inst| {
                         var inst_mut = inst;
                         if (instances_list.append(gpa, inst_mut)) |_| {
                             const inst_ptr = &instances_list.items[instances_list.items.len - 1];
@@ -790,7 +790,7 @@ pub fn main(init: std.process.Init) !void {
                             continue;
                         };
                         const m_ptr = &modules_list.items[modules_list.items.len - 1];
-                        var inst = cur_linker.instantiate(m_ptr) catch |e| {
+                        var inst = cur_linker.instantiate(m_ptr, .{}) catch |e| {
                             std.debug.print("[wasm-3.0-assert] {s}/{s} instantiate FAIL: {s}\n", .{ proposal, d.module_path, @errorName(e) });
                             cur_inst_idx = null;
                             continue;
@@ -1265,7 +1265,7 @@ pub fn main(init: std.process.Init) !void {
                             continue;
                         };
                         const m_ptr = &modules_list.items[modules_list.items.len - 1];
-                        if (cur_linker.instantiate(m_ptr)) |inst| {
+                        if (cur_linker.instantiate(m_ptr, .{})) |inst| {
                             var bad_inst = inst;
                             bad_inst.deinit();
                             summary.asserts_trap_fail += 1; // unexpectedly instantiated
@@ -1298,7 +1298,7 @@ pub fn main(init: std.process.Init) !void {
                             continue;
                         };
                         const m_ptr = &modules_list.items[modules_list.items.len - 1];
-                        if (cur_linker.instantiate(m_ptr)) |inst| {
+                        if (cur_linker.instantiate(m_ptr, .{})) |inst| {
                             var bad_inst = inst;
                             bad_inst.deinit();
                             summary.asserts_unlinkable_fail += 1; // unexpectedly linked
