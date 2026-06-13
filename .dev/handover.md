@@ -3,6 +3,21 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
+## Active task — spec re-vendor → alpha.3 tag (USER-AUTHORIZED 2026-06-13)
+
+User authorized (ADR-0156 user-only tag): refresh reference specs to latest,
+re-vendor corpus, verify FULL 3-host pass against latest spec, then create +
+push tag **`v2.0.0-alpha.3`** (tag-only, NO GitHub Release — memory
+`project_zwasm_v2_prerelease_tagging`). Steps: (1) refresh clones
+`OSS/WebAssembly/{spec→b1c5da6a,testsuite→0dc0343}` + proposals; (2) re-run ALL
+`scripts/regen_spec_*.sh` + `regen_test_data*.sh` + `regen_wasmtime_misc.sh` in
+`nix develop .#gen`; (3) review `test/spec/` corpus diff + `zig build test-all`
+Mac; (4) 3-host green (ubuntu + windows; `--resume` windows gate for the tag);
+(5) bump `.dev/spec_pin.yaml` (spec→b1c5da6a, date 2026-06-13); (6) commit
+re-vendor; (7) tag+push. NOTE: pin(21b053f7)→latest(b1c5da6a) test/core EMPTY,
+but local clones trailed the pin (spec Aug-2025) so corpus MAY be stale ~150
+files — re-vendor reveals truth. Don't rush (user: じっくり).
+
 ## Current state
 
 - **ROADMAP widget: Phase 17 = IN-PROGRESS (feature line)**. CM + WASI-P2
