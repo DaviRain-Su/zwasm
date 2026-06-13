@@ -53,19 +53,28 @@
 ## Active bundle
 
 - **Bundle-ID**: d324-mem64-bulk
-- **Cycles-remaining**: ~3
-- **Continuity-memo**: D-324 row has full evidence. Order: (B1)
-  validator per-memory idx_types slice (replace memAddrType uses in
-  copy/init/fill/size/grow/load/store; copy = [it_dst it_src it_min])
-  + unit tests; (B2) interp bulk pops keyed on
-  rt.memories[memidx].idx_type + 64-bit bounds; verify JIT
-  single-memory64 bulk path; (B3) distill memory64 memory_copy/fill/
-  init raw→active corpus (regen_spec_3_0_assert.sh); (B4)
+- **Cycles-remaining**: ~2
+- **Continuity-memo**: D-324 row has full evidence. **B1+B2+B3 DONE
+  (one commit, post-6fddfd87)**: validator per-memory idx_types +
+  it_min copy rule + unit tests; interp bulk pops at validated width
+  (popAddr/memIs64/outOfRange in bulk_memory.zig) + 3 truncation
+  regression tests; memory64 bulk corpora distilled (11937 directives
+  0 fail; existing corpora regen churn = ZERO, raw/ is deterministic).
+  **NEXT (B-JIT)**: JIT bulk-op memory64 capture is the remaining
+  truncation — arm64 `emitMemoryFill/Copy/Init` (op_memory.zig:592+)
+  capture operands via W-form `encOrrRegW` (drops high 32 bits) and
+  `ADD+CMP X27` bounds assume <2^33; when `ctx.memory0_idx_type ==
+  .i64` capture X-form + overflow-aware bounds (ADDS + B.CS, like
+  load/store's existing mem64 path at :88/:323). Mirror on x86_64
+  op_memory.zig. Red harness: recreate
+  `test/edge_cases/p17/memory64_bulk/{copy,fill}_high_addr_traps.{wat,wasm,expect}`
+  (i64 mem 1 page; dst=0x100000000; expect trap — recipe in git log,
+  was red 2 fails on JIT, deleted pre-commit). THEN (B4)
   `bash scripts/regen_wasmtime_misc.sh` → commit corpus (expect basic
-  74/0, runtime ~359/0/5) + D-324/D-290 row updates.
-- **Exit-condition**: memory-copy.1.wasm validates+runs green via
-  wast_runtime_runner; memory64 bulk corpora in active set 3-host
-  green; wasmtime_misc corpus committed at the new gate-state.
+  74/0, runtime ~359/0/5) + D-324 discharge + D-290 row update.
+- **Exit-condition**: the two memory64_bulk edge fixtures pass (JIT);
+  memory-copy.1.wasm validates+runs green via wast_runtime_runner;
+  wasmtime_misc corpus committed at the new gate-state.
 - **Other open**: D-323 (stdlib NTSTATUS, blocked-by) · D-318 (note,
   non-gating Rosetta limitation) · §1.3 backlog demand-driven.
 
