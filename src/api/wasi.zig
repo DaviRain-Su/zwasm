@@ -101,6 +101,25 @@ pub export fn zwasm_wasi_config_set_envs(
     handle.setEnvs(k, v) catch return;
 }
 
+/// `zwasm_wasi_config_preopen_dir(cfg, host_path, guest_path)` —
+/// queue a host directory for preopening (`include/wasi.h`,
+/// ADR-0184). Config time is io-free: the request is QUEUED here
+/// and opened via the engine-owned io at `wasm_instance_new`,
+/// where an unopenable path fails instantiation (the wasm-c-api
+/// error-reporting point). Both paths are NUL-terminated C
+/// strings, borrowed for the call only (copied). Returns true
+/// when queued; false on null args or OOM.
+pub export fn zwasm_wasi_config_preopen_dir(
+    h: ?*wasi_host.Host,
+    host_path: [*c]const u8,
+    guest_path: [*c]const u8,
+) callconv(.c) bool {
+    const handle = h orelse return false;
+    if (host_path == null or guest_path == null) return false;
+    handle.addPendingPreopen(std.mem.span(host_path), std.mem.span(guest_path)) catch return false;
+    return true;
+}
+
 /// `zwasm_wasi_config_inherit_stdio(cfg)` — route the guest's
 /// stdin/stdout/stderr (fd 0/1/2) to the host process's stdio.
 /// This is the default: `Host.init` already installs the three
@@ -580,6 +599,26 @@ test "zwasm_wasi_config_set_envs: copies key/val pairs into host.envs" {
     try testing.expectEqualStrings("/root", cfg.envs[0].value);
     try testing.expectEqualStrings("PATH", cfg.envs[1].key);
     try testing.expectEqualStrings("/bin", cfg.envs[1].value);
+}
+
+test "zwasm_wasi_config_preopen_dir: queues a pending preopen (copies both paths)" {
+    const cfg = zwasm_wasi_config_new() orelse return error.ConfigAllocFailed;
+    defer zwasm_wasi_config_delete(cfg);
+    try testing.expect(zwasm_wasi_config_preopen_dir(cfg, ".", "/sandbox"));
+    try testing.expectEqual(@as(usize, 1), cfg.pending_preopens.items.len);
+    try testing.expectEqualStrings(".", cfg.pending_preopens.items[0].host_path);
+    try testing.expectEqualStrings("/sandbox", cfg.pending_preopens.items[0].guest_path);
+    // Not opened yet — config time is io-free (ADR-0184).
+    try testing.expectEqual(@as(usize, 0), cfg.preopens.len);
+}
+
+test "zwasm_wasi_config_preopen_dir: null-arg discipline" {
+    try testing.expect(!zwasm_wasi_config_preopen_dir(null, ".", "/s"));
+    const cfg = zwasm_wasi_config_new() orelse return error.ConfigAllocFailed;
+    defer zwasm_wasi_config_delete(cfg);
+    try testing.expect(!zwasm_wasi_config_preopen_dir(cfg, null, "/s"));
+    try testing.expect(!zwasm_wasi_config_preopen_dir(cfg, ".", null));
+    try testing.expectEqual(@as(usize, 0), cfg.pending_preopens.items.len);
 }
 
 test "lookupWasiThunk: every supported WASI 0.1 import resolves" {

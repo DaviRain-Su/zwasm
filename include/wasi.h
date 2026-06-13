@@ -86,13 +86,21 @@ void zwasm_wasi_config_set_envs(
     const char* const* keys,
     const char* const* vals);
 
-/*
- * Host-directory preopen (`zwasm_wasi_config_preopen_dir`) is
- * deferred to post-v0.1 (ADR-0143 / D-255): opening + serving a
- * preopen needs a library-side `std.Io` token the pure C-API does
- * not yet construct (the CLI's `--dir` has the ambient Init io).
- * Filesystem hosting via the C ABI lands with the io infra (D-251).
+/**
+ * Queue a host directory for preopening: the guest sees
+ * `host_path`'s contents under `guest_path` (fd 3, 4, ... in
+ * preopen order). Both strings are borrowed for the call only —
+ * the config copies them.
+ *
+ * The directory is opened at `wasm_instance_new` time via the
+ * engine-owned io (ADR-0184); an unopenable path makes
+ * `wasm_instance_new` return NULL. Returns true when queued,
+ * false on NULL args or allocation failure.
  */
+bool zwasm_wasi_config_preopen_dir(
+    zwasm_wasi_config_t*,
+    const char* host_path,
+    const char* guest_path);
 
 /**
  * Install the WASI setup on a Store. Takes ownership of the

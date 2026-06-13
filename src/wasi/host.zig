@@ -76,6 +76,16 @@ pub const PreopenEntry = struct {
     guest_path: []const u8,
 };
 
+/// A preopen REQUEST queued by a config builder that has no io
+/// token at config time (the C-API `zwasm_wasi_config_preopen_dir`,
+/// ADR-0184). Both paths are owned by the Host's allocator.
+/// `materializePendingPreopens` opens `host_path` via `Host.io` at
+/// instantiation time and promotes the entry into `preopens`.
+pub const PendingPreopen = struct {
+    host_path: []const u8,
+    guest_path: []const u8,
+};
+
 /// Default rights granted to inherited stdio fds. Mirrors the
 /// witx `fdflags` defaults a `wasi-libc`-compiled guest expects
 /// from a vanilla preopen-style stdin / stdout / stderr.
@@ -87,6 +97,13 @@ pub const Host = struct {
     args: [][]const u8 = &.{},
     envs: []EnvEntry = &.{},
     preopens: []PreopenEntry = &.{},
+    /// Preopen requests awaiting an io token (ADR-0184); drained
+    /// by `materializePendingPreopens` at instantiation.
+    pending_preopens: std.ArrayList(PendingPreopen) = .empty,
+    /// Directory handles opened BY the Host (pending-preopen
+    /// materialization). Closed at `deinit`; handles passed in
+    /// via `addPreopen` stay caller-owned and are NOT closed.
+    owned_preopen_fds: std.ArrayList(std.posix.fd_t) = .empty,
     fd_table: std.ArrayList(OpenFd) = .empty,
     /// Set by `proc_exit` (`src/wasi/proc.zig`) to the requested
     /// exit code; the dispatch surface checks this after each
@@ -140,7 +157,58 @@ pub const Host = struct {
         self.alloc.free(self.envs);
         for (self.preopens) |p| self.alloc.free(p.guest_path);
         self.alloc.free(self.preopens);
+        for (self.pending_preopens.items) |p| {
+            self.alloc.free(p.host_path);
+            self.alloc.free(p.guest_path);
+        }
+        self.pending_preopens.deinit(self.alloc);
+        // Host-opened preopen dirs need the io they were opened
+        // with; it is always set when owned fds exist (materialize
+        // requires it) unless the embedder cleared it afterwards.
+        if (self.io) |io| {
+            for (self.owned_preopen_fds.items) |fd| {
+                const d: std.Io.Dir = .{ .handle = fd };
+                d.close(io);
+            }
+        }
+        self.owned_preopen_fds.deinit(self.alloc);
         self.fd_table.deinit(self.alloc);
+    }
+
+    /// Queue a preopen request for `materializePendingPreopens`
+    /// (ADR-0184 — config builders without an io token). Copies
+    /// both paths.
+    pub fn addPendingPreopen(self: *Host, host_path: []const u8, guest_path: []const u8) !void {
+        const host_copy = try self.alloc.dupe(u8, host_path);
+        errdefer self.alloc.free(host_copy);
+        const guest_copy = try self.alloc.dupe(u8, guest_path);
+        errdefer self.alloc.free(guest_copy);
+        try self.pending_preopens.append(self.alloc, .{
+            .host_path = host_copy,
+            .guest_path = guest_copy,
+        });
+    }
+
+    /// Open every queued preopen request via `Host.io` and promote
+    /// it into `preopens` (ADR-0184; instantiation-time so errors
+    /// surface where wasm-c-api reports them). Promotion is
+    /// per-entry: on failure the failing request (and any after
+    /// it) stays pending and the error propagates — the caller
+    /// fails instantiation. No-op when nothing is pending.
+    pub fn materializePendingPreopens(self: *Host) !void {
+        if (self.pending_preopens.items.len == 0) return;
+        const io = self.io orelse return error.NoHostIo;
+        while (self.pending_preopens.items.len > 0) {
+            const entry = self.pending_preopens.items[0];
+            const dir = try std.Io.Dir.cwd().openDir(io, entry.host_path, .{ .iterate = true });
+            errdefer dir.close(io);
+            try self.owned_preopen_fds.append(self.alloc, dir.handle);
+            errdefer _ = self.owned_preopen_fds.pop();
+            _ = try self.addPreopen(dir.handle, entry.guest_path);
+            self.alloc.free(entry.host_path);
+            self.alloc.free(entry.guest_path);
+            _ = self.pending_preopens.orderedRemove(0);
+        }
     }
 
     /// Replace the args slice with a deep copy of `src`. Existing
@@ -314,5 +382,54 @@ test "Host.deinit: leak-clean after addPreopen + setArgs + setEnvs" {
     const fake_fd: std.posix.fd_t = undefined;
     _ = try h.addPreopen(fake_fd, "/p");
 
+    h.deinit();
+}
+
+test "Host.addPendingPreopen + materializePendingPreopens: opens via io, promotes (ADR-0184)" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+
+    var h = try Host.init(testing.allocator);
+    defer h.deinit();
+    h.io = threaded.io();
+
+    try h.addPendingPreopen(".", "/sandbox");
+    try testing.expectEqual(@as(usize, 1), h.pending_preopens.items.len);
+    try testing.expectEqual(@as(usize, 0), h.preopens.len);
+
+    try h.materializePendingPreopens();
+    try testing.expectEqual(@as(usize, 0), h.pending_preopens.items.len);
+    try testing.expectEqual(@as(usize, 1), h.preopens.len);
+    try testing.expectEqualStrings("/sandbox", h.preopens[0].guest_path);
+    const slot = h.translateFd(3) orelse return error.MissingPreopen;
+    try testing.expectEqual(FdKind.dir, slot.kind);
+    // Idempotent once drained.
+    try h.materializePendingPreopens();
+    try testing.expectEqual(@as(usize, 1), h.preopens.len);
+}
+
+test "Host.materializePendingPreopens: pending without io errors" {
+    var h = try Host.init(testing.allocator);
+    defer h.deinit();
+    try h.addPendingPreopen(".", "/sandbox");
+    try testing.expectError(error.NoHostIo, h.materializePendingPreopens());
+}
+
+test "Host.materializePendingPreopens: nonexistent path errors; failed entry stays pending" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    var h = try Host.init(testing.allocator);
+    defer h.deinit();
+    h.io = threaded.io();
+    try h.addPendingPreopen("definitely/not/a/real/dir-zwasm", "/x");
+    try testing.expectError(error.FileNotFound, h.materializePendingPreopens());
+    try testing.expectEqual(@as(usize, 1), h.pending_preopens.items.len);
+    try testing.expectEqual(@as(usize, 0), h.preopens.len);
+}
+
+test "Host.deinit: leak-clean with un-materialized pending preopens" {
+    var h = try Host.init(testing.allocator);
+    try h.addPendingPreopen("/tmp", "/t");
+    try h.addPendingPreopen("/var", "/v");
     h.deinit();
 }

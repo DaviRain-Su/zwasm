@@ -1,4 +1,4 @@
-// FILE-SIZE-EXEMPT: (cap=3300) C ABI translation catalog (Zone 3 boundary layer); no separable subsystem per ADR-0099 §D2 P3 evaluation (see .dev/architecture/api_instance_audit.md, §9.12-G (c)). 10.F D-173/D-172 accessor surfaces extended exempt cap 2500→2800→3000; cyc174 raised 3000→3200 (ADR-0099 amend) for the Wasm start-section execution feature (a runtime-feature add in instantiateInternal, NOT accessor bloat) — consistent with the non-separable P3 eval + the validator.zig cyc158 precedent. P13 §13.2 raised 3200→3300 (ADR-0099 amend) for the runtime-entity host-creation surface — standalone-entity (instance==null) branches in the global/table/memory accessors + the buildBindings host-import arm; the `_new` CONSTRUCTORS are already split to extern_new.zig, this is the irreducible accessor/binding half coupled to the entity structs. D-171 restructure remains for a genuine separable subsystem.
+// FILE-SIZE-EXEMPT: (cap=3400) C ABI translation catalog (Zone 3 boundary layer); no separable subsystem per ADR-0099 §D2 P3 evaluation (see .dev/architecture/api_instance_audit.md, §9.12-G (c)). 10.F D-173/D-172 accessor surfaces extended exempt cap 2500→2800→3000; cyc174 raised 3000→3200 (ADR-0099 amend) for the Wasm start-section execution feature (a runtime-feature add in instantiateInternal, NOT accessor bloat) — consistent with the non-separable P3 eval + the validator.zig cyc158 precedent. P13 §13.2 raised 3200→3300 (ADR-0099 amend) for the runtime-entity host-creation surface — standalone-entity (instance==null) branches in the global/table/memory accessors + the buildBindings host-import arm; the `_new` CONSTRUCTORS are already split to extern_new.zig, this is the irreducible accessor/binding half coupled to the entity structs. ADR-0184 raised 3300→3400 (ADR-0099 amend 2026-06-13) for the engine-owned io plumbing (Threaded ownership + Host.io wiring + preopen materialization), same runtime-feature-add class. D-171 restructure remains for a genuine separable subsystem.
 //! Engine / Store / Module / Instance / Func / Extern surface of
 //! the C ABI binding (§9.5 / 5.0 chunk d carve-out from
 //! `wasm.zig` per ADR-0007).
@@ -706,6 +706,15 @@ pub const InstantiateLimits = struct {
 /// resolver in a `BindingsBuilder` and call here.
 pub fn instantiateInternal(store: *Store, module: *const Module, builder_state: anytype, trap_out: ?*?*Trap, limits: InstantiateLimits) ?*Instance {
     const alloc = storeAllocator(store) orelse return null;
+
+    // ADR-0184: open any preopen requests queued by the io-free
+    // config builder (`zwasm_wasi_config_preopen_dir`) via the
+    // engine-owned io. Instantiation is the wasm-c-api error
+    // surface: an unopenable host path fails the instantiation.
+    if (store.wasi_host) |host_opaque| {
+        const host: *wasi_host.Host = @ptrCast(@alignCast(host_opaque));
+        host.materializePendingPreopens() catch return null;
+    }
 
     var local_state = builder_state;
     const builder: BindingsBuilder = if (@TypeOf(builder_state) == BindingsBuilder)
@@ -2187,6 +2196,48 @@ test "wasm_instance_new: succeeds for WASI imports when host configured (4.7c)" 
     try testing.expectEqual(@as(usize, 1), rt.funcs.len); // placeholder for the import
     try testing.expectEqual(@as(usize, 1), rt.host_calls.len);
     try testing.expect(rt.host_calls[0] != null);
+}
+
+test "wasm_instance_new: materializes queued preopens via engine io (ADR-0184)" {
+    const e = wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer wasm_engine_delete(e);
+    const s = wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer wasm_store_delete(s);
+
+    const cfg = wasi.zwasm_wasi_config_new() orelse return error.ConfigAllocFailed;
+    try testing.expect(wasi.zwasm_wasi_config_preopen_dir(cfg, ".", "/sandbox"));
+    zwasm_store_set_wasi(s, cfg);
+
+    var bytes = wasi_fd_write_import_wasm;
+    const bv: ByteVec = .{ .size = bytes.len, .data = &bytes };
+    const m = wasm_module_new(s, &bv) orelse return error.ModuleAllocFailed;
+    defer wasm_module_delete(m);
+
+    const inst = wasm_instance_new(s, m, null, null) orelse return error.InstanceAllocFailed;
+    defer wasm_instance_delete(inst);
+
+    const host: *wasi_host.Host = @ptrCast(@alignCast(s.wasi_host.?));
+    try testing.expectEqual(@as(usize, 0), host.pending_preopens.items.len);
+    try testing.expectEqual(@as(usize, 1), host.preopens.len);
+    try testing.expectEqualStrings("/sandbox", host.preopens[0].guest_path);
+}
+
+test "wasm_instance_new: unopenable preopen path fails instantiation (ADR-0184)" {
+    const e = wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer wasm_engine_delete(e);
+    const s = wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer wasm_store_delete(s);
+
+    const cfg = wasi.zwasm_wasi_config_new() orelse return error.ConfigAllocFailed;
+    try testing.expect(wasi.zwasm_wasi_config_preopen_dir(cfg, "definitely/not/a/real/dir-zwasm", "/x"));
+    zwasm_store_set_wasi(s, cfg);
+
+    var bytes = wasi_fd_write_import_wasm;
+    const bv: ByteVec = .{ .size = bytes.len, .data = &bytes };
+    const m = wasm_module_new(s, &bv) orelse return error.ModuleAllocFailed;
+    defer wasm_module_delete(m);
+
+    try testing.expect(wasm_instance_new(s, m, null, null) == null);
 }
 
 test "wasm_instance_exports: surfaces declared exports + dispatches via wasm_extern_as_func" {
