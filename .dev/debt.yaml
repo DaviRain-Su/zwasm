@@ -3,6 +3,37 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
+  - id: "D-327"
+    layer: "code"
+    status: "blocked-by"
+    description: |-
+      blocked-by (the spec-assert RUNNER's multi-value-result dispatch is the
+      CEILING on full Wasm 3.0 (wg-3.0) conformance): the `wasm-3.0-assert` corpus
+      is a curated SMOKE subset (11551 asserts) whose runner
+      (`test/spec/spec_assert_runner_{non_simd,wasm_3_0,base}.zig`) checks results
+      via a `dispatchScalarResult`/`dispatchVoidResult` ladder that handles
+      single-scalar + void + a few curated 2-result shapes (`supported_multi`),
+      NOT arbitrary N-tuple multi-value results. So `assert_return`s with
+      multi-value results skip-impl or fail. The runtime ITSELF supports
+      multi-value (Wasm 1.0+); this is a TEST-HARNESS limitation (runner note:
+      "multi-value execution + assert_trap class discrimination land in follow-on
+      cycles"). IMPACT (surfaced 2026-06-14 by the wg-3.0 re-vendor): wg-3.0's
+      incremental assert additions that ARE multi-value-result fail/defer —
+      exception-handling/try_table (+5), gc/extern (+13), likely more across
+      memory64/tail-call/function-references. The gc passing deltas (array +8 etc.)
+      WERE incorporated (`b8e8b16c`); the multi-value ones are deferred (corpus
+      kept at old bake for those, no regression). So "全合格 to wg-3.0" is NOT
+      reachable without this. DISCHARGE: extend the runner's result-dispatch to
+      generic N-tuple multi-value (mirror/generalise `supported_multi`) +
+      assert_trap class discrimination → then complete the per-proposal wg-3.0
+      re-vendor (refresh raw from wg-3.0 → re-bake → the deferred asserts pass).
+      CW-V1 IMPACT = NONE (test-harness only; runtime multi-value is sound).
+    first_raised: "2026-06-14"
+    last_reviewed: "2026-06-14"
+    refs: |-
+      test/spec/spec_assert_runner_non_simd.zig (dispatchScalarResult ladder + supported_multi);
+      test/spec/spec_assert_runner_wasm_3_0.zig; test/spec/spec_assert_runner_base.zig;
+      private/spec_revendor_campaign.md; .dev/spec_revendor_runbook.md; wg-3.0 tag (2025-09-26)
   - id: "D-314"
     layer: "code"
     status: "note"
