@@ -31,8 +31,8 @@ cd "$(dirname "$0")/.."
 UPSTREAM=${WASM_TESTSUITE_REPO:-$HOME/Documents/OSS/WebAssembly/testsuite}
 DEST=test/spec/wasm-2.0-simd-assert
 
-if ! command -v wast2json >/dev/null 2>&1; then
-  echo "[regen_spec_simd_assert] wast2json not found (need wabt in PATH or dev shell)" >&2
+if ! command -v wasm-tools >/dev/null 2>&1; then
+  echo "[regen_spec_simd_assert] wasm-tools not found (need it in PATH or dev shell)" >&2
   exit 1
 fi
 if ! command -v python3 >/dev/null 2>&1; then
@@ -135,14 +135,11 @@ for n in "${NAMES[@]}"; do
   TMP=$(mktemp -d)
   trap "rm -rf '$TMP'" EXIT
 
-  if ! ( cd "$TMP" && wast2json \
-      --enable-function-references \
-      --enable-tail-call \
-      --enable-extended-const \
-      --enable-multi-memory \
-      --enable-relaxed-simd \
-      "$src" -o "$n.json" >/dev/null 2>&1 ); then
-    echo "[regen_spec_simd_assert] skip $n (wast2json rejected)" >&2
+  # D-290: wasm-tools enables all proposals by default (the wabt
+  # --enable-* flags drop). v128 lane JSON is byte-identical to wabt's
+  # (verified), so the lane baker below is unchanged.
+  if ! ( cd "$TMP" && wasm-tools json-from-wast "$src" -o "$n.json" --wasm-dir . >/dev/null 2>&1 ); then
+    echo "[regen_spec_simd_assert] skip $n (json-from-wast rejected)" >&2
     rm -rf "$TMP"
     trap - EXIT
     continue
@@ -224,7 +221,27 @@ def encode_v128_lanes(value, lane_type):
     return f"v128_lanes:{shape}:" + ",".join(parts)
 
 def fmt_scalar(v):
-    return f"{v['type']}:{v['value']}"
+    # D-290 baker normalization (wabt → wasm-tools): wabt emitted i32/i64
+    # UNSIGNED (4294967295); wasm-tools emits SIGNED (-1). The committed
+    # baseline + runner use unsigned decimals — fold negatives to the
+    # unsigned lane width. f32/f64 are bit-pattern decimals in both (identical);
+    # `nan:*` tokens pass through unchanged.
+    t = v["type"]
+    val = v["value"]
+    if t in ("i32", "i64"):
+        try:
+            n = int(val)
+            if n < 0:
+                n += (1 << 32) if t == "i32" else (1 << 64)
+            val = str(n)
+        except (TypeError, ValueError):
+            pass
+    return f"{t}:{val}"
+
+def norm_wasm(fn):
+    # wasm-tools emits some valid TEXT modules as `.wat`; the copy loop
+    # parses those to .wasm, so normalize the manifest name here.
+    return fn[:-4] + ".wasm" if fn.endswith(".wat") else fn
 
 def has_nan_lane(v):
     if v.get("type") != "v128":
@@ -235,9 +252,12 @@ def has_nan_lane(v):
 def result_type(r):
     """Result element type. `(either A B)` elements (relaxed-SIMD) carry
     no top-level `type`; all alternatives share one type, so read the
-    first alternative's."""
+    first alternative's. D-290: wabt put the alts in a top-level `either`
+    key; wasm-tools nests them as `{"type":"either","values":[...]}`."""
     if "either" in r:
         return r["either"][0]["type"]
+    if r.get("type") == "either":
+        return r["values"][0]["type"]
     return r["type"]
 
 def fmt_token(v):
@@ -247,8 +267,11 @@ def fmt_token(v):
     # §17.4 relaxed-SIMD `(either A B)` — 2+ permitted outcomes. Emit
     # `either:<tokA>|<tokB>`; the runner PASSes if `got` matches ANY.
     # Propagate a `!`-bad sub-token (e.g. nan-in-lane) to skip the row.
-    if "either" in v:
-        alts = [fmt_token(a) for a in v["either"]]
+    # D-290: wabt = top-level `either` list; wasm-tools = nested
+    # `{"type":"either","values":[...]}`.
+    alts_list = v["either"] if "either" in v else (v["values"] if v.get("type") == "either" else None)
+    if alts_list is not None:
+        alts = [fmt_token(a) for a in alts_list]
         for a in alts:
             if a.startswith("!"):
                 return a
@@ -399,7 +422,7 @@ lines = []
 for c in d["commands"]:
     t = c.get("type")
     if t == "module":
-        lines.append("module " + c["filename"])
+        lines.append("module " + norm_wasm(c["filename"]))
     elif t == "assert_return":
         a = c["action"]
         if a.get("type") != "invoke":
@@ -492,14 +515,27 @@ with open(dst, "w") as f:
     f.write("\n".join(lines) + "\n")
 PY
 
-  # Copy referenced .wasm files. `module ` / `assert_invalid` /
-  # `assert_malformed` directives all reference distinct .wasm
-  # files in the wast2json output; the runner reads them on demand.
+  # Materialize referenced .wasm files (D-290 tool-difference rules):
+  #   - `module` (valid): strip wasm-tools' name section; if emitted as a
+  #     `.wat` text module, parse it to .wasm first (→ near byte-parity).
+  #   - `assert_invalid` / `assert_malformed`: intentionally broken — copy
+  #     RAW (never re-encode/strip).
   while read -r line; do
     set -- $line
-    if [ "$1" = "module" ] || [ "$1" = "assert_invalid" ] || [ "$1" = "assert_malformed" ]; then
-      cp "$TMP/$2" "$out_dir/"
-    fi
+    case "$1" in
+      module)
+        base="${2%.wasm}"
+        if [ -f "$TMP/$2" ]; then
+          wasm-tools strip --all "$TMP/$2" -o "$out_dir/$2"
+        elif [ -f "$TMP/$base.wat" ]; then
+          wasm-tools parse "$TMP/$base.wat" -o "$TMP/$base.fromwat.wasm"
+          wasm-tools strip --all "$TMP/$base.fromwat.wasm" -o "$out_dir/$2"
+        fi
+        ;;
+      assert_invalid|assert_malformed)
+        [ -f "$TMP/$2" ] && cp "$TMP/$2" "$out_dir/"
+        ;;
+    esac
   done < "$out_dir/manifest.txt"
 
   rm -rf "$TMP"
