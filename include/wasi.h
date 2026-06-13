@@ -63,12 +63,19 @@ void                 zwasm_wasi_config_delete(zwasm_wasi_config_t*);
  * process's stdio. This is the default (`Host.init` installs the
  * three stdio fds), kept for API parity.
  *
- * Process argv / env inheritance (`inherit_argv` / `inherit_env`)
- * is deferred to post-v0.1 — a C-library context has no Zig-0.16
- * `Init` token for the process argv/env/io (ADR-0143 / D-255). Use
- * the explicit `set_args` / `set_envs` below instead.
+ * Process argv inheritance (`inherit_argv`) remains deferred:
+ * Zig 0.16 offers no library-side cross-platform process-args
+ * read (ADR-0184). Use the explicit `set_args` below instead.
  */
 void zwasm_wasi_config_inherit_stdio(zwasm_wasi_config_t*);
+
+/**
+ * Snapshot the host process's environment into the config,
+ * replacing any previously set envs (same replace semantics as
+ * `set_envs`). Later host-process env changes are not reflected.
+ * Returns true on success; false on NULL cfg or snapshot failure.
+ */
+bool zwasm_wasi_config_inherit_env(zwasm_wasi_config_t*);
 
 /**
  * Explicit argv / envs override. Each `argv` / `keys` / `vals`

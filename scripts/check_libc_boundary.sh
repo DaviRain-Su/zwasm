@@ -55,6 +55,13 @@ NECESSARY=(
   "std.c.waitpid"
   "std.c.alarm"
   "std.c.getenv"
+  # ADR-0184 / ADR-0070 amendment (2026-06-13): full-environ snapshot
+  # for the C-API `zwasm_wasi_config_inherit_env`. Same constraint
+  # class as getenv (B132): a C-ABI export has no std.process.Init,
+  # so the POSIX environ block is reachable only via libc. The
+  # Windows path reads the PEB through std.process.Environ (no libc);
+  # the site is comptime-POSIX-only.
+  "std.c.environ"
   # ADR-0105 D1 (2026-05-23): stack-limit query for JIT-prologue
   # stack-probe. macOS pthread_get_stackaddr_np / pthread_get_stacksize_np
   # + Linux pthread_getattr_np / pthread_attr_getstack / pthread_attr_destroy.

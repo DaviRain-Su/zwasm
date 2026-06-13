@@ -12,6 +12,7 @@
 //! lower zone (`interp/`, `wasi/`).
 
 const std = @import("std");
+const builtin = @import("builtin");
 const runtime = @import("../runtime/runtime.zig");
 const wasi_host = @import("../wasi/host.zig");
 const wasi_fd = @import("../wasi/fd.zig");
@@ -117,6 +118,35 @@ pub export fn zwasm_wasi_config_preopen_dir(
     const handle = h orelse return false;
     if (host_path == null or guest_path == null) return false;
     handle.addPendingPreopen(std.mem.span(host_path), std.mem.span(guest_path)) catch return false;
+    return true;
+}
+
+/// `zwasm_wasi_config_inherit_env(cfg)` — snapshot the host
+/// process's environment into the config (`include/wasi.h`,
+/// ADR-0184), replacing any previously set envs (same replace
+/// semantics as `set_envs`). Snapshot-at-call: later host-process
+/// env mutations are not reflected. Returns true on success;
+/// false on null cfg or snapshot/copy failure.
+///
+/// Env access at the C boundary: Windows reads the PEB via
+/// `std.process.Environ` (`.global` block); POSIX reads the libc
+/// `environ` block (`std.c.environ`, ADR-0070 Necessary — a C-ABI
+/// export has no `std.process.Init` token, same constraint as
+/// `std.c.getenv` in `wasm_engine_new`).
+pub export fn zwasm_wasi_config_inherit_env(h: ?*wasi_host.Host) callconv(.c) bool {
+    const handle = h orelse return false;
+    const ca = std.heap.c_allocator;
+    const env: std.process.Environ = if (builtin.os.tag == .windows)
+        .{ .block = .global }
+    else posix_blk: {
+        const raw = std.c.environ;
+        var n: usize = 0;
+        while (raw[n] != null) : (n += 1) {}
+        break :posix_blk .{ .block = .{ .slice = raw[0..n :null] } };
+    };
+    var map = std.process.Environ.createMap(env, ca) catch return false;
+    defer map.deinit();
+    handle.setEnvs(map.keys(), map.values()) catch return false;
     return true;
 }
 
@@ -619,6 +649,29 @@ test "zwasm_wasi_config_preopen_dir: null-arg discipline" {
     try testing.expect(!zwasm_wasi_config_preopen_dir(cfg, null, "/s"));
     try testing.expect(!zwasm_wasi_config_preopen_dir(cfg, ".", null));
     try testing.expectEqual(@as(usize, 0), cfg.pending_preopens.items.len);
+}
+
+test "zwasm_wasi_config_inherit_env: snapshots the process environment (ADR-0184)" {
+    const cfg = zwasm_wasi_config_new() orelse return error.ConfigAllocFailed;
+    defer zwasm_wasi_config_delete(cfg);
+    try testing.expect(zwasm_wasi_config_inherit_env(cfg));
+    // The test runner always carries at least one env var
+    // (PATH / HOME on POSIX; SystemRoot etc. on Windows).
+    try testing.expect(cfg.envs.len > 0);
+    for (cfg.envs) |e| try testing.expect(e.key.len > 0);
+}
+
+test "zwasm_wasi_config_inherit_env: null-arg discipline; replaces explicit envs" {
+    try testing.expect(!zwasm_wasi_config_inherit_env(null));
+    const cfg = zwasm_wasi_config_new() orelse return error.ConfigAllocFailed;
+    defer zwasm_wasi_config_delete(cfg);
+    const keys = [_][*c]const u8{"ZWASM_TEST_SENTINEL_KEY"};
+    const vals = [_][*c]const u8{"1"};
+    zwasm_wasi_config_set_envs(cfg, keys.len, &keys, &vals);
+    try testing.expectEqual(@as(usize, 1), cfg.envs.len);
+    try testing.expect(zwasm_wasi_config_inherit_env(cfg));
+    // setEnvs is replace-semantics: the sentinel pair is gone.
+    for (cfg.envs) |e| try testing.expect(!std.mem.eql(u8, e.key, "ZWASM_TEST_SENTINEL_KEY"));
 }
 
 test "lookupWasiThunk: every supported WASI 0.1 import resolves" {
