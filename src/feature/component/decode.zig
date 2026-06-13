@@ -72,6 +72,11 @@ pub const Section = struct {
 /// section list. Bodies are borrowed from `input`; the caller must keep
 /// `input` alive while the `Component` is used.
 pub const Component = struct {
+    /// Borrowed input bytes. Section bodies — and the TypeInfo names that slice
+    /// them (`decodeLabel`) — point into THIS, so the decoded component is only
+    /// valid while `input` lives. A long-lived handle (`ComponentInstance` /
+    /// `BuiltComponent`) therefore owns a copy of the bytes and decodes against
+    /// it, decoupling the handle from the caller's buffer (REQ-7 / D-326).
     input: []const u8,
     sections: std.ArrayList(Section),
 

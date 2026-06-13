@@ -53,6 +53,11 @@ pub const InstantiateOpts = Module.InstantiateOpts;
 /// heap storage keeps the handle owners pinned across the struct's lifetime).
 pub const ComponentInstance = struct {
     alloc: Allocator,
+    /// Owned copy of the component bytes. `decoded` (and the `info` names +
+    /// core `module` that slice it) borrow from THIS, so the instance is
+    /// self-contained — a host can free its load buffer and keep the opened
+    /// component cached (REQ-7 / D-326).
+    owned_bytes: []const u8,
     decoded: decode.Component,
     /// Decoded type/canon/alias index spaces — used to resolve a component
     /// export to the core funcs the host invokes (C2-2).
@@ -115,6 +120,7 @@ pub const ComponentInstance = struct {
         self.alloc.destroy(self.module);
         self.info.deinit();
         self.decoded.deinit(self.alloc);
+        self.alloc.free(self.owned_bytes);
     }
 
     /// Invoke a core export by name with raw facade `Value`s (flat-scalar
@@ -380,6 +386,10 @@ const Linker = @import("../zwasm/linker.zig").Linker;
 /// are the follow-up.
 pub const ComponentGraph = struct {
     alloc: Allocator,
+    /// Owned copy of the component bytes — `outer`, children, and `info` names
+    /// slice it, so the graph is self-contained vs the caller's buffer
+    /// (REQ-7 / D-326).
+    owned_bytes: []const u8,
     outer: decode.Component,
     info: ctypes.TypeInfo,
     children: std.ArrayList(*decode.Component),
@@ -410,6 +420,7 @@ pub const ComponentGraph = struct {
         self.children.deinit(self.alloc);
         self.info.deinit();
         self.outer.deinit(self.alloc);
+        self.alloc.free(self.owned_bytes);
     }
 
     /// Invoke a flat-scalar export by name on whichever child instance exports
@@ -424,9 +435,17 @@ pub const ComponentGraph = struct {
 
 /// Instantiate + link a multi-component graph (see `ComponentGraph`).
 pub fn instantiateGraph(engine: *Engine, alloc: Allocator, bytes: []const u8, opts: InstantiateOpts) anyerror!ComponentGraph {
+    // Own the bytes so the graph is self-contained (REQ-7 / D-326). On a decode
+    // failure `graph` is never assigned (its `errdefer deinit` un-armed), so free
+    // the dupe inline; once built, `graph.deinit` owns it.
+    const owned_bytes = try alloc.dupe(u8, bytes);
     var graph = ComponentGraph{
         .alloc = alloc,
-        .outer = try decode.decode(alloc, bytes),
+        .owned_bytes = owned_bytes,
+        .outer = decode.decode(alloc, owned_bytes) catch |e| {
+            alloc.free(owned_bytes);
+            return e;
+        },
         .info = undefined,
         .children = .empty,
         .modules = .empty,
@@ -481,7 +500,12 @@ pub fn instantiateGraph(engine: *Engine, alloc: Allocator, bytes: []const u8, op
 /// `opts` carries the per-instance budget (fuel / max-memory); pass `.{}` for
 /// the default budget (REQ-4, cw CM-API).
 pub fn instantiate(engine: *Engine, alloc: Allocator, bytes: []const u8, opts: InstantiateOpts) Error!ComponentInstance {
-    var decoded = try decode.decode(alloc, bytes);
+    // Own the bytes so the instance is self-contained (REQ-7 / D-326): `decoded`,
+    // its `info` names, and the core `module` all borrow from `owned_bytes`.
+    const owned_bytes = try alloc.dupe(u8, bytes);
+    errdefer alloc.free(owned_bytes);
+
+    var decoded = try decode.decode(alloc, owned_bytes);
     errdefer decoded.deinit(alloc);
 
     const core_bytes = firstCoreModule(&decoded) orelse return Error.NoCoreModule;
@@ -501,7 +525,7 @@ pub fn instantiate(engine: *Engine, alloc: Allocator, bytes: []const u8, opts: I
     errdefer info.deinit();
     try cvalidate.validate(&info); // ADR-0176: reject invalid components pre-instantiate
 
-    return .{ .alloc = alloc, .decoded = decoded, .info = info, .engine = engine, .module = module, .core = core };
+    return .{ .alloc = alloc, .owned_bytes = owned_bytes, .decoded = decoded, .info = info, .engine = engine, .module = module, .core = core };
 }
 
 // WASI Preview 2 host trampolines + the single-component runner live in a

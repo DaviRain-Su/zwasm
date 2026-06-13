@@ -1595,6 +1595,10 @@ pub const DropResourceError = resource_table.Error || error{DestructorTrapped};
 
 pub const BuiltComponent = struct {
     alloc: Allocator,
+    /// Owned copy of the component bytes — `decoded`, its `info` names, and the
+    /// core `modules` slice it, so the build is self-contained vs the caller's
+    /// load buffer (REQ-7 / D-326).
+    owned_bytes: []const u8,
     decoded: decode.Component,
     info: ctypes.TypeInfo,
     /// Heap-stable: trampolines hold this pointer for the build's lifetime.
@@ -1628,6 +1632,7 @@ pub const BuiltComponent = struct {
         alloc.destroy(self.ctx);
         self.info.deinit();
         self.decoded.deinit(alloc);
+        alloc.free(self.owned_bytes);
     }
 
     /// REQ-3 (cw CM-API) — introspect a func export's full typed signature
@@ -1676,7 +1681,11 @@ pub const BuiltComponent = struct {
 /// `opts` is the per-instance budget applied to every guest instance
 /// (REQ-4, cw CM-API); pass `.{}` for the default budget.
 pub fn buildWasiP2Component(engine: *Engine, alloc: Allocator, bytes: []const u8, host: *wasi_host.Host, opts: Module.InstantiateOpts) anyerror!BuiltComponent {
-    var decoded = try decode.decode(alloc, bytes);
+    // Own the bytes so the build is self-contained (REQ-7 / D-326).
+    const owned_bytes = try alloc.dupe(u8, bytes);
+    errdefer alloc.free(owned_bytes);
+
+    var decoded = try decode.decode(alloc, owned_bytes);
     errdefer decoded.deinit(alloc);
     var info = try ctypes.decodeTypeInfo(alloc, &decoded);
     errdefer info.deinit();
@@ -1691,6 +1700,7 @@ pub fn buildWasiP2Component(engine: *Engine, alloc: Allocator, bytes: []const u8
 
     var self: BuiltComponent = .{
         .alloc = alloc,
+        .owned_bytes = owned_bytes,
         .decoded = decoded,
         .info = info,
         .ctx = ctx,

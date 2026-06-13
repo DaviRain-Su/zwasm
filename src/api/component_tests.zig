@@ -73,6 +73,43 @@ test "REQ-1 (cw CM-API): open auto-selects single path for a pure component + un
     try testing.expectEqualStrings("Hello, zwasm!", out.string);
 }
 
+test "REQ-7 (cw CM-API): an opened component outlives the caller's input buffer" {
+    // cw caches the opened component long-lived (a GC-finalised instance box) and
+    // frees its transient load buffer right after `open`. The component must OWN
+    // its bytes: `decode.Component` borrowed the input zero-copy, so the TypeInfo
+    // names (export labels slice the section bodies) dangled once the host freed
+    // `bytes` — and resolveFuncSig returned null for EVERY export (cw's symptom).
+    // Free + clobber the input immediately after open to pin the contract.
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const src = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/greet_component.wasm", testing.allocator, .limited(1 << 20));
+    const bytes = try testing.allocator.dupe(u8, src); // a private, soon-freed load buffer
+    testing.allocator.free(src);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+    host.io = io;
+
+    var opened = try open(&eng, testing.allocator, bytes, &host, .{});
+    defer opened.deinit();
+
+    // The host drops its load buffer; the opened component must not depend on it.
+    @memset(bytes, 0xAA); // any dangling slice now reads garbage
+    testing.allocator.free(bytes);
+
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const sig = (try opened.resolveFuncSig(arena.allocator(), "greet")).?;
+    try testing.expectEqual(@as(usize, 1), sig.params.len);
+
+    const out = (try opened.invokeTyped("greet", &.{.{ .string = "zwasm" }}, testing.allocator)).?;
+    defer out.deinit(testing.allocator);
+    try testing.expectEqualStrings("Hello, zwasm!", out.string);
+}
+
 test "REQ-1 (cw CM-API): open auto-selects the WASI graph for a wasip2 component" {
     var threaded: std.Io.Threaded = .init(testing.allocator, .{});
     defer threaded.deinit();
