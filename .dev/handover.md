@@ -21,13 +21,10 @@ single-scalar/void + a few 2-result shapes, NOT generic N-tuple multi-value. So
 the wg-3.0 incremental asserts that are multi-value (eh try_table +5, gc extern
 +13, likely more in mem64/tail-call/func-refs) cannot pass — full "全合格 to
 wg-3.0" is BLOCKED on D-327 (a TEST-HARNESS gap; runtime multi-value is sound).
-DECISION (surfaced to user 2026-06-14): (A) implement D-327 (extend runner to
-N-tuple multi-value + assert_trap-class) → unlocks deferred asserts → complete
-per-proposal re-vendor → full wg-3.0; multi-cycle. (B) tag alpha.3 NOW (gc
-updated; substantial curated 3.0 corpus 3-host green) + D-327 + remaining
-proposal-drift tracked for beta/rc; honest "passes wg-3.0 except documented
-multi-value asserts". Recommend B for an alpha. AWAITING user pick before the
-outward-facing tag.
+DECISION surfaced to user 2026-06-14 (AWAITING pick before the outward-facing
+tag): (A) implement D-327 (N-tuple multi-value runner) → full wg-3.0; multi-cycle.
+(B) tag alpha.3 now (gc updated; curated 3.0 corpus 3-host green) + D-327 +
+remaining proposal-drift tracked for beta/rc. Recommended B for an alpha.
 
 ## Current state
 
