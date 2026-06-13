@@ -21,10 +21,9 @@ OPTIONS surfaced: (A) full re-vendor campaign first (correct, multi-cycle, may
 surface real conformance fixes); (B) tag alpha.3 now on known-green + re-vendor
 as tracked follow-up; (C) re-bake only the new/changed semantic tests, validate
 runtime passes, commit just those + tag. AWAITING USER PICK.
-Runbook (when resumed): `import_proposal_corpus.sh --copy-all` (3.0 raw is
-STATIC) → `nix develop .#gen` → regen_spec_{1_0,2_0,simd,threads,3_0}_assert +
-regen_test_data{,_2_0} + regen_wasmtime_misc → fix distiller shape-gates →
-`zig build test-all` → 3-host (--resume windows) → bump spec_pin → commit → tag.
+Runbook (resume): `import_proposal_corpus.sh --copy-all` (3.0 raw STATIC) →
+`nix develop .#gen` → all regen_spec_*/regen_test_data*/regen_wasmtime_misc →
+fix distiller shape-gates → `zig build test-all` → 3-host → bump spec_pin → tag.
 
 ## Current state
 
