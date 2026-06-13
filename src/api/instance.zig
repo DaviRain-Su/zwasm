@@ -146,6 +146,13 @@ inline fn engineAllocator(e: *const Engine) std.mem.Allocator {
     };
 }
 
+/// Engine-owned io token (ADR-0184). Null only for an Engine that
+/// predates `wasm_engine_new` (e.g. a zeroed struct from C).
+pub inline fn engineIo(e: *const Engine) ?std.Io {
+    const t: *std.Io.Threaded = @ptrCast(@alignCast(e.io_threaded orelse return null));
+    return t.io();
+}
+
 /// `wasm_engine_new()` — allocate an Engine + bind the C
 /// allocator. Returns null on OOM (zero allocations should
 /// happen at this layer beyond the Engine struct itself; the C
@@ -172,9 +179,19 @@ pub export fn wasm_engine_new() callconv(.c) ?*Engine {
     }
     const alloc = std.heap.c_allocator;
     const e = alloc.create(Engine) catch return null;
+    // ADR-0184: the engine owns a `std.Io.Threaded` so the C-ABI
+    // surface (which cannot receive a Zig io token) can serve WASI
+    // preopens / env inheritance. Threads spawn lazily; init only
+    // needs the allocator.
+    const threaded = alloc.create(std.Io.Threaded) catch {
+        alloc.destroy(e);
+        return null;
+    };
+    threaded.* = .init(alloc, .{});
     e.* = .{
         .alloc_ptr = alloc.ptr,
         .alloc_vtable = @ptrCast(alloc.vtable),
+        .io_threaded = threaded,
     };
     return e;
 }
@@ -186,6 +203,11 @@ pub export fn wasm_engine_new() callconv(.c) ?*Engine {
 pub export fn wasm_engine_delete(e: ?*Engine) callconv(.c) void {
     const handle = e orelse return;
     const alloc = engineAllocator(handle);
+    if (handle.io_threaded) |t_opaque| {
+        const t: *std.Io.Threaded = @ptrCast(@alignCast(t_opaque));
+        t.deinit();
+        alloc.destroy(t);
+    }
     alloc.destroy(handle);
 }
 
@@ -298,6 +320,15 @@ pub export fn zwasm_store_set_wasi(s: ?*Store, h: ?*wasi_host.Host) callconv(.c)
         const old: *wasi_host.Host = @ptrCast(@alignCast(old_opaque));
         old.deinit();
         std.heap.c_allocator.destroy(old);
+    }
+    if (h) |hp| {
+        // ADR-0184: hand the engine-owned io to the host so fs
+        // syscalls (path_open, preopen materialization) work from
+        // the pure C surface. Valid for the host's whole life: the
+        // engine outlives the store, which owns the host.
+        if (store.engine) |eng| {
+            if (hp.io == null) hp.io = engineIo(eng);
+        }
     }
     store.wasi_host = if (h) |hp| @as(*anyopaque, @ptrCast(hp)) else null;
 }
@@ -1681,6 +1712,29 @@ test "wasm_engine_new / delete: round-trip + alloc binding survives" {
 
 test "wasm_engine_delete: tolerates null handle" {
     wasm_engine_delete(null);
+}
+
+test "wasm_engine_new: owns a std.Io.Threaded; engineIo is usable (ADR-0184)" {
+    const e = wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer wasm_engine_delete(e);
+    try testing.expect(e.io_threaded != null);
+    const io = engineIo(e) orelse return error.NoEngineIo;
+    // Probe the io with a real filesystem op: stat the cwd.
+    var dir = try std.Io.Dir.cwd().openDir(io, ".", .{});
+    dir.close(io);
+}
+
+test "zwasm_store_set_wasi: wires the engine io into Host.io (ADR-0184)" {
+    const e = wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer wasm_engine_delete(e);
+    const s = wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer wasm_store_delete(s);
+
+    const cfg = wasi.zwasm_wasi_config_new() orelse return error.ConfigAllocFailed;
+    try testing.expect(cfg.io == null);
+    zwasm_store_set_wasi(s, cfg);
+    const host: *wasi_host.Host = @ptrCast(@alignCast(s.wasi_host.?));
+    try testing.expect(host.io != null);
 }
 
 test "wasm_store_new / delete: round-trip with engine back-pointer" {

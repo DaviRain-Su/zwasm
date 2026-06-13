@@ -24,4 +24,12 @@ pub const Engine = extern struct {
     /// round-trips.
     alloc_ptr: ?*anyopaque,
     alloc_vtable: ?*const anyopaque,
+    /// Engine-owned `std.Io.Threaded` (ADR-0184). The C-ABI
+    /// boundary cannot receive a Zig io token, so the engine
+    /// manufactures one; WASI preopens / env inheritance flow
+    /// through it. Heap-allocated by `wasm_engine_new`, deinited
+    /// at `wasm_engine_delete`. Type-erased for the same
+    /// C-stable-layout reason as the allocator pair; the §9.3
+    /// binding casts to `*std.Io.Threaded`.
+    io_threaded: ?*anyopaque = null,
 };
