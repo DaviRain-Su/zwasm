@@ -28,24 +28,31 @@
   supported_multi staleness fixed). Remaining blocked distillers =
   regen_wasmtime_misc.sh + regen_spec_simd_assert.sh (re-curation
   class — per-fixture work, the D-290 row has the full evidence).
-- **STOPPED 2026-06-13 by user (weekly rate limit)**; re-audited the
-  resume wiring at stop. A fresh session resumes with `/continue`
-  ALONE: read this file → first chunk below. All gates green at stop
-  (mac test/lint per commit; ubuntu test-all green through @357a019e;
-  windows batch recorded @0a84e770; the few post-audit commits are
-  docs/ADR/debt-only — ubuntu re-verifies on first resume).
-- **ADR-0184 ACCEPTED (user, 2026-06-13)** — C-API engine-owned
-  `std.Io` (wasm.h stays upstream-verbatim; wasi.h extension surface;
-  full 裏取り in the ADR's Investigation addendum).
-- **NEXT (first chunk of the fresh session): implement ADR-0184** in
-  order: (1) `zwasm_engine_new` constructs+owns `std.Io.Threaded`
-  (deinit at `engine_delete`; wire to `Host.io`); (2) re-add
-  `wasi_config_preopen_dir` to include/wasi.h + src/api/wasi.zig
-  (open via engine io at INSTANTIATION time — preopen precedent at
-  src/cli/run.zig:99-110, the `--dir` loop); (3) `inherit_env` via
-  `std.process.Environ` over the engine io; (4) C-API preopen smoke
-  test (C host opens temp dir, guest reads a file) 3-host. inherit_argv
-  stays deferred per the ADR. D-255 discharges at the end.
+- **STOPPED 2026-06-13 by user (account switch)** mid-ADR-0184; clean
+  break — all in-flight work committed, tree clean, pushed. A fresh
+  session resumes with `/continue` ALONE: read this file → first chunk
+  below. Mac test/lint green per commit; ubuntu test-all kicked at stop
+  (verify /tmp/ubuntu.log at Step 0.7); windows batch not due.
+- **ADR-0184 IMPLEMENTED steps 1–3 of 4 (2026-06-13)**:
+  (1) `0f9dcfc6` engine-owned `std.Io.Threaded` (`wasm_engine_new`
+  creates, `engine_delete` deinits; `zwasm_store_set_wasi` wires
+  `engineIo` → `Host.io`); (2) `12d71f5d` `zwasm_wasi_config_preopen_dir`
+  (queued io-free at config via `Host.addPendingPreopen`, opened at
+  `instantiateInternal` via `materializePendingPreopens`; instance.zig
+  cap 3300→3400 per ADR-0099 amend); (3) `8be99968`
+  `zwasm_wasi_config_inherit_env` (`std.process.Environ` snapshot — PEB
+  on windows, `std.c.environ` on POSIX; ADR-0070 amendment + gate list).
+  Cross-compile x86_64-windows-gnu / x86_64-linux-gnu verified.
+- **NEXT (first chunk): ADR-0184 step 4** — C-API preopen smoke test:
+  new `test/c_api_conformance/wasi_preopen.c` (C host: mkdir temp +
+  write file via C stdio → `zwasm_wasi_config_preopen_dir` →
+  instantiate a wasi guest that path_opens + fd_reads it; exit 0 =
+  pass). Wire into build.zig `conformance_cases` (~line 990; needs a
+  committed wasi guest .wasm — follow test/wasi/hello.wat pattern,
+  fixture under test/c_api_conformance/). 3-host via test-all. THEN
+  mark ADR-0184 Status: Implemented + **discharge D-255** (debt.yaml
+  line ~382) + drop the stale wasi.h-deferral mention in D-251 row if
+  any. inherit_argv stays deferred per the ADR.
 - **AFTER that (CWFS north-star gap, user-surfaced 2026-06-13)**:
   extend `TypeInfo.exportedFuncs` to ENUMERATE interface-nested funcs
   (walk exported instances; emit path-qualified `<iface>#<func>`
@@ -55,8 +62,6 @@
 - **THEN**: D-290 re-curation distillers (regen_wasmtime_misc /
   regen_spec_simd_assert — per-fixture work, evidence in the row) ·
   debt long-tail · §1.3 backlog demand-driven · D-323 blocked-by.
-- **Open user-decision item**: ADR-0184 Proposed (C-API engine-owned io
-  — ADR-0143 surface reversal; loop does NOT implement until reviewed).
 - **Other open**: D-323 (stdlib NTSTATUS, blocked-by) · D-318 (note,
   non-gating Rosetta limitation) · §1.3 backlog demand-driven.
 
@@ -72,8 +77,8 @@
   corpus-JIT SEGVs, local-diagnostic only.
 - Earlier: embedder-hardening · Tier-1 static-lib · interp sandboxing ·
   musl (ADR-0178) · host-infra hardening (`3e501d9c`).
-- **Open user-decision follow-ons**: D-251 (C-API WASI preopen io ADR);
-  Tier-2 #5 ILP32/watchOS.
+- **Open user-decision follow-ons**: Tier-2 #5 ILP32/watchOS. (D-251's
+  preopen-io ADR ask is RESOLVED by ADR-0184 Accepted+implementing.)
 
 ## State at pause (stable baseline)
 
