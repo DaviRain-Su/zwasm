@@ -3,42 +3,6 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
-  - id: "D-326"
-    layer: "code"
-    status: "now"
-    description: |-
-      now (REQ-7 from cw dogfooding, 2026-06-13; reply to the CM-API finished-form
-      campaign). The returned `Opened` (and its `ComponentInstance` / `BuiltComponent`
-      / `TypeInfo`) is NOT relocatable: the 6 CM-API requests all work for the one-shot
-      stack-local path (open → invokeTyped/resolveFuncSig → deinit in the same frame),
-      but storing the by-value return at a HOST-OWNED stable address (cw boxes it in a
-      GC-finalised `{engine, host, opened}` on the heap for the instance-cache pattern
-      that REQ-5 `dropResource` was designed for) makes `resolveFuncSig` return null for
-      EVERY export and `invokeTyped` report "no exported function". cw's diagnosis: the
-      decoded `TypeInfo` (`info`) holds ADDRESS-BASED references into `decoded` (or
-      arena/internal self-pointers), so the by-value move dangles them; the one-shot path
-      only survives because the stale stack frame isn't clobbered yet.
-      BLAST: blocks instance caching + the ADR-0135 `require`-a-component surface (one Var
-      per export over a persistent instance) — the REQ-5 raison d'être. One-shot path
-      unaffected; cw ships on it meanwhile (instance-cache code written + reverted, re-lands
-      when this is available).
-      FIX (pick finished-form-clean): (1) `comp.openBoxed(...) !*Opened` — zwasm allocates
-      the Opened + returns a stable pointer (host holds + deinit/free), OR (2) あるべき論:
-      make Opened/ComponentInstance/BuiltComponent/TypeInfo RELOCATABLE — no intra-struct
-      address refs; `info` borrows only from heap-allocated backing stable across a struct
-      move. Investigation FIRST: confirm the dangling-pointer mechanism (which field holds
-      the self-ref) before choosing — a relocatable design is the cleaner finished form but
-      may have wider blast; verify with a heap-box adversarial test (move then resolve).
-      Supersedes D-293 as next actionable (fresh dogfooding blocker > no-rush conformance-
-      neutral demux).
-    first_raised: "2026-06-13"
-    last_reviewed: "2026-06-13"
-    refs: |-
-      $MY/ClojureWasmFromScratch/private/20260613_handover_from_zwasm/cw_finding_REQ7_opened_heap_stability.md;
-      src/api/component.zig (comp.open / Opened union / ComponentInstance / instantiate);
-      src/api/component_wasi_p2.zig (BuiltComponent / buildWasiP2Component);
-      src/feature/component/types.zig (TypeInfo + decoded ComponentInstance — suspected self-ref holder);
-      src/feature/component/wit_type.zig (resolveFuncSig/resolveType); docs/zig_api_design.md §3.9; pin commit 65a760e2
   - id: "D-314"
     layer: "code"
     status: "note"

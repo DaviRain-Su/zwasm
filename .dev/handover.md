@@ -23,9 +23,17 @@
     (delegating methods) + `componentNeedsWasi` predicate.
   - **REQ-5** (`5795c3d0`) — host-facing `Opened.dropResource` /
     `BuiltComponent.dropResource` (removes handle + runs destructor).
-  - cljw handover written `COMPLETED` →
-    `$MY/ClojureWasmFromScratch/private/20260613_handover_from_zwasm/handover.md`
-    (pin commit **`65a760e2`**). docs §3.9 synced.
+  - **REQ-7 FIXED (`33e0100c`)** — opened component now OWNS its bytes so it
+    outlives the caller's load buffer (cw instance-cache pattern). `decode`
+    stayed zero-copy; ComponentInstance/BuiltComponent/ComponentGraph dupe +
+    own `owned_bytes`, decode against it, free in deinit. Root cause was
+    input-buffer lifetime (not relocatability): TypeInfo names borrowed the
+    section bodies = caller's bytes → dangled on free → resolveFuncSig null.
+    Adversarial test (free+clobber input, then resolve+invoke).
+  - cljw handovers written `COMPLETED` →
+    `$MY/ClojureWasmFromScratch/private/20260613_handover_from_zwasm/`
+    (handover.md pin `65a760e2`; handover_v2.md REQ-7 pin `33e0100c`).
+    docs §3.9 synced.
 - **D-325 FIXED + closed (`65a760e2`)** — cross-instance
   `call_indirect`/`call_ref` ran the callee in the CALLER's runtime context;
   a guest func reached through a wit-bindgen shim's `$imports` table executed
@@ -46,19 +54,9 @@
 
 ## NEXT (autonomous)
 
-**cw REQ-7 reply received 2026-06-13** (reply to the closed CM-API campaign;
-`$MY/ClojureWasmFromScratch/private/20260613_handover_from_zwasm/cw_finding_REQ7_*.md`)
-→ filed **D-326 (`now`)**. One new `now`:
-- **D-326 — `Opened` heap-stability** (REQ-7; supersedes D-293). The 6 CM-API
-  requests work for the one-shot STACK-LOCAL path, but the by-value `Opened` /
-  `ComponentInstance` / `BuiltComponent` / `TypeInfo` is NOT relocatable:
-  storing the return at a host heap address (cw's GC-finalised instance-cache
-  box) makes `resolveFuncSig` return null for EVERY export (→ "no exported
-  function"). Suspected: `TypeInfo` holds address-based self-refs into
-  `decoded`. INVESTIGATE first (confirm WHICH field self-refs), then pick
-  finished-form: (1) `comp.openBoxed → *Opened` or (2) あるべき論 make the
-  structs relocatable. Adversarial test = heap-box MOVE then resolve. See row.
-- **D-293 — array trap demux** (deferred behind D-326; no rush, conformance-
+**D-326 (cw REQ-7) FIXED + closed `33e0100c`** — opened component owns its bytes
+(see Current state). No `now` debt. Next actionable:
+- **D-293 — array trap demux** (no rush, conformance-
   neutral, lower-freq). ⚠️ Recipe NEEDS RECONCILING before opening: slice-4c
   (`8980bebe`) ALREADY maps array.get/set OOB → code 6 oob_memory (deliberate,
   NO new TrapKind), so a fresh `array_oob` kind would CONTRADICT it. Real
