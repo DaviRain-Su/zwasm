@@ -41,9 +41,31 @@ nix develop .#gen        # Mac host only; provides the generation toolchains
 
 | Shell                 | Used by                             | Contents                                                                                      |
 |-----------------------|-------------------------------------|-----------------------------------------------------------------------------------------------|
-| `devShells.default`   | every host (Mac + ubuntu + windows) | zig + wabt + wasmtime + wasm-tools + lldb + nasm (lightweight)                                |
+| `devShells.default`   | Mac + ubuntu (via `nix develop`)    | zig + wabt + wasmtime + wasm-tools + lldb + nasm (lightweight)                                |
 | `devShells.gen`       | Mac generation host only            | + emscripten, tinygo, go, rustc (wasm32 targets via rust-overlay), clang + lld, wasm-tools    |
 | `devShells.rust-host` | ubuntunote (§13.5 `run-rust-host`) | zig + native rustc (host target; ADR-0162). Windows uses native winget rust instead (no nix). |
+
+### windowsmini native tools (no nix on Windows)
+
+windowsmini does **not** run nix — `run_remote_windows.sh` invokes `zig build`
+directly over SSH. The `devShells.default` tool set is mirrored by **native**
+installs from [`scripts/windows/install_tools.ps1`](../scripts/windows/install_tools.ps1)
+(the SSOT; pinned versions mirror `flake.nix`). Tools land in
+`%LOCALAPPDATA%\zwasm-tools\<name>-<version>\` and are wired into the **User**
+PATH. Current pins (2026-06-14, kept current per user directive): zig **0.16.0**
+(PINNED — never bump), wasmtime **45.0.0**, wasm-tools **1.251.0**, wasmer
+**7.1.0** (the §9.6 A3 second oracle), hyperfine **1.20.0** (latest), rustc
+**1.96.0** (latest stable, winget/rustup). Update = bump the `$versions` pins +
+`pwsh -File scripts\windows\install_tools.ps1 -OnlyTool <name> -Force`.
+
+> **sshd PATH-cache gotcha** (verified 2026-06-14): the Windows OpenSSH service
+> caches its environment, so a User-PATH change written by `install_tools.ps1`
+> is **NOT visible to new ssh sessions** (incl. the gate) until **windowsmini
+> reboots** (or `sshd` restarts). A naive `Restart-Service sshd` over ssh is
+> unreliable — the restart process is a child of the session and is killed when
+> sshd stops. So: after an `install_tools.ps1` update, the registry PATH is
+> durably correct but a **reboot activates it**. The new binaries are verifiable
+> meanwhile by absolute path (`%LOCALAPPDATA%\zwasm-tools\<name>-<ver>\...`).
 
 `gen` uses a separate `genPkgs` binding (with the `rust-overlay`) so the
 overlay never perturbs `default`. Rust wasm targets pinned:

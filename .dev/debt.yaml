@@ -610,16 +610,18 @@ entries:
     layer: "infra"
     status: "blocked-by"
     description: |-
-      blocked-by: hyperfine absent on windowsmini (no nix shell — native `zig.exe`) AND
-      `run_remote_windows.sh` has no bench step. Windows bench *timing* auto-recording into
-      `bench/history.yaml` is deferred per ADR-0137 (§11.2/§11.P re-scoped to 2-host Mac+Linux
-      bench). The 3-host **correctness** reconcile (windowsmini test-all) is UNAFFECTED — only
-      perf-timing on the 3rd host is missing. Discharge: provision hyperfine on windowsmini
-      (global Windows install — needs user / a setup doc) OR add a native-timing path to
+      blocked-by: `run_remote_windows.sh` has no bench step. **CORRECTION 2026-06-14: the
+      "hyperfine absent" half of this barrier is DISSOLVED** — hyperfine 1.20.0 (the latest
+      release) IS installed on windowsmini via `scripts/windows/install_tools.ps1` (verified
+      `C:\Users\shota\AppData\Local\zwasm-tools\hyperfine-1.20.0`). Remaining barrier = the
+      missing bench step + ADR-0137 scope: Windows bench *timing* auto-recording into
+      `bench/history.yaml` is deferred (§11.2/§11.P re-scoped to 2-host Mac+Linux bench). The
+      3-host **correctness** reconcile (windowsmini test-all) is UNAFFECTED — only perf-timing
+      on the 3rd host is missing. Discharge: add a native-timing path to
       `run_remote_windows.sh bench` that appends a `history.yaml` Windows row, then record one
-      baseline. Not a correctness gate; perf-completeness only.
+      baseline (OR keep ADR-0137's 2-host bench scope). Not a correctness gate; perf-completeness only.
     first_raised: "2026-06-03"
-    last_reviewed: "2026-06-03"
+    last_reviewed: "2026-06-14"
     refs: |-
       ADR-0137; scripts/run_remote_windows.sh (no bench step); scripts/run_bench.sh (hyperfine);
       bench/results/history.yaml; ROADMAP §11.2 / §11.P
