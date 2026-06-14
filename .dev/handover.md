@@ -40,10 +40,17 @@ SUSTAINED**; the user assists when a toolchain needs installing.
     `UnsupportedOp` ⇒ unimplemented JIT op). Root-cause each cluster, fix, add boundary
     fixtures, enable `ZWASM_JIT_RUN=1` by default for the runnable set. Multi-cycle.
 
+**Tool currency (user directive 2026-06-14 "先んじて最新化")**: ALL hosts on latest —
+Mac+ubuntu via flake (`nix flake update`; wasmtime 45, wasmer 7.1, nixpkgs 06-10,
+rust/zig-overlay 06-14; **zig PINNED 0.16.0**). windowsmini native tools updated via
+`install_tools.ps1` (wasmtime 45/wasm-tools 1.251/+wasmer 7.1; hyperfine+rustc already
+latest) — registry PATH durable but **needs a windowsmini REBOOT to activate** (sshd
+env-cache; gate works on prior versions meanwhile). D-249 hyperfine-absent premise dissolved.
+
 **First action on resume**: Phase A2 — **embenchen** via emcc (in `.#gen`). Fetch/build a
 small embenchen kernel, instantiate under zwasm; the expected find is the emscripten
 env-stub host-import gap (D-026/D-082) — implement enough `env`/emscripten imports to run,
-triage from there. (A1 Zig + A3 wasmer-oracle + runtime-bump all DONE this session. No
+triage from there. (A1 Zig + A3 wasmer-oracle + runtime-bump + tool-currency all DONE. No
 active bundle/campaign; this agenda drives.)
 
 ## State (tag-ready baseline, all 3-host green)
