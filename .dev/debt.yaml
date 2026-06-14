@@ -628,37 +628,6 @@ entries:
     last_reviewed: "2026-06-13"
     refs: |-
       D-072 (closes (a/b)-path runner enforcement at chunk 9.9-h-23; this row inherits (c)-path), ADR-0029, ADR-0050 D-2, ADR-0012 §6, ADR-0065, `skip_embenchen_emcc_env_imports.md`, `skip_externref_segment.md`, ROADMAP Phase 10 + Phase 11 rows
-  - id: "D-177"
-    layer: "code"
-    status: "note"
-    description: |-
-      note (RE-SCOPED 2026-06-14 — thunk-coverage barrier DISSOLVED, verified): the original `blocked-by:
-      Phase 11 lookupWasiThunk only 16 of ~50 syscalls` is STALE — Phase 11 closed it. `lookupWasiThunk`
-      (src/api/wasi.zig:531) now registers the FULL 46-name WASI 0.1 surface (the cited fd_filestat_get /
-      path_filestat_get / fd_prestat_get are all present, with a coverage test at :677), and the 10 SKIP-WASI
-      fixtures all PASS: `zig build test-api-zig-facade` = 55 PASS / 0 SKIP-WASI / 0 SKIP-IMPORTS / 0 FAIL
-      (verified 2026-06-14). REMAINING (distinct, minor, host-supported surface gap, NOT the thunk barrier):
-      the Zig facade's bulk `WasiConfig` struct (src/zwasm/linker.zig:60) is args-only — `defineWasi` wires
-      only `cfg.args` via `h.setArgs`, while the underlying `wasi/host.zig` Host ALSO has `setEnvs(keys,vals)`
-      (:234) + `addPreopen` (:261), and both the CLI (`--env`/`--dir`) and C-API (`zwasm_wasi_config_*`)
-      already expose them. So the facade WasiConfig undersells the host. **envs DONE `04cb3497`**:
-      `WasiConfig.envs` ([]const Env{name,value}) wired via h.setEnvs + white-box test + docs §3.8 synced.
-      REMAINING = preopens (+ optional stdio). SURVEYED 2026-06-14 — the fd-ownership question is SOLVED by
-      the existing ADR-0184 `addPendingPreopen(host_path, guest_path)` + `materializePendingPreopens` path:
-      Host opens the dir via `Host.io` at instantiate, tracks the fd in `owned_preopen_fds`, and CLOSES it on
-      `Host.deinit` (host.zig:160-212). BUT the real gate is IO-TOKEN PLUMBING: the facade `Linker.instantiate`
-      (linker.zig:515) binds WASI thunks but NEVER sets `Host.io` nor calls `materializePendingPreopens`, and
-      the facade `Engine` struct (engine.zig:24) has NO io field — so the facade has no io token to materialize
-      with (unlike the C-API/component path which threads engine-owned io per ADR-0184). DISCHARGE: source an
-      io token into the facade (ADR-0184 follow-up — where does the facade Engine get io?) → set `host.io` +
-      call `materializePendingPreopens` at instantiate → add `WasiConfig.preopens` ([]const {host_path,
-      guest_path}) wired via `addPendingPreopen` → facade fixture importing path_open + docs §3.8. Genuine
-      design chunk (io plumbing), NOT config wiring. Low priority (reachable via CLI `--dir` / C-API);
-      facade-convenience parity only.
-    first_raised: "2026-05-25"
-    last_reviewed: "2026-06-14"
-    refs: |-
-      ADR-0109 §3.8, `src/api/wasi.zig::lookupWasiThunk`, `src/wasi/host.zig`, `test/api/zig_facade_runner.zig`, plan §3 J.7
   - id: "D-148"
     layer: "code"
     status: "blocked-by"
