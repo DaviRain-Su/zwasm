@@ -56,8 +56,13 @@ investigation, ALL parked/blocked with recipes recorded: **D-330 residual** (c_s
 runtime-corruption (panicmem teardown deref; INFRA-BLOCKED — needs per-function interp-fallback bisect,
 which does not exist) + **D-331(B)/D-289** go_regex — regalloc cap RAISED `682401fd` (4095→65535 +
 allocator-backed buffers, the 4th dynamic-vs-fixed instance; func[1516]/16070 vregs now clears regalloc+
-prologue); remainder = a SEPARATE emit-side `vreg>=slots.len` mismatch (parked, recipe in debt). **NEXT**:
-ALL JIT items now parked/blocked — diversify to 完成形 surface/dogfooding/debt work. (A1 Zig + A2
+prologue); remainder = a SEPARATE emit-side `vreg>=slots.len` mismatch (parked, recipe in debt). **NEXT
+(diversify — all JIT items parked/blocked)**: best COMPLETABLE clean item = **D-332** (sandboxing-triad:
+bound the INITIAL eager table alloc, cross-engine). Design to decide+ADR: `store_table_elements_max` is
+set post-instantiation, so add an instantiation-TIME cap source — thread `max_table_elements: ?u64=null`
+through the JIT `RunLimits` + interp instantiate config (+ C/Zig API), enforce at the initial table
+alloc (setup.zig + instantiate.zig) as a clean trap (not OOM); default null = unlimited (no regression).
+TDD: adversarial fixture w/ huge declared table.min + cap. (go bugs are fix-but-still-broken / niche.) (A1 Zig + A2
 embenchen + A3 wasmer-oracle + runtime-bump + tool-currency-3host + B1 jit-diff-lane DONE; D-331 primary
 `10d7d2b2` + (A) `45ff0b94`; D-330 coalescing `6790c204` FIXED.)
 
