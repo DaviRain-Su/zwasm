@@ -1680,6 +1680,12 @@ pub fn compile(
                             const fx = landing_pad_fixups.items[probe_i];
                             if (fx.target_labels_depth != popped_depth) continue;
                             const k = eh_builder.entries.items[fx.entry_idx].kind;
+                            // D-327: any _ref clause needs the per-clause path to
+                            // emit the exnref reify call (even with 0 payload).
+                            if (k == .catch_ref or k == .catch_all_ref) {
+                                any_payload = true;
+                                break;
+                            }
                             if (k == .catch_ or k == .catch_ref) {
                                 const tag_idx_opt = eh_builder.entries.items[fx.entry_idx].tag_idx;
                                 if (tag_idx_opt) |t| {
@@ -1724,6 +1730,24 @@ pub fn compile(
                                 const entry = &eh_builder.entries.items[fx.entry_idx];
                                 const clause_start: u32 = @intCast(buf.items.len);
 
+                                const is_ref = entry.kind == .catch_ref or entry.kind == .catch_all_ref;
+                                // D-327 (ADR-0120 D6) — reify the exnref FIRST (before
+                                // the param prelude), into the TOP result vreg (the
+                                // single last result, above the params). The reify is an
+                                // emit-synthesized CALL the regalloc doesn't model, so it
+                                // clobbers caller-saved regs — doing it first means the
+                                // params (written after) survive. BLR reify_exnref_fn(rt);
+                                // store X0 (= *Exception). Cohort-safe: X19 callee-saved.
+                                if (is_ref) {
+                                    if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+                                    const exnref_vreg = pushed_vregs.items[pushed_vregs.items.len - 1];
+                                    try gpr.writeU32(allocator, &buf, inst.encOrrReg(0, 31, abi.runtime_ptr_save_gpr)); // MOV X0, X19
+                                    try gpr.writeU32(allocator, &buf, inst.encLdrImm(16, abi.runtime_ptr_save_gpr, @intCast(jit_abi.reify_exnref_fn_off)));
+                                    try gpr.writeU32(allocator, &buf, inst.encBLR(16));
+                                    const dest_reg = try gpr.gprDefSpilled(alloc, exnref_vreg, 0);
+                                    if (dest_reg != 0) try gpr.writeU32(allocator, &buf, inst.encOrrReg(dest_reg, 31, 0)); // MOV dest, X0
+                                    try gpr.gprStoreSpilled(allocator, &buf, alloc, spill_base_off, exnref_vreg, 0);
+                                }
                                 if (entry.kind == .catch_ or entry.kind == .catch_ref) {
                                     const tag_idx = entry.tag_idx orelse return Error.UnsupportedOp;
                                     const n_payload: u32 = if (ctx.tag_param_counts.len > tag_idx)
@@ -1731,10 +1755,17 @@ pub fn compile(
                                     else
                                         0;
                                     if (n_payload > 0) {
-                                        if (pushed_vregs.items.len < n_payload) return Error.AllocationMissing;
+                                        // D-328/D-327: the catch result vregs are the
+                                        // DEEPEST `result_arity` slots; for catch_ref
+                                        // the exnref is the single TOP result, so the
+                                        // tag params are the deepest np (base skips the
+                                        // exnref slot).
+                                        const extra: usize = if (is_ref) 1 else 0;
+                                        if (pushed_vregs.items.len < n_payload + extra) return Error.AllocationMissing;
+                                        const base = pushed_vregs.items.len - n_payload - extra;
                                         var k: u32 = 0;
                                         while (k < n_payload) : (k += 1) {
-                                            const target_vreg = pushed_vregs.items[pushed_vregs.items.len - n_payload + k];
+                                            const target_vreg = pushed_vregs.items[base + k];
                                             const dest_reg = try gpr.gprDefSpilled(alloc, target_vreg, 0);
                                             const slot_off: u15 = @intCast(jit_abi.eh_payload_buf_off + k * 8);
                                             try gpr.writeU32(allocator, &buf, inst.encLdrImm(dest_reg, abi.runtime_ptr_save_gpr, slot_off));
@@ -1742,8 +1773,6 @@ pub fn compile(
                                         }
                                     }
                                 }
-                                // catch_all / catch_all_ref: no payload
-                                // prelude needed; exnref push deferred.
 
                                 // Emit JMP placeholder to common_pc.
                                 const jmp_off: u32 = @intCast(buf.items.len);

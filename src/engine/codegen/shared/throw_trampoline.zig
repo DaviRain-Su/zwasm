@@ -168,6 +168,11 @@ pub fn trampolineCore(
                     // via X29/RBP; restore it from the matched frame.
                     rt.eh_handler_fp = h.handler_fp;
                     rt.eh_handler_active = 1;
+                    // D-327 (ADR-0120 D6) — stash the thrown tag_idx so a
+                    // catch_ref / catch_all_ref landing pad can reify the
+                    // exnref with the ACTUAL caught tag (catch_all_ref has no
+                    // compile-time tag). Uniform for both _ref kinds.
+                    rt.eh_thrown_tag_idx = site.tag_idx;
                     // trap_flag stays 0 — handler dispatch will run.
                 },
                 .outside => {

@@ -114,8 +114,16 @@ pub const RuntimeOwned = struct {
     // by-value RuntimeOwned move so the token addresses in `tag_ids` hold.
     tag_ids: []u64 = &.{},
     tag_tokens: []u8 = &.{},
+    // D-327 (ADR-0120 D6) — exnref reify context (allocator + Exception
+    // tracker). Heap-allocated so the by-value RuntimeOwned move (D-215)
+    // doesn't dangle the self-referential pointer in `rt.eh_reify_ctx`.
+    eh_reify_ctx: ?*entry.EhReifyCtx = null,
 
     pub fn deinit(self: *RuntimeOwned, allocator: Allocator) void {
+        if (self.eh_reify_ctx) |c| {
+            c.deinit();
+            allocator.destroy(c);
+        }
         if (self.thunk_arena) |arena| shared_thunk.freeArena(arena);
         if (self.gc_arena) |a| {
             a.deinit();
@@ -993,6 +1001,14 @@ pub fn setupRuntimeLinked(
     errdefer allocator.destroy(mem_ctx);
     mem_ctx.* = .{ .allocator = allocator, .memory = memory, .max_pages = mem_max_pages };
 
+    // D-327 (ADR-0120 D6) — install the exnref reify callout unconditionally
+    // (cheap; the ctx only allocates when an `_ref` catch clause actually
+    // fires). Heap-allocated so the by-value RuntimeOwned move keeps the
+    // `rt.eh_reify_ctx` pointer valid.
+    const reify_ctx = try allocator.create(entry.EhReifyCtx);
+    errdefer allocator.destroy(reify_ctx);
+    reify_ctx.* = .{ .allocator = allocator };
+
     return .{
         .rt = .{
             .vm_base = if (memory.len > 0) memory.ptr else @ptrFromInt(@as(usize, 0x1000)),
@@ -1001,6 +1017,8 @@ pub fn setupRuntimeLinked(
             .mem0_page_size_log2 = mem_page_size_log2,
             .host_state = mem_ctx,
             .memory_grow_fn = jitMemoryGrow,
+            .reify_exnref_fn = entry.reifyExnref,
+            .eh_reify_ctx = reify_ctx,
             .funcptr_base = funcptrs_buf.ptr,
             .table_size = table_size,
             .typeidx_base = typeidxs_buf.ptr,
@@ -1048,6 +1066,7 @@ pub fn setupRuntimeLinked(
             .tag_ids_count = @intCast(tag_ids.len),
         },
         .mem_ctx = mem_ctx,
+        .eh_reify_ctx = reify_ctx,
         .dispatch = dispatch,
         .globals = globals_buf,
         .funcptrs = funcptrs_buf,

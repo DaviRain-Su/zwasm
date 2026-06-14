@@ -603,6 +603,27 @@ pub fn reifyExnref(rt: *JitRuntime) callconv(.c) usize {
     return @intFromPtr(exc);
 }
 
+/// D-327 — `throw_ref` re-throw. Reads the held exnref's `*Exception`
+/// (`exc_ptr`) back into the JIT payload-staging buffer + length, and
+/// returns its `tag_idx` so the emitted `throw_ref` re-enters the throw
+/// dispatcher exactly as a fresh `throw` of the same tag+payload (the
+/// round-trip identity Wasm `throw_ref` requires). `exc_ptr == 0` is a
+/// null exnref — spec says `throw_ref` then TRAPS; route to an uncaught
+/// dispatch (len 0 + no-match sentinel) rather than deref null (the
+/// precise null-trap kind is a follow-up, untested by the wg-3.0 corpus).
+pub fn rethrowFromExnref(rt: *JitRuntime, exc_ptr: usize) callconv(.c) u32 {
+    if (exc_ptr == 0) {
+        rt.eh_payload_len = 0;
+        return 0xFFFF_FFFF;
+    }
+    const exc: *exception_mod.Exception = @ptrFromInt(exc_ptr);
+    const n = @min(exc.payload_len, exception_mod.max_payload);
+    var i: u32 = 0;
+    while (i < n) : (i += 1) rt.eh_payload_buf[i] = exc.payload[i].bits64;
+    rt.eh_payload_len = exc.payload_len;
+    return exc.tag_idx;
+}
+
 /// Default `memory_grow_fn` — unconditionally refuses growth by
 /// returning the spec sentinel `-1`. Spec-conformant for any host
 /// that opts to disallow runtime linear-memory growth (per Wasm

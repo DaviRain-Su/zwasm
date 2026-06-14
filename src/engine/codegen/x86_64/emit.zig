@@ -999,6 +999,12 @@ pub fn compile(
                     const fx = landing_pad_fixups.items[probe_i];
                     if (fx.target_labels_depth != end_pre_pop_depth) continue;
                     const k = eh_builder.entries.items[fx.entry_idx].kind;
+                    // D-327: any _ref clause needs the per-clause path to emit the
+                    // exnref reify call (even with 0 payload).
+                    if (k == .catch_ref or k == .catch_all_ref) {
+                        any_payload = true;
+                        break;
+                    }
                     if (k == .catch_ or k == .catch_ref) {
                         if (eh_builder.entries.items[fx.entry_idx].tag_idx) |t| {
                             if (ctx.tag_param_counts.len > t and ctx.tag_param_counts[t] > 0) {
@@ -1035,6 +1041,22 @@ pub fn compile(
                         const entry = &eh_builder.entries.items[fx.entry_idx];
                         const clause_start: u32 = @intCast(buf.items.len);
 
+                        const is_ref = entry.kind == .catch_ref or entry.kind == .catch_all_ref;
+                        // D-327 (ADR-0120 D6) — reify the exnref FIRST (before the
+                        // param prelude) into the TOP result vreg. The reify is an
+                        // emit-synthesized CALL the regalloc doesn't model (clobbers
+                        // caller-saved), so params written after survive. Win64 arg0
+                        // = RCX, SysV = RDI (abi.current.entry_arg0_gpr).
+                        if (is_ref) {
+                            if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
+                            const exnref_vreg = pushed_vregs.items[pushed_vregs.items.len - 1];
+                            try buf.appendSlice(allocator, inst.encMovRR(.q, abi.current.entry_arg0_gpr, abi.runtime_ptr_save_gpr).slice());
+                            try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, @intCast(jit_abi.reify_exnref_fn_off)).slice());
+                            try buf.appendSlice(allocator, inst.encCallReg(.rax).slice());
+                            const dest_reg = try gpr.gprDefSpilled(alloc, exnref_vreg, 0);
+                            try buf.appendSlice(allocator, inst.encMovRR(.q, dest_reg, abi.return_gpr).slice());
+                            try gpr.gprStoreSpilled(allocator, &buf, alloc, spill_base_off, exnref_vreg, 0);
+                        }
                         if (entry.kind == .catch_ or entry.kind == .catch_ref) {
                             const tag_idx = entry.tag_idx orelse return Error.UnsupportedOp;
                             const n_payload: u32 = if (ctx.tag_param_counts.len > tag_idx)
@@ -1042,10 +1064,15 @@ pub fn compile(
                             else
                                 0;
                             if (n_payload > 0) {
-                                if (pushed_vregs.items.len < n_payload) return Error.AllocationMissing;
+                                // D-328/D-327: tag params are the DEEPEST np result
+                                // vregs; for catch_ref the exnref is the TOP result, so
+                                // the base skips it.
+                                const extra: usize = if (is_ref) 1 else 0;
+                                if (pushed_vregs.items.len < n_payload + extra) return Error.AllocationMissing;
+                                const base = pushed_vregs.items.len - n_payload - extra;
                                 var k: u32 = 0;
                                 while (k < n_payload) : (k += 1) {
-                                    const target_vreg = pushed_vregs.items[pushed_vregs.items.len - n_payload + k];
+                                    const target_vreg = pushed_vregs.items[base + k];
                                     const dest_reg = try gpr.gprDefSpilled(alloc, target_vreg, 0);
                                     const off: i32 = @intCast(jit_abi.eh_payload_buf_off + k * 8);
                                     try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(dest_reg, abi.runtime_ptr_save_gpr, off).slice());

@@ -1,14 +1,11 @@
 //! x86_64 emit handler for `throw_ref` — Zone 2 per ADR-0074
 //! + ADR-0114 D2 + ADR-0119. Mirror of arm64 sibling.
 //!
-//! Wasm spec 3.0 §3.3.10.8. Pop exnref, resolve *Exception,
-//! re-enter dispatcher (same shape as throw, per ADR-0114 D6).
-//!
-//! ## IT-6 cycle 3b shape (current)
-//!
-//! Reuses `throw.emitTrampolineCallAndTrap` — same MOVABS+CALL+JMP
-//! sequence as `throw`. The exnref pop + deref divergence lands
-//! at cycle 3c alongside the full dispatchThrow integration.
+//! Wasm spec 3.0 §3.3.10.8. Pop the exnref (a `*Exception` handle the
+//! JIT reified at a catch_ref/catch_all_ref landing pad, D-327), read its
+//! tag_idx + payload back into the JIT payload-staging buffer via the
+//! `rethrowFromExnref` helper, then re-enter the throw dispatcher exactly
+//! as a fresh `throw` of that tag (round-trip identity, ADR-0120 D6).
 //!
 //! Registered in `dispatch_collector.collected_x86_64_ctx_ops`.
 //!
@@ -16,6 +13,10 @@
 
 const meta = @import("../../../../../instruction/wasm_3_0/throw_ref.zig");
 const ctx_mod = @import("../../ctx.zig");
+const abi = @import("../../abi.zig");
+const gpr = @import("../../gpr.zig");
+const inst = @import("../../inst.zig");
+const jit_abi = @import("../../../shared/jit_abi.zig");
 const trampoline_mod = @import("../../../shared/throw_trampoline.zig");
 const throw_op = @import("throw.zig");
 const zir = @import("../../../../../ir/zir.zig");
@@ -31,7 +32,21 @@ pub const is_safepoint: bool = false;
 
 pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void {
     _ = ins;
-    const addr: u64 = @intFromPtr(&trampoline_mod.zwasmThrowTrampoline);
-    try throw_op.emitTrampolineCallAndTrap(ctx, addr);
+    if (ctx.pushed_vregs.items.len < 1) return ctx_mod.Error.AllocationMissing;
+    const exn_vreg = ctx.pushed_vregs.pop().?;
+    const exn_reg = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, exn_vreg, 0);
+    const arg0 = abi.current.entry_arg0_gpr; // RDI (SysV) / RCX (Win64)
+    const arg1 = abi.current.arg_gprs[1]; // RSI (SysV) / RDX (Win64)
+    // arg1 = exc_ptr (set before arg0 in case exn_reg == arg0).
+    if (exn_reg != arg1) try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.q, arg1, exn_reg).slice());
+    // arg0 = rt; CALL rethrowFromExnref → RAX = tag_idx, payload restored.
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.q, arg0, abi.runtime_ptr_save_gpr).slice());
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovImm64Q(.r10, @intFromPtr(&jit_abi.rethrowFromExnref)).slice());
+    try ctx.buf.appendSlice(ctx.allocator, inst.encCallReg(.r10).slice());
+    // Move tag_idx (RAX) into arg0 — the trampoline reads the platform's
+    // first-arg reg as the throw-site tag indicator (mirror of throw.emit's
+    // marshal). The trampoline call below only clobbers R10, so arg0 survives.
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.d, arg0, abi.return_gpr).slice());
+    try throw_op.emitTrampolineCallAndTrap(ctx, @intFromPtr(&trampoline_mod.zwasmThrowTrampoline));
     ctx.dead_code.* = true;
 }
