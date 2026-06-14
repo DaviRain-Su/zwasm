@@ -6,18 +6,19 @@
 ## Active bundle
 
 - **Bundle-ID**: D-330-jit-printf-disasm (JIT `%s`/strnlen miscompile hunt)
-- **Cycles-remaining**: ~1-2
+- **Cycles-remaining**: ~2
 - **Continuity-memo**: ARCH-INDEPENDENT (arm64 == x86_64-Rosetta, interp correct both) ⇒
-  **shared** codegen. Culprit = repro2.wasm **func 12** (vfprintf, 1087 vregs, well under
-  4095 cap → reuse bug not cap). **Cycle-4 localized it**: the regalloc_compute.zig expiry
-  `last_use_pc <= def_pc` def==last_use **slot-coalescing** is the bug — EXP2 (`<` strict) FIXES
-  repro + flips both fixtures (c_sha256_hash, emcc_fasta) to MATCH, but breaks the intended-design
-  test `regalloc_compute.zig:448`. So coalescing (result⟵last-use-operand, same slot) is unsafe
-  here via (a) an op emit that writes result before reading the coalesced operand, OR (b) liveness
-  under-computing a last_use. EXP5 ruled out select-result. Normal ALU is read-before-write safe ⇒
-  leans (b) liveness, unconfirmed. NEXT (cycle-5): PC-window bisect (disable boundary-coalescing
-  per def_pc range in func 12) → nail the ONE corrupting (freed_vreg,new_vreg,op,slot); then fix
-  emit read-order OR liveness range — keep the :448 test green. Full trail: spike README cycle-4.
+  **shared** codegen. Culprit = repro2.wasm **func 12** (vfprintf, 1087 vregs, under 4095 cap).
+  EXP2 (`<` strict expiry, NO def==last_use slot-coalescing) FIXES repro + flips both fixtures
+  (c_sha256_hash, emcc_fasta) to MATCH — but breaks the intended-design test `regalloc_compute.zig:448`
+  (coalescing relies on read-before-write emit). **Cycle-5**: PC-window bisect → perturbation that
+  fixes narrows to **def_pc 1437** = `i32.eqz` of `i32.load8_u` (the strnlen byte-loop NULL CHECK;
+  not SWAR). BUT the eqz emit is read-before-write correct + the slot-8 timeline is cleanly
+  sequential (no overlap) ⇒ disabling 1437 coalescing likely fixes by perturbing GLOBAL slot state
+  (window-bisect ≠ clean pinpoint); precision-at-1437 still suspicious (spill-stage X14/X15 reuse
+  across the byte loop?). NEXT (cycle-6): map ZIR pc→JIT byte (debug_jit_auto Recipe 16), DISASSEMBLE
+  the load8_u/eqz/br_if region (pc ~1434-1442) buggy `<=` vs 1437-strict, diff to SEE the divergence;
+  fix the specific stage-reg/emit hazard, keep :448 green. Full trail: spike README cycle-5.
 - **Exit-condition**: `zwasm run --engine jit repro2.wasm` prints `1:hi`/`2:lit` + the :448 test
   stays green + boundary fixture + lesson; D-330 deletable.
 
