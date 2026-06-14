@@ -66,15 +66,12 @@ per-proposal re-verification before surfacing "tag it".
 
 ## NEXT (autonomous)
 
-No `now` debt (54 entries). **2026-06-14 completion-refinement sweep** (all green):
-scaffolding audit (false-positive `1e887116`) · **D-301 closed `37d05775`**
-(threads/atomic 294/0, phantom skips) · **README `b34183a7`** (flake wabt + WASI-P2
-headline) · docs axis verified (cli.md/c_api.md accurate-to-code; comparison doc
-dated-snapshot) · **D-297 discharged `13069bcc`** (Linker-deinit guard rejected —
-cross-path inc/dec false-fire risk; contract suffices, wasmtime-parity) · **D-177
-re-scoped `dca15df8`** (thunk barrier DISSOLVED — lookupWasiThunk 46/46, facade
-55 PASS/0 SKIP) · **WasiConfig.envs shipped `04cb3497`** (Zig-API WASI env-var
-parity, TDD; D-177 narrowed `13be9d5b` → preopens-only). Alpha conformance MET.
+No `now` debt (53 entries). **2026-06-14 sweep** (all green; detail in git): audit
+false-positive `1e887116` · D-301 `37d05775` (threads/atomic phantom skips) · README
+`b34183a7` · docs axis verified · D-297 discharged `13069bcc` (Linker guard rejected,
+contract suffices) · **D-177 thunk barrier dissolved `dca15df8`** + **WasiConfig.envs
+shipped `04cb3497`** (Zig-API env parity, TDD) · **D-179 closed `e9e436b0`** (wabt
+GC-bake gate gone — D-290 removed wabt, wasm-tools bakes GC). Alpha conformance MET.
 Next actionable (demand-driven long-tail — pick by signal):
 - **D-177 preopens** (narrowed facet) = add `WasiConfig.preopens`. SURVEYED
   `35b08704`: fd-ownership solved by ADR-0184 addPendingPreopen/materialize; real
