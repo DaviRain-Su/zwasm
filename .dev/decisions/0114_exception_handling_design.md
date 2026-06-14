@@ -328,3 +328,15 @@ the impl SHA range cited.
   not only by the comptime assert in `emit.zig`. Concretely:
   the rule's stale-ness check ensures that the catch-path
   symbol set never references the Trap dispatcher's entry-point.
+- 2026-06-14 — **`cross_module_throw_propagation.wat` SUBSUMED (no dedicated
+  fixture).** The removal-condition listed a hand-authored cross-module EH edge
+  fixture. D-238 (ADR-0185, x86_64 cross-instance EH frame-walk) established that
+  the OFFICIAL `exception-handling/try_table` corpus already provides it: the
+  `catch-imported () -> i32:2` / `catch-imported-alias` (importer instance catches
+  the exporter instance's imported tag) + `imported-mismatch () -> i32:3` (uncaught
+  propagation) directives ARE the cross-module throw-propagation scenario, are
+  no-arg-i32 (so they run under `ZWASM_SPEC_ENGINE=jit`), and verify on BOTH arches.
+  A hand-authored `.wat` would only duplicate this, and the edge-runner can't drive
+  multi-module fixtures anyway. So this removal-condition item is met by the corpus
+  test, not a separate fixture. The `trap_not_caught_by_try_table.wat` item is
+  unaffected.

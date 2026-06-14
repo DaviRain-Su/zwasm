@@ -1,6 +1,11 @@
 # 0185 — x86_64 cross-instance EH frame-walk (thunk frame-link + global sniff resolution)
 
-- **Status**: Accepted (2026-06-14; autonomous loop, D-238 implementation campaign)
+- **Status**: Closed (Implemented) — slices 1-4 + the union regression fix landed
+  (`68a480b9`..`808090f2`, `9fbb7881`, `3387413c`); functional proof = the
+  `exception-handling/try_table` `catch-imported`/`imported-mismatch` cross-module
+  tests pass under `ZWASM_SPEC_ENGINE=jit` on x86_64 (`return 34/0/0`, no crash) +
+  3-host test-all green (ubuntu `81710782` OK, windows `c8e00b0b` OK, Mac green).
+  D-238 closed. [Accepted 2026-06-14, D-238 campaign]
 - **Date**: 2026-06-14
 - **Author**: claude (autonomous loop)
 - **Tags**: x86_64, exception-handling, unwind, cross-instance, bridge-thunk, frame-chain, sniff, D-238, D-184, ADR-0134
@@ -136,3 +141,11 @@ arches. Status → `Closed (Implemented)` with the SHA.
 
 - 2026-06-14 — Initial. Accepted as the implementation design for the
   D-238 campaign (investigation `eba26059`+`74fa9511` established (a)+(b)+(c)).
+- 2026-06-14 — **Closed (Implemented).** All five slices + the union regression
+  fix landed; the in-flight catch caught a single-instance SEGV (slice 2b's
+  predicate had REPLACED rather than UNIONed the local CodeMap — lesson
+  `global-predicate-cannot-replace-local-codemap`) + a stale x86_64 `thunk_bytes`
+  test. Functional proof: `ZWASM_SPEC_ENGINE=jit` x86_64 exception-handling
+  `34/0/0`. ADR-0114's `cross_module_throw_propagation.wat` is SUBSUMED by the
+  official `try_table` `catch-imported` corpus test (both arches, JIT-runnable) —
+  no dedicated fixture authored (see ADR-0114 Revision 2026-06-14).
