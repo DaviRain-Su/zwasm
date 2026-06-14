@@ -1098,8 +1098,17 @@ entries:
       live-importer count (Instance back-ref decremented on its deinit) + `std.debug.assert(count==0)` in
       `Linker.deinit`. Turns the silent-UAF footgun into a loud panic in Debug/ReleaseSafe. Contract-based (no
       guard) is acceptable for a v0.1 systems embedding API (mirrors wasmtime's Store-ownership model; Zig has
-      no borrow checker), so this is a nice-to-have, not a correctness gap. DISCHARGE: implement the assert-guard
-      OR consciously decide the documented contract suffices for v1.0.
+      no borrow checker), so this is a nice-to-have, not a correctness gap. DISCHARGE DECIDED 2026-06-14
+      (contract suffices for v1.0 — guard REJECTED): the live-importer counter would need balanced inc/dec
+      across EVERY path that aliases `ctx_storage` — the facade `_zwasm.Instance` (instance.zig:33, holds only
+      handle+c_store, NO Linker back-ref), the C-API store path, AND component.zig / component_wasi_p2.zig —
+      each a distinct Instance type + deinit path. Any unbalanced path makes `assert(count==0)` FALSE-FIRE in
+      the ReleaseSafe test net (ADR-0177); a partial guard (one path) is worse than none (false protection +
+      spurious panic). The footgun is already mitigated by (a) the documented LIFETIME CONTRACT on the
+      `src/zwasm/linker.zig` file header + `deinit` docstring and (b) the alias being a raw pointer (explicit,
+      not a silent default) — acceptable misuse-resistance for a systems embedding API, mirroring wasmtime's
+      contract-based Store ownership. (Stale ref corrected: ctx_storage lives at `src/zwasm/linker.zig:68`, not
+      the cited linker.zig:548.) Residual CLOSED.
     first_raised: "2026-06-06"
     last_reviewed: "2026-06-06"
     refs: |-
