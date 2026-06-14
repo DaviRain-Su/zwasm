@@ -1187,15 +1187,26 @@ entries:
       pointer, not 88). The D-327 exnref machinery (reify helper + throw_ref
       read-back) is otherwise VALIDATED — the throw_ref round-trip fixture goes
       green (it routes the payload through the Exception, not the i32 slot).
-      DISCHARGE: make op_control.emitEndIntra (+ regalloc) allocate DISTINCT
-      result vregs for a multi-value catch landing-pad block, so params and the
-      exnref occupy separate slots; then re-apply D-327 reify (contract +
-      fixture bytes in private/notes/d327-catch_ref-plan.md → EXECUTION
-      CONTRACT). Investigate WHY the two results share vreg 0 (placeholder /
-      unallocated) first.
+      DISCHARGE: assign DISTINCT result vregs to a multi-value catch landing-pad
+      block, so params + exnref occupy separate slots; then re-apply D-327 reify
+      (contract + fixture bytes in private/notes/d327-catch_ref-plan.md →
+      EXECUTION CONTRACT).
+      SCOPE GROWTH (2026-06-14, attempt 1): an EMIT-LOCAL fix (overwrite the top
+      result-arity pushed_vregs entries with fresh `next_vreg` vregs at the
+      landing pad) REGRESSED 3 existing single-param catch_ tests (D-182 multi-
+      catch, cross-frame throw, throw+catch_ i32-payload). Root: the catch
+      continuation (`drop`/`local.set`/`return`) reads the IR-ASSIGNED result
+      vreg, NOT a pushed_vregs-position — so fresh emit-vregs don't match what the
+      continuation reads. So this is an **IR/regalloc-level** fix (assign distinct
+      vregs to multi-value catch-block results in lower.zig / the catch-result
+      vreg allocation), NOT emit-local. Multi-cycle. Standalone RED test exists
+      (no exnref needed): a 2-param catch_ — tag (param i32 i32), throw (10,20),
+      catch → block (result i32 i32), drop top, return first → interp 10, JIT 20.
+      Both D-327 + D-328 are CONFORMANCE-NEUTRAL (no spec assert exercises multi-
+      value catch result identity; corpus drops the exnref).
     first_raised: "2026-06-14"
     last_reviewed: "2026-06-14"
-    refs: src/engine/codegen/arm64/op_control.zig (emitEndIntra, ~68-116 result vregs); src/engine/codegen/arm64/emit.zig (landing-pad per-clause prelude ~1690-1740); private/notes/d327-catch_ref-plan.md
+    refs: src/engine/codegen/arm64/op_control.zig (emitEndIntra ~665-815, merge_top_vregs); src/ir/lower.zig (catch-block result vreg assignment); src/engine/codegen/arm64/emit.zig (landing-pad ~1646-1740); private/notes/d327-catch_ref-plan.md
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.
