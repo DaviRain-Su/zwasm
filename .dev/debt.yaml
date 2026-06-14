@@ -257,6 +257,15 @@ entries:
       segidx-OOB / dropped-segment / dst-OOB / src-OOB), so they CANNOT be routed by re-channeling a fixup. The
       proper (larger, low-priority) fix = have the helper RETURN A KIND discriminant the stub maps. next free JIT
       code = 12. Reopen if a GC-on-JIT program needs precise array-trap codes; else leave.
+      RE-SURVEYED 2026-06-14 (barrier RE-CONFIRMED, stays deferred): walked the full mechanism — the proper
+      fix needs (a) a NEW stub variant per arch that sets trap_flag but does NOT MOVZ a static trap_kind (the
+      helper owns the kind), since EmitCindStub bakes ONE static code per channel and these sites demux ≥6
+      modes dynamically; (b) a new gc_array_trap_fixups channel ×2 arches; (c) a ~30-site convention where each
+      helper failure path writes its precise TrapKind to rt.trap_kind (the trap_kind_off field) before
+      `return 0` — gated on an interp-parity survey of each mode's exact TrapKind. Overloading the return slot
+      to carry ref-or-kind would trip single_slot_dual_meaning. Net: multi-cycle architectural surface for ZERO
+      conformance gain (spec runner passes today) + ZERO default-engine gain (interp already precise) → correctly
+      "else leave"; this row IS the saved survey so the next resume doesn't re-walk it.
       (Below: the original slice-1 survey, kept as the method template.)
       SLICE-1 PLAN — oob_table (code 2), surveyed 2026-06-06 (DO BOTH ARCHES TOGETHER; a runVoidExportWasi test
       asserting code 2 FAILS the x86_64/ubuntu gate if x86_64 stays generic → the test enforces parity).
@@ -274,7 +283,7 @@ entries:
       kinds (a subagent plan mis-classified them). Test: hand-assembled `_start` doing `table.get` (or
       call_indirect into a 0/under-sized table) with OOB idx → runVoidExportWasi trap_code==2==oob_table.
     first_raised: "2026-06-06"
-    last_reviewed: "2026-06-13"
+    last_reviewed: "2026-06-14"
     refs: |-
       D-292 (parent program, ADR-0164) + D-165 (trap-code infra); src/api/trap_surface.zig (jitTrapCode);
       src/engine/codegen/{arm64,x86_64}/{op_table,op_convert,op_call,op_tail_call,ops/wasm_3_0/*}.zig +
