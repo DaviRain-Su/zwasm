@@ -43,10 +43,18 @@ localization; M3-a-2 unlocks nothing → not built); **D-202**→note + **ADR-01
 residual, no fixture); **D-197**→note (validator-diag plumbing landed; per-cause
 attribution deferred-by-no-signal); **D-178 CLOSED** (host-side construction surface fully
 landed — C-API `wasm_{global,memory,table}_new` + facade `define{Global,Table,Memory}`).
-Verified GENUINE-blocked: D-026/D-082 (Phase-11 emcc/externref), D-238 (x86_64 EH-JIT
-cycle-3), D-020 (4/5 dbg threshold). NEXT: the 20 remaining blocked-by are external
-(upstream Zig: D-312/D-148/D-323/D-010) / future-phase / user-gated (§1.3 / tag / §13.4)
-— periodically re-verify given this sweep's find-rate; no auto-tag (ADR-0156).
+Verified GENUINE-blocked: D-026/D-082 (Phase-11 emcc/externref), D-020 (4/5 dbg
+threshold). **External/upstream-Zig rows re-verified GENUINE** (D-312/D-148/D-323
+pin-gated to Zig 0.16; D-010 third-site trigger not fired — `rawFreeOwned` still 1
+module): unlike internal rows these don't silently dissolve (pin-bump/trigger-gated).
+**D-238 investigation ADVANCED `eba26059`** (x86_64 EH-JIT parity): the OPEN question
+is resolved — the design note's thunk-RBP candidate is NECESSARY-NOT-SUFFICIENT; the
+real gap is the callee→thunk SNIFF transition (thunk arena not in any CodeMap → sniff
+mis-walks the callee frame). Fix needs (a) RBP-framed thunk + (b) thunk-arena range
+registration; (b) is x86_64-only-verifiable. **NEXT (most-actionable autonomous item):
+D-238 — implement (a)+(b) together, verify ubuntu `ZWASM_SPEC_ENGINE=jit` EH dir** (row
+carries the full plan + byte offsets). Else: future-phase / user-gated (§1.3 / tag /
+§13.4). No auto-tag (ADR-0156).
 
 ## State (tag-ready baseline, all 3-host green)
 
