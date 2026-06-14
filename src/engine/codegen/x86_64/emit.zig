@@ -66,6 +66,7 @@ const label_mod = @import("label.zig");
 const op_alu_int = @import("op_alu_int.zig");
 const op_alu_float = @import("op_alu_float.zig");
 const op_convert = @import("op_convert.zig");
+const op_call = @import("op_call.zig");
 // D-239 — function-references null-ref branch ops (handler files existed
 // but were never wired into the dispatch → UnsupportedOp). Arm64 parity.
 const op_br_on_null = @import("ops/wasm_3_0/br_on_null.zig");
@@ -1052,7 +1053,13 @@ pub fn compile(
                             const exnref_vreg = pushed_vregs.items[pushed_vregs.items.len - 1];
                             try buf.appendSlice(allocator, inst.encMovRR(.q, abi.current.entry_arg0_gpr, abi.runtime_ptr_save_gpr).slice());
                             try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, @intCast(jit_abi.reify_exnref_fn_off)).slice());
+                            // Win64: reifyExnref is a regular C-ABI fn that homes
+                            // its reg arg to the 32-byte shadow space; reserve it
+                            // (no-op on SysV / when the frame already has outgoing
+                            // space). D-327 Win64 fix.
+                            try op_call.emitShadowAlloc(allocator, &buf, outgoing_max_bytes);
                             try buf.appendSlice(allocator, inst.encCallReg(.rax).slice());
+                            try op_call.emitShadowFree(allocator, &buf, outgoing_max_bytes);
                             const dest_reg = try gpr.gprDefSpilled(alloc, exnref_vreg, 0);
                             try buf.appendSlice(allocator, inst.encMovRR(.q, dest_reg, abi.return_gpr).slice());
                             try gpr.gprStoreSpilled(allocator, &buf, alloc, spill_base_off, exnref_vreg, 0);

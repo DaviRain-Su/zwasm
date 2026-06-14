@@ -17,6 +17,7 @@ const abi = @import("../../abi.zig");
 const gpr = @import("../../gpr.zig");
 const inst = @import("../../inst.zig");
 const jit_abi = @import("../../../shared/jit_abi.zig");
+const op_call = @import("../../op_call.zig");
 const trampoline_mod = @import("../../../shared/throw_trampoline.zig");
 const throw_op = @import("throw.zig");
 const zir = @import("../../../../../ir/zir.zig");
@@ -42,7 +43,12 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
     // arg0 = rt; CALL rethrowFromExnref → RAX = tag_idx, payload restored.
     try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.q, arg0, abi.runtime_ptr_save_gpr).slice());
     try ctx.buf.appendSlice(ctx.allocator, inst.encMovImm64Q(.r10, @intFromPtr(&jit_abi.rethrowFromExnref)).slice());
+    // Win64: rethrowFromExnref is a regular C-ABI fn that homes its reg args
+    // to the 32-byte shadow space; reserve it (no-op on SysV / when the frame
+    // already reserves outgoing space). D-327 Win64 fix.
+    try op_call.emitShadowAlloc(ctx.allocator, ctx.buf, ctx.outgoing_max_bytes);
     try ctx.buf.appendSlice(ctx.allocator, inst.encCallReg(.r10).slice());
+    try op_call.emitShadowFree(ctx.allocator, ctx.buf, ctx.outgoing_max_bytes);
     // Move tag_idx (RAX) into arg0 — the trampoline reads the platform's
     // first-arg reg as the throw-site tag indicator (mirror of throw.emit's
     // marshal). The trampoline call below only clobbers R10, so arg0 survives.
