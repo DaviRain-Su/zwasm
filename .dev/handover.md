@@ -51,13 +51,13 @@ wasmtime 45 (verify next Step 0.7). D-249 hyperfine-absent premise dissolved.
 
 **Dogfooding milestone (2026-06-15)**: the `test-realworld-diff-jit` corpus is now **1 mismatch** — ONLY
 `c_sha256_hash` (107 vs 106). emcc_fasta flipped to byte-exact MATCH; this session's D-330 coalescing +
-fp-select + D-289 fixes cleaned the rest. **UNIFYING INSIGHT**: the c_sha256 `\n` residual AND go_regex
-(D-331B) are the SAME root — a **liveness↔emit vreg-numbering DESYNC** (emit's next_vreg diverges from
-liveness's vreg ids → emit indexes the liveness-numbered regalloc slots[] with emit ids → wrong slot/value).
-Evidence: func 4 regalloc VALID (0 overlaps) yet the subagent's "pc678 reads vreg 477" conflicts with
-regalloc (477 def=696, not live at 678). EH-lockstep family. NEXT (one fix likely closes BOTH): instrument
-liveness per-pc vreg-mint vs emit per-pc next_vreg for func 4 (+ func 1516), diff → first divergent pc = the
-op-handler minting out of lockstep; fix it in both passes. (3 investigations mis-localized — verify carefully.)
+fp-select + D-289 fixes cleaned the rest. The last `c_sha256` `\n` residual is **DEPRIORITIZED** (niche
+cosmetic; values + interp correct): **4 hypotheses now DISPROVEN** (func-11/func-8/block-merge/numbering-
+desync). Empirically: func 4 regalloc VALID (0 overlaps) AND liveness↔emit PERFECT LOCKSTEP (561=561, 0
+per-pc divergence) → NOT regalloc, NOT a desync. So it's a genuine value-miscompile (10→0 at a branch)
+needing RUNTIME instruction tracing — source-level guessing failed 4×; do NOT re-chase. (NOT the same as
+go_regex/D-331B, whose emit DOES exceed liveness — the prior "unification" was wrong.) **NEXT: diversify —
+the JIT-residual cluster is exhausted of cheap leads; pick a 完成形 surface/dogfooding/debt item (e.g. D-332).**
 
 **Phase-B status**: D-283 `--jit` lane 3-host green (REPORT-ONLY). **D-330 coalescing miscompile FIXED**
 `6790c204` + x86_64 fp-select `cccb2313` — 4-env green. Remaining JIT-correctness debt, each its own

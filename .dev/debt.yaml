@@ -1040,21 +1040,20 @@ entries:
       regalloc slot-collision — block-result vreg + an unrelated vreg share X22/slot7 (run the allocation
       overlap check on func 4); (b) emitEndIntra fails to MOV the result operand into the block-result vreg.
       ARCH-INDEPENDENT (arm64 == x86_64-Rosetta) ⇒ shared (liveness/regalloc), MOV emit per-arch. CAUTION:
-      THREE investigations now mis-localized (func-11→func-8→func-4-vreg-477). **UNIFYING INSIGHT 2026-06-15
-      (own overlap probe, REVERTED)**: func 4 regalloc is VALID (0 same-slot overlaps, n_slots=15, ranges=567)
-      — so NOT (a) a slot-collision. AND the subagent's "pc678 reads vreg 477" CONFLICTS with regalloc: vreg
-      477 is def=696/last_use=701 (defined AFTER pc678, not live there). That conflict IS the smoking gun:
-      **emit's vreg numbering (next_vreg) has DESYNCED from liveness/regalloc's vreg ids** — emit looks up the
-      regalloc slots[] array (indexed by LIVENESS vreg id) with an EMIT vreg id that maps to a DIFFERENT
-      liveness vreg → reads the wrong slot/value. This is the SAME CLASS as **D-331(B) go_regex** (emit
-      next_vreg ≥ liveness ranges.len) — BOTH are liveness↔emit vreg-numbering LOCKSTEP breaks (lesson
-      `jit-eh-landing-pad-emit-gotchas`). UNIFIED DISCHARGE (one fix likely closes both): instrument liveness's
-      per-pc vreg-mint count AND emit's per-pc next_vreg for func 4 (and func 1516), diff op-by-op → the FIRST
-      pc where they assign different vreg ids = the op-handler that mints out of lockstep (suspect a control-
-      flow op: block/if/else `end` result, br_if-with-value, or a multi-result op liveness/emit count
-      differently). Fix = make that op mint in lockstep both passes. Niche-in-effect (one `\n` + one
-      compile-fail); the MECHANISM (vreg-numbering desync) is the real bug. Spec suite green ⇒ specific op
-      pattern absent from the spec corpus but present in musl/go control flow.
+      **FOUR investigations have now mis-localized this (func-11→func-8→func-4-block-merge→numbering-desync);
+      all DISPROVEN.** Empirical disproofs (own probes, all REVERTED): (1) func 4 regalloc is VALID — 0
+      same-slot overlaps, n_slots=15, ranges=567 → NOT a slot-collision. (2) liveness↔emit are in PERFECT
+      LOCKSTEP for func 4 — instrumented BOTH passes per-pc: identical 847 pcs, identical final vreg count
+      (561=561), ZERO per-pc divergence → NOT a vreg-numbering desync (so the subagent's "pc678 reads vreg 477"
+      was simply WRONG — 477 is def=696, unreachable at 678). **NOT the same class as D-331(B) go_regex**
+      (that one's emit DID exceed liveness ranges.len; func 4 does not — the prior "unification" was wrong,
+      built on the bad vreg-477 claim). So the c_sha256 `\n` is a GENUINE VALUE-MISCOMPILE in some op's
+      machine code (a value that should be 10 reads 0 at the branch that gates the final putchar) — NOT
+      regalloc, NOT vreg-numbering, NOT a known structural class. DISCHARGE now requires RUNTIME
+      instruction-level tracing (disassemble func 4's JIT bytes, single-step/log register values, find where
+      10→0) — source-level hypothesizing has failed 4×. **DEPRIORITIZED**: NICHE cosmetic (one trailing `\n`;
+      the sha256 + verify VALUES are correct; interp correct; 55/56 corpus byte-exact). Disproportionate
+      effort already spent; do NOT re-chase the 4 dead hypotheses.
     first_raised: "2026-06-15"
     last_reviewed: "2026-06-15"
     refs: |-
