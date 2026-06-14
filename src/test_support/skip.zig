@@ -30,8 +30,8 @@
 //!     // ...
 //! }
 //!
-//! test "return_call_ref blocked on 10.R codegen" {
-//!     if (!ready) return skip.blocker(.@"D-186");
+//! test "x86_64 struct-op JIT emit blocked" {
+//!     if (!ready) return skip.blocker(.@"D-211");
 //!     // ...
 //! }
 //!
@@ -65,24 +65,12 @@ pub const Win64Phase = enum {
 /// Add a new variant only when filing the paired debt row in
 /// the same commit.
 pub const Blocker = enum {
-    /// `return_call_ref` blocked-by 10.R-3/4/5 (GC-gated; typed-funcref
-    /// Value shape).
-    @"D-186",
-    /// wabt 1.0.41+ for gc spec corpus baking.
-    @"D-179",
-    /// 10.R x86_64 br_on_null + br_on_non_null JIT emit. Blocked-by
-    /// x86_64 br_if not migrated to (ctx, ins) shape; arm64 landed
-    /// cycle 54b.
-    @"D-194",
     /// 10.G x86_64 struct-op JIT emit (struct.new_default / get / set).
     /// arm64 landed first; x86_64 needs the SysV trampoline-call +
     /// slab-base emit. Subsumed by the GC-on-JIT bundle (D-211).
     @"D-211",
-    /// 10.G struct.get/array.get of an f32/f64 field yields a GPR-class
-    /// result that never reaches the FP return register (V0/XMM0) across
-    /// a call/return boundary → reads stale FP reg. Un-skip the cross-func
-    /// f32 repro when the FP-class result fix lands.
-    @"D-212",
+    // (D-186 / D-179 / D-194 / D-212 variants removed 2026-06-14 — their
+    // debt rows were discharged; check_skip_helpers enforces enum↔debt pairing.)
 };
 
 /// Phase-end batch deferral. See `Win64Phase` doc.
@@ -107,13 +95,13 @@ fn callPhaseEnd() anyerror!void {
 }
 
 fn callBlocker() anyerror!void {
-    return blocker(.@"D-186");
+    return blocker(.@"D-211");
 }
 
 test "skip.phaseEnd(.win64) returns SkipZigTest" {
     try testing.expectError(error.SkipZigTest, callPhaseEnd());
 }
 
-test "skip.blocker(.@\"D-186\") returns SkipZigTest" {
+test "skip.blocker(.@\"D-211\") returns SkipZigTest" {
     try testing.expectError(error.SkipZigTest, callBlocker());
 }

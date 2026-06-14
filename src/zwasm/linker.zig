@@ -54,23 +54,33 @@ pub const LinkError = error{
 };
 
 /// Bulk WASI configuration per ADR-0109 §3.8 +
-/// `docs/zig_api_design.md` §3.8. Carries `args` today; the Host
-/// itself supports envs/preopens (`wasi/host.zig` setEnvs/addPreopen,
-/// exposed by the CLI `--env`/`--dir` + the C-API `zwasm_wasi_config_*`),
-/// so wiring them into this bulk struct is a facade-convenience parity
-/// item tracked as D-177.
+/// `docs/zig_api_design.md` §3.8. Carries `args` / `envs` / `preopens`.
 pub const WasiConfig = struct {
     args: []const []const u8 = &.{},
     /// Environment variables exposed to the guest via `environ_get` /
     /// `environ_sizes_get`. Each entry is a (name, value) pair; copied
     /// into the host on `defineWasi` (the slices need not outlive it).
     envs: []const Env = &.{},
-    // preopens / stdin / stdout / stderr: see D-177 (host supports them;
-    // facade struct not yet wired — reachable via CLI / C-API meanwhile).
+    /// Filesystem preopens (D-177). Each opens `host_path` and exposes it
+    /// to the guest as `guest_path` (the WASI fd-3+ preopen table). REQUIRES
+    /// `io` — the dirs are opened at `instantiate` time via `io`, and the
+    /// Host closes the fds on deinit. Empty = no preopens (back-compat).
+    preopens: []const Preopen = &.{},
+    /// The `std.Io` the WASI host uses for filesystem syscalls (`path_open`,
+    /// preopen materialisation). The embedder brings its own io / event loop
+    /// (no engine-owned thread). `null` → fs syscalls degrade; preopens then
+    /// fail with `error.NoHostIo`.
+    io: ?std.Io = null,
+    // stdin / stdout / stderr capture: still facade-unwired (CLI / C-API meanwhile).
 
     pub const Env = struct {
         name: []const u8,
         value: []const u8,
+    };
+
+    pub const Preopen = struct {
+        host_path: []const u8,
+        guest_path: []const u8,
     };
 };
 
@@ -206,8 +216,8 @@ pub const Linker = struct {
     /// any `(import "wasi_snapshot_preview1" "<name>" ...)` in
     /// the module is satisfied by the registered host (all 46 WASI
     /// 0.1 thunks; Phase 11). Installs `cfg.args` + `cfg.envs`;
-    /// preopens remain a facade-struct parity item (D-177).
-    /// At-most-once per Linker.
+    /// `cfg.preopens` are queued here and OPENED at `instantiate`
+    /// (they need `cfg.io`). At-most-once per Linker.
     pub fn defineWasi(self: *Linker, cfg: WasiConfig) !void {
         if (self.wasi_host != null) return error.WasiAlreadyDefined;
         const h = try self.engine.alloc.create(_wasi_host.Host);
@@ -215,7 +225,12 @@ pub const Linker = struct {
         h.* = try _wasi_host.Host.init(self.engine.alloc);
         errdefer h.deinit();
 
+        h.io = cfg.io;
+
         if (cfg.args.len > 0) try h.setArgs(cfg.args);
+
+        // Queue preopens; `instantiate` materialises them (opens via `io`).
+        for (cfg.preopens) |p| try h.addPendingPreopen(p.host_path, p.guest_path);
 
         if (cfg.envs.len > 0) {
             // setEnvs takes parallel key/value slices; split the pair list
@@ -699,6 +714,11 @@ pub const Linker = struct {
             }
         }
 
+        // D-177 — open queued WASI preopens (via cfg.io) before the instance
+        // runs. No-op when none were queued; NoHostIo / fs errors surface as
+        // InstantiateFailed (preopens set without an io are a caller error).
+        if (self.wasi_host) |h| h.materializePendingPreopens() catch return error.InstantiateFailed;
+
         const prebuilt = bindings_list.items;
         const Pre = struct {
             slice: ?[]const _runtime_import.ImportBinding,
@@ -827,4 +847,35 @@ test "Linker.defineWasi: WasiConfig.envs populate the host environ (D-177)" {
     try testing.expectEqualStrings("bar", host.envs[0].value);
     try testing.expectEqualStrings("BAZ", host.envs[1].key);
     try testing.expectEqualStrings("qux", host.envs[1].value);
+}
+
+test "Linker.defineWasi: WasiConfig.preopens materialise into the host at instantiate (D-177)" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    var eng = try _zwasm.Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var lk = eng.linker();
+    defer lk.deinit();
+    // Preopen the cwd as guest "/sandbox"; the dir is opened via `io` at instantiate.
+    try lk.defineWasi(.{
+        .io = threaded.io(),
+        .preopens = &.{.{ .host_path = ".", .guest_path = "/sandbox" }},
+    });
+    // Minimal `() -> i32` (returns 42, export "f") — no imports.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, 0x03,
+        0x02, 0x01, 0x00, 0x07, 0x05, 0x01, 0x01, 'f',
+        0x00, 0x00, 0x0a, 0x06, 0x01, 0x04, 0x00, 0x41,
+        0x2a, 0x0b,
+    };
+    var mod = try eng.compile(&bytes);
+    defer mod.deinit();
+    var inst = try lk.instantiate(&mod, .{});
+    defer inst.deinit();
+    // `instantiate` drained the pending preopen + opened it into the fd table.
+    const host = lk.wasi_host.?;
+    try testing.expectEqual(@as(usize, 1), host.preopens.len);
+    try testing.expectEqualStrings("/sandbox", host.preopens[0].guest_path);
+    try testing.expectEqual(@as(usize, 0), host.pending_preopens.items.len);
 }
