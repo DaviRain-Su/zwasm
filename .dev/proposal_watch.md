@@ -111,3 +111,15 @@ Text Encoding Builtins` (skip).
   `WebAssembly/{spec,testsuite,WASI}` clones trail `.dev/spec_pin.yaml` (pinned
   2026-06-04, NEWER than the clones) — the tested/vendored corpus is current for
   the targeted scope; refresh the clones for manual lookups when convenient.
+- **2026-06-14** — **wg-3.0 currency re-verification (the debt's "multi-value-runner
+  ceiling" was STALE, refuted)**: empirically compared committed corpus assert
+  counts vs the frozen `wg-3.0` tag for every proposal — ALL current: EH try_table
+  34=34, gc all files (array 24 / struct 17 / i31 55 / type-subtyping 17 / ref_cast
+  11 / ref_test 68), tail-call (un-reverted `21959b5f`). 0 skip-impl; multi-value-
+  result asserts (`type-f64-i64-to-i32-f32`, `get_globals`) PRESENT + passing via
+  `invokeMulti`. **Alpha conformance condition (100% latest 3.0 spec) MET.** Spec
+  pin bumped 21b053f→f3d3448 (`.dev/spec_pin.yaml`): the drift was PURELY `[spectec]`
+  formal-spec tooling + editorial/typing-rule fixes (PRs #2180-2186), `test/core/
+  *.wast` ZERO changes → corpora unaffected. Also: JIT exnref completeness done
+  (D-327 reify + throw_ref / D-328 multi-value catch result-vreg; conformance-
+  neutral but user-directed "ideal form"; bundle `3234f7a9`).
