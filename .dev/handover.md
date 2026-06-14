@@ -3,22 +3,24 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Just closed — JIT machine-code dump primitive (`db3109d8`) + c_sha256 instruction-level localization
+## Just closed — JIT value-trace tooling: dump primitives + `jit_value_trace.sh` harness (PERSISTED)
 
-**3-host gate**: D-289+D-332 batch confirmed Win64-green + RECORDED (windowsmini `41e0f705`,
-`spec_assert_runner_non_simd 25437/0`); ubuntu green `5ef2f33b`. Batch fully 3-host.
+**3-host gate**: D-289+D-332 batch Win64-green + RECORDED (windowsmini `41e0f705`, 25437/0); ubuntu
+green `5ef2f33b` + `db3109d8`/docs verified green this session. Batch fully 3-host.
 
-**Phase-B tooling (`db3109d8`)**: reinstated a PERMANENT JIT machine-code dump —
-`ZWASM_DEBUG=jit.dump zwasm run --engine jit <wasm>` prints per-func body-relative bytes as hex
-(debug_jit_auto Recipe 16, codified; `dbg.on()` gate exposed). The instruction-level lens all 4
-prior c_sha256-`\n` attempts lacked (they worked at the IR/vreg level, which is provably clean).
-**Used it (`e6d81e0b`)**: disassembled func 4 (llvm-mc, NOT llvm-objdump `-b` — dropped in llvm-21);
-the musl putc/`__overflow` `\n`-write is asm lines ~2300-2375 (buffer-check `cbnz w14` gates at
-2316/2345; byte-10 store ~2364). Static structure CORRECT → runtime VALUE bug. **NEXT (concrete,
-tool-equipped — NOT a 5th source guess)**: lldb value-trace at those compares (need to log func 4's
-runtime `start_addr` from code_map, then bp at `start_addr+(line-1)*4`, inspect w14/w15 interp-vs-jit).
-Full trail: D-330 debt residual. STILL deprioritized (niche cosmetic; values+interp correct; 55/56
-byte-exact) — pursue only as the top Phase-B item now D-330-primary/D-289/D-332 are shipped.
+**Phase-B debug tooling (user-directed persistence)** — a reusable lldb value-trace stack for JIT
+miscompiles that produce wrong output but DON'T crash:
+- `ZWASM_DEBUG=jit.dump` prints per-func machine bytes (`db3109d8`, compile.zig) + runtime entry
+  addr (`f49b3675`, setup.zig) — the instruction-level lens the 4 prior IR-level c_sha256 attempts lacked.
+- **`scripts/jit_value_trace.sh {addr|disasm|trace}`** (`39d53605`) automates the ~9-attempt lldb-on-JIT
+  flow (disable-aslr stable addrs; arm `-H` bp AFTER the W^X page maps by stopping at a host symbol;
+  llvm-mc disasm). VALIDATED: `-H` bp fires on a JIT page (func 11). Wired into debug_jit_auto Recipe 18
+  + decision-tree + lesson `2026-06-15-lldb-value-trace-on-jit-code`.
+
+**D-330 c_sha256 `\n` (deprioritized; top Phase-B item)**: localized to a putc-into-buffer miss before
+the single exit `fd_write`. CORRECTION: piped stdout = musl FULL buffering → first fd_write is the exit
+flush AFTER all putc, so stop EARLIER than `fdWrite` to trace the putc-side store. Full trail + corrected
+next probe in D-330 debt residual. Niche cosmetic (values+interp correct; 55/56 byte-exact).
 
 ## Prior session — D-332 table-cap SHIPPED (`3cb5e3bf`) + D-330 coalescing/fp-select/D-289
 
