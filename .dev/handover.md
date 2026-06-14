@@ -20,12 +20,11 @@ D-327 keeps revealing layers (hardcoded manifest tests; DUAL runners —
 @960-977, `non_simd.zig`@694 hand-codes 3 shapes). Likely NARROWER than ~250-400
 LOC but EXACT gap unpinned (which runner drives wasm-3.0-assert; why eh failed).
 A genuine multi-cycle investigate+impl for an ALPHA.
-DECISION (user's call — the alpha effort/release tradeoff): **A** = pin + close
-D-327 → re-vendor deferred asserts (w/ manifest-test updates) → full wg-3.0 →
-tag. **B** = tag `v2.0.0-alpha.3` NOW (3.0 corpus wg-3.0-current-except-multi-value,
-3-host green; gc done; D-327 + deferred asserts → beta/rc debt). Recommend B for
-the alpha. NEXT: honour user pick; if silent, continue D-327 investigation
-(pin the exact runner gap) as autonomous prep.
+DECISION (user's call — alpha effort/release tradeoff): **A** = close D-327 →
+re-vendor deferred asserts (w/ manifest-test updates) → full wg-3.0 → tag. **B** =
+tag `v2.0.0-alpha.3` NOW (corpus wg-3.0-current-except-multi-value, 3-host green;
+D-327+deferred → beta/rc debt). Recommend B. NEXT: honour pick; if silent,
+continue D-327 investigation (pin the exact runner gap).
 
 ## Current state
 
