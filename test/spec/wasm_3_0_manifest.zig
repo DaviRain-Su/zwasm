@@ -222,6 +222,36 @@ pub fn runOne(
     return results[0];
 }
 
+/// No-op `spectest.print_i32_f32` host stub. wg-3.0 `return_call.0.wasm`
+/// gained a `tailprint_i32_f32` export that imports it (the conventional
+/// spec-testsuite print module), so a fixture using that corpus can only
+/// be instantiated once the import is satisfied.
+fn spectestPrintI32F32(_: *zwasm_root.Caller, _: i32, _: f32) void {}
+
+/// Like `runOne` but registers the conventional `spectest.print_i32_f32`
+/// host import. Needed for the wg-3.0 tail-call corpus's import-bearing
+/// `return_call.0.wasm`; the import-free `runOne` cannot instantiate it.
+pub fn runOneSpectest(
+    alloc: std.mem.Allocator,
+    wasm_bytes: []const u8,
+    func_name: []const u8,
+    args: []const zwasm_root.Value,
+) RunError!zwasm_root.Value {
+    var engine = zwasm_root.Engine.init(alloc, .{}) catch return RunError.OutOfMemory;
+    defer engine.deinit();
+    var module = engine.compile(wasm_bytes) catch return RunError.InvokeFailed;
+    defer module.deinit();
+    var linker = zwasm_root.Linker.init(&engine);
+    defer linker.deinit();
+    linker.defineFunc("spectest", "print_i32_f32", fn (*zwasm_root.Caller, i32, f32) void, spectestPrintI32F32) catch return RunError.InvokeFailed;
+    var instance = linker.instantiate(&module, .{}) catch return RunError.InvokeFailed;
+    defer instance.deinit();
+
+    var results: [1]zwasm_root.Value = undefined;
+    instance.invoke(func_name, args, results[0..1]) catch return RunError.InvokeFailed;
+    return results[0];
+}
+
 /// D-190 — `assert_return` invoke against an already-instantiated
 /// Instance. The dispatch loop owns Engine/Module/Linker/Instance
 /// per `module` directive so state-dependent sequences within a
@@ -780,7 +810,7 @@ test "runOne e2e: return_call.0.wasm type-i32 () -> i32:306 (10.TC verify)" {
     // FS-free + io-free, and the test fails fast if the corpus is
     // missing (rather than skipping silently).
     const wasm_bytes = @embedFile("wasm-3.0-assert/tail-call/return_call/return_call.0.wasm");
-    const result = try runOne(testing.allocator, wasm_bytes, "type-i32", &.{});
+    const result = try runOneSpectest(testing.allocator, wasm_bytes, "type-i32", &.{});
     try testing.expectEqual(@as(i32, 306), result.i32);
 }
 
@@ -1249,10 +1279,13 @@ test "compileExpectInvalid: return_call.0.wasm accepted (no false rejection)" {
 // interp dispatch for tail-call), this assertion fails red and
 // must be retightened to `pass == 31, fail == 0`.
 //
-// All 31 asserts target `return_call.0.wasm`; later `module`
-// directives in the manifest switch to other fixtures unrelated
-// to these asserts.
-test "tail-call bisect: enumerate 31 assert_returns + print failures (D-187 regression marker)" {
+// The wg-3.0 corpus has 33 asserts against `return_call.0.wasm`; this
+// marker enumerates the 31 single-result ones. The 2 added by wg-3.0 —
+// `tailprint_i32_f32` (void result) + `type-f64-i64-to-i32-f32` (multi-
+// value i32 f32 result) — are exercised by the spec assert runner, which
+// models void/multi-value; this single-result harness deliberately omits
+// them. Later `module` directives switch to unrelated fixtures.
+test "tail-call bisect: enumerate 31 single-result assert_returns + print failures (D-187 regression marker)" {
     const wasm_bytes = @embedFile("wasm-3.0-assert/tail-call/return_call/return_call.0.wasm");
     const Case = struct {
         name: []const u8,
@@ -1300,7 +1333,7 @@ test "tail-call bisect: enumerate 31 assert_returns + print failures (D-187 regr
     var pass: u32 = 0;
     var fail: u32 = 0;
     for (cases, 0..) |c, idx| {
-        const got = runOne(testing.allocator, wasm_bytes, c.name, c.args) catch |err| {
+        const got = runOneSpectest(testing.allocator, wasm_bytes, c.name, c.args) catch |err| {
             std.debug.print("[bisect fail #{d:>2}] {s} args={any} -> err={s}\n", .{ idx, c.name, c.args, @errorName(err) });
             fail += 1;
             continue;
