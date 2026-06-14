@@ -74,11 +74,12 @@ JIT-correct, 2 genuine miscompiles, 9 `go_*` compile-gaps. B1 bundle CLOSED (lan
   **CYCLE-2 ISOLATED (`private/spikes/jit-vararg/`)**: the bug is **plain `%s` (no precision)**.
   `printf("%s\n","hi")` → JIT empty + drops `\n`. REJECTED: H1 varargs (`%c %d %lu` 1–4 args ok),
   H2 array-store (`arr[i]++`→ok), AND `%.2s` (precision) → CORRECT, `fputs`/`puts` ok, standalone
-  `strnlen(s,0x7FFFFFFF)`/`memchr(...,0x7FFFFFFF)` ok. SUSPECT: emscripten -O2 **INLINES** the plain-
-  `%s` `strnlen(s, PTRDIFF_MAX)` as a word-at-a-time **SWAR null scan** (`(w-0x01010101)&~w&
-  0x80808080`); the small-count `%.Ns` byte-loop + the standalone library strnlen (a CALL) are fine
-  → the miscompiled code is the inlined SWAR word-loop on the huge-count path (the dropped `\n` =
-  vfprintf overflow early-return from a bogus huge length). Separately: 9 `go_*` UnsupportedOp
+  `strnlen(s,0x7FFFFFFF)`/`memchr(...,0x7FFFFFFF)` ok. CYCLE-2.5: a hand-written SWAR word-scan
+  (`swar.c`) compiled -O2 RUNS CORRECT under --jit → generic SWAR is NOT the bug. Refined: the SAME
+  vfprintf runs for `%.2s` (works) and `%s` (broken), differing only in precision (2 vs -1→PTRDIFF_MAX),
+  so it is a **VALUE-DEPENDENT miscompile** on musl's actual `%s` path — an op wrong only for the
+  -1/PTRDIFF_MAX-derived value (signed-cmp / select / shift on a large/neg i32?). Needs real-vfprintf
+  disasm (debug_jit_auto), NOT a hand-rolled idiom. Separately: 9 `go_*` UnsupportedOp
   compile-gaps = debt-tracked op backlog (per-op, predicate clear).
 - **Exit-condition**: both `c_sha256_hash` + `emcc_fasta` flip to MATCH in `test-realworld-diff-jit`
   (jit mismatched → 0); each fix carries a boundary fixture + a lesson on the miscompiled op/pattern.
