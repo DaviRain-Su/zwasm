@@ -15,28 +15,21 @@ NOT an alpha blocker. Cycle-4a infra kept (`8478d853`).
 
 ## Active bundle — JIT exnref completeness (user chose "do it now" 2026-06-14)
 
-- **Bundle-ID**: d327-exnref-jit  **Cycles-remaining**: ~3
-- **Continuity-memo**: SCOPE GREW → SURFACED TO USER 2026-06-14. The exnref
-  machinery (D-327) is VALIDATED (round-trip green) but BLOCKED by **D-328**, which
-  turned out to be an **IR/regalloc-level** fix, NOT emit-local: attempt-1 (fresh
-  `next_vreg` at the landing pad) REGRESSED 3 single-param catch_ tests because the
-  catch continuation reads the IR-ASSIGNED result vreg, not a pushed_vregs slot. So
-  multi-value catch result vregs must be made distinct in the IR (lower.zig /
-  catch-result allocation) — multi-cycle. BOTH D-327 + D-328 are CONFORMANCE-
-  NEUTRAL (no spec test). Standalone D-328 RED (no exnref): 2-param catch_ → 10 vs
-  JIT 20→10. **D-328 DONE on Mac `00cd1fb4`** (full `zig build test` 2855/0, lint
-  clean, x86_64 cross-compiles; pending 3-host). Impl: BlockInfo gains result_arity
-  + is_catch_target; lower.zig resolves each catch's TARGET block (block_stack
-  [len-2-label_idx] — try_table is transparent for its OWN catch labels, so label 0
-  = enclosing block) + marks it; liveness + arm64/x86_64 emit TRUNCATE dead body
-  vregs to entry then MINT result_arity distinct vregs at the target `.end` IN
-  LOCKSTEP. **NEXT = re-apply D-327 reify** (`private/notes/d327-catch_ref-plan.md`)
-  — now the exnref result vreg is distinct so reify won't corrupt the i32. Verify
-  D-328 3-host FIRST (delicate regalloc; D-327 stacks on it). Cycle-4a infra
-  `8478d853` kept.
-- **Exit-condition**: D-328 fixed (distinct vregs) → JIT round-trip + catch_ref_88
-  + catch_all_ref_77 all return their values both arches; full `zig build test` +
-  lint + 3-host green.
+- **Bundle-ID**: d327-exnref-jit  **Cycles-remaining**: ~1 (verify)
+- **Continuity-memo**: BOTH DONE (user's "ideal form"; CONFORMANCE-NEUTRAL — no spec
+  test, EH was already wg-3.0-current). **D-328 3-HOST GREEN** `00cd1fb4` (multi-
+  value catch result-vreg collision: BlockInfo.result_arity/is_catch_target;
+  lower.zig resolves each catch's TARGET block via block_stack[len-2-label_idx] —
+  try_table transparent for its own catch labels; liveness + emit ×2 TRUNCATE dead
+  body vregs + MINT distinct result vregs at the target `.end` in LOCKSTEP).
+  **D-327 DONE Mac `5866b601`** (exnref reify + throw_ref round-trip; reify emitted
+  FIRST — emit-synth CALL clobbers caller-saved, params after survive; param base
+  skips the exnref top slot; setup installs reifyExnref+ctx; trampoline stashes
+  thrown tag). Round-trip 88 / catch_ref_88 88 / catch_all_ref_77 77; 2856/0, lint,
+  x86_64 cross-compiles. NEXT = verify D-327 ubuntu+windows (Win64 RCX arg0 =
+  ABI-risk); then CLOSE bundle. No eh re-vendor needed (EH already current).
+- **Exit-condition**: D-327 ubuntu+windows green (3-host) → close bundle d327-
+  exnref-jit (round-trip + catch_ref_88 + catch_all_ref_77 all green everywhere).
 
 ## Parallel track — wg-3.0 currency re-verification (the conformance gate)
 
