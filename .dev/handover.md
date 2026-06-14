@@ -45,48 +45,18 @@ wasm-tools 1.251/+wasmer 7.1) — user REBOOTED 2026-06-14, verified ACTIVE (pos
 wasmtime 45.0.0/wasm-tools 1.251.0/wasmer 7.1.0/zig 0.16.0). windows gate re-validating with
 wasmtime 45 (verify next Step 0.7). D-249 hyperfine-absent premise dissolved.
 
-**A2 embenchen DONE `1aac480f`**: 3 benchmarks (fannkuch/fasta/primes) reproduced via MODERN
-emcc `-sSTANDALONE_WASM`→WASI (NOT the legacy env-shim ABI of the vendored `embenchen_*`
-fixtures, which stay Phase-11/D-026). The find: modern path Just Works — zwasm runs all 3
-byte-identical to wasmtime under its existing WASI host, no shim. realworld_run 56/56, diff
-56/56. windows gate green on the new wasmtime 45 toolchain (recorded 3bc17f04).
-
-**Phase B / B1 = D-283 — JIT-DIFF LANE LANDED `219dbd17`.** `zig build test-realworld-diff-jit`
-(WASI-aware `runWasmJitCaptured` + byte-diff vs wasmtime). Real signal replacing the false
-12-trap framing: **`diff_runner [jit]: 45/56 matched, 2 mismatched, 9 skipped`**. The truth: 45
-JIT-correct, 2 genuine miscompiles, 9 `go_*` compile-gaps. B1 bundle CLOSED (lane = the deliverable).
-
-**B2 PIVOTED → D-330 `a0dfccaf`+ (no active bundle).** The 2 miscompiles (`c_sha256_hash`,
-`emcc_fasta`) were bisected over 4 cycles to **plain `%s` (no precision)** under --jit/--aot (codegen,
-interp correct). FOUR reductions (generic varargs, array-store, hand-SWAR, count-limited scan, AND
-the EXACT musl null-scan `((0x01010100-w)|w)&0x80808080` as minimal `.wat`) ALL run CORRECT — so it's
-a **context-dependent regalloc/spill-class miscompile** that only manifests under the real ~large
-vfprintf's register pressure (reduction can't isolate it). Filed **D-330** (focused `debug_jit_auto`
-disasm campaign of repro2.wasm's printf_core; private/spikes/jit-vararg has all reductions). The
-`--jit` lane keeps it visible (report-only). Niche (emscripten plain-%s stdout only; values correct).
-
-**D-331(A) RESOLVED `45ff0b94` — hypothesis was a RED HERRING.** Not a go `_start` void-sig
-asymmetry: a debug print at `runWasiLenient`'s entry gate NEVER fired → fault was UPSTREAM in
-`setupRuntimeLinked` (setup.zig), a fixed `table_size > 4096` reject (Go funcref table = 5790).
-Interp (instantiate.zig allocs `min` uncapped) ran go_* fine → JIT-only fixed-cap asymmetry. FIX:
-removed the arbitrary cap (allocator-backed buffers, no fixed-array dep). go_hello now compiles +
-instantiates + RUNS (correct stdout). THIRD dynamic-vs-fixed instance ([256]Frame `10d7d2b2`;
-table_size; still-open max_slots=4095). Boundary fixture p10/large_table/over_4096. Filed **D-332**
-(eager table alloc unbounded by `store_table_elements_max`, cross-engine). Lesson
-`reject-error-was-an-upstream-fixed-cap`.
-
-**BUT it revealed the genuine deep gap**: go_* now JIT-MISCOMPILE — Go runtime detects corruption
-AFTER correct output, NON-DETERMINISTIC across runs (`poll_oneoff` fatal / `badmorestackg0` / `unlock
-of unlocked lock` / `switchToCrashStack0`) ⇒ a late memory-corruption miscompile (uninit reg/stack-
-class), D-330/D-283 class — NOT entry-sig or WASI-host (poll_oneoff is wired, same impl as interp).
-The `--jit` lane (report-only) now shows go_* run-and-corrupt (huge crash-dump) vs prior compile-skip.
+**Phase A+B history (DONE, archived in commits/debt/lessons)**: A2 embenchen `1aac480f`; B1 = D-283
+`--jit` diff-lane `219dbd17` (realworld_run 56/56); D-331(A) table-cap red-herring fix `45ff0b94`
+(+ D-332). All detail in those commits + the cited lessons; not repeated here.
 
 **Phase-B status**: D-283 `--jit` lane 3-host green (REPORT-ONLY). **D-330 coalescing miscompile FIXED**
-`6790c204` (no active bundle). Remaining JIT-correctness debt (no clear shared fix — each its own
-investigation): **D-330 residual** (c_sha256 dropped `\n`, NICHE, partial) + **D-331(A)-next** go_*
-runtime-corruption (non-deterministic; UNCHANGED by the regalloc fix) + **D-331(B)** go_regex
-SlotOverflow (= D-289 large-frame, lowest priority). **NEXT**: D-330 residual is the cheapest (byte-diff
-c_sha256 interp/jit → the dropped final 0x0a → which print drops it); then go corruption. (A1 Zig + A2
+`6790c204` + x86_64 fp-select `cccb2313` — 4-env green. Remaining JIT-correctness debt, each its own
+investigation, ALL parked/blocked with recipes recorded: **D-330 residual** (c_sha256 `\n` → func-8
+`__overflow` fast-path miscompile; NICHE, partial — next-probe recipe in debt) + **D-331(A)-next** go_*
+runtime-corruption (panicmem teardown deref; INFRA-BLOCKED — needs per-function interp-fallback bisect,
+which does not exist) + **D-331(B)** go_regex SlotOverflow (= D-289 large-frame: dynamic slot table +
+>32760 spill addressing — a structural rework). **NEXT**: D-331(B)/D-289 large-frame is the only
+un-parked JIT item (structural); else diversify to 完成形 surface/dogfooding/debt work. (A1 Zig + A2
 embenchen + A3 wasmer-oracle + runtime-bump + tool-currency-3host + B1 jit-diff-lane DONE; D-331 primary
 `10d7d2b2` + (A) `45ff0b94`; D-330 coalescing `6790c204` FIXED.)
 
