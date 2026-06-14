@@ -10,6 +10,10 @@
 # Pinned to the upstream HEAD as of the date below (acknowledged baseline; the
 # vendored corpora may trail it — proposal_watch's review covers re-sync). Bump
 # these SHAs + the date when re-vendoring.
-pinned: "2026-06-04"
-spec: "21b053f79a2727fffcdd89ebe95b093eec68515a"
+# 2026-06-14 bump: spec main advanced 21b053f→f3d3448 but the diff is PURELY
+# `[spectec]` formal-spec tooling + editorial/typing-rule fixes (PRs #2180-2186);
+# `test/core/*.wast` had ZERO changes, so the frozen-3.0 conformance corpora are
+# unaffected. No re-vendor needed; pin bumped to silence the benign drift flag.
+pinned: "2026-06-14"
+spec: "f3d344821ae9d030d3dcf8d710e0b62b36032052"
 testsuite: "0dc0343c9876267d99a7577ed4fc2289406a7869"
