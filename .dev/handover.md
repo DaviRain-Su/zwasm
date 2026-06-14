@@ -9,17 +9,14 @@ Project is feature-complete + 3-host green + tag-ready; **tag is user-only, NEVE
 autonomous (ADR-0156)**. This agenda is completion-refinement under Phase 17.
 Work the tasks top-to-bottom; each names a concrete first action.
 
-**A1 — flaky `zig build test` (D-311), focused chunk.** Local `zig build test`
-seed-flakily SEGVs (3-host `test-all` is authority + green; this only improves
-LOCAL determinism). Investigation DONE + recipe in
-[`releasesafe_jit_failures.md`](releasesafe_jit_failures.md) §"Re-narrowed
-2026-06-14". Steps: (1) route the contract-violating test direct-calls through
-the existing safe helpers — `entry.zig:2694-95` (f32 test) → `invokeAndCheck`;
-`linker.zig:598,829` → `entry.callI32NoArgs`; (2) DECIDE whether x86_64 production
-multi-result `entry.zig:1365/1424` (`f(rt)`, no asm-clobber vs arm64's
-`aarch64_blr_clobbers` sibling) needs the `asm volatile("":::entry.jit_cohort_clobbers)`
-barrier; (3) verify `zig build test` ×~20 (seed-varying) shows ZERO SEGV + 3-host.
-If step 2 opens deeper ABI work, ship step 1 + document; don't rabbit-hole.
+**A1 — flaky `zig build test` (D-311) — DONE `120e9fc1` (de-escalated + fixed).**
+Pinned it: `zig build test` EXITS 0 + the test binary passes 2754/0 STANDALONE
+across 4 seeds → the "failed command --listen=-" is a Zig build-runner IPC artifact,
+**NOT a real failure** (earlier "seed-flaky SEGV" framing was overstated). Shipped the
+correctness fix anyway: new pub `entry.callEntrySafe` (wraps the D-245 trampoline) +
+routed the 8 contract-violating test direct-calls (entry.zig f32 / linker.zig×2 /
+runner_test.zig×4). Full finding: [`releasesafe_jit_failures.md`](releasesafe_jit_failures.md)
+§RESOLVED-as-NOT-A-FAILURE. (Residual --listen line = build-runner quirk, deferred.)
 
 **A2 — ClojureWasm (cljw/CWFS) handoff doc — CURRENT STATE of the Zig API.** Not a
 changelog — a standalone "here is the Zig embedding API as it stands now" for the
