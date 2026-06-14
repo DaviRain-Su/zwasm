@@ -33,12 +33,8 @@ SUSTAINED**; the user assists when a toolchain needs installing.
   - **A4 (user-assisted)**: remote provisioning — **D-254** (native rust on ubuntu +
     windows → 3-host rust differential; user chose (a)) + **D-249** (hyperfine on win).
 - **Phase B — deep JIT bug-hunt (SUSTAINED; settle in)**:
-  - **B1 = D-283**: triage + fix the live JIT signal (run `ZWASM_JIT_RUN=1` corpus:
-    interp 55/55 but **JIT 35 pass / 11 trap / 9 compile-gap**). cljw-excluded set:
-    **6 RUN-TRAP** (`tinygo_{fib,hello,json,sort}`, `rust_file_io`, `c_sha256_hash` —
-    interp-passes ⇒ JIT miscompile / WASI-gap) + **9 COMPILE-OP** (ALL `go_*` —
-    `UnsupportedOp` ⇒ unimplemented JIT op). Root-cause each cluster, fix, add boundary
-    fixtures, enable `ZWASM_JIT_RUN=1` by default for the runnable set. Multi-cycle.
+  - **B1 = D-283 DONE** (`219dbd17` lane): the real JIT signal lives in `test-realworld-diff-jit`
+    (see Phase-B status below). Root-cause each remaining cluster, fix, add boundary fixtures. Multi-cycle.
 
 **Tool currency (user directive 2026-06-14) DONE+VERIFIED on ALL 3 hosts**: Mac+ubuntu via
 flake (wasmtime 45, wasmer 7.1, nixpkgs 06-10, rust/zig-overlay 06-14; **zig PINNED 0.16.0**;
@@ -67,28 +63,32 @@ vfprintf's register pressure (reduction can't isolate it). Filed **D-330** (focu
 disasm campaign of repro2.wasm's printf_core; private/spikes/jit-vararg has all reductions). The
 `--jit` lane keeps it visible (report-only). Niche (emscripten plain-%s stdout only; values correct).
 
-**D-331 PRIMARY GAP FIXED `10d7d2b2`.** Root cause: the JIT liveness pass used a FIXED `[256]Frame`
-control-nesting stack; fat standard-Go funcs (go_hello func[303]: 11151 instrs, >256 nested blocks)
-overflowed it → UnsupportedOp. Made `block_stack` allocator-backed + doubling. Result: realworld JIT
-compile-pass **47/56 → 55/56** (8 of 9 go_* flip compile-op→compile-pass); zig build test green, no
-regression; boundary fixture deep_control_nest_300. D-331 now `partial` — 2 SEPARATE smaller remaining
-gaps: (A) 8 go_* **UnsupportedEntrySignature** (they compile, but JIT run-path can't invoke Go's `_start`
-ABI); (B) **go_regex SlotOverflow** (a different fixed vreg/slot cap — same dynamic-vs-fixed pattern,
-likely a similar fix).
+**D-331(A) RESOLVED `45ff0b94` — hypothesis was a RED HERRING.** Not a go `_start` void-sig
+asymmetry: a debug print at `runWasiLenient`'s entry gate NEVER fired → fault was UPSTREAM in
+`setupRuntimeLinked` (setup.zig), a fixed `table_size > 4096` reject (Go funcref table = 5790).
+Interp (instantiate.zig allocs `min` uncapped) ran go_* fine → JIT-only fixed-cap asymmetry. FIX:
+removed the arbitrary cap (allocator-backed buffers, no fixed-array dep). go_hello now compiles +
+instantiates + RUNS (correct stdout). THIRD dynamic-vs-fixed instance ([256]Frame `10d7d2b2`;
+table_size; still-open max_slots=4095). Boundary fixture p10/large_table/over_4096. Filed **D-332**
+(eager table alloc unbounded by `store_table_elements_max`, cross-engine). Lesson
+`reject-error-was-an-upstream-fixed-cap`.
 
-**Phase-B status**: D-283 `--jit` lane done + 3-host green (45/2/9, REPORT-ONLY). Remaining JIT-correctness
-debt: **D-330** (2 `%s` regalloc-class miscompiles) + **D-331** partial (go entry-sig + go_regex slot cap).
+**BUT it revealed the genuine deep gap**: go_* now JIT-MISCOMPILE — Go runtime detects corruption
+AFTER correct output, NON-DETERMINISTIC across runs (`poll_oneoff` fatal / `badmorestackg0` / `unlock
+of unlocked lock` / `switchToCrashStack0`) ⇒ a late memory-corruption miscompile (uninit reg/stack-
+class), D-330/D-283 class — NOT entry-sig or WASI-host (poll_oneoff is wired, same impl as interp).
+The `--jit` lane (report-only) now shows go_* run-and-corrupt (huge crash-dump) vs prior compile-skip.
 
-**First action on resume**: D-331(A) — the **go `_start` UnsupportedEntrySignature** (MOST tractable;
-likely flips 8 go_* + a clean green-commit overnight start). LEAD (already traced): go's `_start`
-(`_rt0_wasm_wasip1`) is VOID `()->()` (type 11), idx 1326, defined (16 imports); `runWasiLenient`
-(runner.zig:466) HANDLES void at L502 + `resolveLenientEntryIdx` returns it correctly — yet `zwasm run
---engine jit go_hello` still rejects. Interp runs it fine ⇒ a downstream ASYMMETRY (suspect:
-`compiled.func_sigs[idx]` module-index-vs-defined-index OR compile-incomplete). Step 0: TEMP-instrument
-runWasiLenient to print which branch rejects for idx 1326. Then D-331(B) go_regex SlotOverflow = HARD
-D-289 large-frame (max_slots=4095 fixed + >32760 spill offsets) — defer/link D-289. (Alt: D-330 %s
-disasm — hard regalloc.) (A1 Zig + A2 embenchen + A3 wasmer-oracle + runtime-bump + tool-currency-3host
-+ B1 jit-diff-lane DONE; D-331 primary FIXED.)
+**Phase-B status**: D-283 `--jit` lane 3-host green (REPORT-ONLY). Remaining JIT-correctness debt, all
+HARD multi-cycle codegen miscompiles: **D-330** (2 `%s` regalloc-class) + **D-331(A)-next** (go_*
+runtime corruption) + **D-331(B)** go_regex SlotOverflow (= D-289 large-frame, max_slots=4095).
+
+**First action on resume**: a `debug_jit_auto` miscompile campaign — the most leveraged is **D-330**
+(2 `%s` reductions already isolated in private/spikes/jit-vararg; printf_core disasm) OR the **go_*
+runtime-corruption** (D-331(A)-next; non-deterministic ⇒ likely the same regalloc/spill-class as D-330,
+may share a fix). Both are bundle-mode multi-cycle disasm hunts. D-331(B) go_regex = HARD D-289 large-
+frame (>32760 spill offsets), lowest priority. (A1 Zig + A2 embenchen + A3 wasmer-oracle + runtime-bump
++ tool-currency-3host + B1 jit-diff-lane DONE; D-331 primary `10d7d2b2` + (A) `45ff0b94` FIXED.)
 
 ## State (tag-ready baseline, all 3-host green)
 
@@ -100,9 +100,9 @@ disasm — hard regalloc.) (A1 Zig + A2 embenchen + A3 wasmer-oracle + runtime-b
   Rev 2026-06-14 floored `core_comp` too; `check_releasesafe_runners.sh` guards it).
 - **EH**: cross-instance exception-handling on JIT works on BOTH arches (arm64 `4f73d9ee`
   + x86_64 D-238/ADR-0185 `c534afca`). Interp + JIT EH spec corpus green.
-- **Debt**: 46 entries, **zero `now`**; all blocked-by are external (upstream
+- **Debt**: 47 entries, **zero `now`**; all blocked-by are external (upstream
   Zig / hosts) / future-phase (11/12/14) / user-gated, or `note`/`partial` long-tail.
-  D-283 (realworld-under-JIT) Phase-B anchor; D-330 (%s) + D-331 (go, primary FIXED) JIT-debt.
+  D-283 Phase-B anchor; D-330 (%s) + D-331 (go, primary + (A) FIXED, miscompile-next) + D-332 JIT-debt.
 - **Realworld corpus**: 50 fixtures (c/cpp/rust/tinygo/go), interp 50/50; JIT run-stage
   opt-in (`ZWASM_JIT_RUN=1`) — the Phase-B signal source. cljw fixtures retired.
 - **Tag**: `v2.0.0-alpha.3` tag-only (no Release → Latest stays v1.11.0), USER-ONLY.

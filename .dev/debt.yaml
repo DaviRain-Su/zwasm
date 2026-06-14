@@ -1028,22 +1028,24 @@ entries:
       (go_hello_wasi func[303]: 11151 instrs, >256 nested blocks) overflowed it. Made `block_stack` an
       allocator-backed slice that doubles on demand. Result: realworld JIT compile-pass **47/56 → 55/56**
       (8 of 9 go_* flip compile-op → compile-pass); `zig build test` green (no regression); boundary
-      fixture `test/edge_cases/p9/block/deep_control_nest_300` (300 blocks → i32:42). REMAINING (partial,
-      both SEPARATE smaller gaps surfaced once compile cleared): (A) **8 go_* `UnsupportedEntrySignature`**
-      — they now COMPILE but the JIT run-path can't invoke Go's `_start` (Go wasip1 entry ABI; the entry
-      runner rejects its signature). (B) **go_regex `SlotOverflow`** — a DIFFERENT fixed cap (vreg/slot
-      count) the giant go_regex func exceeds; same dynamic-vs-fixed pattern as the control stack, likely
-      a similar fix. DISCHARGE: (A) teach the JIT entry runner Go's `_start` sig; (B) dynamic slot table.
-      Then go_* RUN under `test-realworld-diff-jit`.
+      fixture `test/edge_cases/p9/block/deep_control_nest_300` (300 blocks → i32:42).
       ---
-      REMAINING-GAP LEADS (2026-06-15, after the primary fix): (A) **8 go_* UnsupportedEntrySignature** —
-      Go's `_start` (`_rt0_wasm_wasip1`) is `(func)` = VOID `()->()` (type 11), idx 1326, a DEFINED func
-      (16 imports). `runner.runWasiLenient` (runner.zig:466) HANDLES void at line 502 (`callVoidNoArgs`),
-      `resolveLenientEntryIdx` correctly returns the `_start` idx — yet `zwasm run --engine jit go_hello`
-      still returns UnsupportedEntrySignature. So the reject is a downstream ASYMMETRY (interp's
-      runWasmCaptured runs go_* fine; JIT's runWasiLenient does not) — likely a `compiled.func_sigs[idx]`
-      module-index-vs-defined-index mismatch OR a compile-incomplete-module interaction. Next: instrument
-      runWasiLenient to print which branch rejects for func idx 1326. Likely a SMALL runner fix → flips 8.
+      **(A) ENTRY-SIG HYPOTHESIS WAS A RED HERRING — REAL CAUSE FOUND + FIXED 2026-06-15**: the
+      `UnsupportedEntrySignature` for go_* did NOT come from `runWasiLenient`'s entry gate at all (a
+      debug print placed there never fired). Tracing UPSTREAM: it came from `setupRuntimeLinked`
+      (setup.zig) — a **fixed `table_size > 4096` reject** (`globals_count > 4096` shares the line). Go
+      wasip1 declares a ~5790-entry funcref table → tripped the cap; the interp (instantiate.zig allocs
+      `min` cells uncapped) ran go_* fine — the exact dynamic-vs-fixed pattern as the [256]Frame control
+      stack. FIX: removed the arbitrary cap (both buffers are allocator-backed below, no fixed-array
+      dependency). Boundary fixture `test/edge_cases/p10/large_table/over_4096` (5000-entry table → i32:42).
+      go_hello now COMPILES + INSTANTIATES + RUNS — prints correct stdout ("Hello from Go/WASI!").
+      **BUT this revealed the genuine deep gap**: go_* then **JIT-MISCOMPILE** — Go's runtime detects
+      internal corruption AFTER the correct output (NON-DETERMINISTIC across runs: `poll_oneoff` fatal /
+      `badmorestackg0` / `unlock of unlocked lock` / `switchToCrashStack0`). Non-determinism ⇒ a
+      memory-corruption miscompile (uninit reg/stack-class), D-330/D-283 class — NOT an entry-sig or
+      WASI-host gap (poll_oneoff is wired, jit_dispatch.zig:352, same impl as interp). DISCHARGE (A-next):
+      `debug_jit_auto` miscompile hunt on a go_* func under JIT (link D-330). The `--jit` lane (report-only)
+      now shows go_* run-and-corrupt (huge crash-dump output) instead of compile-skip — louder but truer.
       (B) **go_regex SlotOverflow** = the HARD D-289 large-frame class: `max_slots=4095` (regalloc_compute.zig:32,
       fixed `active_buf`/`free_buf` buffers) for SIMULTANEOUSLY-LIVE values, AND >4095 live ⇒ spill offsets
       blow the `>32760` imm limit (op_alu_int.zig:565 etc.). Needs BOTH a dynamic slot table AND large-frame
@@ -1070,6 +1072,29 @@ entries:
       D-283 (parent); src/engine/codegen/arm64/emit.zig (emit-setup >32760 checks 427/430/484-541;
       body else-arm 2148; per-op errdefer 869); src/engine/codegen/shared/compile.zig (compileOne stages);
       D-289 (large_frame offset class); test/realworld/wasm/go_*.wasm
+  - id: "D-332"
+    layer: "code"
+    status: "blocked-by"
+    description: |-
+      blocked-by: **no design decision yet on bounding EAGER initial table allocation by the sandbox
+      limit, cross-engine.** Surfaced removing D-331(A)'s arbitrary `table_size > 4096` cap in
+      setup.zig: both the JIT (`setupRuntimeLinked`) and the interp (`instantiate.zig` `alloc(Value,
+      entry.min)`) eagerly allocate a table's declared `min` cells with NO upper bound — only OOM
+      stops a pathological declared min (up to 2^32-1 → ~32 GB attempt). The runtime HAS a sandbox knob
+      `store_table_elements_max` (runtime.zig:396) but it is enforced ONLY at `table.grow` time
+      (table_ops.zig:104), NOT against the initial `min`. A module declaring `(table 4000000000 funcref)`
+      over-allocates before any grow. PRE-EXISTING (the old 4096 cap masked it on the JIT path only; the
+      interp always had the exposure). DISCHARGE: decide + apply ONE bound uniformly to both engines —
+      either consult `store_table_elements_max` against `min` at instantiation (reject over-cap as a
+      clean trap, not OOM), or a generous spec-aligned default ceiling. Must stay engine-symmetric (the
+      asymmetry is exactly the D-331(A) bug class). NICHE: needs an adversarial fixture, not a real
+      toolchain (Go's 5790 is fine).
+    first_raised: "2026-06-15"
+    last_reviewed: "2026-06-15"
+    refs: |-
+      src/engine/setup.zig (~L501 eager funcptrs/typeidxs alloc); src/runtime/instance/instantiate.zig
+      (~L1509 alloc(Value, entry.min)); src/runtime/runtime.zig:396 (store_table_elements_max);
+      src/instruction/wasm_2_0/table_ops.zig:104 (grow-time enforcement); D-331 (origin)
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.
