@@ -12,8 +12,13 @@
   tests); **Slice 2b** `05c66ab0` (`Context.is_code_addr` field + `dispatchThrow`
   predicate param + x86_64 `loadFrameLink` routing + `throw_trampoline` wires
   `eh_registry.isCodeAddr`; arm64 + unit tests unaffected via null fallback);
-  **Slice 3** `9fbb7881` (RBP-framed 40-byte thunk + 4 byte tests). All
-  cross-compiled (`-Dtarget=x86_64-linux-gnu`) + Mac-test-green (no regression).
+  **Slice 3** `9fbb7881` (RBP-framed 40-byte thunk + 4 byte tests).
+  **Regression FIX `808090f2`**: the ubuntu gate caught a SEGV — slice 2b's
+  predicate REPLACED the local CodeMap, breaking single-instance EH (unregistered
+  edge-runner thrower → `isCodeAddr` false for all → mis-walk → SEGV 0x1008).
+  Fixed by UNION'ing the local throwing-instance CodeMap (normalize_ctx) with the
+  global predicate (lesson `global-predicate-cannot-replace-local-codemap`). All
+  cross-compiled + Mac-test-green; the SEGV fix itself is ubuntu-verified (re-kick).
 - **NEXT — Slice 4**: in `spec_assert_runner_wasm_3_0.zig`, alongside the existing
   `eh_registry.register(&owned.rt)` (line ~760) + the 3 `unregister` sites
   (~517/526/698), register each instance's thunk_arena range via

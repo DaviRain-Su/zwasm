@@ -224,3 +224,46 @@ test "loadFrameSniffedPred x86_64: no code slot — escaped to host, standard de
 test "loadFrameSniffedPred x86_64: fp == 0 sentinel → null" {
     try testing.expectEqual(@as(?RawFrameLink, null), loadFrameSniffedPred(0, null, testIsCode5xxxx));
 }
+
+/// A predicate that NEVER claims an address — models the global eh_registry
+/// being EMPTY (a single, unregistered throwing instance, e.g. the edge-runner).
+fn testIsCodeNever(addr: usize) bool {
+    _ = addr;
+    return false;
+}
+
+test "loadFrameSniffedPred x86_64: local CodeMap resolves a single UNREGISTERED instance (regression for 808090f2 SEGV)" {
+    // The exact shape that SEGV'd: slice 2b's predicate REPLACED the local
+    // CodeMap, so a single throwing instance not in eh_registry (empty global
+    // predicate) could not disambiguate the R15-pushed layout → it mis-picked
+    // the standard slot, returned a garbage caller_fp, and the next walk step
+    // SEGV'd reading slots[1]. The fix UNIONs the local CodeMap (always present
+    // via normalize_ctx) with the global predicate. Here the global predicate
+    // is NEVER true, yet the saved RIP at [fp,16] lives in the local map, so the
+    // R15-pushed layout must still resolve. A revert to pure-predicate fails here
+    // BEFORE the x86_64 ubuntu integration run would.
+    const code_map_mod = @import("../shared/code_map.zig");
+    var entries = [_]code_map_mod.Entry{.{ .start_addr = 0x50000, .len = 0x100, .func_idx = 0 }};
+    const cm = code_map_mod.CodeMap{ .entries = &entries };
+    // R15-pushed frame: [fp,16]=saved RIP=0x50080 ∈ the LOCAL map (∉ the global).
+    var frame: [3]usize = .{ 0x7FFF_1111_0000, 0x7FFF_2222_0000, 0x50080 };
+    const fp: usize = @intFromPtr(&frame);
+    const link = loadFrameSniffedPred(fp, &cm, testIsCodeNever).?;
+    try testing.expectEqual(@as(usize, 0x7FFF_2222_0000), link.caller_fp); // [fp,8]
+    try testing.expectEqual(@as(usize, 0x50080), link.caller_rip); // [fp,16]
+}
+
+test "loadFrameSniffedPred x86_64: union prefers EITHER source — global-only still resolves" {
+    // Symmetric half: a frame whose saved RIP is in the GLOBAL predicate but NOT
+    // the local CodeMap (the cross-instance case — another instance's frame or a
+    // bridge thunk). The union must resolve it via the global predicate even with
+    // a non-null local map that does not contain the address.
+    const code_map_mod = @import("../shared/code_map.zig");
+    var entries = [_]code_map_mod.Entry{.{ .start_addr = 0x10000, .len = 0x100, .func_idx = 0 }};
+    const cm = code_map_mod.CodeMap{ .entries = &entries }; // does NOT cover 0x50xxx
+    var frame: [3]usize = .{ 0x7FFF_1111_0000, 0x7FFF_2222_0000, 0x50080 };
+    const fp: usize = @intFromPtr(&frame);
+    const link = loadFrameSniffedPred(fp, &cm, testIsCode5xxxx).?; // 0x50080 ∈ global
+    try testing.expectEqual(@as(usize, 0x7FFF_2222_0000), link.caller_fp);
+    try testing.expectEqual(@as(usize, 0x50080), link.caller_rip);
+}
