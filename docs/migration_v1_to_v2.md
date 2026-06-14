@@ -26,14 +26,14 @@ re-verify — see [Part 4](#part-4--verify-it-yourself).
 Most users can migrate now. **Check this list first** — if you depend on something
 in it, either stay on v1 for now, or use the noted alternative.
 
-| If you rely on…                                                      | Status in v2                                                                                                              | What to do                                                                 |
-|-----------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------|
-| **`.wat` (text format) loading**                                      | **Removed by design** — v2 only consumes binary `.wasm`                                                                  | Pre-assemble with `wasm-tools` / `wabt` (`wat2wasm`) and feed the `.wasm`  |
-| **fuel / timeout / cancellation / memory-limit via the C API or CLI** | **Shipped** (ADR-0179): C `zwasm_instance_*` setters in `zwasm.h`; CLI `--fuel`/`--timeout`/`--max-memory` (both engines) | Migrate to the instance-level setters (v1 was config-level)                |
-| **WASI directory preopen via the C API**                              | **Deferred** — `wasi.h` ships args/env/inherit-stdio only                                                                | Use the CLI `--dir` or the Zig API (both support preopen); else stay on v1 |
-| **Custom host allocator via the C API**                               | **Removed** (standard wasm-c-api has no allocator hook)                                                                   | No direct replacement; raise an issue if you need it                       |
-| **C-API linear-memory copy helpers** (`..._memory_read/write`)        | **Removed** — reach memory via `wasm_memory_data` / `wasm_memory_data_size`                                              | Copy through the raw `wasm_memory_data` pointer yourself                   |
-| **watchOS / 32-bit (ILP32) targets**                                  | **Deferred**                                                                                                              | Stay on v1                                                                 |
+| If you rely on…                                                      | Status in v2                                                                                                              | What to do                                                                |
+|-----------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------|
+| **`.wat` (text format) loading**                                      | **Removed by design** — v2 only consumes binary `.wasm`                                                                  | Pre-assemble with `wasm-tools` / `wabt` (`wat2wasm`) and feed the `.wasm` |
+| **fuel / timeout / cancellation / memory-limit via the C API or CLI** | **Shipped** (ADR-0179): C `zwasm_instance_*` setters in `zwasm.h`; CLI `--fuel`/`--timeout`/`--max-memory` (both engines) | Migrate to the instance-level setters (v1 was config-level)               |
+| **WASI directory preopen via the C API**                              | **Shipped** (ADR-0184) — `wasi.h` has `zwasm_wasi_config_preopen_dir` + `inherit_env` (plus args/envs/inherit-stdio)     | Use the C API directly, or the CLI `--dir` / the Zig facade               |
+| **Custom host allocator via the C API**                               | **Removed** (standard wasm-c-api has no allocator hook)                                                                   | No direct replacement; raise an issue if you need it                      |
+| **C-API linear-memory copy helpers** (`..._memory_read/write`)        | **Removed** — reach memory via `wasm_memory_data` / `wasm_memory_data_size`                                              | Copy through the raw `wasm_memory_data` pointer yourself                  |
+| **watchOS / 32-bit (ILP32) targets**                                  | **Deferred**                                                                                                              | Stay on v1                                                                |
 
 Everything else — running `.wasm`, WASI 0.1, the embedding lifecycle, full Wasm
 3.0 — is available. Pick your surface below and port.
@@ -85,21 +85,21 @@ wasm_func_call(func, &args, &results);
 
 **Symbol map:**
 
-| v1 (`zwasm.h`)                                              | v2 (wasm-c-api + `wasi.h`)                                                                                                        |
-|-------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
-| `zwasm_module_t` / `_config_t` / `_imports_t`               | `wasm_engine_t` / `wasm_store_t` / `wasm_module_t` / `wasm_instance_t` / `wasm_func_t` …                                         |
-| `zwasm_module_new[_wasi][_configured]`, `_with_imports`     | `wasm_module_new` → `wasm_instance_new` (imports via `wasm_extern_vec_t`)                                                        |
-| `zwasm_module_invoke(uint64_t* args, results)`              | `wasm_func_call(func, wasm_val_vec_t args, results)`                                                                              |
-| `zwasm_module_validate`                                     | `wasm_module_validate`                                                                                                            |
-| `zwasm_module_export_{count,name,param_count,result_count}` | `wasm_module_exports` → `wasm_exporttype_vec_t` / `wasm_functype_*`                                                              |
-| `zwasm_module_memory_{data,size,read,write}`                | `wasm_memory_data` / `wasm_memory_data_size` (no copy-read/write helpers)                                                         |
-| `zwasm_last_error_message` (thread-local)                   | `wasm_trap_t` from the call + `wasm_trap_message`                                                                                 |
-| host imports via `zwasm_import_{new,add_fn}`                | `wasm_func_new` + `wasm_extern_vec_t` passed to `wasm_instance_new`                                                               |
-| `zwasm_wasi_config_{set_argv,set_env}`                      | `wasi.h`: `zwasm_wasi_config_set_args` / `_set_envs`                                                                              |
-| `zwasm_wasi_config_{preopen_dir,preopen_fd,set_stdio_fd}`   | **no equivalent** — `wasi.h` has `inherit_stdio` only (preopen deferred)                                                         |
-| `zwasm_config_set_{fuel,timeout,max_memory,…}`             | `zwasm.h` instance-level: `zwasm_instance_set_fuel` / `_set_memory_pages_limit` / `_interrupt` (timeout = host timer + interrupt) |
-| `zwasm_config_set_allocator`                                | **no equivalent**                                                                                                                 |
-| `zwasm_module_cancel`                                       | `zwasm.h`: `zwasm_instance_interrupt` (+ `_clear_interrupt`)                                                                      |
+| v1 (`zwasm.h`)                                              | v2 (wasm-c-api + `wasi.h`)                                                                                                             |
+|-------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------|
+| `zwasm_module_t` / `_config_t` / `_imports_t`               | `wasm_engine_t` / `wasm_store_t` / `wasm_module_t` / `wasm_instance_t` / `wasm_func_t` …                                              |
+| `zwasm_module_new[_wasi][_configured]`, `_with_imports`     | `wasm_module_new` → `wasm_instance_new` (imports via `wasm_extern_vec_t`)                                                             |
+| `zwasm_module_invoke(uint64_t* args, results)`              | `wasm_func_call(func, wasm_val_vec_t args, results)`                                                                                   |
+| `zwasm_module_validate`                                     | `wasm_module_validate`                                                                                                                 |
+| `zwasm_module_export_{count,name,param_count,result_count}` | `wasm_module_exports` → `wasm_exporttype_vec_t` / `wasm_functype_*`                                                                   |
+| `zwasm_module_memory_{data,size,read,write}`                | `wasm_memory_data` / `wasm_memory_data_size` (no copy-read/write helpers)                                                              |
+| `zwasm_last_error_message` (thread-local)                   | `wasm_trap_t` from the call + `wasm_trap_message`                                                                                      |
+| host imports via `zwasm_import_{new,add_fn}`                | `wasm_func_new` + `wasm_extern_vec_t` passed to `wasm_instance_new`                                                                    |
+| `zwasm_wasi_config_{set_argv,set_env}`                      | `wasi.h`: `zwasm_wasi_config_set_args` / `_set_envs`                                                                                   |
+| `zwasm_wasi_config_{preopen_dir,preopen_fd,set_stdio_fd}`   | `wasi.h`: `zwasm_wasi_config_preopen_dir` + `inherit_env` (ADR-0184) + `inherit_stdio`; `preopen_fd`/`set_stdio_fd` have no equivalent |
+| `zwasm_config_set_{fuel,timeout,max_memory,…}`             | `zwasm.h` instance-level: `zwasm_instance_set_fuel` / `_set_memory_pages_limit` / `_interrupt` (timeout = host timer + interrupt)      |
+| `zwasm_config_set_allocator`                                | **no equivalent**                                                                                                                      |
+| `zwasm_module_cancel`                                       | `zwasm.h`: `zwasm_instance_interrupt` (+ `_clear_interrupt`)                                                                           |
 
 **WASI host setup** (`include/wasi.h`) — the full surface is:
 
@@ -107,7 +107,9 @@ wasm_func_call(func, &args, &results);
 zwasm_wasi_config_t* cfg = zwasm_wasi_config_new();
 zwasm_wasi_config_set_args(cfg, argc, argv);
 zwasm_wasi_config_set_envs(cfg, count, keys, vals);
+zwasm_wasi_config_inherit_env(cfg);              // snapshot host environ (ADR-0184)
 zwasm_wasi_config_inherit_stdio(cfg);
+zwasm_wasi_config_preopen_dir(cfg, ".", "/");    // preopen host dir → guest path (ADR-0184)
 zwasm_store_set_wasi(store, cfg);   // takes ownership of cfg
 ```
 
@@ -204,9 +206,10 @@ _ = inst.interruptRequested();
 ```
 
 For a wall-clock timeout, run a host timer thread that calls `inst.interrupt()`
-after the deadline. **These controls apply to the interpreter (the default
-engine).** Under `--engine jit` they are not yet enforced (see
-[§3.2](#32-behavioral--internal-differences)).
+after the deadline. The facade `Instance` produces interpreter-backed instances,
+so these setters drive the interpreter; the **CLI** `--engine jit` enforces
+`--fuel` / `--timeout` / `--max-memory` directly via the JIT's prologue +
+back-edge polls (D-314, ADR-0179).
 
 ---
 
@@ -224,7 +227,7 @@ engine).** Under `--engine jit` they are not yet enforced (see
 | WAT text-format loading                          | full `.wat` parser            | **removed by design** (delegated to `wasm-tools` / `wabt`)                                                           |
 | Custom host allocator (C API)                    | yes                           | **removed** (no wasm-c-api hook)                                                                                     |
 | C-API memory copy helpers                        | `..._memory_read/write`       | **removed** (use `wasm_memory_data`)                                                                                 |
-| C-API WASI directory preopen                     | yes                           | **deferred** (CLI `--dir` + Zig API cover it)                                                                        |
+| C-API WASI directory preopen                     | yes                           | **shipped** (ADR-0184: `zwasm_wasi_config_preopen_dir` + `inherit_env`)                                              |
 | Rich CLI verbs (`inspect`/`validate`/`features`) | yes                           | **removed** (lean CLI; use `wasm-tools` + programmatic validation)                                                   |
 
 The sandboxing controls (fuel/timeout/cancel/mem-cap) are **fully present on BOTH
@@ -250,8 +253,11 @@ Both ship **WASI 0.1 (preview1)**. In v2:
 
 - WASI runs on **all execution paths** — interpreter, `--engine jit`, and AOT
   `.cwasm` — with a deny-by-default capability model and `--dir` preopen at the CLI.
-- **WASI 0.2 / preview2** (Component Model) is **opt-in experimental** (`-Dcomponent`).
-- **C-API preopen** is deferred (CLI `--dir` and the Zig API cover preopen today).
+- **WASI 0.2 / preview2** (Component Model) is **default-ON** (ADR-0182;
+  `-Dcomponent=false` for a lean opt-out) — real `wasm32-wasip2` Rust/Go
+  components run e2e (corpus 158/0/0).
+- **C-API preopen** is **shipped** (ADR-0184: `zwasm_wasi_config_preopen_dir`
+  + `inherit_env`); the CLI `--dir` and Zig facade also cover it.
 - **Preopen confinement:** guest paths are escape-guarded (absolute and `..` are
   rejected), and a guest cannot plant an escaping symlink (`path_symlink` refuses a
   target that would leave the preopen root). Following a *pre-existing* on-disk
