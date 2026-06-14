@@ -782,7 +782,12 @@ entries:
     layer: "test"
     status: "note"
     description: |-
-      note (D-244 JIT-WASI retrospective follow-up): the realworld WASI corpus is NOT exercised end-to-end under
+      note (D-244 JIT-WASI retrospective follow-up): **PHASE-B ANCHOR of the 2026-06-14 real-world reproduction
+      agenda — see `.dev/realworld_reproduction_plan.md`.** Live signal (cljw-excluded, `ZWASM_JIT_RUN=1` on the
+      50-fixture corpus 2026-06-14): interp 55/55 but JIT 35 pass / **6 RUN-TRAP** (tinygo_{fib,hello,json,sort},
+      rust_file_io, c_sha256_hash — interp-passes ⇒ JIT miscompile/WASI-gap) / **9 COMPILE-OP** (all go_* —
+      UnsupportedOp ⇒ unimplemented JIT op). Triage+fix per the plan. — the realworld WASI corpus is NOT exercised
+      end-to-end under
       `--engine jit`. `test/realworld/run_runner_jit.zig` compiles the fixtures via JIT (46/55 compile-pass) but its
       RUN stage is OPT-IN (`ZWASM_JIT_RUN=1`, default-off) — so the new full-46 JIT WASI surface (D-244,
       `wasi/jit_dispatch.zig` + `cli/run.zig runWasmJit`) is verified by per-syscall unit tests + a handful of
