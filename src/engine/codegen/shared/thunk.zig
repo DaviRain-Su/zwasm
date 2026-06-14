@@ -190,7 +190,7 @@ const testing = std.testing;
 test "thunk_bytes: matches arch-specific constant" {
     switch (builtin.target.cpu.arch) {
         .aarch64 => try testing.expectEqual(@as(usize, 96), thunk_bytes),
-        .x86_64 => try testing.expectEqual(@as(usize, 27), thunk_bytes),
+        .x86_64 => try testing.expectEqual(@as(usize, 40), thunk_bytes), // D-238/ADR-0185 a: 27→40 (RBP frame-link)
         else => unreachable,
     }
 }
