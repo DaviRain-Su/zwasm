@@ -38,7 +38,23 @@ entries:
       compare (drop the per-shape ladder) (~150 LOC) + base.zig generic unpack
       (~80) + tuple tests. assert_trap-class discrimination (the note's other
       half) is SEPARATE + spec-permissive (any-trap-satisfies) → independent.
-      CW-V1 IMPACT = NONE (test-harness only; runtime multi-value is sound).
+      ** RE-SCOPE 2026-06-14c (ROOT CAUSE PINNED — the prior "multi-value runner"
+      framing was WRONG) **: the `wasm-3.0-assert` corpus is driven by
+      `spec_assert_runner_wasm_3_0.zig`, which ALREADY does multi-value via
+      `inst.invokeMulti`. Re-vendoring eh `try_table` from wg-3.0 + running with
+      `ZWASM_SPEC_DETAIL=1` shows the 5 failures are `FAILsetup` (not value
+      mismatches) for the functions `catch / catch_ref1 / catch_ref2 /
+      catch_all_ref1 / catch_all_ref2` — i.e. a SETUP `inst.invoke` errors
+      (jit_setup_failed @1378). ACTUAL GAP = **JIT codegen for `try_table`
+      `catch_ref` / `catch_all_ref`** (the Wasm 3.0 EH catch clauses that bind an
+      `exnref` result; 37 uses in wg-3.0 try_table.wast). A specific EH-codegen
+      feature, NOT multi-value, NOT test-harness. This is the real blocker to full
+      wg-3.0 for the eh proposal — clearly beta/rc work. DISCHARGE (re-pointed):
+      implement catch_ref/catch_all_ref in the JIT try_table EH codegen (both
+      arches) → re-vendor eh (w/ wasm_3_0_manifest hardcoded-test updates) → pass.
+      (The non_simd ladder / multi-value-runner items above are a SEPARATE, lower
+      concern — the corpus runner already handles scalar multi-value.)
+      CW-V1 IMPACT = NONE (Wasm 3.0 EH catch_ref; cw doesn't depend on it).
     first_raised: "2026-06-14"
     last_reviewed: "2026-06-14"
     refs: |-
