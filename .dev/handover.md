@@ -18,11 +18,17 @@ drift is ENTIRELY multi-value-result → DEFERRED. So the 3.0 corpus is now
 **current for wg-3.0 EXCEPT the multi-value asserts**, blocked on **D-327** (the
 spec-assert RUNNER handles single-scalar/void + a few 2-tuple shapes, not generic
 N-tuple multi-value; a TEST-HARNESS gap — runtime multi-value is sound).
-DECISION surfaced to user 2026-06-14 (AWAITING pick before the outward-facing
-tag): (A) implement D-327 (N-tuple multi-value runner) → full wg-3.0; multi-cycle.
-(B) tag alpha.3 now (3.0 corpus 3-host green, current-except-D-327) + D-327
-tracked for beta/rc. Recommended B for an alpha. If silent next cycle: start
-D-327 Phase-I investigation (scope A's cost) as autonomous option-A prep.
+D-327 SCOPED `bd764663` (subagent): SMALL-MEDIUM (~250-400 LOC), NOT large — the
+ENGINE already has `JitInstance.invokeMulti`→`[]TypedResult` (runner.zig:853);
+only the test-runner result-check (`dispatchMultiResult` non_simd:694, 3 hardcoded
+shapes) lags. FIX = switch handle_assert_return to invokeMulti + generic tuple
+compare. So option A is feasible in a few cycles → genuine full wg-3.0.
+DECISION (surfaced; tag is user-only/outward-facing): (A) implement D-327 →
+full wg-3.0; now bounded. (B) tag alpha.3 now (current-except-D-327). Given A is
+bounded + aligns with 全合格, NEXT cycle: START D-327 impl (TDD — red: a
+multi-value assert_return the runner can't check; green: invokeMulti refactor) →
+then re-vendor the deferred eh/gc-extern asserts → surface the tag for user go.
+User may still pick B (tag now) — honour if they say so.
 
 ## Current state
 
