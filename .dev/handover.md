@@ -53,28 +53,28 @@ fixtures, which stay Phase-11/D-026). The find: modern path Just Works — zwasm
 byte-identical to wasmtime under its existing WASI host, no shim. realworld_run 56/56, diff
 56/56. windows gate green on the new wasmtime 45 toolchain (recorded 3bc17f04).
 
-**Phase B / B1 = D-283 — TRIAGE DONE `ffc0fc7d`, now implementing.** The "12 RUN-TRAP" were
-NOT JIT miscompiles: `run_runner_jit` runs `_start` via `runVoidExport`(wasi_host=NULL) so any
-WASI call mid-run traps. CLI `zwasm run --engine jit` (WASI-aware) runs emcc_primes+tinygo_sort
-correctly. Fix = add a WASI-aware `--jit` lane to `diff_runner.zig`. The 9 `go_*` COMPILE-OP
-(UnsupportedOp) are separate, genuine op-gaps (next bundle).
+**Phase B / B1 = D-283 — JIT-DIFF LANE LANDED `219dbd17`.** `zig build test-realworld-diff-jit`
+(WASI-aware `runWasmJitCaptured` + byte-diff vs wasmtime). Real signal replacing the false
+12-trap framing: **`diff_runner [jit]: 45/56 matched, 2 mismatched, 9 skipped`**. The truth: 45
+JIT-correct, 2 genuine miscompiles, 9 `go_*` compile-gaps. B1 bundle CLOSED (lane = the deliverable).
 
 ## Active bundle
 
-- **Bundle-ID**: B1-D283-jit-diff-lane
-- **Cycles-remaining**: ~2
-- **Continuity-memo**: run-traps = null-WASI harness artifacts (lesson
-  `jit-realworld-runtraps-are-null-wasi-harness-artifacts`). Implement `--jit` lane in
-  `test/realworld/diff_runner.zig` mirroring the landed `--aot`/`--wasmer` lanes: run each
-  fixture via the WASI-aware JIT path (`cli_run.runWasmJit*` — needs a stdout-CAPTURING variant;
-  check if `runWasmJitCaptured` exists, else add one) + byte-diff vs wasmtime. Add
-  `test-realworld-diff-jit` build step. Report-only first, then gate once clean.
-- **Exit-condition**: `zig build test-realworld-diff-jit` runs the corpus under `--engine jit`,
-  byte-diffs vs wasmtime, and the prior 12 false-traps resolve to MATCH (real JIT-correctness
-  signal); summary line prints `diff_runner [jit]: N/M agree`.
+- **Bundle-ID**: B2-D283-jit-miscompiles
+- **Cycles-remaining**: ~3
+- **Continuity-memo**: 2 genuine JIT miscompiles found by the `--jit` lane (interp byte-matches
+  wasmtime, JIT emits SHORT/wrong output): **`c_sha256_hash`** (wasmtime 107B / jit 91B) +
+  **`emcc_fasta`** (154B / jit 87B). Root-cause via `debug_jit_auto` skill. Repro:
+  `zig build && ./zig-out/bin/zwasm run --engine jit test/realworld/wasm/c_sha256_hash.wasm`
+  (compare vs `--engine interp` / wasmtime). c_sha256_hash = pure integer (u32 rot/xor/add);
+  emcc_fasta = f64 LCG + weighted select — likely DIFFERENT root causes. Separately, the 9 `go_*`
+  UnsupportedOp compile-gaps are a debt-tracked op-implementation backlog (per-op, predicate clear).
+- **Exit-condition**: both `c_sha256_hash` + `emcc_fasta` flip to MATCH in `test-realworld-diff-jit`
+  (jit mismatched → 0); each fix carries a boundary fixture + a lesson on the miscompiled op/pattern.
 
-**First action on resume**: implement the `--jit` lane (bundle above). (A1 Zig + A2 embenchen +
-A3 wasmer-oracle + runtime-bump + tool-currency-3host all DONE+VALIDATED.)
+**First action on resume**: B2 — repro `c_sha256_hash` under `--engine jit` vs interp, diff the
+output to localize the miscompiled value, then `debug_jit_auto`. (A1 Zig + A2 embenchen + A3
+wasmer-oracle + runtime-bump + tool-currency-3host + B1 jit-diff-lane all DONE.)
 
 ## State (tag-ready baseline, all 3-host green)
 

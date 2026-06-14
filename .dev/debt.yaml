@@ -799,7 +799,15 @@ entries:
       lacks a WASI host. DISCHARGE (per this row's own text): add a **`--jit` lane to `diff_runner.zig`** (mirror the
       landed `--aot`/`--wasmer` lanes) that runs each fixture via the WASI-aware JIT path + byte-diffs stdout vs
       wasmtime — the real JIT-correctness net. The 9 COMPILE-OP (go_* UnsupportedOp) remain genuine unimplemented-op
-      gaps (separate, real). — the realworld WASI corpus is NOT exercised
+      gaps (separate, real).
+      ---
+      **LANE LANDED 2026-06-15 `219dbd17`** (`zig build test-realworld-diff-jit`; `runWasmJitCaptured`). REAL signal
+      replacing the false 12-trap framing: **`diff_runner [jit]: 45/56 matched vs wasmtime, 2 mismatched, 9 skipped`**.
+      So the true remaining JIT work is precise: (A) **2 genuine JIT miscompiles** — `c_sha256_hash` (wasmtime 107B /
+      jit 91B) + `emcc_fasta` (154B / 87B); interp byte-matches wasmtime, JIT emits SHORT/wrong output ⇒ a real
+      codegen bug (next: root-cause via debug_jit_auto — bundle B2). (B) **9 `go_*` UnsupportedOp** compile-gaps
+      (unimplemented JIT op at a specific func) — discharge predicate clear, file/fix per-op. Lane stays REPORT-ONLY
+      until (A)+(B) clear, then gates. — the realworld WASI corpus is NOT exercised
       end-to-end under
       `--engine jit`. `test/realworld/run_runner_jit.zig` compiles the fixtures via JIT (46/55 compile-pass) but its
       RUN stage is OPT-IN (`ZWASM_JIT_RUN=1`, default-off) — so the new full-46 JIT WASI surface (D-244,
