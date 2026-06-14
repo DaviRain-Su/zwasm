@@ -80,10 +80,31 @@ pub fn runWasmJit(
     env_vals: []const []const u8,
     limits: Limits,
 ) !u8 {
+    return runWasmJitCaptured(alloc, io, bytes, invoke_name, argv, preopens, env_keys, env_vals, limits, null);
+}
+
+/// Like `runWasmJit` but routes guest stdout (`fd_write` on fd 1) into
+/// `stdout_capture` when non-null. `null` → real process stdout (the CLI
+/// path). The realworld `--jit` differential lane (D-283) passes a buffer to
+/// byte-diff `--engine jit` output vs wasmtime — the real JIT-correctness net,
+/// since the bare `run_runner_jit` run-stage executes with no WASI host.
+pub fn runWasmJitCaptured(
+    alloc: std.mem.Allocator,
+    io: std.Io,
+    bytes: []const u8,
+    invoke_name: ?[]const u8,
+    argv: []const []const u8,
+    preopens: []const PreopenDir,
+    env_keys: []const []const u8,
+    env_vals: []const []const u8,
+    limits: Limits,
+    stdout_capture: ?*std.ArrayList(u8),
+) !u8 {
     const runner = @import("../engine/runner.zig");
     var host = try wasi_host.Host.init(alloc);
     defer host.deinit();
     host.io = io;
+    if (stdout_capture) |b| host.stdout_buffer = b;
     // ADR-0179 #3a-4 — `--timeout` arms a timer on the io event loop that
     // raises the interrupt flag the JIT polls (prologue + back-edges).
     // ConcurrencyUnavailable surfaces loudly (a silent no-timeout run would

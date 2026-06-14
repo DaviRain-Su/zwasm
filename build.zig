@@ -910,6 +910,18 @@ pub fn build(b: *std.Build) void {
     const test_realworld_diff_wasmer_step = b.step("test-realworld-diff-wasmer", "Realworld differential incl. the opt-in wasmer second-oracle lane (§9.6 A3)");
     test_realworld_diff_wasmer_step.dependOn(&run_realworld_diff_wasmer.step);
 
+    // `zig build test-realworld-diff-jit` — D-283 the real JIT-correctness net.
+    // Same wasmtime differential PLUS a `--jit` lane that runs each fixture via
+    // the WASI-aware `--engine jit` path (runWasmJitCaptured) + byte-diffs stdout
+    // vs wasmtime. Replaces the misleading run_runner_jit run-stage (null WASI
+    // host → false traps). Report-only first; gates once clean.
+    const run_realworld_diff_jit = b.addRunArtifact(realworld_diff_runner_exe);
+    run_realworld_diff_jit.addArg(b.pathFromRoot("test/realworld/wasm"));
+    run_realworld_diff_jit.addArg("--jit");
+    run_realworld_diff_jit.has_side_effects = true;
+    const test_realworld_diff_jit_step = b.step("test-realworld-diff-jit", "Realworld differential incl. the opt-in WASI-aware JIT lane (D-283)");
+    test_realworld_diff_jit_step.dependOn(&run_realworld_diff_jit.step);
+
     // `zig build test-api-zig-facade` — Phase 10 / §10.J / J.6.
     // Walks the realworld corpus driving each fixture through the
     // native Zig facade (`Engine.compile` → `Module.instantiate`).

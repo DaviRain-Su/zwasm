@@ -82,13 +82,20 @@ pub fn main(init: std.process.Init) !void {
     //   --wasmer  wasmer as a 2nd reference oracle vs wasmtime (§9.6 A3). The
     //             value: a wasmtime/wasmer disagreement is the divergence a
     //             single-reference gate can't see.
+    //   --jit     run via the WASI-aware `--engine jit` path (`runWasmJitCaptured`)
+    //             + byte-diff vs wasmtime (D-283). The real JIT-correctness net —
+    //             the bare `run_runner_jit` run-stage executes with NO WASI host so
+    //             every fd_write/proc_exit "traps"; this lane measures actual output.
     var aot_lane = false;
     var wasmer_lane = false;
+    var jit_lane = false;
     while (arg_it.next()) |a| {
         if (std.mem.eql(u8, a, "--aot")) {
             aot_lane = true;
         } else if (std.mem.eql(u8, a, "--wasmer")) {
             wasmer_lane = true;
+        } else if (std.mem.eql(u8, a, "--jit")) {
+            jit_lane = true;
         }
     }
 
@@ -151,6 +158,12 @@ pub fn main(init: std.process.Init) !void {
     var wasmer_agree: u32 = 0;
     var wasmer_disagree: u32 = 0;
     var wasmer_skipped: u32 = 0;
+
+    // JIT lane (D-283, opt-in). Runs each fixture via the WASI-aware JIT path and
+    // byte-diffs stdout vs wasmtime — the real `--engine jit` correctness signal.
+    var jit_matched: u32 = 0;
+    var jit_mismatched: u32 = 0;
+    var jit_skipped: u32 = 0;
 
     var it = dir.iterate();
     while (try it.next(io)) |entry| {
@@ -268,6 +281,18 @@ pub fn main(init: std.process.Init) !void {
             try stdout.flush();
         }
 
+        // JIT lane (opt-in) — same placement rationale as the AOT/wasmer lanes:
+        // run BEFORE the v2-trap/empty continues so the JIT path is compared even
+        // where the interp v2 can't complete.
+        if (jit_lane) {
+            switch (try jitCompare(gpa, io, bytes, entry.name, &v2_argv, needs_preopen, wt_stdout, wt_exit, stdout)) {
+                .match => jit_matched += 1,
+                .mismatch => jit_mismatched += 1,
+                .skip => jit_skipped += 1,
+            }
+            try stdout.flush();
+        }
+
         if (v2_exit != 0 and wt_exit == 0) {
             try stdout.print("SKIP-V2-TRAP  {s} (v2 exit={d}, wasmtime exit=0 — v2 could not complete)\n", .{ entry.name, v2_exit });
             skipped_v2 += 1;
@@ -308,6 +333,12 @@ pub fn main(init: std.process.Init) !void {
         try stdout.print(
             "diff_runner [wasmer]: {d}/{d} agree-with-wasmtime, {d} REF-DISAGREE, {d} skipped — REPORT-ONLY\n",
             .{ wasmer_agree, total, wasmer_disagree, wasmer_skipped },
+        );
+    }
+    if (jit_lane) {
+        try stdout.print(
+            "diff_runner [jit]: {d}/{d} matched vs wasmtime, {d} mismatched, {d} skipped (JIT-unsupported / trap) — REPORT-ONLY\n",
+            .{ jit_matched, total, jit_mismatched, jit_skipped },
         );
     }
     // Flush the summary unconditionally: the green path (no mismatch, matched
@@ -462,6 +493,46 @@ fn wasmerCompare(
         .{ name, wt_stdout.len, wm_result.stdout.len, v2_side },
     );
     return .disagree;
+}
+
+/// Outcome of the JIT lane for one fixture — mirrors `AotOutcome`.
+const JitOutcome = enum { match, mismatch, skip };
+
+/// Run `bytes` through the WASI-aware JIT path (`cli_run.runWasmJitCaptured` =
+/// the real `--engine jit`, with a stdout-capture buffer) and byte-compare vs
+/// `wt_stdout`. This is the realworld JIT-correctness net (D-283): the bare
+/// `run_runner_jit` run-stage executes with NO WASI host, so every fixture
+/// hitting `fd_write`/`proc_exit` mid-run "traps" — a false signal. Skip
+/// semantics mirror the interp/AOT lanes: a JIT non-zero exit where wasmtime
+/// exited 0 = the JIT could not complete (skip, not an output regression).
+fn jitCompare(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    bytes: []const u8,
+    name: []const u8,
+    argv: []const []const u8,
+    needs_preopen: bool,
+    wt_stdout: []const u8,
+    wt_exit: u8,
+    out: anytype,
+) !JitOutcome {
+    var jit_stdout: std.ArrayList(u8) = .empty;
+    defer jit_stdout.deinit(gpa);
+    const preopens: []const cli_run.PreopenDir = if (needs_preopen)
+        &.{.{ .host_path = preopen_scratch, .guest_path = "." }}
+    else
+        &.{};
+    const jit_exit: u8 = cli_run.runWasmJitCaptured(gpa, io, bytes, null, argv, preopens, &.{}, &.{}, .{}, &jit_stdout) catch |err| {
+        try out.print("  SKIP-JIT-RUN  {s}: {s}\n", .{ name, @errorName(err) });
+        return .skip;
+    };
+    if (jit_exit != 0 and wt_exit == 0) {
+        try out.print("  SKIP-JIT-TRAP  {s} (jit exit={d}, wasmtime exit=0 — JIT could not complete)\n", .{ name, jit_exit });
+        return .skip;
+    }
+    if (std.mem.eql(u8, wt_stdout, jit_stdout.items)) return .match;
+    try out.print("  MISMATCH-JIT  {s} (wasmtime={d} bytes, jit={d} bytes)\n", .{ name, wt_stdout.len, jit_stdout.items.len });
+    return .mismatch;
 }
 
 /// Test whether `wasmtime` is reachable on PATH. Returns the
