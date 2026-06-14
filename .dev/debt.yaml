@@ -1021,16 +1021,28 @@ entries:
       what it's given), but the DIVERGENCE is its 3rd-entry CALLER. interp: caller=**func 8 `__overflow`**,
       buf=&'\n' len=1 → `\n` written. jit: caller=**func 6** (exit fflush), buf=0 len=0 (empty wbase
       flush) → `\n` dropped. ROOT: **func 8 `__overflow` is called 2× in interp but its write-path runs
-      only 1× under JIT** — on the 2nd call JIT wrongly takes the BUFFERED FAST-PATH (`*wpos++=c`) instead
-      of the write path. The branch = func 8 ZIR pc19-31: `wpos==wend` (pc26 br_if) OR `lbf==10` (pc31
-      br_if) → write; under JIT NEITHER br_if fires on call 2 → fast-path → `\n` stuck in buffer →
-      flushed empty at exit. Inputs = loads `i32.load [1992]`(wpos)/`[1996]`(wend)/`[2056]`(lbf) + their
-      `i32.eq`. **ARCH-INDEPENDENT** (arm64 == x86_64-macos) ⇒ SHARED codegen/IR, not arch emit (rules out
-      fp-select; strict-`<` regalloc didn't fix — func 8/11 slots non-overlapping). Could be a GENERAL
-      branch-cond or FILE-struct-STORE miscompile (the `\n` is just the symptom) — elevates priority if so.
-      DISCHARGE (next probe, subagent recipe): ring-log func-8's three loads ([1992]/[1996]/[2056]) + the
-      two br_if outcomes per func-8 entry, interp vs jit → FIRST divergence = the miscompiled op; suspect
-      an earlier miscompiled STORE to f->wpos/wbase (op_memory.zig) or func-8 branch-cond regalloc pc19-31.
+      of the write path... — **THIS func-8 ROOT WAS WRONG** (2nd subagent 2026-06-15, runtime ring-probes):
+      func 8 is invoked only 1× under JIT (2× interp); the func-8/caller framing was a red herring.
+      **CORRECTED ROOT = func 4 (`_start`), a BLOCK-RESULT MERGE at `end`@676** (NOT a store/branch/compare):
+      the final `printf("verify: OK\n")` inlines two `putchar('\n')` blocks; the 2nd (the final `\n`) is
+      gated by `pc678 i32.ne; pc679 br_if 1` with operands `i32.ne(lhs = block@676 result, rhs = local.get 0)`.
+      interp: `i32.ne(10,10)`→false→not taken→2nd putchar runs→`\n`. JIT: `i32.ne(0,10)`→**true**→taken→`\n`
+      SKIPPED (106 vs 107). The lhs is WRONG: block@676's single result should be `local.get 2` (=10, the
+      `call 10`/fwrite byte count, verified correct), but pc678's i32.ne reads **vreg 477 (homed X22 / slot 7)
+      holding 0** — a STALE/wrong vreg (NOT the local.get outputs 483/514/519; possibly left from the dropped
+      `i32.eq`@672 result vreg 522). So the operand-stack/vreg threading at `end`@676 MIS-BINDS the block
+      result (the block-result vreg X22/slot7 left holding 0 instead of MOV'd from the result operand).
+      Concrete: interp@pc678 `(wn=10,wm=10)` vs JIT `(wn=0,wm=10)`; CMP-EMIT `lhs_vreg=477, slot=.reg=7(X22)`.
+      Homed-local X9 preserved across `call 10` (pre=10/post=10) → NOT the D-291 spill/reload. SAME FAMILY as
+      lesson `jit-eh-landing-pad-emit-gotchas` (block/catch result vregs must be minted liveness+emit LOCKSTEP).
+      FIX SITE: `src/engine/codegen/arm64/emit.zig` `.end` handler (~1642) → `op_control.emitEndIntra` +
+      `src/engine/codegen/arm64/op_control_merge_mov.zig`. Two candidates (NEXT PROBE to disambiguate): (a)
+      regalloc slot-collision — block-result vreg + an unrelated vreg share X22/slot7 (run the allocation
+      overlap check on func 4); (b) emitEndIntra fails to MOV the result operand into the block-result vreg.
+      ARCH-INDEPENDENT (arm64 == x86_64-Rosetta) ⇒ the block-result-merge logic (which vreg holds the result)
+      is shared even if the MOV emit is per-arch. CAUTION: two subagents mis-rooted (func-11→func-8→func-4);
+      verify the func-4 pc678 divergence reproduces before fixing. Niche-in-effect (one `\n`); possibly
+      GENERAL-in-mechanism (block-result mis-bind) — but spec suite 100% green ⇒ a specific pattern.
     first_raised: "2026-06-15"
     last_reviewed: "2026-06-15"
     refs: |-

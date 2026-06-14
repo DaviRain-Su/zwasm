@@ -49,6 +49,13 @@ wasmtime 45 (verify next Step 0.7). D-249 hyperfine-absent premise dissolved.
 `--jit` diff-lane `219dbd17` (realworld_run 56/56); D-331(A) table-cap red-herring fix `45ff0b94`
 (+ D-332). All detail in those commits + the cited lessons; not repeated here.
 
+**Dogfooding milestone (2026-06-15)**: the `test-realworld-diff-jit` corpus is now **1 mismatch** — ONLY
+`c_sha256_hash` (107 vs 106). emcc_fasta flipped to byte-exact MATCH; this session's D-330 coalescing +
+fp-select + D-289 fixes cleaned the rest. The last `\n` residual = a **func-4 block-result MERGE mis-bind**
+(corrected from the func-8 red herring): `i32.ne` at pc678 reads a stale vreg (X22/slot7 = 0) instead of the
+block@676 result (=10) → skips the final putchar. Localized to emit.zig `.end`/op_control_merge_mov (a
+regalloc slot-collision OR missing merge-MOV; EH-lockstep family). NEXT: pin (a)-vs-(b) + fix → clean corpus.
+
 **Phase-B status**: D-283 `--jit` lane 3-host green (REPORT-ONLY). **D-330 coalescing miscompile FIXED**
 `6790c204` + x86_64 fp-select `cccb2313` — 4-env green. Remaining JIT-correctness debt, each its own
 investigation, ALL parked/blocked with recipes recorded: **D-330 residual** (c_sha256 `\n` → func-8
