@@ -262,8 +262,12 @@ pub fn main(init: std.process.Init) !void {
             "diff_runner [aot]: {d}/{d} matched, {d} mismatched, {d} skipped (AOT-unsupported / trap) — REPORT-ONLY\n",
             .{ aot_matched, total, aot_mismatched, aot_skipped },
         );
-        try stdout.flush();
     }
+    // Flush the summary unconditionally: the green path (no mismatch, matched
+    // >= 30) returns at the bottom WITHOUT hitting any of the branch-local
+    // flushes below, so the summary line would otherwise be lost in the
+    // buffered writer (observed: "diff_runner: 53/" truncation).
+    try stdout.flush();
 
     if (mismatched != 0) std.process.exit(1);
     // wasmtime resolved via `which` but every spawn failed (e.g. on
