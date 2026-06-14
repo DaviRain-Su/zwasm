@@ -24,16 +24,16 @@ NOT an alpha blocker. Cycle-4a infra kept (`8478d853`).
   multi-value catch result vregs must be made distinct in the IR (lower.zig /
   catch-result allocation) — multi-cycle. BOTH D-327 + D-328 are CONFORMANCE-
   NEUTRAL (no spec test). Standalone D-328 RED (no exnref): 2-param catch_ → 10 vs
-  JIT 20. USER CHOSE "do the IR fix now". DESIGN COMPLETE (all unknowns resolved) →
-  `private/notes/d328-catch-result-vregs-plan.md` "COMPLETE DESIGN". block_idx is in
-  the `.end` op payload (no Frame plumbing). The lowerer resolves each catch's
-  TARGET block (block_stack[len-1-label_idx]) + records (block_idx, result_arity)
-  in a new `ZirFunc.eh_catch_targets`; both liveness `.end` + emit `.end` (×2 arch)
-  mint result_arity vregs ONLY on dead fall-through (stack==entry_depth) in
-  lockstep. **NEXT = IMPLEMENT (no more surveying)**: 4 files (zir+lower, liveness,
-  arm64/x86_64 emit) + re-add 2-param catch_ test → JIT 10; 3 single-param catch_ +
-  normal multi-value block tests STAY green. THEN re-apply D-327 reify. Cycle-4a
-  infra `8478d853` kept.
+  JIT 20→10. **D-328 DONE on Mac `00cd1fb4`** (full `zig build test` 2855/0, lint
+  clean, x86_64 cross-compiles; pending 3-host). Impl: BlockInfo gains result_arity
+  + is_catch_target; lower.zig resolves each catch's TARGET block (block_stack
+  [len-2-label_idx] — try_table is transparent for its OWN catch labels, so label 0
+  = enclosing block) + marks it; liveness + arm64/x86_64 emit TRUNCATE dead body
+  vregs to entry then MINT result_arity distinct vregs at the target `.end` IN
+  LOCKSTEP. **NEXT = re-apply D-327 reify** (`private/notes/d327-catch_ref-plan.md`)
+  — now the exnref result vreg is distinct so reify won't corrupt the i32. Verify
+  D-328 3-host FIRST (delicate regalloc; D-327 stacks on it). Cycle-4a infra
+  `8478d853` kept.
 - **Exit-condition**: D-328 fixed (distinct vregs) → JIT round-trip + catch_ref_88
   + catch_all_ref_77 all return their values both arches; full `zig build test` +
   lint + 3-host green.
