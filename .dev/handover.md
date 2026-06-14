@@ -3,13 +3,25 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
+## Active bundle
+
+- **Bundle-ID**: D-330-jit-printf-disasm (JIT `%s`/strnlen miscompile hunt)
+- **Cycles-remaining**: ~2-3
+- **Continuity-memo**: ARCH-INDEPENDENT (repros on arm64 AND x86_64-Rosetta, interp
+  correct both) ⇒ bug is in **shared** codegen (lowering/liveness/regalloc), NOT arch
+  emit. Culprit = repro2.wasm **func 12** (vfprintf, 1412 wat lines). Mechanism:
+  inlined `strnlen(s, SIZE_MAX)` SWAR returns too-large under pressure → musl
+  `if(p<0 && *z) goto overflow` → vfprintf returns -1 → empty %s + dropped `\n`.
+  Full trail: `private/spikes/jit-vararg/README.md` cycle-3. NEXT: dump shared
+  regalloc/liveness slot assignment for func 12 (regalloc_compute.zig); find the
+  pressure-triggered spill/slot collision on the strnlen loop's running-ptr / word / mask.
+- **Exit-condition**: `zwasm run --engine jit repro2.wasm` prints `1:hi`/`2:lit`
+  (strnlen returns correct length) + boundary fixture + lesson; D-330 deletable.
+
 ## ACTIVE AGENDA (user-directed 2026-06-14) — real-world toolchain/bench reproduction
 
-**Just closed**: **D-238 (x86_64 cross-instance EH on JIT parity) CLOSED** `c534afca`
-(ADR-0185 Implemented; functional proof = `ZWASM_SPEC_ENGINE=jit` x86_64
-exception-handling `34/0/0`; 3-host test-all green). **cljw guest-wasm RETIRED**
-`02ef14b0` (user decision — cw won't emit wasm; cljw tests zwasm consumer-side).
 Project is feature-complete + 3-host green + tag-ready (**tag = USER-ONLY, ADR-0156**).
+D-238 x86_64 EH `c534afca`; cljw guest-wasm retired `02ef14b0` (cljw tests consumer-side).
 
 **The agenda — drive via `/continue`. Authoritative plan (ordering + 2026 language
 scope + the live JIT-trap inventory):**
@@ -17,24 +29,11 @@ scope + the live JIT-trap inventory):**
 supersedes ROADMAP §9 for these tasks. **User ordering: Phase A QUICK → Phase B
 SUSTAINED**; the user assists when a toolchain needs installing.
 
-- **Phase A — reproduction infra (QUICK; get it working)**:
-  - **A1 (Zig half DONE `5c044967`)**: `zig_{hello,fib,prime_sieve}` wasm32-wasi added;
-    interp 53/53, byte-diff 53/53 vs wasmtime, JIT-clean (+ fixed a diff_runner green-path
-    flush bug `6995bbd3`). **AssemblyScript + WasmGC (Kotlin/Wasm/Dart) → D-329** (need
-    `asc`/SDK provisioning + a call-export harness; AS dropped WASI).
-  - **A2 (autonomous, NEXT)**: **embenchen** (emcc in `.#gen`) — the classic Emscripten
-    bench; the find = the emscripten env-stub host-import gap (D-026/D-082).
-  - **A3 (DONE `897b54d7`)**: **3-way differential** — opt-in `--wasmer` second-oracle
-    lane (`zig build test-realworld-diff-wasmer`) vs wasmtime; REF-DISAGREE flags the
-    divergence a single-reference gate misses. argv[0] CLI convention normalized.
-    **Runtimes bumped to latest `074a885f`** (wasmtime 43→**45.0.0**, wasmer 5.0.4→**7.1.0**
-    via nixpkgs 06-10): re-validated — zwasm == wasmtime45 == wasmer7.1 on 53/53, **0
-    divergence** across a 2-major bump (lesson `reference-runtime-bump-divergence-capture`).
-  - **A4 (user-assisted)**: remote provisioning — **D-254** (native rust on ubuntu +
-    windows → 3-host rust differential; user chose (a)) + **D-249** (hyperfine on win).
-- **Phase B — deep JIT bug-hunt (SUSTAINED; settle in)**:
-  - **B1 = D-283 DONE** (`219dbd17` lane): the real JIT signal lives in `test-realworld-diff-jit`
-    (see Phase-B status below). Root-cause each remaining cluster, fix, add boundary fixtures. Multi-cycle.
+- **Phase A — reproduction infra: DONE.** A1 Zig fixtures (`5c044967`; AssemblyScript/WasmGC →
+  D-329) + A2 embenchen (`1aac480f`) + A3 `--wasmer` 2nd-oracle lane (`897b54d7`) + runtime bump
+  (wasmtime 45 / wasmer 7.1). A4 remote rust provisioning = D-254; hyperfine = D-249. Details in plan.
+- **Phase B — deep JIT bug-hunt (SUSTAINED).** B1 = D-283 `--jit` lane DONE (`219dbd17`); now working
+  the remaining miscompiles (active bundle D-330, see top + Phase-B status below). Multi-cycle.
 
 **Tool currency (user directive 2026-06-14) DONE+VERIFIED on ALL 3 hosts**: Mac+ubuntu via
 flake (wasmtime 45, wasmer 7.1, nixpkgs 06-10, rust/zig-overlay 06-14; **zig PINNED 0.16.0**;
@@ -80,15 +79,11 @@ class), D-330/D-283 class — NOT entry-sig or WASI-host (poll_oneoff is wired, 
 The `--jit` lane (report-only) now shows go_* run-and-corrupt (huge crash-dump) vs prior compile-skip.
 
 **Phase-B status**: D-283 `--jit` lane 3-host green (REPORT-ONLY). Remaining JIT-correctness debt, all
-HARD multi-cycle codegen miscompiles: **D-330** (2 `%s` regalloc-class) + **D-331(A)-next** (go_*
-runtime corruption) + **D-331(B)** go_regex SlotOverflow (= D-289 large-frame, max_slots=4095).
-
-**First action on resume**: a `debug_jit_auto` miscompile campaign — the most leveraged is **D-330**
-(2 `%s` reductions already isolated in private/spikes/jit-vararg; printf_core disasm) OR the **go_*
-runtime-corruption** (D-331(A)-next; non-deterministic ⇒ likely the same regalloc/spill-class as D-330,
-may share a fix). Both are bundle-mode multi-cycle disasm hunts. D-331(B) go_regex = HARD D-289 large-
-frame (>32760 spill offsets), lowest priority. (A1 Zig + A2 embenchen + A3 wasmer-oracle + runtime-bump
-+ tool-currency-3host + B1 jit-diff-lane DONE; D-331 primary `10d7d2b2` + (A) `45ff0b94` FIXED.)
+HARD multi-cycle codegen miscompiles → **active bundle = D-330** (`%s`, see top). Sibling: **D-331(A)-
+next** go_* runtime-corruption (non-deterministic; likely same regalloc/spill-class as D-330, may share
+the fix) + **D-331(B)** go_regex SlotOverflow (= D-289 large-frame, lowest priority). (A1 Zig + A2
+embenchen + A3 wasmer-oracle + runtime-bump + tool-currency-3host + B1 jit-diff-lane DONE; D-331 primary
+`10d7d2b2` + (A) `45ff0b94` FIXED.)
 
 ## State (tag-ready baseline, all 3-host green)
 
