@@ -35,16 +35,18 @@ preopen_dir+inherit_env; jit-sandbox "not yet enforced" → D-314 enforced; CM
 
 **AGENDA COMPLETE** (A1+A2+A3 done). **D-177 preopens SHIPPED `9bdf9401` + closed
 `94c40966`** (full facade WASI args/envs/preopens parity; docs synced `93e94821`).
-**Barrier-dissolution sweep EXHAUSTED** (closed the whole Phase-10/D-290/discharged
-cluster, 9 rows; scaffolding-coherence re-verified clean post-churn). **D-022 re-audited
-`c812d56b`→`note` 2026-06-14**: its "M3-a-2 unlocks `result[0] mismatch` localization +
-5 misc-runtime skips" claim was a CATEGORY ERROR (verified) — a value mismatch is not a
-trap (`wast_runtime_runner.zig:889` refs no trace), and the 5 skips fail at instantiation
-(emcc env-shim/externref, Phase-11/10), not on M3-a-2; M3-a-2 itself is tractable (D-245
-dissolved the calling-conv barrier) but a low-value trap-diagnosis nicety unlocking
-nothing → deferred, NOT built. **Lower-value completeness now EXHAUSTED** (D-253 (C)
-host_info DONE; D-022 corrected). NEXT = genuinely user-gated (§1.3 capabilities / tag /
-§13.4 prioritization) or blocked-external (upstream Zig / hosts). No auto-tag (ADR-0156).
+**2026-06-14 internal-`blocked-by` staleness sweep** (`0049036e`/`b36f15fc`/`ea359302`):
+the earlier "barrier sweep EXHAUSTED" was WRONG — internal-predicate rows had silently
+gone stale. Corrected 5: **D-022**→note (category error: trap-event ≠ value-mismatch
+localization; M3-a-2 unlocks nothing → not built); **D-202**→note + **ADR-0127 Closed**
+(PHASE C landed `add983e8`, assert_unlinkable 5→0; only a latent same-typespace #1
+residual, no fixture); **D-197**→note (validator-diag plumbing landed; per-cause
+attribution deferred-by-no-signal); **D-178 CLOSED** (host-side construction surface fully
+landed — C-API `wasm_{global,memory,table}_new` + facade `define{Global,Table,Memory}`).
+Verified GENUINE-blocked: D-026/D-082 (Phase-11 emcc/externref), D-238 (x86_64 EH-JIT
+cycle-3), D-020 (4/5 dbg threshold). NEXT: the 20 remaining blocked-by are external
+(upstream Zig: D-312/D-148/D-323/D-010) / future-phase / user-gated (§1.3 / tag / §13.4)
+— periodically re-verify given this sweep's find-rate; no auto-tag (ADR-0156).
 
 ## State (tag-ready baseline, all 3-host green)
 
@@ -53,7 +55,7 @@ host_info DONE; D-022 corrected). NEXT = genuinely user-gated (§1.3 capabilitie
 - **Surfaces**: C-API 293/293 (+preopen_dir/inherit_env, ADR-0184) · Zig-API
   complete (+`WasiConfig.{envs,preopens,io}` — full WASI parity) · lean CLI ·
   memory-safety sound · dogfooded into cw v1. Runners ReleaseSafe (ADR-0177).
-- **Debt**: 47 entries, **zero `now`**; rest blocked-by(external)/note long-tail.
+- **Debt**: 46 entries, **zero `now`**; 20 blocked-by(external/future/user-gated) + 24 note long-tail.
   2026-06-14 barrier-dissolution sweep (verified via `test-spec-wasm-3.0-assert`)
   closed D-196 (multi-memory 407/0) / D-195 / D-186 (return_call_ref both arches) /
   D-198 (iso-recursive, gc fail=0) / D-206 (cross-module return_call) + D-301/D-179
