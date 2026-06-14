@@ -76,7 +76,15 @@ pub fn loadFrameLink(fp: usize, ctx: ?*anyopaque) ?unwind.FrameLink {
             // else the callee→thunk transition (and any importer-instance
             // frame) mis-walks. Production sets `is_code_addr`; prefer it.
             if (adapter_ctx.is_code_addr) |pred| {
-                break :blk arch_frame_chain.loadFrameSniffedPred(fp, pred) orelse return null;
+                // Union the throwing instance's local CodeMap (normalize_ctx,
+                // always present in production even for a single unregistered
+                // instance) with the global predicate — see loadFrameSniffedPred.
+                const code_map_mod = @import("code_map.zig");
+                const local_cm: ?*const code_map_mod.CodeMap = if (adapter_ctx.normalize_ctx) |p|
+                    @ptrCast(@alignCast(p))
+                else
+                    null;
+                break :blk arch_frame_chain.loadFrameSniffedPred(fp, local_cm, pred) orelse return null;
             }
             // Legacy single-CodeMap sniff (the production path's
             // `code_map.adapterContextFor` sets `normalize_ctx` to the CodeMap

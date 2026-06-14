@@ -104,12 +104,37 @@ pub fn loadFrameSniffed(
 /// first (most intermediate frames don't push R15), then the R15-pushed slot
 /// (`[fp,16]`); neither → the standard default (correct for a standard frame,
 /// e.g. the RBP-framed bridge thunk itself).
-pub fn loadFrameSniffedPred(fp: usize, is_code: *const fn (usize) bool) ?RawFrameLink {
+pub fn loadFrameSniffedPred(
+    fp: usize,
+    local_code_map: ?*const @import("../shared/code_map.zig").CodeMap,
+    is_code: *const fn (usize) bool,
+) ?RawFrameLink {
     if (fp == 0) return null;
     const slots: [*]const usize = @ptrFromInt(fp);
-    if (is_code(slots[1])) return .{ .caller_fp = slots[0], .caller_rip = slots[1] };
-    if (is_code(slots[2])) return .{ .caller_fp = slots[1], .caller_rip = slots[2] };
+    // Code membership = the THROWING instance's own CodeMap (always available
+    // via the adapter's normalize_ctx, even for a single instance NOT
+    // registered in eh_registry — e.g. the edge runner) UNION the global
+    // predicate (other registered instances + bridge-thunk arenas). The
+    // union is load-bearing: a bare global predicate returns false for an
+    // unregistered single instance, so the sniff would mis-resolve the
+    // layout and walk into a garbage caller_fp (D-238 regression, caught on
+    // the x86_64 ubuntu gate — the single-CodeMap sniff this replaced always
+    // saw the thrower's CodeMap).
+    if (isCodeUnion(local_code_map, is_code, slots[1])) return .{ .caller_fp = slots[0], .caller_rip = slots[1] };
+    if (isCodeUnion(local_code_map, is_code, slots[2])) return .{ .caller_fp = slots[1], .caller_rip = slots[2] };
     return .{ .caller_fp = slots[0], .caller_rip = slots[1] };
+}
+
+inline fn isCodeUnion(
+    local_code_map: ?*const @import("../shared/code_map.zig").CodeMap,
+    is_code: *const fn (usize) bool,
+    addr: usize,
+) bool {
+    if (local_code_map) |cm| switch (cm.lookup(addr)) {
+        .inside => return true,
+        .outside => {},
+    };
+    return is_code(addr);
 }
 
 // ---------------------------------------------------------------------
@@ -167,7 +192,7 @@ test "loadFrameSniffedPred x86_64: standard layout — saved RIP at [fp,8]" {
     // (code). The bridge thunk itself is this shape (ADR-0185 a).
     var frame: [3]usize = .{ 0x7FFF_0000_0000, 0x50040, 0xDEAD };
     const fp: usize = @intFromPtr(&frame);
-    const link = loadFrameSniffedPred(fp, testIsCode5xxxx).?;
+    const link = loadFrameSniffedPred(fp, null, testIsCode5xxxx).?;
     try testing.expectEqual(@as(usize, 0x7FFF_0000_0000), link.caller_fp);
     try testing.expectEqual(@as(usize, 0x50040), link.caller_rip);
 }
@@ -181,7 +206,7 @@ test "loadFrameSniffedPred x86_64: R15-pushed callee — saved RIP at [fp,16] (t
     // mis-pick [fp,0]/[fp,8]; the global predicate fixes it.
     var frame: [3]usize = .{ 0x7FFF_1111_0000, 0x7FFF_2222_0000, 0x50080 };
     const fp: usize = @intFromPtr(&frame);
-    const link = loadFrameSniffedPred(fp, testIsCode5xxxx).?;
+    const link = loadFrameSniffedPred(fp, null, testIsCode5xxxx).?;
     try testing.expectEqual(@as(usize, 0x7FFF_2222_0000), link.caller_fp); // [fp,8]
     try testing.expectEqual(@as(usize, 0x50080), link.caller_rip); // [fp,16]
 }
@@ -191,11 +216,11 @@ test "loadFrameSniffedPred x86_64: no code slot — escaped to host, standard de
     // Falls back to the standard {slots[0], slots[1]} default.
     var frame: [3]usize = .{ 0xAAAA, 0xBBBB, 0xCCCC };
     const fp: usize = @intFromPtr(&frame);
-    const link = loadFrameSniffedPred(fp, testIsCode5xxxx).?;
+    const link = loadFrameSniffedPred(fp, null, testIsCode5xxxx).?;
     try testing.expectEqual(@as(usize, 0xAAAA), link.caller_fp);
     try testing.expectEqual(@as(usize, 0xBBBB), link.caller_rip);
 }
 
 test "loadFrameSniffedPred x86_64: fp == 0 sentinel → null" {
-    try testing.expectEqual(@as(?RawFrameLink, null), loadFrameSniffedPred(0, testIsCode5xxxx));
+    try testing.expectEqual(@as(?RawFrameLink, null), loadFrameSniffedPred(0, null, testIsCode5xxxx));
 }
