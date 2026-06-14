@@ -52,3 +52,26 @@ rm -f *.wasm *.o
 - `hello` — minimal WASI stdout line.
 - `fib` — recursive fib(0..24) + i64 math + `bufPrint` (deep call-chain JIT stress).
 - `prime_sieve` — Sieve of Eratosthenes over a stack array (linear memory + nested loops).
+
+## c/{fannkuch,fasta,primes}.c → wasm/emcc_*.wasm (embenchen reproduction)
+
+The classic Emscripten **embenchen** benchmark kernels, regenerated via **modern
+emcc `-sSTANDALONE_WASM`** (Phase A2). This emits a clean WASI module (imports:
+`wasi_snapshot_preview1.{proc_exit,fd_write}` only) — NOT the legacy emscripten
+`env`-shim ABI (`DYNAMICTOP_PTR` / `___syscall*` / `_emscripten_memcpy_big`) of
+the vendored `test/wasmtime_misc/embenchen/` fixtures, which stay deferred to
+Phase 11 (D-026/D-082). The `emcc_` prefix marks the emscripten emitter (distinct
+import surface from bare-clang `c_`). Each prints a deterministic checksum/result
+for byte-diff vs wasmtime; zwasm runs all three byte-identical under its existing
+WASI host (no new shim needed — the A2 "find" is that the modern path Just Works).
+
+```sh
+cd test/realworld/src/c
+for f in fannkuch fasta primes; do
+    emcc -O2 -sSTANDALONE_WASM=1 -o ../../wasm/emcc_$f.wasm $f.c
+done
+```
+
+- `fannkuch` — pancake-flip permutation count (recursion-free perm generator + integer-heavy).
+- `fasta` — LCG pseudo-random + weighted nucleotide selection (FP + branch-heavy).
+- `primes` — trial-division prime counting (integer arithmetic + tight branch loop).
