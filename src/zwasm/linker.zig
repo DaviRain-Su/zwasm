@@ -61,8 +61,17 @@ pub const LinkError = error{
 /// item tracked as D-177.
 pub const WasiConfig = struct {
     args: []const []const u8 = &.{},
-    // envs / preopens / stdin / stdout / stderr: see D-177 (host supports them;
+    /// Environment variables exposed to the guest via `environ_get` /
+    /// `environ_sizes_get`. Each entry is a (name, value) pair; copied
+    /// into the host on `defineWasi` (the slices need not outlive it).
+    envs: []const Env = &.{},
+    // preopens / stdin / stdout / stderr: see D-177 (host supports them;
     // facade struct not yet wired — reachable via CLI / C-API meanwhile).
+
+    pub const Env = struct {
+        name: []const u8,
+        value: []const u8,
+    };
 };
 
 pub const Linker = struct {
@@ -196,8 +205,9 @@ pub const Linker = struct {
     /// ADR-0109 §3.8 — bulk WASI bindings. After `defineWasi`,
     /// any `(import "wasi_snapshot_preview1" "<name>" ...)` in
     /// the module is satisfied by the registered host (all 46 WASI
-    /// 0.1 thunks; Phase 11). Installs `cfg.args`; envs/preopens
-    /// are a facade-struct parity item (D-177). At-most-once per Linker.
+    /// 0.1 thunks; Phase 11). Installs `cfg.args` + `cfg.envs`;
+    /// preopens remain a facade-struct parity item (D-177).
+    /// At-most-once per Linker.
     pub fn defineWasi(self: *Linker, cfg: WasiConfig) !void {
         if (self.wasi_host != null) return error.WasiAlreadyDefined;
         const h = try self.engine.alloc.create(_wasi_host.Host);
@@ -206,6 +216,20 @@ pub const Linker = struct {
         errdefer h.deinit();
 
         if (cfg.args.len > 0) try h.setArgs(cfg.args);
+
+        if (cfg.envs.len > 0) {
+            // setEnvs takes parallel key/value slices; split the pair list
+            // into two temporaries (setEnvs dupes, so they need not persist).
+            const keys = try self.engine.alloc.alloc([]const u8, cfg.envs.len);
+            defer self.engine.alloc.free(keys);
+            const vals = try self.engine.alloc.alloc([]const u8, cfg.envs.len);
+            defer self.engine.alloc.free(vals);
+            for (cfg.envs, 0..) |e, i| {
+                keys[i] = e.name;
+                vals[i] = e.value;
+            }
+            try h.setEnvs(keys, vals);
+        }
 
         self.wasi_host = h;
     }
@@ -783,4 +807,24 @@ test "start function may be an IMPORTED host func (wit-component start-shim shap
     var inst = try lk.instantiate(&mod, .{});
     defer inst.deinit();
     try testing.expectEqual(@as(u32, 1), ticks);
+}
+
+test "Linker.defineWasi: WasiConfig.envs populate the host environ (D-177)" {
+    var eng = try _zwasm.Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var lk = eng.linker();
+    defer lk.deinit();
+    try lk.defineWasi(.{
+        .args = &.{"prog"},
+        .envs = &.{
+            .{ .name = "FOO", .value = "bar" },
+            .{ .name = "BAZ", .value = "qux" },
+        },
+    });
+    const host = lk.wasi_host.?;
+    try testing.expectEqual(@as(usize, 2), host.envs.len);
+    try testing.expectEqualStrings("FOO", host.envs[0].key);
+    try testing.expectEqualStrings("bar", host.envs[0].value);
+    try testing.expectEqualStrings("BAZ", host.envs[1].key);
+    try testing.expectEqualStrings("qux", host.envs[1].value);
 }

@@ -326,17 +326,16 @@ a unit:
 ```zig
 try linker.defineWasi(.{
     .args = &.{ "prog", "arg1", "arg2" },
+    .envs = &.{ .{ .name = "LANG", .value = "C" } }, // → environ_get
 });
 // All wasi_snapshot_preview1 imports are defined as a unit.
 const inst = try linker.instantiate(module);
 ```
 
-`env` / `preopens` / `stdin` / `stdout` / `stderr` are not yet fields on the
-Zig `WasiConfig` (deferred — D-177 / D-251). Until they land, drive those from
-the surfaces that already support them: filesystem preopens via the CLI `--dir`
-flag or the C API, and stdio capture via the C API. The shape above is the
-intended target once the config grows; code against the current single-field
-struct.
+`args` and `envs` are settable on the Zig `WasiConfig`. `preopens` / `stdin` /
+`stdout` / `stderr` are not yet fields (deferred — D-177 / D-251); until they
+land, drive those from the surfaces that already support them: filesystem
+preopens via the CLI `--dir` flag or the C API, and stdio capture via the C API.
 
 ### §3.9 — Component Model: typed invoke (ADR-0183, as-built)
 
