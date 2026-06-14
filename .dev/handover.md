@@ -51,10 +51,13 @@ wasmtime 45 (verify next Step 0.7). D-249 hyperfine-absent premise dissolved.
 
 **Dogfooding milestone (2026-06-15)**: the `test-realworld-diff-jit` corpus is now **1 mismatch** — ONLY
 `c_sha256_hash` (107 vs 106). emcc_fasta flipped to byte-exact MATCH; this session's D-330 coalescing +
-fp-select + D-289 fixes cleaned the rest. The last `\n` residual = a **func-4 block-result MERGE mis-bind**
-(corrected from the func-8 red herring): `i32.ne` at pc678 reads a stale vreg (X22/slot7 = 0) instead of the
-block@676 result (=10) → skips the final putchar. Localized to emit.zig `.end`/op_control_merge_mov (a
-regalloc slot-collision OR missing merge-MOV; EH-lockstep family). NEXT: pin (a)-vs-(b) + fix → clean corpus.
+fp-select + D-289 fixes cleaned the rest. **UNIFYING INSIGHT**: the c_sha256 `\n` residual AND go_regex
+(D-331B) are the SAME root — a **liveness↔emit vreg-numbering DESYNC** (emit's next_vreg diverges from
+liveness's vreg ids → emit indexes the liveness-numbered regalloc slots[] with emit ids → wrong slot/value).
+Evidence: func 4 regalloc VALID (0 overlaps) yet the subagent's "pc678 reads vreg 477" conflicts with
+regalloc (477 def=696, not live at 678). EH-lockstep family. NEXT (one fix likely closes BOTH): instrument
+liveness per-pc vreg-mint vs emit per-pc next_vreg for func 4 (+ func 1516), diff → first divergent pc = the
+op-handler minting out of lockstep; fix it in both passes. (3 investigations mis-localized — verify carefully.)
 
 **Phase-B status**: D-283 `--jit` lane 3-host green (REPORT-ONLY). **D-330 coalescing miscompile FIXED**
 `6790c204` + x86_64 fp-select `cccb2313` — 4-env green. Remaining JIT-correctness debt, each its own
