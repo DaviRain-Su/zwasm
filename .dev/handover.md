@@ -24,10 +24,11 @@ NOT an alpha blocker. Cycle-4a infra kept (`8478d853`).
   multi-value catch result vregs must be made distinct in the IR (lower.zig /
   catch-result allocation) — multi-cycle. BOTH D-327 + D-328 are CONFORMANCE-
   NEUTRAL (no spec test). Standalone D-328 RED (no exnref): 2-param catch_ → 10 vs
-  JIT 20 (see debt D-328). PAUSED pending user's call on whether to invest the
-  multi-cycle IR fix now vs defer (debt-tracked) + pursue the conformance track.
-  D-327 code re-derivable from `private/notes/d327-catch_ref-plan.md`. Cycle-4a
-  infra `8478d853` kept.
+  JIT 20 (see debt D-328). USER CHOSE "do the IR fix now" 2026-06-14 → proceeding.
+  NEXT = Phase I: find where the IR assigns catch-block result vregs (why multi-
+  value → vreg 0) → assign DISTINCT → re-apply D-327 reify. Standalone 2-param
+  catch_ test = Phase-II correctness net. D-327 code in
+  `private/notes/d327-catch_ref-plan.md`. Cycle-4a infra `8478d853` kept.
 - **Exit-condition**: D-328 fixed (distinct vregs) → JIT round-trip + catch_ref_88
   + catch_all_ref_77 all return their values both arches; full `zig build test` +
   lint + 3-host green.
