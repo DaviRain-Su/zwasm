@@ -8,9 +8,14 @@
 - **Bundle-ID**: d327-catch_ref
 - **Cycles-remaining**: ~3
 - **Continuity-memo**: plan in `private/notes/d327-catch_ref-plan.md`. Decode/IR/
-  validate DONE; gap = landing-pad emit doesn't push the exnref for catch_ref/
-  catch_all_ref (`arm64/emit.zig:1699`, `x86_64/emit.zig:1014`; exnref deferred
-  "v0.2" @1642). VERIFY where the exception ptr is at the landing pad first.
+  validate DONE; landing-pad emit (`arm64/emit.zig:1699`, `x86_64:1014`) loads only
+  payload. CORRECTED 2026-06-14: the JIT EH model is VALUE-based (`eh_payload_buf`
+  only) — NO exception-object ptr at the landing pad (interp has `*Exception exc`;
+  JIT discarded it). So exnref must be REIFIED via a new runtime helper
+  (`zwasm_reify_exnref(rt, tag_idx, payload) → *exc`) called at the landing pad +
+  pushed. DESIGN SUBTLETY: exnref IDENTITY matters for `throw_ref` (rethrow) — a
+  catch-time reification must round-trip. So this is MEDIUM (real EH design), not
+  the survey's SMALL. Mirror interp `mvp.zig:943-957` semantics.
 - **Exit-condition**: JIT `try_table (result i32 exnref) (catch_ref)` pushes the
   exnref (red test green, both arches) → re-vendor eh try_table from wg-3.0 (w/
   wasm_3_0_manifest hardcoded-count updates) → eh wg-3.0-current, full `zig build
@@ -31,41 +36,10 @@ now closing it as normal completeness work.
 
 - **ROADMAP widget: Phase 17 = IN-PROGRESS (feature line)**. CM + WASI-P2
   wasmtime-equivalent campaign CLOSED 2026-06-13 (corpus 158/0/0).
-- **cljw CM-API finished-form campaign CLOSED 2026-06-13** (bundle
-  cljw-cm-api-finished-form; user-directed, finished-form-first). All 6
-  cw component-model API requests done + tested + 3-host green:
-  - **REQ-4** (`8a647a2b`+`336c9db4`) — `InstantiateOpts` budget threaded
-    into all component instantiate entries + Linker.instantiate.
-  - **REQ-3** (`ef1bdbb0`) — public `WitType` type-tree +
-    resolveType/resolveFuncSig (specialization-preserving + labels;
-    new feature/component/wit_type.zig).
-  - **REQ-2** (`115f6be9`) — enum/variant/flags labels borrow into the
-    value tree (output self-describing; input by ordinal).
-  - **REQ-6** (`0af412ce`) — typed-invoke diagnostics; ALSO extracted
-    component.zig tests → component_tests.zig (2007→529 lines).
-  - **REQ-1** (`53334187`) — unified `comp.open` + `Opened` union handle
-    (delegating methods) + `componentNeedsWasi` predicate.
-  - **REQ-5** (`5795c3d0`) — host-facing `Opened.dropResource` /
-    `BuiltComponent.dropResource` (removes handle + runs destructor).
-  - **REQ-7 FIXED (`33e0100c`)** — opened component now OWNS its bytes so it
-    outlives the caller's load buffer (cw instance-cache pattern). `decode`
-    stayed zero-copy; ComponentInstance/BuiltComponent/ComponentGraph dupe +
-    own `owned_bytes`, decode against it, free in deinit. Root cause was
-    input-buffer lifetime (not relocatability): TypeInfo names borrowed the
-    section bodies = caller's bytes → dangled on free → resolveFuncSig null.
-    Adversarial test (free+clobber input, then resolve+invoke).
-  - cljw handovers written `COMPLETED` →
-    `$MY/ClojureWasmFromScratch/private/20260613_handover_from_zwasm/`
-    (handover.md pin `65a760e2`; handover_v2.md REQ-7 pin `33e0100c`).
-    docs §3.9 synced.
-- **D-325 FIXED + closed (`65a760e2`)** — cross-instance
-  `call_indirect`/`call_ref` ran the callee in the CALLER's runtime context;
-  a guest func reached through a wit-bindgen shim's `$imports` table executed
-  against the shim's empty globals → `globalGet` OOB (the REQ-5 dtor trap).
-  Fix: a foreign-runtime funcref runs in ITS context via new
-  `invokeCrossRuntime` (shared by call_indirect/call_ref + cross_module.thunk,
-  single source). REQ-5 dtor now runs cleanly; 3-host + test-all green.
-- **D-324 CLOSED** (memory64 × multi-memory bulk-op; B1–B4+JIT).
+- **cljw CM-API finished-form campaign CLOSED 2026-06-13** (all 6 cw requests +
+  REQ-7 `33e0100c` opened-component-owns-bytes; 3-host green; cljw handovers
+  COMPLETED). **D-325 / D-324 CLOSED** (cross-instance ctx fix; memory64×multi-mem
+  bulk-op). Detail in git log / ADRs.
 - **D-290 CLOSED 2026-06-13 — wabt→wasm-tools migration COMPLETE.** All
   distillers swapped (2_0 / wasmtime_misc / **simd** `fa06c202` 13420/0
   skip-impl 32→0 / **threads** `db72560a` exact-parity 294/0 / 3_0 stale-
