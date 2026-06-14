@@ -1,6 +1,6 @@
 # 0127 — Cross-module func import type-identity (finality + supertype + canonical)
 
-- **Status**: Accepted (2026-05-31 via ADR-0128 — user "100%" directive; D-202 PHASE C implements next)
+- **Status**: Closed (Implemented) — PHASE C landed `add983e8` (cross-`Types` `canonicalEqualCross` + `superReachesCross` wired at `linker.zig:626`); `assert_unlinkable gc/type-subtyping` 5→0, no-regression set (multi-mem 407 + EH 34 + `.30/.48/.50`) green at Phase 10 100% close (ADR-0133). Residual latent #1 same-typespace simplification tracked as D-202 `note`. [Accepted 2026-05-31 via ADR-0128 — user "100%" directive]
 - **Date**: 2026-05-30
 - **Author**: claude (autonomous loop)
 - **Tags**: cross-module, linker, gc, type-identity, finality, canonical, subtyping, D-202, Phase 10 / 10.M
@@ -159,3 +159,12 @@ the 3-host gate, and the impl matches decision #1 + #2. Status →
   exporter's full `Types` (not just `final` + a supertype list) must be
   reachable at the linker. Impl is genuinely intricate → fresh-context /
   post-Accept cycle, NOT a quick threading extension.
+- 2026-06-14 — **Closed (Implemented)**. PHASE C landed `add983e8`:
+  `sections.canonicalEqualCross` + `superReachesCross` (threading two
+  `Types` through the recursion as Revision cyc242 required), `source_types`
+  threaded onto `CrossModuleFuncEntry`, wired at `linker.zig:626` as the #2
+  AND-condition. `assert_unlinkable gc/type-subtyping` 5→0; no-regression set
+  green at Phase 10 100% close. Re-audit found the D-202 row had gone stale
+  (still claimed PHASE C unbuilt); reduced to a `note` for the residual
+  latent #1 same-typespace structural simplification (`linker.zig:611`; no
+  corpus fixture).
