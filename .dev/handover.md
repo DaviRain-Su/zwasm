@@ -18,11 +18,16 @@
   types); caught tag_idx via new `rt.eh_thrown_tag_idx` stashed by trampolineCore;
   Exception lifetime via an `EhReifyCtx{allocator,exceptions}` on RuntimeOwned
   (setup.zig:118/996+), mirroring memory_grow_fn default-safe/override.
-- **NEXT = Cycle-4a**: jit_abi trailing fields (`reify_exnref_fn`/`eh_reify_ctx`/
-  `eh_thrown_tag_idx`) + `defaultReifyExnref` @panic + production `reifyExnref` +
-  unit test (reify snapshots tag_idx+payload; clobber-safety). Then 4b trampoline
-  stash → 4c landing-pad emit (×2 arch, e2e `drop`→88) → 4d throw_ref read-back
-  (round-trip 88) → 5 re-vendor eh from wg-3.0 (UPDATE wasm_3_0_manifest counts).
+- **Cycle-4a DONE `8478d853`**: jit_abi reify infra (fields +24B→592, EhReifyCtx,
+  reifyExnref snapshot+clobber-safe, panic stub, off) + unit test green.
+- **NEXT = Cycle-4b+4c (bundled — 4b has no signal without 4c)**: (4b) trampoline
+  `throw_trampoline.zig` `.handler` path stashes the thrown tag_idx →
+  `rt.eh_thrown_tag_idx`; (4c) landing-pad emit (`arm64/emit.zig:~1699`,
+  `x86_64:~1014`): after the payload prelude, if `entry.kind == .catch_ref or
+  .catch_all_ref` → BLR `[rt + reify_exnref_fn_off]`, push X0/RAX as the last
+  result vreg (treat 0 → trap). e2e red→green both arches: `try_table (result i32
+  exnref) (catch_ref $e0) … drop` → 88. Then 4d throw_ref read-back (round-trip
+  88) → 5 re-vendor eh from wg-3.0 (UPDATE wasm_3_0_manifest counts).
 - **Exit-condition**: JIT catch_ref pushes exnref + throw_ref round-trips, both
   arches green → eh wg-3.0-current, full `zig build test` + 3-host green. (Closes
   D-327; the alpha tag stays separate/user-only.)
