@@ -1112,13 +1112,6 @@ entries:
     first_raised: "2026-06-07"
     last_reviewed: "2026-06-07"
     refs: src/ir/zir_ops.zig:665-671; src/feature/stack_switching/README.md; .dev/proposal_watch.md (Phase 3); OSS/WebAssembly stack-switching proposal
-  - id: D-301
-    layer: test
-    status: note
-    description: 'note (MOSTLY DISCHARGED @d13f099a): atomics official spec corpus (proposals/threads/atomic.wast) is GREEN + wired into test-all via spec_assert_runner_non_simd — 247 asserts pass (load/store/all rmw incl cmpxchg), ZERO zwasm atomics bugs. Extended the runner: 3 entry.zig 3-arg helpers + 4 assert_return dispatch arms; cmpxchg executes. RESIDUAL (smaller, optional runner-test-harness extensions, NOT zwasm bugs — atomic JIT fully edge-covered @p17/atomics): (a) 47 skips = assert_trap (45; nonSimdRunAssertTrap → parseAssertReturnArgs cant parse i64/multi-arg the assert_return path handles — runner arg-parse bug) + memory.atomic.wait32/64 (2; non_simd scratch memory not marked shared → ExpectedSharedMemory trap). Discharge: fix the runner assert_trap argparse + mark scratch shared for wait. Refs: test/spec/spec_assert_runner_non_simd.zig (nonSimdRunAssertTrap; base.growable_memory shared flag), scripts/regen_spec_threads_assert.sh.'
-    first_raised: "2026-06-07"
-    last_reviewed: "2026-06-07"
-    refs: scripts/regen_spec_threads_assert.sh; test/spec/spec_assert_runner_non_simd.zig; engine/codegen/shared/entry.zig
   - id: D-305
     layer: code
     status: blocked-by
