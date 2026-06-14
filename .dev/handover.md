@@ -47,14 +47,20 @@ Verified GENUINE-blocked: D-026/D-082 (Phase-11 emcc/externref), D-020 (4/5 dbg
 threshold). **External/upstream-Zig rows re-verified GENUINE** (D-312/D-148/D-323
 pin-gated to Zig 0.16; D-010 third-site trigger not fired — `rawFreeOwned` still 1
 module): unlike internal rows these don't silently dissolve (pin-bump/trigger-gated).
-**D-238 investigation ADVANCED `eba26059`** (x86_64 EH-JIT parity): the OPEN question
-is resolved — the design note's thunk-RBP candidate is NECESSARY-NOT-SUFFICIENT; the
-real gap is the callee→thunk SNIFF transition (thunk arena not in any CodeMap → sniff
-mis-walks the callee frame). Fix needs (a) RBP-framed thunk + (b) thunk-arena range
-registration; (b) is x86_64-only-verifiable. **NEXT (most-actionable autonomous item):
-D-238 — implement (a)+(b) together, verify ubuntu `ZWASM_SPEC_ENGINE=jit` EH dir** (row
-carries the full plan + byte offsets). Else: future-phase / user-gated (§1.3 / tag /
-§13.4). No auto-tag (ADR-0156).
+**D-238 FULLY DESIGNED `eba26059`+`74fa9511`** (x86_64 EH-JIT parity): two-cycle
+investigation complete. Root cause = the x86_64 sniff's layout-disambiguation is fed a
+SINGLE (throwing-instance) CodeMap (`unwind.walk` one loader; per-frame resolver only
+does handler dispatch) — insufficient for cross-instance (the bridge thunk is in the
+IMPORTER's arena; importer frames in the importer's CodeMap). Fix = **(a)** RBP-framed
+thunk (byte-exact seq + alignment verified) + **(b)** GLOBAL thunk-range set + **(c)**
+route the sniff's `.inside` resolve through the global `eh_registry` resolver (the
+load-bearing piece; the "empty sentinel CodeMap" idea is wrong). LOW-pri,
+x86_64-functional-verify-only — but the LOGIC is Mac-unit-testable (synthetic
+cross-instance frame chains, `unwind.zig:390`). **NEXT (most-actionable autonomous
+campaign): implement D-238 (a)+(b)+(c)** — ADR for a+b+c → Mac unit tests
+(callee→thunk→importer synthetic walk) → ubuntu `ZWASM_SPEC_ENGINE=jit` EH-dir verify →
+ship ADR-0114 fixture (row carries the full design). Else: future-phase / user-gated
+(§1.3 / tag / §13.4). No auto-tag (ADR-0156).
 
 ## State (tag-ready baseline, all 3-host green)
 
