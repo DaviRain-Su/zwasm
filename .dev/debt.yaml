@@ -677,15 +677,6 @@ entries:
     last_reviewed: "2026-06-13"
     refs: |-
       Codeberg ziglang/zig#35343 (upstream report), `build.zig::test-spec-wasm-2.0-assert` (workaround site), `src/engine/codegen/shared/entry.zig::callLargesig`, `private/spikes/d148-zig-sysv-fp-args/` (minimal repro + CODEBERG-ISSUE-DRAFT.md), commits `0cba220b` / `15f55120` / `a8474d1a`
-  - id: "D-179"
-    layer: "infra"
-    status: "blocked-by"
-    description: |-
-      blocked-by: wabt version in flake.nix (current 1.0.40 / `wast2json --version` 1.0.39 lacks newer GC type syntax — i8 / i16 packed fields / anyref / `(ref 0)`). Discharge: bump `wabt` derivation in flake.nix to a version that supports the spec-current GC type syntax (HEAD has it; check wabt 1.0.41+ when released) OR pre-bake offline from a wabt build. Trigger: 10.G impl row activation (needs full GC corpus bake). | **wabt 1.0.39 cannot bake `gc/struct.wast`** — flake-pinned wabt rejects newer GC type syntax (i8 / i16 packed fields / anyref / typed refs). The other 4 proposals (memory64 / tail-call / EH / function-references) bake green at 10.T-2a smoke (commit `433967fb`). The GC corpus is autonomous-discoverable; impact is bounded to the GC bake step.
-    first_raised: "2026-05-25"
-    last_reviewed: "2026-06-13"
-    refs: |-
-      `scripts/regen_spec_3_0_assert.sh` (smoke skipped gc/struct), 10.T-2a commit, `flake.nix` wabt pin
   - id: "D-178"
     layer: "code"
     status: "blocked-by"
