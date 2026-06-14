@@ -15,11 +15,10 @@ ubuntu (lesson `2026-06-14-corpus-revendor-breaks-hardcoded-manifest-tests`).
 memory64/multi-memory/func-refs no-drift; eh + tail-call drift remain (deferred).
 So 3.0 corpus = current-for-wg-3.0 EXCEPT multi-value asserts (D-327) + the
 reverted tail-call/eh deltas. Mechanism DONE (refdialect.py + runbook).
-D-327 scope kept revealing layers (hardcoded manifest tests; DUAL runners —
+D-327 keeps revealing layers (hardcoded manifest tests; DUAL runners —
 `spec_assert_runner_wasm_3_0.zig` ALREADY routes multi-value via `invokeMulti`
-@960-977, while `non_simd.zig`'s `dispatchMultiResult`@694 hand-codes 3 shapes).
-So D-327 is likely NARROWER than the ~250-400 LOC estimate but the EXACT gap is
-unpinned (which runner drives wasm-3.0-assert; why eh try_table still failed).
+@960-977, `non_simd.zig`@694 hand-codes 3 shapes). Likely NARROWER than ~250-400
+LOC but EXACT gap unpinned (which runner drives wasm-3.0-assert; why eh failed).
 A genuine multi-cycle investigate+impl for an ALPHA.
 DECISION (user's call — the alpha effort/release tradeoff): **A** = pin + close
 D-327 → re-vendor deferred asserts (w/ manifest-test updates) → full wg-3.0 →
