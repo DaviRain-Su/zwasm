@@ -45,6 +45,16 @@ pub const NormalizePcFn = *const fn (ret_addr: usize, ctx: ?*anyopaque) u32;
 pub const Context = struct {
     normalize: NormalizePcFn,
     normalize_ctx: ?*anyopaque = null,
+    /// x86_64-only (D-238 / ADR-0185 (c)): a global "is this address valid
+    /// JIT code anywhere" predicate (any instance's CodeMap OR any bridge-thunk
+    /// arena, = `eh_registry.isCodeAddr`). When set, the x86_64 frame sniff uses
+    /// it instead of the single throwing-instance `normalize_ctx` CodeMap — a
+    /// cross-instance unwind walks frames in OTHER instances + the importer's
+    /// bridge thunk, which the single CodeMap cannot resolve. Null → legacy
+    /// single-CodeMap sniff (unit tests + arm64, which ignores it entirely).
+    /// Separate field from `normalize_ctx` by design (two distinct axes:
+    /// PC-normalization base vs. layout-disambiguation code-membership).
+    is_code_addr: ?*const fn (usize) bool = null,
 };
 
 /// Implementation of `unwind.LoadFrameChainFn` parameterised on
@@ -60,13 +70,19 @@ pub fn loadFrameLink(fp: usize, ctx: ?*anyopaque) ?unwind.FrameLink {
     const raw = switch (builtin.target.cpu.arch) {
         .aarch64 => arch_frame_chain.loadFrame(fp) orelse return null,
         .x86_64 => blk: {
-            // Sniff requires the CodeMap; the production path
-            // (`code_map.adapterContextFor`) sets `normalize_ctx`
-            // to the CodeMap pointer. Unit tests that supply an
-            // `identityTruncate`-style normalize set `normalize_ctx`
-            // to null — fall back to the plain `loadFrame` shape
-            // for those (the synthetic frames in those tests
-            // don't model the zwasm uses_runtime_ptr layout).
+            // D-238 / ADR-0185 (c): cross-instance unwind needs the GLOBAL
+            // code-membership predicate (any instance's CodeMap OR any
+            // bridge-thunk arena), not the single throwing-instance CodeMap —
+            // else the callee→thunk transition (and any importer-instance
+            // frame) mis-walks. Production sets `is_code_addr`; prefer it.
+            if (adapter_ctx.is_code_addr) |pred| {
+                break :blk arch_frame_chain.loadFrameSniffedPred(fp, pred) orelse return null;
+            }
+            // Legacy single-CodeMap sniff (the production path's
+            // `code_map.adapterContextFor` sets `normalize_ctx` to the CodeMap
+            // pointer). Unit tests with a null `normalize_ctx` fall back to the
+            // plain `loadFrame` shape (their synthetic frames don't model the
+            // zwasm uses_runtime_ptr layout).
             if (adapter_ctx.normalize_ctx) |ctx_ptr| {
                 const code_map_mod = @import("code_map.zig");
                 const code_map: *const code_map_mod.CodeMap = @ptrCast(@alignCast(ctx_ptr));

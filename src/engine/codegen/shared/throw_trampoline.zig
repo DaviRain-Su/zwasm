@@ -135,6 +135,9 @@ pub fn trampolineCore(
         site,
         zwasm_throw.default_max_unwind_depth,
         eh_registry.resolver(),
+        // D-238 / ADR-0185 (c) — global code-membership for the x86_64 sniff
+        // (cross-instance frames + the importer's bridge thunk). arm64 ignores.
+        eh_registry.isCodeAddr,
     );
 
     switch (result) {

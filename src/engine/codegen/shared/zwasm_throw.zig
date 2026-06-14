@@ -78,6 +78,10 @@ pub fn dispatchThrow(
     site: ThrowSite,
     max_unwind_depth: u32,
     resolver: ?unwind.InstanceResolver,
+    /// x86_64 cross-instance code-membership predicate (D-238 / ADR-0185 (c));
+    /// `eh_registry.isCodeAddr` in production, `null` in unit tests (→ legacy
+    /// single-CodeMap sniff). arm64 ignores it (no sniff).
+    is_code_addr: ?*const fn (usize) bool,
 ) UnwindResult {
     // (1) Normalise the throw-site absolute address to a
     // module-relative PC (= absolute - block_addr) to match
@@ -89,7 +93,8 @@ pub fn dispatchThrow(
     // (2) Build the adapter context. The code_map serves both
     // as the initial-PC normaliser (above) and the per-frame
     // PC normaliser (here).
-    const ctx = code_map_mod.adapterContextFor(code_map);
+    var ctx = code_map_mod.adapterContextFor(code_map);
+    ctx.is_code_addr = is_code_addr;
     const loader = frame_chain_adapter.loaderFor(&ctx);
 
     // (3) Walk. `throw_site_addr` is the absolute address of the
@@ -144,7 +149,7 @@ test "dispatchThrow: throw-site address inside a function → handler in same fr
         .throw_site_addr = 0x10042,
         .tag_idx = 5,
     };
-    const result = dispatchThrow(table, &cmap, site, 16, null);
+    const result = dispatchThrow(table, &cmap, site, 16, null, null);
 
     switch (result) {
         .handler => |h| {
@@ -175,7 +180,7 @@ test "dispatchThrow: no matching handler → uncaught" {
         .throw_site_addr = 0x20050,
         .tag_idx = 99,
     };
-    const result = dispatchThrow(table, &cmap, site, 16, null);
+    const result = dispatchThrow(table, &cmap, site, 16, null, null);
     try testing.expectEqual(UnwindResult.uncaught, result);
 }
 
@@ -241,7 +246,7 @@ test "dispatchThrow: handler in caller frame after one unwind step" {
         .throw_site_addr = 0x10042, // rel pc 0x42, in inner's [0, 0x50) catch tag=7
         .tag_idx = 5, // not 7 → miss
     };
-    const result = dispatchThrow(table3, &cmap, site, 16, null);
+    const result = dispatchThrow(table3, &cmap, site, 16, null, null);
     switch (result) {
         .handler => |h| {
             try testing.expectEqual(@as(u32, 0x90), h.landing_pad_pc);
@@ -284,7 +289,7 @@ test "dispatchThrow: throw-site outside any JIT function → walks via sentinel"
     };
     // The initial lookup falls through (PC = sentinel maxInt32, no entry covers it),
     // walker advances to outer frame at rel pc 0x50, catch_all hits.
-    const result = dispatchThrow(table, &cmap, site, 16, null);
+    const result = dispatchThrow(table, &cmap, site, 16, null, null);
     switch (result) {
         .handler => |h| {
             try testing.expectEqual(@as(u32, 0x42), h.landing_pad_pc);
