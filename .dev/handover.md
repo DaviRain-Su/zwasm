@@ -79,14 +79,9 @@ Next actionable (demand-driven long-tail — pick by signal):
 - **D-177 preopens** (the narrowed facet) = add `WasiConfig.preopens` — needs the
   host-fd ownership story resolved first (addPreopen takes an open dir fd; who
   closes it — Host.deinit or caller?). Focused chunk; host-supported; minor.
-- **D-293 remainder** = GC array.* trampolines only. **RE-SURVEYED + barrier
-  RE-CONFIRMED deferred 2026-06-14 (`565ed49a`)** — full demux mechanism walked
-  (new no-static-kind stub variant ×2 + `gc_array_trap_fixups` channel + ~30-site
-  `rt.trap_kind` write convention, gated on an interp-parity TrapKind survey;
-  return-slot overload trips single_slot_dual_meaning). Multi-cycle architectural
-  surface for ZERO conformance + ZERO default-engine gain → correctly else-leave;
-  the debt row now holds the saved survey, so DON'T re-walk.
-- D-245 → note (RESOLVED, re-audit 2026-06-13; see row).
+- **D-293 remainder** = GC array.* trampolines — RE-SURVEYED + RE-CONFIRMED
+  deferred 2026-06-14 (`565ed49a`; full demux mechanism in the debt row, DON'T
+  re-walk). ZERO conformance + ZERO default-engine gain → correctly else-leave.
 - Else: §1.3 backlog demand-driven · blocked-by long-tail · D-323.
 
 ## Closed-work pointers (detail in git log / ADRs)
