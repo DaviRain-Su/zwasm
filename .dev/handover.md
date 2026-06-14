@@ -62,19 +62,31 @@ JIT-correct, 2 genuine miscompiles, 9 `go_*` compile-gaps. B1 bundle CLOSED (lan
 
 - **Bundle-ID**: B2-D283-jit-miscompiles
 - **Cycles-remaining**: ~3
-- **Continuity-memo**: 2 genuine JIT miscompiles found by the `--jit` lane (interp byte-matches
-  wasmtime, JIT emits SHORT/wrong output): **`c_sha256_hash`** (wasmtime 107B / jit 91B) +
-  **`emcc_fasta`** (154B / jit 87B). Root-cause via `debug_jit_auto` skill. Repro:
-  `zig build && ./zig-out/bin/zwasm run --engine jit test/realworld/wasm/c_sha256_hash.wasm`
-  (compare vs `--engine interp` / wasmtime). c_sha256_hash = pure integer (u32 rot/xor/add);
-  emcc_fasta = f64 LCG + weighted select — likely DIFFERENT root causes. Separately, the 9 `go_*`
-  UnsupportedOp compile-gaps are a debt-tracked op-implementation backlog (per-op, predicate clear).
+- **Continuity-memo**: (INVESTIGATION cycle-1 done; cycle-2 = disassembly) 2 deterministic
+  **CODEGEN** miscompiles (CONFIRMED codegen, not harness: the `--aot` lane mismatches IDENTICALLY
+  — c_sha256_hash→91B, emcc_fasta→87B, same bytes as `--jit`; JIT+AOT share `compileWasm`, interp
+  is correct). Precise localization (output diff vs interp):
+  · **c_sha256_hash** `printf("input: %%s\n", input)` (sha256_hash.c:115) prints `input: ` then
+    DROPS the `%%s` string + `\n` (16 bytes). BUT the SAME `input` ptr hashes correctly (line 112,
+    strlen+loop) AND `printf("%%02x", hash[i])` (int vararg, line 118) prints correctly.
+  · **emcc_fasta** `printf("%%c:%%d ", syms[j], counts[j])` (fasta.c:37): `%%c` (1st vararg) CORRECT,
+    `%%d` (2nd vararg counts[j]) prints **0** for all — yet `%%lu` checksum (line 36) is correct.
+  Enumerated hypotheses (investigation_discipline §1): (H1) **emscripten varargs stack-buffer store
+  miscompile** — a vararg stored at wrong offset / lost (fits fasta 2nd-arg=0; sha256 %%s ptr);
+  distinguishing probe = disassemble the i32.store sequence writing the vararg buffer before the
+  printf call. (H2) **array-element store** `counts[j]++` lost (fasta counts genuinely 0, not a
+  print bug) — probe: a minimal `arr[i]++`-in-loop fixture under --jit. (H3) string-literal/passive-
+  data pointer-as-arg value miscompiled at a 2nd use site. Repro: `./zig-out/bin/zwasm run --engine
+  jit test/realworld/wasm/c_sha256_hash.wasm` vs `--engine interp`. Use `debug_jit_auto`. Separately:
+  9 `go_*` UnsupportedOp compile-gaps = debt-tracked op backlog (per-op, predicate clear).
 - **Exit-condition**: both `c_sha256_hash` + `emcc_fasta` flip to MATCH in `test-realworld-diff-jit`
   (jit mismatched → 0); each fix carries a boundary fixture + a lesson on the miscompiled op/pattern.
 
-**First action on resume**: B2 — repro `c_sha256_hash` under `--engine jit` vs interp, diff the
-output to localize the miscompiled value, then `debug_jit_auto`. (A1 Zig + A2 embenchen + A3
-wasmer-oracle + runtime-bump + tool-currency-3host + B1 jit-diff-lane all DONE.)
+**First action on resume**: B2 cycle-2 — build a MINIMAL `.wat`/`.c` fixture isolating H1/H2
+(an `arr[i]++`-in-loop and a `printf("%s")` reduced to the smallest wasm that mismatches --jit vs
+interp), then `debug_jit_auto` disassemble the vararg-buffer i32.store / array-store sequence to
+find the miscompiled op. (A1 Zig + A2 embenchen + A3 wasmer-oracle + runtime-bump + tool-currency-
+3host + B1 jit-diff-lane all DONE; B2 cycle-1 localization done — see Active bundle.)
 
 ## State (tag-ready baseline, all 3-host green)
 
