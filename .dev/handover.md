@@ -11,18 +11,18 @@ is behind (baked from PRE-MERGE frozen proposal repos). SOURCE = **`wg-3.0` tag*
 (2025-09-26; gc/exceptions/memory64/multi-memory = subdirs, tail-call/func-refs =
 merged top-level). Mechanism DONE: refdialect.py `44711469` + runbook. Discipline
 = VALIDATE-then-REVERT (commit only semantic deltas, never byte-churn — D-290).
-SLICE 1 DONE `335a0107`(→`b8e8b16c`): gc wg-3.0 deltas incorporated, runtime
-PASSES, green. SLICE 2 (eh): wg-3.0 try_table additions are ENTIRELY
-multi-value-result → 5 new fails → fully DEFERRED (reverted).
-CEILING IDENTIFIED → **D-327**: the spec-assert RUNNER's result-dispatch handles
-single-scalar/void + a few 2-result shapes, NOT generic N-tuple multi-value. So
-the wg-3.0 incremental asserts that are multi-value (eh try_table +5, gc extern
-+13, likely more in mem64/tail-call/func-refs) cannot pass — full "全合格 to
-wg-3.0" is BLOCKED on D-327 (a TEST-HARNESS gap; runtime multi-value is sound).
+CONVERGED (re-vendor prep walked): incorporable wg-3.0 deltas DONE — gc
+`b8e8b16c` + tail-call `6ce31520` (both runtime-PASS, green). memory64/
+multi-memory/function-references = NO drift (already current). eh try_table
+drift is ENTIRELY multi-value-result → DEFERRED. So the 3.0 corpus is now
+**current for wg-3.0 EXCEPT the multi-value asserts**, blocked on **D-327** (the
+spec-assert RUNNER handles single-scalar/void + a few 2-tuple shapes, not generic
+N-tuple multi-value; a TEST-HARNESS gap — runtime multi-value is sound).
 DECISION surfaced to user 2026-06-14 (AWAITING pick before the outward-facing
 tag): (A) implement D-327 (N-tuple multi-value runner) → full wg-3.0; multi-cycle.
-(B) tag alpha.3 now (gc updated; curated 3.0 corpus 3-host green) + D-327 +
-remaining proposal-drift tracked for beta/rc. Recommended B for an alpha.
+(B) tag alpha.3 now (3.0 corpus 3-host green, current-except-D-327) + D-327
+tracked for beta/rc. Recommended B for an alpha. If silent next cycle: start
+D-327 Phase-I investigation (scope A's cost) as autonomous option-A prep.
 
 ## Current state
 
