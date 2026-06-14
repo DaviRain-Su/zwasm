@@ -25,12 +25,22 @@
 - **PENDING VERIFY (next Step 0.7)**: the ubuntu run on `29c4a049` (fix + union
   regression tests) was IN-FLIGHT — confirm no `loadFrameSniffedPred` ABRT, OK
   verdict. Remote was busy, so Slice 4 NOT yet ubuntu-kicked.
-- **NEXT — Slice 5 (closes D-238 + ADR-0185)**: kick ubuntu `ZWASM_SPEC_ENGINE=jit`
-  on the EH cross-module dir (importer catches exporter throw — the functional
-  proof) + confirm non-EH D-225 + arm64 EH stay green; then ship the ADR-0114
-  `cross_module_throw_propagation.wat` fixture (both arches) + flip D-238→resolved
-  + ADR-0185/0127-style Closed. First: a plain ubuntu test-all kick verifies
-  Slice 4 + the unit tests once the remote frees.
+- **NEXT — Slice 5 (closes D-238 + ADR-0185) — PRE-SCOUTED**: the functional verify
+  is the EXISTING `exception-handling/try_table` corpus under `ZWASM_SPEC_ENGINE=jit`:
+  `catch-imported () -> i32:2` + `catch-imported-alias` (importer catches exporter's
+  imported tag) + `imported-mismatch () -> i32:3` (uncaught propagation) ARE the
+  cross-module throw-propagation D-238 scenario, all no-arg-i32 (JIT-runnable). Mac
+  arm64 baseline VERIFIED this session: `ZWASM_SPEC_ENGINE=jit zig build
+  test-spec-wasm-3.0-assert` → exception-handling JIT `return pass=34 fail=0 skip=0`,
+  no crash. **Slice 5 steps**: (1) once remote frees, kick `ZWASM_SPEC_ENGINE=jit
+  zig build test-spec-wasm-3.0-assert` on ubuntu → confirm exception-handling JIT
+  0-fail/0-crash on x86_64 (the proof the slices 2a/2b/3/4 fix works) + a plain
+  test-all for the unit tests; (2) **ADR-0114's `cross_module_throw_propagation.wat`
+  is SUBSUMED** by try_table `catch-imported` (official corpus, both arches, JIT) —
+  reconcile via an ADR-0114 Revision note (do NOT hand-author a duplicate fixture;
+  the edge-runner can't do multi-module); (3) flip D-238→resolved + ADR-0185 →
+  Closed(Implemented) with the SHA range. Bundle exit-condition MET when ubuntu
+  exception-handling JIT is 0-fail on x86_64.
 - **Continuity-memo**: x86_64-functional-verify is ubuntu-only (opt-in JIT engine);
   unit tests (frame_chain + thunk byte tests) execute on the ubuntu gate, not Mac
   (x86_64/ files aren't in the Mac test graph). Cross-compile gates compilation
@@ -72,21 +82,12 @@ preopen_dir+inherit_env; jit-sandbox "not yet enforced" → D-314 enforced; CM
 
 **AGENDA COMPLETE** (A1+A2+A3 done). **D-177 preopens SHIPPED `9bdf9401` + closed
 `94c40966`** (full facade WASI args/envs/preopens parity; docs synced `93e94821`).
-**2026-06-14 internal-`blocked-by` staleness sweep** (`0049036e`/`b36f15fc`/`ea359302`):
-the earlier "barrier sweep EXHAUSTED" was WRONG — internal-predicate rows had silently
-gone stale. Corrected 5: **D-022**→note (category error: trap-event ≠ value-mismatch
-localization; M3-a-2 unlocks nothing → not built); **D-202**→note + **ADR-0127 Closed**
-(PHASE C landed `add983e8`, assert_unlinkable 5→0; only a latent same-typespace #1
-residual, no fixture); **D-197**→note (validator-diag plumbing landed; per-cause
-attribution deferred-by-no-signal); **D-178 CLOSED** (host-side construction surface fully
-landed — C-API `wasm_{global,memory,table}_new` + facade `define{Global,Table,Memory}`).
-Verified GENUINE-blocked: D-026/D-082 (Phase-11 emcc/externref), D-020 (4/5 dbg
-threshold). **External/upstream-Zig rows re-verified GENUINE** (D-312/D-148/D-323
-pin-gated to Zig 0.16; D-010 third-site trigger not fired — `rawFreeOwned` still 1
-module): unlike internal rows these don't silently dissolve (pin-bump/trigger-gated).
-**D-238 (x86_64 EH-JIT parity) is now an ACTIVE implementation campaign** — design
-+ slices 1/2a landed; see the `## Active bundle` section at the top for the driving
-next-step (Slice 2b). Else (after the campaign): future-phase / user-gated (§1.3 /
+**2026-06-14 debt-coherence sweep** (`0049036e`..`ea359302`): corrected 5 silently-stale
+internal `blocked-by` rows (D-022/D-202/D-197→note, D-178 closed, ADR-0127 Closed) +
+re-verified the external/upstream-Zig rows GENUINE (D-312/D-148/D-323 pin-gated; D-010
+trigger not fired). Full detail in git. **D-238 (x86_64 EH-JIT parity) is now an ACTIVE
+campaign** — see the `## Active bundle` at top for the driving next-step. After the
+campaign: future-phase / user-gated (§1.3 /
 tag / §13.4). No auto-tag (ADR-0156).
 
 ## State (tag-ready baseline, all 3-host green)
