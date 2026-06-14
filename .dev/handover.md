@@ -71,22 +71,24 @@ JIT-correct, 2 genuine miscompiles, 9 `go_*` compile-gaps. B1 bundle CLOSED (lan
     strlen+loop) AND `printf("%%02x", hash[i])` (int vararg, line 118) prints correctly.
   · **emcc_fasta** `printf("%%c:%%d ", syms[j], counts[j])` (fasta.c:37): `%%c` (1st vararg) CORRECT,
     `%%d` (2nd vararg counts[j]) prints **0** for all — yet `%%lu` checksum (line 36) is correct.
-  Enumerated hypotheses (investigation_discipline §1): (H1) **emscripten varargs stack-buffer store
-  miscompile** — a vararg stored at wrong offset / lost (fits fasta 2nd-arg=0; sha256 %%s ptr);
-  distinguishing probe = disassemble the i32.store sequence writing the vararg buffer before the
-  printf call. (H2) **array-element store** `counts[j]++` lost (fasta counts genuinely 0, not a
-  print bug) — probe: a minimal `arr[i]++`-in-loop fixture under --jit. (H3) string-literal/passive-
-  data pointer-as-arg value miscompiled at a 2nd use site. Repro: `./zig-out/bin/zwasm run --engine
-  jit test/realworld/wasm/c_sha256_hash.wasm` vs `--engine interp`. Use `debug_jit_auto`. Separately:
-  9 `go_*` UnsupportedOp compile-gaps = debt-tracked op backlog (per-op, predicate clear).
+  **CYCLE-2 ISOLATED (`private/spikes/jit-vararg/`)**: the bug is **plain `%s` (no precision)**.
+  `printf("%s\n","hi")` → JIT empty + drops `\n`. REJECTED: H1 varargs (`%c %d %lu` 1–4 args ok),
+  H2 array-store (`arr[i]++`→ok), AND `%.2s` (precision) → CORRECT, `fputs`/`puts` ok, standalone
+  `strnlen(s,0x7FFFFFFF)`/`memchr(...,0x7FFFFFFF)` ok. SUSPECT: emscripten -O2 **INLINES** the plain-
+  `%s` `strnlen(s, PTRDIFF_MAX)` as a word-at-a-time **SWAR null scan** (`(w-0x01010101)&~w&
+  0x80808080`); the small-count `%.Ns` byte-loop + the standalone library strnlen (a CALL) are fine
+  → the miscompiled code is the inlined SWAR word-loop on the huge-count path (the dropped `\n` =
+  vfprintf overflow early-return from a bogus huge length). Separately: 9 `go_*` UnsupportedOp
+  compile-gaps = debt-tracked op backlog (per-op, predicate clear).
 - **Exit-condition**: both `c_sha256_hash` + `emcc_fasta` flip to MATCH in `test-realworld-diff-jit`
   (jit mismatched → 0); each fix carries a boundary fixture + a lesson on the miscompiled op/pattern.
 
-**First action on resume**: B2 cycle-2 — build a MINIMAL `.wat`/`.c` fixture isolating H1/H2
-(an `arr[i]++`-in-loop and a `printf("%s")` reduced to the smallest wasm that mismatches --jit vs
-interp), then `debug_jit_auto` disassemble the vararg-buffer i32.store / array-store sequence to
-find the miscompiled op. (A1 Zig + A2 embenchen + A3 wasmer-oracle + runtime-bump + tool-currency-
-3host + B1 jit-diff-lane all DONE; B2 cycle-1 localization done — see Active bundle.)
+**First action on resume**: B2 cycle-3 — `debug_jit_auto` disassemble the inlined-`strnlen` SWAR
+word-scan in the plain-`%s` path (repro: `private/spikes/jit-vararg/repro2.wasm`, lines 1/2 drop
+under --jit). Find the miscompiled i32 op in `(w-0x01010101)&~w&0x80808080`; OR reduce to a
+hand-written word-scan `.wat`. On fix: boundary fixture + lesson. (A1 Zig + A2 embenchen + A3
+wasmer-oracle + runtime-bump + tool-currency-3host + B1 jit-diff-lane all DONE; B2 cycle-2 isolated
+plain-`%s`/inlined-SWAR — see Active bundle + spike README.)
 
 ## State (tag-ready baseline, all 3-host green)
 
