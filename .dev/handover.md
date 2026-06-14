@@ -22,9 +22,13 @@
   (per user) pin the broken shape. **Slice 4** `03e99a8a` (spec-runner registers
   each instance's thunk_arena range via `registerThunkArena`/`unregisterThunkArena`
   at the eh_registry.register/unregister sites; interp spec corpus 0-fail).
-- **PENDING VERIFY (next Step 0.7)**: the ubuntu run on `29c4a049` (fix + union
-  regression tests) was IN-FLIGHT — confirm no `loadFrameSniffedPred` ABRT, OK
-  verdict. Remote was busy, so Slice 4 NOT yet ubuntu-kicked.
+- **ubuntu test-all GREEN `3387413c`** (`[run_remote_ubuntu] OK`) — the SEGV
+  union-fix + the slice-3 follow-up `thunk_bytes` test 27→40 (a stale x86_64-only
+  test I'd missed) make slices 1-4 + fixes pass on x86_64. windows re-kicked after a
+  D-028-class configure-phase FileNotFound flake (build never reached tests; tracked).
+  A fresh ubuntu kick is verifying the `81710782` ReleaseSafe-audit build.zig change.
+- **PENDING VERIFY (next Step 0.7)**: fresh ubuntu (`81710782` core_comp floor) +
+  windows re-kick verdict.
 - **NEXT — Slice 5 (closes D-238 + ADR-0185) — PRE-SCOUTED**: the functional verify
   is the EXISTING `exception-handling/try_table` corpus under `ZWASM_SPEC_ENGINE=jit`:
   `catch-imported () -> i32:2` + `catch-imported-alias` (importer catches exporter's
