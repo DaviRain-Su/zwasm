@@ -22,6 +22,7 @@ const gc_type_info = @import("../feature/gc/type_info.zig");
 const needs_heap_detector = @import("../feature/gc/needs_heap_detector.zig");
 const shared_thunk = @import("codegen/shared/thunk.zig");
 const jit_mem = @import("../platform/jit_mem.zig");
+const dbg = @import("../support/dbg.zig");
 const Error = runner_mod.Error;
 const CompiledWasm = runner_mod.CompiledWasm;
 
@@ -590,6 +591,13 @@ pub fn setupRuntimeLinked(
         const raw_ti = compiled.func_typeidxs[i];
         const canon_ti: u32 = if (fe_canon_types) |t| canonical_type.canonicalTypeidx(t.items, raw_ti) else raw_ti;
         fe.* = .{ .runtime = undefined, .func_idx = @intCast(i), .typeidx = canon_ti, .funcptr = funcptr, .raw_typeidx = raw_ti };
+        // Runtime entry address for `ZWASM_DEBUG=jit.dump` — pairs the
+        // body-relative bytes (compile.zig) with the absolute address so an
+        // lldb breakpoint at `addr + (asm_line-1)*4` (arm64) can value-trace a
+        // miscompile. Skipped for import sentinels (no JIT body).
+        if (f_off != linker.IMPORT_SENTINEL_OFFSET and dbg.on("jit.dump")) {
+            std.debug.print("[jit.dump] func={d} runtime_addr=0x{x}\n", .{ i, funcptr });
+        }
     }
 
     // Evaluate each defined global's init-expr so e.g. `__stack_pointer`
