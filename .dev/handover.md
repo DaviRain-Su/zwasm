@@ -3,12 +3,16 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Just closed — D-330 primary mechanism FIXED (`6790c204`)
+## Just closed — D-330 coalescing FIXED (`6790c204`) + x86_64 fp-select companion (`cccb2313`)
 
 The JIT `%s`/strnlen miscompile was the **LSRA free-pool expiry coalescing a result vreg into
-a same-pc last-use operand's slot** (`<=` → strict `<`; ADR-0037 amendment). Arch-INDEPENDENT
-(arm64 == x86_64-Rosetta ⇒ shared codegen). repro2 correct; **emcc_fasta byte-exact MATCH**;
-test + test-spec green; +1 slot worst-case. Lesson `2026-06-15-regalloc-boundary-coalesce-read-after-write`.
+a same-pc last-use operand's slot** (`<=` → strict `<`; ADR-0037 amendment). repro2 correct;
+**emcc_fasta byte-exact MATCH**; +1 slot worst-case. Lesson `2026-06-15-regalloc-boundary-coalesce-read-after-write`.
+**The `<` change EXPOSED a latent x86_64 bug** (caught at Step 0.7 — ubuntu test-all FAIL,
+29 `float_exprs no_fold_*_select`): `emitFpSelect` TESTed cond AFTER `MOVQ r_a,xmm_val1`, but
+gprLoadSpilled stages a SPILLED cond through `r_a` → cond clobbered before the test. Fixed
+`cccb2313` (TEST cond first; matches the already-correct x86_64 int select; arm64 CSEL unaffected).
+wasm-2.0-assert now 25437/0 on arm64 AND x86_64-Rosetta (was 25408/29). **Re-verify ubuntu next 0.7.**
 **Residual (D-330 partial)**: `c_sha256_hash` 91B→106B (sha256 hash now correct) still drops ONE
 trailing `\n`. MECHANISM PINNED (fdWrite trace): musl line-buffered final flush sends 2 ciovecs
 (iov[0]="verify: OK" len=10, iov[1]="\n" len=1); under JIT the guest passes **iov[1] len=0** (interp
