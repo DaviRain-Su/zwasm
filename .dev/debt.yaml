@@ -451,8 +451,28 @@ entries:
       removal-condition fixture) once x86_64 lands so both arches are covered. FIX:
       mirror the arm64 D1 change on the x86_64 thunk (establish an RBP frame the
       unwinder can walk), verify on `ubuntunote` via a JIT-corpus run of the EH dir.
+      DESIGN REFINED 2026-06-14 (survey + alignment derivation): the naive
+      "PUSH RBP; PUSH R15; MOV RBP,RSP" mirror is WRONG on alignment — the thunk
+      ENTRY RSP is ≡8 mod 16 (importer's CALL pushed retaddr); TWO pushes →
+      RSP≡8 before `CALL RAX`, but SysV needs ≡0 (else SSE/AVX in the callee
+      faults). The current 1-push (PUSH R15) thunk aligns BY LUCK; adding RBP
+      breaks it. Correct frame needs a 3rd 8-byte adjustment (a `SUB RSP,8` pad
+      before the MOVs, `ADD RSP,8` after the CALL) → ~40-byte thunk. Candidate:
+      `PUSH RBP; MOV RBP,RSP; PUSH R15; SUB RSP,8; MOV RDI=callee_rt; MOV
+      RAX=callee_entry; CALL RAX; ADD RSP,8; POP R15; POP RBP; RET` (standard
+      frame [RBP]=saved_RBP/[RBP+8]=importer_retaddr → the sniff's first try
+      [RBP+8] finds it; pad keeps CALL 16-aligned). OPEN: the unwinder's per-frame
+      `uses_runtime_ptr` sniff (frame_chain_adapter D-184) is keyed off a CodeMap
+      lookup; the thunk has NO CodeMap entry — confirm how the walk treats the
+      thunk frame before shipping. All encoders exist (encPushR/encPopR(.rbp),
+      encMovRR(.q,.rbp,.rsp), encSubRSpImm8/encAddRSpImm8). thunk_bytes 27→~40
+      auto-propagates to arena sizing (shared/thunk.zig:106). HIGH-FRICTION: the
+      EH functional path is x86_64-JIT-only (NOT Mac-testable; needs
+      ZWASM_SPEC_ENGINE=jit on ubuntu, EH dir has cross-module `catch-imported`);
+      non-EH cross-module-call regression IS caught by default 3-host (D-225
+      fixtures). LOW priority — do as a focused x86_64-verifiable chunk, not blind.
     first_raised: "2026-06-03"
-    last_reviewed: "2026-06-03"
+    last_reviewed: "2026-06-14"
     refs: |-
       `src/engine/codegen/x86_64/thunk.zig` (needs RBP frame-link); `src/engine/codegen/arm64/thunk.zig` (the arm64 D1 reference, `4f73d9ee`); `src/engine/codegen/shared/frame_chain_adapter.zig:60-76` (x86_64 sniffed read, D-184); ADR-0134 cycle 3; ADR-0114 (cross_module_throw_propagation.wat removal cond)
   - id: "D-026"
