@@ -1054,6 +1054,20 @@ entries:
       10→0) — source-level hypothesizing has failed 4×. **DEPRIORITIZED**: NICHE cosmetic (one trailing `\n`;
       the sha256 + verify VALUES are correct; interp correct; 55/56 corpus byte-exact). Disproportionate
       effort already spent; do NOT re-chase the 4 dead hypotheses.
+      ---
+      **TOOLING NOW EXISTS (2026-06-15 `db3109d8`)**: the instruction-level lens that all 4 prior
+      (IR-level) attempts lacked. `ZWASM_DEBUG=jit.dump zwasm run --engine jit <wasm>` prints each
+      func's body-relative machine bytes as a hex line (`[jit.dump] func=N len=L hex=...`). Disasm
+      arm64 via llvm-mc (NO objdump `-b` in llvm-21): `echo "$HEX" | sed -E 's/(..)/0x\1 /g' |
+      /nix/store/*llvm-21*/bin/llvm-mc --disassemble --triple=aarch64`. Done for func 4 (10580 B =
+      2645 insns). **FINDING**: the inlined musl putc/`__overflow` '\n'-write lives at asm lines
+      ~2300-2375. Two buffer-check gates `cbnz w14` at asm-line 2316 + 2345 (each `cmp wpos,wend` i.e.
+      `cmp mem[1996],mem[1992]`); the '\n' byte write is `mov x14,#10; strb w15,[x28,x16]` at ~2364.
+      Static structure is CORRECT (it does write 10 to the buffer) → bug is a RUNTIME VALUE at one of
+      those compares. **NEXT (concrete, tool-equipped — NOT a 5th source guess)**: lldb value-trace —
+      code_map.zig has func 4's runtime start_addr; breakpoint at `start_addr + (asm_line-1)*4` for the
+      2345 cbnz, inspect w14/w15 interp-vs-jit. OR add a wasm-pc→machine-offset emit map (2nd primitive)
+      for precise pc678↔offset correlation. Repro on Mac arm64 confirmed (`verify: OK` no trailing \n).
     first_raised: "2026-06-15"
     last_reviewed: "2026-06-15"
     refs: |-

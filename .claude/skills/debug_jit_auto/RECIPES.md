@@ -509,42 +509,45 @@ runtime hangs / corrupts / loops infinitely so `lldb -b -o
 interrupt), instrument the runner to dump the bytes BEFORE
 execution. Pre-execution dump bypasses the hang.
 
-D-165 cycle 9 pattern (now reverted; reference for re-introduction):
+**CODIFIED 2026-06-15 (`db3109d8`)** — permanent, env-gated, in
+`src/engine/compile.zig` (the per-func link loop). No more ad-hoc
+re-introduction:
 
-```zig
-// in test/spec/spec_assert_runner_base.zig at module-load site
-// (after current_compiled = compiled;):
-for (compiled.func_results, 0..) |*fr, def_idx| {
-    const wasm_idx = compiled.num_imports + @as(u32, @intCast(def_idx));
-    std.debug.print("[<tag>] func{d} (wasm_idx={d}) len={d} bytes=", .{ def_idx, wasm_idx, fr.out.bytes.len });
-    for (fr.out.bytes) |b| std.debug.print("{x:0>2}", .{b});
-    std.debug.print("\n", .{});
-}
+```sh
+ZWASM_DEBUG=jit.dump zig-out/bin/zwasm run --engine jit <file.wasm> 2> /tmp/dump.log
+# each line: [jit.dump] func=<wasm_idx> len=<L> hex=<machine bytes>
 ```
 
-(Currently `std.posix.getenv` / `std.process.getEnvVarOwned`
-both unavailable in 0.16 stdlib at this surface; `std.c.getenv`
-re-introduces libc concern. Cycle 9 used `if (true)` unconditional
-+ revert. Future re-introduction: pick one and codify.)
+Gated by `dbg.on("jit.dump")` (Zone-0 whitelist plumbed from Zone 3;
+release-stripped, zero cost when unset). Bytes are body-relative
+(pre-link → call/branch targets not yet fixed up).
 
-Run, redirect stderr to file, scp back to Mac:
+Disassemble (arm64). **NOTE: llvm-21's `llvm-objdump` dropped GNU
+`-b binary`, and Apple's `/usr/bin/objdump` rejects `-b` too. Use
+`llvm-mc --disassemble`:**
 
 ```bash
-# Win-side: dump to file
-ssh windowsmini 'cmd /c "cd /d <repo> && start /B zig-out\bin\zwasm-spec-wasm-2-0-assert.exe <manifest-dir> > %USERPROFILE%\d165-win.log 2>&1"'
-sleep N  # wait for compile + dump to finish, before any hang
-ssh windowsmini 'cmd /c "taskkill /F /IM zwasm-spec-wasm-2-0-assert.exe 2>nul"'
-scp -q windowsmini:d165-win.log /tmp/d165-win.log
-
-# Mac-side: extract a specific function's bytes and disassemble
-grep "func7" /tmp/d165-win.log | awk -F'bytes=' '{ print $2 }' \
-    | xxd -r -p > /tmp/func7.bin
-llvm-objdump --disassemble -b binary -m x86_64 --x86-asm-syntax=intel /tmp/func7.bin
+HEX=$(grep -oE "func=4 .* hex=[0-9a-f]+" /tmp/dump.log | sed -E 's/.*hex=//')
+echo "$HEX" | sed -E 's/(..)/0x\1 /g' \
+  | /nix/store/*llvm-21*/bin/llvm-mc --disassemble --triple=aarch64 > /tmp/func4.asm
+# x86_64: --triple=x86_64  (add --output-asm-variant=1 for Intel syntax)
 ```
 
-This dumped fac-ssa's 390-byte body and was on the critical
-path to identifying the pick0/pick1 MEMORY-class + cap=1
-bugs in D-165 cycle 9.
+Map an asm line back to a runtime address for an lldb value-trace:
+`code_map.zig` Entry carries the func's `start_addr`; the i-th asm
+line (1-based) is at `start_addr + (i-1)*4` on arm64. First use:
+D-330 c_sha256 `\n` residual (func 4 putc/`__overflow` region).
+
+Win64 legacy variant — dump to file, scp back to Mac:
+
+```bash
+ssh windowsmini 'cmd /c "cd /d <repo> && set ZWASM_DEBUG=jit.dump&& start /B zig-out\bin\zwasm.exe run --engine jit <file.wasm> > %USERPROFILE%\dump.log 2>&1"'
+scp -q windowsmini:dump.log /tmp/dump.log
+```
+
+The original D-165 use (ad-hoc `if(true)` in the spec runner, now
+superseded by the env gate) dumped fac-ssa's 390-byte body on the
+critical path to the pick0/pick1 MEMORY-class + cap=1 bugs.
 
 ### Recipe 17 — manifest-bisect via `test/private/d-165/` scratch dir
 
