@@ -10,14 +10,19 @@ SUMMARY: 1.0/2.0/simd/threads CURRENT; gc re-vendored to wg-3.0 `b8e8b16c` (3-ho
 green); tail-call reverted `a981e5d8` (broke hardcoded `wasm_3_0_manifest.zig`
 tests — lesson filed); rest no-drift. So 3.0 corpus = **wg-3.0-current EXCEPT the
 multi-value asserts (D-327)**. Sustainable mechanism DONE (refdialect.py + runbook).
-D-327 PINNED: the eh try_table multi-value failures are **VALUE MISMATCHES** in
-`spec_assert_runner_wasm_3_0.zig` (which already does invokeMulti) ⇒ a likely REAL
-JIT multi-value bug (try_table/exception context), NOT a test-harness gap. So
-closing it (full wg-3.0) is a genuine **runtime investigation** (multi-cycle).
-DECISION (user's call): **A** = investigate+fix D-327 → full wg-3.0 → tag (multi-
-cycle). **B** = tag `v2.0.0-alpha.3` NOW (3-host green, current-except-D-327;
-D-327 → beta/rc debt). **Recommend B** for an alpha. NEXT: honour pick; if silent,
-begin the D-327 runtime investigation (re-vendor eh + bisect the try_table fail).
+D-327 ROOT CAUSE PINNED `04e5fae2` (investigation COMPLETE): re-vendored eh
+try_table + `ZWASM_SPEC_DETAIL=1` → the 5 failures are `FAILsetup` on functions
+`catch/catch_ref*/catch_all_ref*` ⇒ the JIT can't run `try_table` with
+**`catch_ref`/`catch_all_ref`** (Wasm 3.0 EH exnref-binding catch clauses; 37 uses
+in wg-3.0). A specific **JIT EH-codegen feature gap** — NOT multi-value, NOT
+test-harness. Bounded but a real both-arches codegen feature = clearly beta/rc.
+CAMPAIGN CONVERGED. The 3.0 corpus is alpha-ready: wg-3.0-current except the
+catch_ref EH-codegen gap (D-327), 3-host green; gc done; mechanism (refdialect+
+runbook) done; lessons + D-327 fully characterized.
+DECISION (the gating item — yours): **B (recommended)** = tag `v2.0.0-alpha.3` now
+(D-327 catch_ref → beta/rc). **A** = implement catch_ref/catch_all_ref JIT codegen
+first (multi-cycle EH feature). bucket-3 stop — autonomous investigation exhausted;
+the next step (A feature or B tag) is your alpha call.
 
 ## Current state
 
