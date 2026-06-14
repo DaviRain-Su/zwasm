@@ -32,12 +32,16 @@
 User wants the 3.0 corpus genuinely complete (not "alpha-ready except gaps")
 before `v2.0.0-alpha.3`. Two autonomous items gate the tag; close both → tag
 surfaces ready (user-only, ADR-0156):
-1. **tail-call un-revert** — re-vendor wg-3.0 tail-call (`return_call` +3 /
-   `return_call_indirect` +4 asserts) **WITH** `wasm_3_0_manifest.zig` hardcoded
-   updates (e2e `i32:306` value + "enumerate 31 asserts" count) in the SAME
-   commit (lesson 2026-06-14). Low-risk; **do this FIRST**.
-2. **D-327** — the Active bundle above (JIT EH catch_ref/throw_ref) → then eh
-   wg-3.0 re-vendor. Bigger, multi-cycle.
+1. **tail-call un-revert — DONE Mac `21959b5f`** (full `zig build test` green
+   2853/0; pending 3-host). Root cause of the prior breakage was NOT counts: wg-3.0
+   `return_call.0.wasm` gained a `tailprint_i32_f32` export importing
+   `spectest.print_i32_f32`, so the import-free `runOne` couldn't instantiate it →
+   added `runOneSpectest` (registers the stub) for the e2e + D-187 bisect markers;
+   bisect now enumerates the 31 single-result asserts (corpus has 33; void +
+   multi-value pair covered by the spec runner).
+2. **D-327 — NEXT** (Active bundle above; JIT EH catch_ref/throw_ref) → then eh
+   wg-3.0 re-vendor. Bigger, multi-cycle. Start at Cycle-4a (jit_abi reify infra +
+   unit test) per `private/notes/d327-catch_ref-plan.md`.
 
 ## Campaign — spec re-vendor (full detail `private/spec_revendor_campaign.md`)
 
