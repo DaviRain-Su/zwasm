@@ -502,9 +502,28 @@ entries:
       eh_registry/CodeMap entry spanning the thunk arena tagged standard-layout, OR
       a sniff branch that recognizes a thunk-range RIP. (b) is the load-bearing
       architectural decision + is x86_64-only-verifiable; do NOT ship (a) alone (it
-      LOOKS done but the walk still breaks at the callee frame). Next cycle: decide
-      (b)'s mechanism, implement (a)+(b) together, verify via ubuntu ZWASM_SPEC_ENGINE=jit
-      on the EH dir.
+      LOOKS done but the walk still breaks at the callee frame). **DESIGN SURVEY
+      2026-06-14 (deeper — the fix is (a)+(b)+(c), bigger than first thought)**:
+      confirmed the x86_64 sniff's layout-disambiguation is fed a SINGLE CodeMap
+      (`unwind.walk` uses one `loader` whose `normalize_ctx` = the THROWING instance's
+      CodeMap, set once by `code_map.adapterContextFor` @code_map.zig:145-148; the
+      per-frame `resolver` only does handler-table dispatch @unwind.zig:153, NOT
+      frame-chain loading @:184). This is insufficient for cross-instance by
+      construction: in `M1 imports f from M2; M2.f throws`, the bridge thunk lives in
+      **M1's (importer's) thunk_arena**, and the importer frames are in **M1's
+      CodeMap** — neither is the throwing M2's CodeMap. So the real fix = (a) RBP
+      thunk + (b) a GLOBAL thunk-arena range set (the thunk is the importer's, not the
+      thrower's) + **(c) route the sniff's `.inside` layout-resolve through the global
+      `eh_registry` resolver (all instances' CodeMaps + the thunk-range set), NOT the
+      single throwing-instance CodeMap** — (c) is the load-bearing change. The earlier
+      "empty sentinel CodeMap for thunk PCs" idea is WRONG (an empty map returns
+      `.outside`, which does NOT resolve the R15-pushed layout the callee frame needs
+      at `[RBP,16]`). SCOPE: deep EH-unwind-resolution change (touches D-184 sniff +
+      ADR-0134 cross-instance dispatch), LOW priority, x86_64-functional-verify only
+      (logic IS Mac-unit-testable via synthetic cross-instance frame chains, cf.
+      `unwind.zig:390` TwoInstanceResolver). Deliberate future campaign: ADR for
+      (a)+(b)+(c) → Mac unit tests (synthetic callee→thunk→importer walk) → ubuntu
+      `ZWASM_SPEC_ENGINE=jit` EH-dir functional verify → ship ADR-0114 fixture.
     first_raised: "2026-06-03"
     last_reviewed: "2026-06-14"
     refs: |-
