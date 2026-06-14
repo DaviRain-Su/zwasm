@@ -698,6 +698,9 @@ fn findStartFuncIdx(bytes: []const u8) ?u32 {
 pub const InstantiateLimits = struct {
     fuel: ?u64 = null,
     max_memory_pages: ?u64 = null,
+    /// D-332 — host cap on the INITIAL declared element count of each table
+    /// (extends the grow-time `store_table_elements_max` to instantiation).
+    max_table_elements: ?u64 = null,
 };
 
 /// Internal entry shared by `wasm_instance_new` (C ABI path,
@@ -732,6 +735,7 @@ pub fn instantiateInternal(store: *Store, module: *const Module, builder_state: 
     // allocation in `instantiateRuntime` (not just later `memory.grow`).
     inst_rt.fuel = limits.fuel;
     inst_rt.store_memory_pages_max = limits.max_memory_pages;
+    inst_rt.store_table_elements_max = limits.max_table_elements; // D-332 (initial alloc)
 
     const inst = alloc.create(Instance) catch {
         inst_rt.deinit();

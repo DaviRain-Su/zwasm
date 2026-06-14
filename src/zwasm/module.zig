@@ -110,6 +110,12 @@ pub const Module = struct {
     /// Default linear-memory ceiling in 64 KiB pages (4096 = 256 MiB), an extra
     /// cap below the spec 4 GiB ceiling.
     pub const default_max_memory_pages: u64 = 4096;
+    /// Default table-element ceiling (D-332): a generous DoS backstop on the
+    /// INITIAL eager table allocation, mirroring `default_max_memory_pages`.
+    /// 10M funcref slots ≈ 80 MiB — far above any real toolchain (Go/wasip1's
+    /// table is ~5790), so it rejects only pathological declared mins, NOT a low
+    /// arbitrary cap (cf. D-331(A)). Hosts tighten via `max_table_elements`.
+    pub const default_max_table_elements: u64 = 10_000_000;
 
     /// Instantiation options (ADR-0179). Both budgets default to a FINITE value
     /// so the common `init → compile → instantiate → invoke` flow is bounded
@@ -117,20 +123,25 @@ pub const Module = struct {
     pub const InstantiateOpts = struct {
         fuel: Budget = .{ .limited = default_fuel },
         max_memory_pages: Budget = .{ .limited = default_max_memory_pages },
+        /// D-332 — host cap on a table's INITIAL declared element count (mirrors
+        /// `max_memory_pages`; extends the grow-time `store_table_elements_max`).
+        max_table_elements: Budget = .{ .limited = default_max_table_elements },
     };
 
     /// `StartTrapped` = the module's `(start)` function trapped during
     /// instantiation (D-275); `MemoryLimitExceeded` = the module's declared
     /// initial linear memory exceeds `opts.max_memory_pages`;
-    /// `InstantiateFailed` = any other failure (link / alloc). The specific
-    /// trap kind is available to C hosts via `wasm_instance_new`'s `trap_out` +
-    /// `wasm_trap_message`.
-    pub const InstantiateError = error{ InstantiateFailed, StartTrapped, MemoryLimitExceeded };
+    /// `TableLimitExceeded` = a declared table's initial element count exceeds
+    /// `opts.max_table_elements` (D-332); `InstantiateFailed` = any other
+    /// failure (link / alloc). The specific trap kind is available to C hosts
+    /// via `wasm_instance_new`'s `trap_out` + `wasm_trap_message`.
+    pub const InstantiateError = error{ InstantiateFailed, StartTrapped, MemoryLimitExceeded, TableLimitExceeded };
 
     pub fn instantiate(self: *Module, opts: InstantiateOpts) InstantiateError!_zwasm.Instance {
         const limits: _api_instance.InstantiateLimits = .{
             .fuel = opts.fuel.toOptional(),
             .max_memory_pages = opts.max_memory_pages.toOptional(),
+            .max_table_elements = opts.max_table_elements.toOptional(),
         };
 
         // Reject an over-cap declared initial memory before instantiation so the
@@ -139,6 +150,12 @@ pub const Module = struct {
         if (limits.max_memory_pages) |cap| {
             if (self.declaredInitialMemoryPages()) |min_pages| {
                 if (min_pages > cap) return error.MemoryLimitExceeded;
+            }
+        }
+        // D-332: same for the largest declared initial table element count.
+        if (limits.max_table_elements) |cap| {
+            if (self.declaredInitialTableElements()) |min_elems| {
+                if (min_elems > cap) return error.TableLimitExceeded;
             }
         }
 
@@ -163,6 +180,22 @@ pub const Module = struct {
         // authoritatively, so a decode miss here safely defers to that path
         // (the section already parsed during `compile`).
         var decoded = _sections.decodeMemory(self.alloc, sec.body) catch return null;
+        defer decoded.deinit();
+        if (decoded.items.len == 0) return null;
+        var max_min: u64 = 0;
+        for (decoded.items) |entry| max_min = @max(max_min, entry.min);
+        return max_min;
+    }
+
+    /// D-332 — largest declared initial element count across the module's
+    /// DEFINED tables, or `null` when it declares none. Mirrors
+    /// `declaredInitialMemoryPages`; element units match the runtime table cap.
+    fn declaredInitialTableElements(self: *const Module) ?u64 {
+        const sec = self.native.find(.table) orelse return null;
+        // EXEMPT-FALLBACK: D-332 — best-effort pre-check for a distinct caller
+        // error; the runtime re-decodes + enforces the cap authoritatively, so a
+        // decode miss here safely defers (the section parsed during `compile`).
+        var decoded = _sections.decodeTables(self.alloc, sec.body) catch return null;
         defer decoded.deinit();
         if (decoded.items.len == 0) return null;
         var max_min: u64 = 0;
@@ -357,6 +390,25 @@ test "Module.instantiate: declared initial memory above max_memory_pages → Mem
     var inst = try mod.instantiate(.{ .max_memory_pages = .{ .limited = 2 } });
     defer inst.deinit();
     try testing.expect(inst.memory() != null);
+}
+
+test "Module.instantiate: declared initial table above max_table_elements → TableLimitExceeded (D-332)" {
+    // (module (table 2 funcref)) — table section: count 1, funcref(0x70), min-only(0x00), min 2.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x04, 0x04, 0x01, 0x70, 0x00, 0x02, // table: funcref min 2
+    };
+    var eng = try _zwasm.Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var mod = try eng.compile(&bytes);
+    defer mod.deinit();
+
+    // A small declared min (2) above a low cap (1) is rejected WITHOUT allocating
+    // — the cap bounds the INITIAL eager table alloc, not only table.grow.
+    try testing.expectError(error.TableLimitExceeded, mod.instantiate(.{ .max_table_elements = .{ .limited = 1 } }));
+
+    var inst = try mod.instantiate(.{ .max_table_elements = .{ .limited = 2 } });
+    defer inst.deinit();
 }
 
 test "Module.exports: memory export → kind=.memory (kind-mapping boundary)" {

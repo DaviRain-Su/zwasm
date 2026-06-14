@@ -1506,6 +1506,13 @@ pub fn instantiateRuntime(
                     imp_glob_slots = gs;
                 }
                 for (t.items, 0..) |entry, i| {
+                    // D-332: a host element cap bounds the INITIAL table
+                    // allocation (not only `table.grow`) — a declared `min` above
+                    // it is refused here before the cells are reserved (mirrors
+                    // the `store_memory_pages_max` initial-memory check above).
+                    if (rt.store_table_elements_max) |cap| {
+                        if (entry.min > cap) return error.TableLimitExceeded;
+                    }
                     const refs = try a.alloc(Value, entry.min);
                     if (entry.init_expr.len > 0) {
                         // Wasm 3.0 table-with-init-expr: eval the const-expr

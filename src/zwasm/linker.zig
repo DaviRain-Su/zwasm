@@ -740,6 +740,7 @@ pub const Linker = struct {
         const limits: _api_instance.InstantiateLimits = .{
             .fuel = opts.fuel.toOptional(),
             .max_memory_pages = opts.max_memory_pages.toOptional(),
+            .max_table_elements = opts.max_table_elements.toOptional(), // D-332
         };
         // trap_out=null: the Linker path keeps the coarse InstantiateFailed for
         // a start trap (its rich LinkError covers the import-resolution failures);
