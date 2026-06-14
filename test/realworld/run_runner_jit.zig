@@ -46,7 +46,7 @@ const builtin = @import("builtin");
 const zwasm = @import("zwasm");
 const engine_runner = zwasm.engine.runner;
 
-/// Per-fixture timeout for the run-stage. cljw_*/tinygo_fib
+/// Per-fixture timeout for the run-stage. tinygo_fib + similar
 /// fixtures have compute-heavy loops; without isolation they
 /// can hang the runner. Fork-and-kill is the only hard
 /// guarantee against guest tight loops (cooperative cancellation

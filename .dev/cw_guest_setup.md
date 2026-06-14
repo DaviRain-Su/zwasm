@@ -1,6 +1,17 @@
 # ClojureWasm guest end-to-end — setup procedure
 
-> **Doc-state**: ACTIVE — load-bearing reference (Phase 9+ scope).
+> **Doc-state**: SUPERSEDED (2026-06-14, user decision).
+>
+> **The cljw realworld-wasm fixtures are RETIRED** (`cljw_{fib,gcd,arith,sieve,tak}.wasm`
+> + `CLJW_PROVENANCE.txt` removed from `test/realworld/wasm/`). Rationale: the
+> wasm-emitting cljw was **cw v0** (`ClojureWasm`), frozen at the 2026-05-04 vendor
+> commit; the actively-advancing **cw v1** (`ClojureWasmFromScratch`) is a tree-walk
+> evaluator with **no plan to emit wasm**, so this doc's "switch corpus source when
+> cw lands wasm" plan is void. The cljw↔zwasm relationship is now **consumer-side**:
+> ClojureWasm dogfoods zwasm as an embedder, and that testing lives on the cljw side
+> — zwasm does not carry cljw guest-wasm fixtures. Real-world corpus diversity instead
+> expands across mainstream wasm toolchains (Rust/C/C++/TinyGo/Go/AssemblyScript/Zig/…
+> + WasmGC langs) per `.dev/handover.md` ACTIVE AGENDA. Kept for history.
 
 > Discovered 2026-05-04 during §9.6 / 6.G investigation: the
 > ROADMAP's original wording "via `build.zig.zon` `path = ...`"
