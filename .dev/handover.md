@@ -67,11 +67,22 @@ vfprintf's register pressure (reduction can't isolate it). Filed **D-325** (focu
 disasm campaign of repro2.wasm's printf_core; private/spikes/jit-vararg has all reductions). The
 `--jit` lane keeps it visible (report-only). Niche (emscripten plain-%s stdout only; values correct).
 
-**First action on resume**: the more tractable Phase-B remainder — the **9 `go_*` UnsupportedOp
-compile-gaps**. Step 0: `ZWASM_JIT_RUN=1 zig build test-realworld-run-jit` then `compileWasm: func[N]
-... UnsupportedOp` — identify WHICH op (likely ONE shared op across all go_*; Go's runtime uses a
-specific construct). If one op → implement its JIT emit (established op-emit pattern, both arches) →
-flips up to 9 fixtures in `test-realworld-diff-jit`. (A1 Zig + A2 embenchen + A3 wasmer-oracle +
+**9 `go_*` compile-gaps TRIAGED → D-326 `<this commit>`.** NOT a missing opcode (Step-0 instrumented:
+body op-dispatch handles all ops, else-arm + per-op errdefer never fire; NOT memory.init — go uses 0,
+its 29085 data segs are active). It's a **structural emit-SETUP / large-frame limit** (the `>32760`
+imm-offset budget, D-289 large_frame class) hit by FAT standard-Go funcs. Filed D-326 (next: stage-level
+instrument shared/compile.zig → confirm site → raise the offset budget). Niche: TinyGo JIT-fine, interp
+runs all go_* correctly.
+
+**Phase-B status**: the D-283 `--jit` lane (the deliverable) is done + 3-host green; BOTH real-bug
+clusters now precisely triaged + filed — **D-325** (2 `%s` regalloc-class miscompiles) + **D-326**
+(9 go_* large-frame codegen limit). Both need focused codegen-disassembly campaigns.
+
+**First action on resume**: pick a focused codegen campaign — **D-326** is the more tractable (narrowed
+to the emit-setup large-frame offset budget; likely an escalated-addressing fix for >32760 offsets,
+a known D-289 class). Step 0: stage-level instrument `shared/compile.zig` (which compileOne stage
+rejects go_hello func[303]) → confirm the `>32760` site → escalate the offset addressing. (Alt: D-325
+%s disasm.) (A1 Zig + A2 embenchen + A3 wasmer-oracle +
 runtime-bump + tool-currency-3host + B1 jit-diff-lane DONE; B2→D-325. D-325 disasm campaign is the
 alternative deliberate track when prioritized.)
 

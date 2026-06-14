@@ -1019,6 +1019,31 @@ entries:
       D-283 (parent / the --jit lane); test/realworld/diff_runner.zig (--jit lane); private/spikes/jit-vararg
       (repro.c/repro2.c/repro3.c/swar.c/swar2.c/scan.wat — all reductions); lesson
       jit-realworld-runtraps-are-null-wasi-harness-artifacts; debug_jit_auto skill
+  - id: "D-326"
+    layer: "code"
+    status: "blocked-by"
+    description: |-
+      blocked-by: a **structural JIT-codegen limit hit by fat standard-Go (GOOS=wasip1) binaries** —
+      the 9 `go_*` realworld fixtures (D-283 sub-cluster) JIT-compile-FAIL with `UnsupportedOp` at a
+      specific func (e.g. go_hello_wasi func[303] params=1 results=1). Step-0 triage 2026-06-15 RULED
+      OUT (instrumented + reverted): (1) NOT a missing opcode — the arm64 body op-dispatch handles all
+      ops; the else-arm diagnostic (emit.zig:2148) never fires; (2) NOT `memory.init`/dataidx≥2048
+      (op_memory.zig:895) — go uses 0 memory.init (its 29085 data segments are ACTIVE); (3) NOT any
+      body-op handler — the per-op `errdefer` (emit.zig:869) never fires. So the reject is from emit
+      **SETUP** (pre-body prologue / param+local marshalling — the `>32760` imm-offset budget checks at
+      emit.zig:427/430/484-541) OR an earlier compileOne stage (lower/hoist/liveness/regalloc). Go's
+      fat funcs (large frames) are the likely trigger → the D-289 `large_frame` offset class. DISCHARGE:
+      stage-level instrument shared/compile.zig (print which stage fails for func[303]) → confirm the
+      site → raise the imm-offset budget (escalated addressing for >32760 offsets) OR the relevant cap;
+      then the 9 go_* flip to RUN under `test-realworld-diff-jit`. Severity: NICHE — only FAT standard-Go
+      under JIT; TinyGo (the lean Go path) JIT-compiles fine (tinygo_* are in the 45 OK), and interp
+      runs all go_* correctly (interp is the default). The `--jit` lane keeps it visible (9 skipped).
+    first_raised: "2026-06-15"
+    last_reviewed: "2026-06-15"
+    refs: |-
+      D-283 (parent); src/engine/codegen/arm64/emit.zig (emit-setup >32760 checks 427/430/484-541;
+      body else-arm 2148; per-op errdefer 869); src/engine/codegen/shared/compile.zig (compileOne stages);
+      D-289 (large_frame offset class); test/realworld/wasm/go_*.wasm
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.
