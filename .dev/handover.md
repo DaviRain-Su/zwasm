@@ -3,14 +3,16 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Just closed — D-332 JIT sandbox-triad completion: `--max-table-elements` (`bd355258`)
+## Just closed — JIT sandbox-triad table leg COMPLETE (`bd355258` + `fa4678f4`, Phase-17 refinement)
 
-**`bd355258`**: the JIT runner enforced fuel + max_memory but NOT a table-elements cap (the interp
-eager-alloc path did) — an asymmetric triad gap + a setup.zig comment that falsely claimed the bound.
-Added `RunLimits.max_table_elements` + `Error.TableLimitExceeded`, early-reject in `runWasiLenient`
-(Σ declared table mins > cap) before setup's eager `table_refs` alloc; CLI `--max-table-elements`
-mirrors `--max-memory`; null = unlimited. Test + lint green (2864/2876, 0 fail). This was the D-332
-"low-value follow-on" — now closed; the sandbox triad (fuel/memory/table) is cross-engine complete.
+The JIT runner enforced fuel + max_memory but NOT a table-elements cap (interp did) — asymmetric
+triad gap + a setup.zig comment that falsely claimed the bound. **`bd355258`**: `RunLimits.max_table_elements`
++ `Error.TableLimitExceeded`, early-reject in `runWasiLenient` (Σ declared table mins > cap) before setup's
+eager alloc; CLI `--max-table-elements` mirrors `--max-memory`. **`fa4678f4` (D-314(b))**: `jitTableGrow`
+now honors `rt.store_table_elements_max` too (runtime `table.grow`, not just initial alloc) — added a
+trailing `store_table_elements_max` to the extern JitRuntime (maxInt=unlimited; offsets intact; size
+592→600). null = unlimited (no regression); test+lint green (2866/2878, 0 fail). **Sandbox triad
+(fuel/memory/table) now cross-engine complete on JIT.** D-314(b) discharged; D-332 fully closed.
 
 **Phase-B debug tooling (user-directed persistence, prior turns)** — a reusable lldb value-trace stack for JIT
 miscompiles that produce wrong output but DON'T crash:
@@ -28,15 +30,11 @@ not 11: the final `putc('\n')` didn't advance `wpos` — `\n` dropped at buffer-
 miscompile family as discharged D-330 primary. **NEXT**: disasm/trace the wpos-store for the verify line
 (jit_value_trace.sh). Deprioritized cosmetic (values+interp correct; 55/56 byte-exact). Trail: D-330 debt.
 
-## Prior session — D-332 table-cap SHIPPED (`3cb5e3bf`) + D-330 coalescing/fp-select/D-289
+## Prior session (SHAs durable; detail in commits/debt)
 
-**D-332** `3cb5e3bf`: `InstantiateOpts.max_table_elements` (default 10M) bounds the initial eager table
-alloc (ADR-0179 amendment); debt deleted; follow-on (low value) = `--engine jit` CLI table cap.
-**D-330 primary** `6790c204`: LSRA free-pool expiry coalesced a result vreg into a same-pc last-use
-operand's slot (`<=`→strict `<`; ADR-0037 amend); emcc_fasta byte-exact. **EXPOSED latent x86_64
-`emitFpSelect` spilled-cond clobber** → fixed `cccb2313` (TEST cond first). wasm-2.0-assert 25437/0 on
-arm64 + Rosetta + ubuntu + Win64. **D-289** `682401fd`: regalloc cap 4095→65535 + allocator-backed.
-Residual = the c_sha256 `\n` above (the func-8 framing in earlier handovers was DISPROVEN → func 4).
+**D-332** `3cb5e3bf` interp `max_table_elements` initial-alloc cap. **D-330 primary** `6790c204` LSRA
+strict-`<` expiry (+ `cccb2313` x86_64 fp-select clobber). **D-289** `682401fd` regalloc cap 4095→65535.
+wasm-2.0-assert 25437/0 on arm64 + Rosetta + ubuntu + Win64. Residual = c_sha256 `\n` (above).
 
 ## ACTIVE AGENDA (user-directed 2026-06-14) — real-world toolchain/bench reproduction
 

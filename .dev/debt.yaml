@@ -21,8 +21,10 @@ entries:
       REMAINING (design upgrades, demand-driven):
       (a) epoch-COUNTER (per-store deadline ticks) over the v0 binary flag +
           a runtime-level pre-instantiate StoreLimits struct (ADR-0179 draft).
-      (b) JIT-side table-elements limit (interp setTableElementsLimit = D-316;
-          jitTableGrow caps at descriptor .max only).
+      (b) ~~JIT-side table-elements limit~~ DONE 2026-06-15 (`bd355258` initial eager-alloc
+          early-reject in runWasiLenient + `fa4678f4` jitTableGrow honors rt.store_table_elements_max,
+          set from RunLimits.max_table_elements; CLI `--max-table-elements`). Sandbox triad's table
+          leg now cross-engine. JitRuntime gained a trailing `store_table_elements_max` (maxInt=unlimited).
       (c) .cwasm + component CLI limits threading (today the CLI REFUSES the
           flags there loudly rather than running unsandboxed).
       (d) facade/C-API JIT-backed instances (the SEAM asserts in
@@ -35,7 +37,7 @@ entries:
       CW-V1 IMPACT = NONE (cw consumes the interp-only facade; its untrusted
       code already runs sandboxed).
     first_raised: "2026-06-08"
-    last_reviewed: "2026-06-12"
+    last_reviewed: "2026-06-15"
     refs: |-
       .dev/decisions/0179_execution_interruption_resource_limits.md (Revisions 2026-06-12); .dev/architecture/jit_facade_integration_scope.md; include/zwasm.h; src/api/zwasm_ext.zig; src/engine/runner.zig (RunLimits); src/cli/run.zig (Limits)
   - id: "D-315"
