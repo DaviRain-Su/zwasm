@@ -544,6 +544,14 @@ pub const JitRuntime = extern struct {
     /// exnref with the ACTUAL thrown tag. TRAILING.
     eh_thrown_tag_idx: u32 = 0,
     _pad_reify: u32 = 0,
+    /// D-314(b) — host sandbox cap on total table elements, consulted by
+    /// `jitTableGrow` so a guest cannot `table.grow` past the host ceiling
+    /// (mirrors the interp `Runtime.store_table_elements_max`). `maxInt`
+    /// sentinel = unlimited (extern-struct can't carry `?u64`; an optional
+    /// integer needs a tag byte). TRAILING — appended so JIT-emitted code's
+    /// `@offsetOf` field offsets are unchanged. Set by `runWasiLenient` from
+    /// `RunLimits.max_table_elements`.
+    store_table_elements_max: u64 = std.math.maxInt(u64),
 };
 
 /// Host-side context for `reifyExnref` (ADR-0120 D6 / D-327). Owns the
@@ -1568,7 +1576,8 @@ test "JitRuntime: total size = 464 bytes (post-10.E tag_ids tail)" {
     // D-314 #3b appends `fuel_metered`+pad+`fuel_cell` (+16 B, trailing) → 552 + 16 = 568.
     // D-327 (ADR-0120 D6) appends `reify_exnref_fn` (+8) + `eh_reify_ctx` (+8) +
     // `eh_thrown_tag_idx` (u32 +4) + `_pad_reify` (+4) → 568 + 24 = 592.
-    try testing.expectEqual(@as(u32, 592), head_size);
+    // D-314(b) appends `store_table_elements_max` (u64 +8, trailing) → 592 + 8 = 600.
+    try testing.expectEqual(@as(u32, 600), head_size);
 }
 
 test "jitGcAlloc: allocates struct{i32} via the *JitRuntime bridge (10.G A-2a)" {

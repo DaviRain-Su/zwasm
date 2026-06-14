@@ -527,6 +527,10 @@ pub fn runWasiLenient(
     if (limits.max_memory_bytes) |bytes_cap| {
         if (owned.mem_ctx) |ctx| ctx.host_max_pages = bytes_cap >> @intCast(owned.rt.mem0_page_size_log2);
     }
+    // D-314(b): the table-elements cap also bounds runtime `table.grow`
+    // (jitTableGrow reads `rt.store_table_elements_max`), not just the initial
+    // eager alloc rejected above. Sets the same cap the early-reject used.
+    if (limits.max_table_elements) |cap| owned.rt.store_table_elements_max = cap; // maxInt sentinel default = unlimited
     if (limits.interrupt_flag) |flag| owned.rt.interrupt_ptr = flag;
 
     const idx = entry_idx orelse return owned.rt.jit_executed_flag; // no entry → instantiate-only

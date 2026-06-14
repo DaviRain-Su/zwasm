@@ -217,6 +217,11 @@ pub fn jitTableGrow(rt: *entry.JitRuntime, tableidx: u32, init: u64, delta: u32)
     const old_len = d.len;
     const new_len: u64 = @as(u64, old_len) + @as(u64, delta);
     if (new_len > d.max) return -1; // exceeds pre-allocated capacity (= .max)
+    // D-314(b): host sandbox cap on total table elements — a guest cannot
+    // grow past `store_table_elements_max` even within the static descriptor
+    // max. Mirrors the interp table.grow handler (instantiate.zig) so the
+    // sandbox triad's table leg is cross-engine. maxInt sentinel = unlimited.
+    if (new_len > rt.store_table_elements_max) return -1;
     var i: u32 = old_len;
     while (i < old_len + delta) : (i += 1) d.refs[i] = init;
     d.len = @intCast(new_len);

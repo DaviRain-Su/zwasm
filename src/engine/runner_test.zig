@@ -2053,6 +2053,44 @@ test "runWasiLenient: declared table elements over max_table_elements → TableL
     _ = try runner.runWasiLenient(testing.allocator, &wasm, null, null, null, .{});
 }
 
+test "jitTableGrow: store_table_elements_max refuses table.grow past host cap (D-314(b))" {
+    // (module (table 1 10 externref) (func (export "g") (result i32)
+    //   ref.null extern  i32.const 5  table.grow 0))
+    const wasm = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, // type ()→i32
+        0x03, 0x02, 0x01, 0x00, // func: 1× type 0
+        0x04, 0x05, 0x01, 0x6f, 0x01, 0x01, 0x0a, // table externref {min 1, max 10}
+        0x07, 0x05, 0x01, 0x01, 0x67, 0x00, 0x00, // export "g" func 0
+        0x0a, 0x0b, 0x01, 0x09, 0x00, 0xd0, 0x6f, 0x41, 0x05, 0xfc, 0x0f, 0x00, 0x0b, // ref.null extern; i32.const 5; table.grow 0; end
+    };
+    var compiled = try compileWasm(testing.allocator, &wasm);
+    defer compiled.deinit(testing.allocator);
+    var owned = try setupRuntime(testing.allocator, &compiled, &wasm);
+    defer owned.deinit(testing.allocator);
+    // Host cap = 3 < (start 1 + delta 5 = 6) → grow refused, returns -1.
+    owned.rt.store_table_elements_max = 3;
+    try testing.expectEqual(@as(u32, 0xFFFFFFFF), try entry.callI32NoArgs(compiled.module, 0, &owned.rt));
+}
+
+test "jitTableGrow: no host cap → table.grow within descriptor max succeeds (D-314(b) baseline)" {
+    const wasm = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, 0x03,
+        0x02, 0x01, 0x00,
+        0x04, 0x05, 0x01, 0x6f, 0x01, 0x01, 0x0a, // table externref {1, 10}
+        0x07, 0x05, 0x01, 0x01, 0x67, 0x00, 0x00,
+        0x0a, 0x0b, 0x01, 0x09, 0x00, 0xd0, 0x6f,
+        0x41, 0x05, 0xfc, 0x0f, 0x00, 0x0b,
+    };
+    var compiled = try compileWasm(testing.allocator, &wasm);
+    defer compiled.deinit(testing.allocator);
+    var owned = try setupRuntime(testing.allocator, &compiled, &wasm);
+    defer owned.deinit(testing.allocator);
+    // No cap → grow 1→6 (within max 10) returns the prior size (1).
+    try testing.expectEqual(@as(u32, 1), try entry.callI32NoArgs(compiled.module, 0, &owned.rt));
+}
+
 // Trap-KIND execution tests (ADR-0164 A / D-292: unreachable=5, oob_memory=6,
 // div_by_zero=7, int_overflow=8) live in the sibling `runner_trap_test.zig`
 // (split to keep this file under the 2000-line hard cap; mirrors runner_gc_test).
