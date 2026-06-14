@@ -3,28 +3,32 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Just closed — D-332 table-cap SHIPPED (`3cb5e3bf`) + D-330 coalescing/fp-select/D-289 (this session)
+## Just closed — JIT machine-code dump primitive (`db3109d8`) + c_sha256 instruction-level localization
 
-**D-332 (sandboxing) DONE** `3cb5e3bf`: `InstantiateOpts.max_table_elements` (default 10M) bounds the
-INITIAL eager table alloc (mirrors `max_memory_pages`; ADR-0179 amendment) → closes the pathological-
-`(table 4e9)` OOM the D-331(A) cap-removal exposed. Interp/facade surface (the sandboxing surface);
-test + test-spec + lint green. Debt row deleted. Follow-on (low value): `--engine jit` CLI table cap.
+**3-host gate**: D-289+D-332 batch confirmed Win64-green + RECORDED (windowsmini `41e0f705`,
+`spec_assert_runner_non_simd 25437/0`); ubuntu green `5ef2f33b`. Batch fully 3-host.
 
-The JIT `%s`/strnlen miscompile was the **LSRA free-pool expiry coalescing a result vreg into
-a same-pc last-use operand's slot** (`<=` → strict `<`; ADR-0037 amendment). repro2 correct;
-**emcc_fasta byte-exact MATCH**; +1 slot worst-case. Lesson `2026-06-15-regalloc-boundary-coalesce-read-after-write`.
-**The `<` change EXPOSED a latent x86_64 bug** (caught at Step 0.7 — ubuntu test-all FAIL,
-29 `float_exprs no_fold_*_select`): `emitFpSelect` TESTed cond AFTER `MOVQ r_a,xmm_val1`, but
-gprLoadSpilled stages a SPILLED cond through `r_a` → cond clobbered before the test. Fixed
-`cccb2313` (TEST cond first; matches the already-correct x86_64 int select; arm64 CSEL unaffected).
-wasm-2.0-assert now 25437/0 on arm64 + x86_64-Rosetta + ubuntu x86_64 `5ef2f33b` + **windows Win64
-(recorded `217fa950`)** — ALL 4 environments green. D-330 coalescing + fp-select FULLY validated.
-**Residual (D-330 partial)**: `c_sha256_hash` still drops ONE trailing `\n`. DEEP-TRACED (subagent):
-NOT the coalescing class. The `\n` is lost because **func 8 `__overflow`** wrongly takes the buffered
-fast-path on its 2nd call under JIT (the `wpos==wend`/`lbf==10` br_if at pc26/pc31 don't fire) → `\n`
-stuck in buffer → flushed empty at exit. ARCH-INDEPENDENT (shared codegen). Possibly a GENERAL
-branch-cond or FILE-struct-store miscompile (elevates priority). NEXT = ring-log func-8's loads
-[1992]/[1996]/[2056] + br_if outcomes interp-vs-jit → first divergence = the op. Full trail: D-330 debt.
+**Phase-B tooling (`db3109d8`)**: reinstated a PERMANENT JIT machine-code dump —
+`ZWASM_DEBUG=jit.dump zwasm run --engine jit <wasm>` prints per-func body-relative bytes as hex
+(debug_jit_auto Recipe 16, codified; `dbg.on()` gate exposed). The instruction-level lens all 4
+prior c_sha256-`\n` attempts lacked (they worked at the IR/vreg level, which is provably clean).
+**Used it (`e6d81e0b`)**: disassembled func 4 (llvm-mc, NOT llvm-objdump `-b` — dropped in llvm-21);
+the musl putc/`__overflow` `\n`-write is asm lines ~2300-2375 (buffer-check `cbnz w14` gates at
+2316/2345; byte-10 store ~2364). Static structure CORRECT → runtime VALUE bug. **NEXT (concrete,
+tool-equipped — NOT a 5th source guess)**: lldb value-trace at those compares (need to log func 4's
+runtime `start_addr` from code_map, then bp at `start_addr+(line-1)*4`, inspect w14/w15 interp-vs-jit).
+Full trail: D-330 debt residual. STILL deprioritized (niche cosmetic; values+interp correct; 55/56
+byte-exact) — pursue only as the top Phase-B item now D-330-primary/D-289/D-332 are shipped.
+
+## Prior session — D-332 table-cap SHIPPED (`3cb5e3bf`) + D-330 coalescing/fp-select/D-289
+
+**D-332** `3cb5e3bf`: `InstantiateOpts.max_table_elements` (default 10M) bounds the initial eager table
+alloc (ADR-0179 amendment); debt deleted; follow-on (low value) = `--engine jit` CLI table cap.
+**D-330 primary** `6790c204`: LSRA free-pool expiry coalesced a result vreg into a same-pc last-use
+operand's slot (`<=`→strict `<`; ADR-0037 amend); emcc_fasta byte-exact. **EXPOSED latent x86_64
+`emitFpSelect` spilled-cond clobber** → fixed `cccb2313` (TEST cond first). wasm-2.0-assert 25437/0 on
+arm64 + Rosetta + ubuntu + Win64. **D-289** `682401fd`: regalloc cap 4095→65535 + allocator-backed.
+Residual = the c_sha256 `\n` above (the func-8 framing in earlier handovers was DISPROVEN → func 4).
 
 ## ACTIVE AGENDA (user-directed 2026-06-14) — real-world toolchain/bench reproduction
 
