@@ -22,10 +22,14 @@ SUSTAINED**; the user assists when a toolchain needs installing.
     interp 53/53, byte-diff 53/53 vs wasmtime, JIT-clean (+ fixed a diff_runner green-path
     flush bug `6995bbd3`). **AssemblyScript + WasmGC (Kotlin/Wasm/Dart) → D-324** (need
     `asc`/SDK provisioning + a call-export harness; AS dropped WASI).
-  - **A2 (autonomous)**: **embenchen** (emcc in `.#gen`) — the classic Emscripten bench;
-    the find = the emscripten env-stub host-import gap (D-026/D-082).
-  - **A3 (autonomous)**: **3-way differential** — zwasm vs wasmtime vs wasmer (both on
-    PATH) + hyperfine perf, over the corpus.
+  - **A2 (autonomous, NEXT)**: **embenchen** (emcc in `.#gen`) — the classic Emscripten
+    bench; the find = the emscripten env-stub host-import gap (D-026/D-082).
+  - **A3 (DONE `897b54d7`)**: **3-way differential** — opt-in `--wasmer` second-oracle
+    lane (`zig build test-realworld-diff-wasmer`) vs wasmtime; REF-DISAGREE flags the
+    divergence a single-reference gate misses. argv[0] CLI convention normalized.
+    **Runtimes bumped to latest `074a885f`** (wasmtime 43→**45.0.0**, wasmer 5.0.4→**7.1.0**
+    via nixpkgs 06-10): re-validated — zwasm == wasmtime45 == wasmer7.1 on 53/53, **0
+    divergence** across a 2-major bump (lesson `reference-runtime-bump-divergence-capture`).
   - **A4 (user-assisted)**: remote provisioning — **D-254** (native rust on ubuntu +
     windows → 3-host rust differential; user chose (a)) + **D-249** (hyperfine on win).
 - **Phase B — deep JIT bug-hunt (SUSTAINED; settle in)**:
@@ -36,10 +40,11 @@ SUSTAINED**; the user assists when a toolchain needs installing.
     `UnsupportedOp` ⇒ unimplemented JIT op). Root-cause each cluster, fix, add boundary
     fixtures, enable `ZWASM_JIT_RUN=1` by default for the runnable set. Multi-cycle.
 
-**First action on resume**: Phase A3 — wire the **3-way differential** (zwasm vs wasmtime
-vs **wasmer**) over the corpus: confirm wasmer is on PATH (`.#gen` / bench shell), extend
-`diff_runner` (or a sibling) to byte-compare a second reference + add hyperfine perf.
-Then A2 (embenchen via emcc, D-026/D-082). (No active bundle/campaign; this agenda drives.)
+**First action on resume**: Phase A2 — **embenchen** via emcc (in `.#gen`). Fetch/build a
+small embenchen kernel, instantiate under zwasm; the expected find is the emscripten
+env-stub host-import gap (D-026/D-082) — implement enough `env`/emscripten imports to run,
+triage from there. (A1 Zig + A3 wasmer-oracle + runtime-bump all DONE this session. No
+active bundle/campaign; this agenda drives.)
 
 ## State (tag-ready baseline, all 3-host green)
 
