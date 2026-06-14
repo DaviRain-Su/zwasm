@@ -613,6 +613,12 @@ pub fn emitFpSelect(
     const cond_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, cond_v, 0);
     const r_a = abi.spill_stage_gprs[0];
     const r_b = abi.spill_stage_gprs[1];
+    // TEST cond BEFORE the MOVQ/MOVD that load val1 into r_a: when `cond_v` is
+    // SPILLED, gprLoadSpilled stages it through spill_stage_gprs[0] == r_a, so
+    // `MOVQ r_a, xmm_val1` would clobber cond before the test (D-330 fix exposed
+    // this once `<` strict expiry spilled cond). MOVQ/MOVD don't touch EFLAGS, so
+    // the flags survive to the CMOV.
+    try buf.appendSlice(allocator, inst.encTestRR(.d, cond_r, cond_r).slice());
     if (is_f64) {
         try buf.appendSlice(allocator, inst.encMovqR64FromXmm(r_a, xmm_val1).slice());
         try buf.appendSlice(allocator, inst.encMovqR64FromXmm(r_b, xmm_val2).slice());
@@ -620,7 +626,6 @@ pub fn emitFpSelect(
         try buf.appendSlice(allocator, inst.encMovdR32FromXmm(r_a, xmm_val1).slice());
         try buf.appendSlice(allocator, inst.encMovdR32FromXmm(r_b, xmm_val2).slice());
     }
-    try buf.appendSlice(allocator, inst.encTestRR(.d, cond_r, cond_r).slice());
     try buf.appendSlice(allocator, inst.encCmovccRR(.q, .ne, r_b, r_a).slice());
     const xmm_dst = try gpr.xmmDefSpilled(alloc, result_v, 0);
     if (is_f64) {
