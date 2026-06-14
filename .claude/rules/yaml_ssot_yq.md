@@ -46,7 +46,12 @@ yq -r '.entries[] | select(.status == "now") | .id' .dev/debt.yaml          # di
 yq -r '.entries[] | select(.status == "blocked-by") | .id + "  " + .last_reviewed' .dev/debt.yaml  # staleness sweep
 DROW="D-201" yq -r '.entries[] | select(.id == env(DROW)) | .description' .dev/debt.yaml   # one body
 yq -r '.entries[] | select(.status == "resolved" or .status == "note") | .id' .dev/debt.yaml  # deletable (git retains)
-grep -oE 'D-[0-9]+' .dev/debt.yaml | sort -t- -k2 -n | tail -1     # highest ID → next is +1
+# NEXT ID — grep the WHOLE repo, NOT just debt.yaml. Resolved rows are DELETED
+# from debt.yaml but their src/.dev citations remain; reusing a deleted number
+# collides with those dangling citations (2026-06-15: D-324/325/326 reused →
+# clashed with validator / cross-instance-call_indirect / REQ-7; renumbered to
+# D-329/330/331). The true max = max CITED anywhere, not max in debt.yaml.
+grep -rhoE 'D-[0-9]+' src/ .dev/ include/ test/ scripts/ | sort -t- -k2 -n -u | tail -1  # true max → next is +1
 ```
 
 ## Edit workflow (AI agent)
