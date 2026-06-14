@@ -27,24 +27,17 @@
   test I'd missed) make slices 1-4 + fixes pass on x86_64. windows re-kicked after a
   D-028-class configure-phase FileNotFound flake (build never reached tests; tracked).
   A fresh ubuntu kick is verifying the `81710782` ReleaseSafe-audit build.zig change.
-- **PENDING VERIFY (next Step 0.7)**: fresh ubuntu (`81710782` core_comp floor) +
-  windows re-kick verdict.
-- **NEXT — Slice 5 (closes D-238 + ADR-0185) — PRE-SCOUTED**: the functional verify
-  is the EXISTING `exception-handling/try_table` corpus under `ZWASM_SPEC_ENGINE=jit`:
-  `catch-imported () -> i32:2` + `catch-imported-alias` (importer catches exporter's
-  imported tag) + `imported-mismatch () -> i32:3` (uncaught propagation) ARE the
-  cross-module throw-propagation D-238 scenario, all no-arg-i32 (JIT-runnable). Mac
-  arm64 baseline VERIFIED this session: `ZWASM_SPEC_ENGINE=jit zig build
-  test-spec-wasm-3.0-assert` → exception-handling JIT `return pass=34 fail=0 skip=0`,
-  no crash. **Slice 5 steps**: (1) once remote frees, kick `ZWASM_SPEC_ENGINE=jit
-  zig build test-spec-wasm-3.0-assert` on ubuntu → confirm exception-handling JIT
-  0-fail/0-crash on x86_64 (the proof the slices 2a/2b/3/4 fix works) + a plain
-  test-all for the unit tests; (2) **ADR-0114's `cross_module_throw_propagation.wat`
-  is SUBSUMED** by try_table `catch-imported` (official corpus, both arches, JIT) —
-  reconcile via an ADR-0114 Revision note (do NOT hand-author a duplicate fixture;
-  the edge-runner can't do multi-module); (3) flip D-238→resolved + ADR-0185 →
-  Closed(Implemented) with the SHA range. Bundle exit-condition MET when ubuntu
-  exception-handling JIT is 0-fail on x86_64.
+- **Slice 5 IN-FLIGHT (the D-238 exit-condition)**: `ZWASM_SPEC_ENGINE=jit
+  bash scripts/run_remote_ubuntu.sh test-spec-wasm-3.0-assert` kicked → `/tmp/ubuntu_jit.log`.
+  Proof = exception-handling JIT 0-fail/0-crash on x86_64 (the `catch-imported`/
+  `imported-mismatch` try_table cross-module tests; Mac arm64 baseline this session
+  was JIT `return 34/0/0`). PENDING VERIFY next Step 0.7: this JIT log + windows re-kick.
+- **NEXT (on JIT green) — CLOSE D-238 + ADR-0185**: (1) ADR-0114's
+  `cross_module_throw_propagation.wat` is SUBSUMED by try_table `catch-imported`
+  (official corpus, both arches, JIT) → reconcile via an ADR-0114 Revision note
+  (do NOT author a duplicate fixture; edge-runner can't do multi-module);
+  (2) flip D-238→resolved + ADR-0185 → Closed(Implemented) with the SHA range;
+  (3) close the bundle (`check_bundle_active --close`).
 - **Continuity-memo**: x86_64-functional-verify is ubuntu-only (opt-in JIT engine);
   unit tests (frame_chain + thunk byte tests) execute on the ubuntu gate, not Mac
   (x86_64/ files aren't in the Mac test graph). Cross-compile gates compilation
