@@ -47,13 +47,17 @@ wasm-tools 1.251/+wasmer 7.1) — user REBOOTED 2026-06-14, verified ACTIVE (pos
 wasmtime 45.0.0/wasm-tools 1.251.0/wasmer 7.1.0/zig 0.16.0). windows gate re-validating with
 wasmtime 45 (verify next Step 0.7). D-249 hyperfine-absent premise dissolved.
 
-**First action on resume**: Phase A2 IN-FLIGHT — **embenchen via MODERN emcc** (design call:
-`-sSTANDALONE_WASM`→WASI, NOT the legacy env-shim ABI of the vendored `embenchen_*` fixtures
-which stay Phase-11/D-026). `test/realworld/src/c/fannkuch.c` written; emcc build kicked in
-`.#gen` (rebuilding rust derivations from the rust-overlay bump first — slow). NEXT: confirm
-`/tmp/emcc_fannkuch.wasm` runs+diffs vs wasmtime → copy to corpus as `emcc_fannkuch.wasm` +
-PROVENANCE/README, then add fasta/primes. (A1 Zig + A3 wasmer-oracle + runtime-bump + tool-
-currency all DONE. No
+**A2 embenchen DONE `1aac480f`**: 3 benchmarks (fannkuch/fasta/primes) reproduced via MODERN
+emcc `-sSTANDALONE_WASM`→WASI (NOT the legacy env-shim ABI of the vendored `embenchen_*`
+fixtures, which stay Phase-11/D-026). The find: modern path Just Works — zwasm runs all 3
+byte-identical to wasmtime under its existing WASI host, no shim. realworld_run 56/56, diff
+56/56. windows gate green on the new wasmtime 45 toolchain (recorded 3bc17f04).
+
+**First action on resume**: Phase B is the big remaining agenda item — **B1 = D-283** JIT
+realworld trap/compile-gap triage (`ZWASM_JIT_RUN=1`: 6 RUN-TRAP tinygo/rust/c + 9 COMPILE-OP
+go_*). OPTIONAL quicker: more embenchen (ifs/copy) OR extend the A3 wasmer lane to the new
+emcc fixtures / windows (wasmer now on windowsmini too). (A1 Zig + A2 embenchen + A3 wasmer-
+oracle + runtime-bump + tool-currency-3host all DONE+VALIDATED. No
 active bundle/campaign; this agenda drives.)
 
 ## State (tag-ready baseline, all 3-host green)
