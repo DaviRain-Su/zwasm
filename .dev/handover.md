@@ -3,7 +3,20 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Active campaign — spec re-vendor → alpha.3 tag (USER-AUTHORIZED; option A chosen 2026-06-14)
+## Active bundle
+
+- **Bundle-ID**: d327-catch_ref
+- **Cycles-remaining**: ~3
+- **Continuity-memo**: plan in `private/notes/d327-catch_ref-plan.md`. Decode/IR/
+  validate DONE; gap = landing-pad emit doesn't push the exnref for catch_ref/
+  catch_all_ref (`arm64/emit.zig:1699`, `x86_64/emit.zig:1014`; exnref deferred
+  "v0.2" @1642). VERIFY where the exception ptr is at the landing pad first.
+- **Exit-condition**: JIT `try_table (result i32 exnref) (catch_ref)` pushes the
+  exnref (red test green, both arches) → re-vendor eh try_table from wg-3.0 (w/
+  wasm_3_0_manifest hardcoded-count updates) → eh wg-3.0-current, full `zig build
+  test` + 3-host green. (Closes D-327; the alpha tag stays separate/user-only.)
+
+## Campaign — spec re-vendor → alpha.3 tag (CONVERGED; tag = user-only)
 
 Full plan + all findings: **`private/spec_revendor_campaign.md`** (read first).
 SUMMARY: 1.0/2.0/simd/threads CURRENT; gc re-vendored to wg-3.0 `b8e8b16c` (3-host
