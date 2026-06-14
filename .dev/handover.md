@@ -27,11 +27,13 @@
   test I'd missed) make slices 1-4 + fixes pass on x86_64. windows re-kicked after a
   D-028-class configure-phase FileNotFound flake (build never reached tests; tracked).
   A fresh ubuntu kick is verifying the `81710782` ReleaseSafe-audit build.zig change.
-- **Slice 5 IN-FLIGHT (the D-238 exit-condition)**: `ZWASM_SPEC_ENGINE=jit
-  bash scripts/run_remote_ubuntu.sh test-spec-wasm-3.0-assert` kicked → `/tmp/ubuntu_jit.log`.
-  Proof = exception-handling JIT 0-fail/0-crash on x86_64 (the `catch-imported`/
-  `imported-mismatch` try_table cross-module tests; Mac arm64 baseline this session
-  was JIT `return 34/0/0`). PENDING VERIFY next Step 0.7: this JIT log + windows re-kick.
+- **Slice 5 GREEN ✅ (x86_64 functional proof MET)**: `/tmp/ubuntu_jit.log` →
+  `[exception-handling] JIT: return pass=34 fail=0 skip=0` + ubuntu OK. The
+  `catch-imported`/`imported-mismatch` cross-module EH passes under JIT on x86_64 —
+  D-238's actual fix proven. **HOLDING the close ONE cycle for the Win64
+  no-regression verdict** (the 40-byte thunk is x86_64-shared → Win64 uses it too;
+  windows re-kick was ~90% done, past the D-028 configure flake). Verify
+  `/tmp/win.log` OK next Step 0.7, then close.
 - **NEXT (on JIT green) — CLOSE D-238 + ADR-0185**: (1) ADR-0114's
   `cross_module_throw_propagation.wat` is SUBSUMED by try_table `catch-imported`
   (official corpus, both arches, JIT) → reconcile via an ADR-0114 Revision note
