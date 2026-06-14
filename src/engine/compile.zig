@@ -16,6 +16,7 @@ const sections = @import("../parse/sections.zig");
 const zir = @import("../ir/zir.zig");
 const validator_mod = @import("../validate/validator.zig");
 const leb128 = @import("../support/leb128.zig");
+const dbg = @import("../support/dbg.zig");
 const FuncType = zir.FuncType;
 const compile_func = @import("codegen/shared/compile.zig");
 const linker = @import("codegen/shared/linker.zig");
@@ -1178,6 +1179,18 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
             .call_fixups = r.out.call_fixups,
             .frame_bytes = r.out.frame_bytes,
         };
+        // Permanent JIT-bytes dump primitive (debug_jit_auto Recipe 16):
+        // `ZWASM_DEBUG=jit.dump` prints each function's body-relative
+        // machine code as a hex line, so a miscompile can be disassembled
+        // (`objdump -b binary`/`ndisasm`) at the instruction level instead
+        // of guessing at the IR/vreg level. Body-relative (pre-link), so
+        // call/branch targets are not yet fixed up.
+        if (dbg.on("jit.dump")) {
+            const wasm_idx = num_imports + @as(u32, @intCast(i));
+            std.debug.print("[jit.dump] func={d} len={d} hex=", .{ wasm_idx, r.out.bytes.len });
+            for (r.out.bytes) |b| std.debug.print("{x:0>2}", .{b});
+            std.debug.print("\n", .{});
+        }
     }
     var wrapper_specs_list: std.ArrayList(linker.WrapperSpec) = .empty;
     defer wrapper_specs_list.deinit(allocator);

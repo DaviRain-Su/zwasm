@@ -145,6 +145,15 @@ pub fn print(comptime mod: []const u8, comptime fmt: []const u8, args: anytype) 
     std.debug.print("[dbg " ++ mod ++ "] " ++ fmt ++ "\n", args);
 }
 
+/// Whether `mod` is enabled by `ZWASM_DEBUG` — the gate predicate
+/// behind `print`, exposed for call sites that must emit
+/// variable-shaped output (e.g. a hex byte dump) that a comptime
+/// `fmt` cannot express. Comptime no-op in release builds, same as
+/// `print`. Pair with `std.debug.print` inside the guarded block.
+pub fn on(comptime mod: []const u8) bool {
+    return enabled(mod);
+}
+
 /// Force-disable the cached whitelist. Test-only: lets a unit test
 /// re-evaluate `ZWASM_DEBUG` after mutating the process env.
 pub fn resetForTest() void {
@@ -205,6 +214,15 @@ test "enabled: `*` enables every module" {
     defer resetForTest();
     try testing.expect(enabled("anything"));
     try testing.expect(enabled("interp.alloc"));
+}
+
+test "on: mirrors enabled (gate predicate for variable-shaped output)" {
+    resetForTest();
+    initFromEnv("jit.dump");
+    defer resetForTest();
+    try testing.expect(on("jit.dump"));
+    try testing.expect(!on("jit"));
+    try testing.expect(!on("interp"));
 }
 
 test "enabled: comma-separated whitelist" {
