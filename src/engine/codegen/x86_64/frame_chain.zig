@@ -92,6 +92,26 @@ pub fn loadFrameSniffed(
     return .{ .caller_fp = slots[0], .caller_rip = slots[1] };
 }
 
+/// Predicate-based variant of `loadFrameSniffed` (D-238 / ADR-0185 (c)).
+/// Identical layout disambiguation, but instead of a SINGLE CodeMap it asks
+/// `is_code(addr)` = "is this a valid JIT code address ANYWHERE" (any
+/// instance's CodeMap OR any registered bridge-thunk arena). A cross-instance
+/// EH unwind walks frames belonging to OTHER instances + the importer's bridge
+/// thunk, whose saved-RIP addresses are not in the throwing instance's
+/// CodeMap; a single-CodeMap sniff resolves them `.outside` and mis-walks (the
+/// callee→thunk transition specifically). The production predicate is
+/// `eh_registry.isCodeAddr`; the standard-layout slot (`[fp,8]`) is checked
+/// first (most intermediate frames don't push R15), then the R15-pushed slot
+/// (`[fp,16]`); neither → the standard default (correct for a standard frame,
+/// e.g. the RBP-framed bridge thunk itself).
+pub fn loadFrameSniffedPred(fp: usize, is_code: *const fn (usize) bool) ?RawFrameLink {
+    if (fp == 0) return null;
+    const slots: [*]const usize = @ptrFromInt(fp);
+    if (is_code(slots[1])) return .{ .caller_fp = slots[0], .caller_rip = slots[1] };
+    if (is_code(slots[2])) return .{ .caller_fp = slots[1], .caller_rip = slots[2] };
+    return .{ .caller_fp = slots[0], .caller_rip = slots[1] };
+}
+
 // ---------------------------------------------------------------------
 // Unit tests — pure pointer read; synthetic frame planted in test
 // memory. No JIT emit / no actual stack walk required.
@@ -133,4 +153,49 @@ test "loadFrame x86_64: chained read — outer frame reachable via inner's calle
     const outer_link = loadFrame(inner_link.caller_fp).?;
     try testing.expectEqual(@as(usize, 0), outer_link.caller_fp);
     try testing.expectEqual(@as(usize, 0x1111), outer_link.caller_rip);
+}
+
+/// Test predicate: "code" = the synthetic JIT/thunk range [0x50000, 0x50100).
+/// Stack-slot values in the tests live far outside it (high addresses), so the
+/// predicate cleanly separates a saved-RIP slot from saved-RBP/saved-R15.
+fn testIsCode5xxxx(addr: usize) bool {
+    return addr >= 0x50000 and addr < 0x50100;
+}
+
+test "loadFrameSniffedPred x86_64: standard layout — saved RIP at [fp,8]" {
+    // `PUSH RBP; MOV RBP,RSP` frame: [fp,0]=saved RBP (stack), [fp,8]=saved RIP
+    // (code). The bridge thunk itself is this shape (ADR-0185 a).
+    var frame: [3]usize = .{ 0x7FFF_0000_0000, 0x50040, 0xDEAD };
+    const fp: usize = @intFromPtr(&frame);
+    const link = loadFrameSniffedPred(fp, testIsCode5xxxx).?;
+    try testing.expectEqual(@as(usize, 0x7FFF_0000_0000), link.caller_fp);
+    try testing.expectEqual(@as(usize, 0x50040), link.caller_rip);
+}
+
+test "loadFrameSniffedPred x86_64: R15-pushed callee — saved RIP at [fp,16] (the D-238 case)" {
+    // uses_runtime_ptr `PUSH RBP; PUSH R15; MOV RBP,RSP` frame:
+    // [fp,0]=saved R15 (stack), [fp,8]=saved RBP (stack), [fp,16]=saved RIP =
+    // a bridge-thunk return address (code). The standard slot [fp,8] is a stack
+    // address (NOT code), so the sniff must fall through to [fp,16]. A single
+    // throwing-instance CodeMap would resolve the thunk RIP `.outside` and
+    // mis-pick [fp,0]/[fp,8]; the global predicate fixes it.
+    var frame: [3]usize = .{ 0x7FFF_1111_0000, 0x7FFF_2222_0000, 0x50080 };
+    const fp: usize = @intFromPtr(&frame);
+    const link = loadFrameSniffedPred(fp, testIsCode5xxxx).?;
+    try testing.expectEqual(@as(usize, 0x7FFF_2222_0000), link.caller_fp); // [fp,8]
+    try testing.expectEqual(@as(usize, 0x50080), link.caller_rip); // [fp,16]
+}
+
+test "loadFrameSniffedPred x86_64: no code slot — escaped to host, standard default" {
+    // Neither candidate slot is code (frame chain escaped into host stack).
+    // Falls back to the standard {slots[0], slots[1]} default.
+    var frame: [3]usize = .{ 0xAAAA, 0xBBBB, 0xCCCC };
+    const fp: usize = @intFromPtr(&frame);
+    const link = loadFrameSniffedPred(fp, testIsCode5xxxx).?;
+    try testing.expectEqual(@as(usize, 0xAAAA), link.caller_fp);
+    try testing.expectEqual(@as(usize, 0xBBBB), link.caller_rip);
+}
+
+test "loadFrameSniffedPred x86_64: fp == 0 sentinel → null" {
+    try testing.expectEqual(@as(?RawFrameLink, null), loadFrameSniffedPred(0, testIsCode5xxxx));
 }
