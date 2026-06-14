@@ -76,9 +76,10 @@ re-scoped `dca15df8`** (thunk barrier DISSOLVED — lookupWasiThunk 46/46, facad
 55 PASS/0 SKIP) · **WasiConfig.envs shipped `04cb3497`** (Zig-API WASI env-var
 parity, TDD; D-177 narrowed `13be9d5b` → preopens-only). Alpha conformance MET.
 Next actionable (demand-driven long-tail — pick by signal):
-- **D-177 preopens** (the narrowed facet) = add `WasiConfig.preopens` — needs the
-  host-fd ownership story resolved first (addPreopen takes an open dir fd; who
-  closes it — Host.deinit or caller?). Focused chunk; host-supported; minor.
+- **D-177 preopens** (narrowed facet) = add `WasiConfig.preopens`. SURVEYED
+  `35b08704`: fd-ownership solved by ADR-0184 addPendingPreopen/materialize; real
+  gate = IO-TOKEN PLUMBING (facade Engine has no io field, instantiate never sets
+  host.io/materializes). Genuine design chunk (ADR-0184 follow-up), low-priority.
 - **D-293 remainder** = GC array.* trampolines — RE-SURVEYED + RE-CONFIRMED
   deferred 2026-06-14 (`565ed49a`; full demux mechanism in the debt row, DON'T
   re-walk). ZERO conformance + ZERO default-engine gain → correctly else-leave.
