@@ -185,6 +185,7 @@ private/     gitignored agent scratch
   [Zig](docs/reference/zig_api.md) · [C](docs/reference/c_api.md) · [CLI](docs/reference/cli.md)
 - [`docs/benchmarks.md`](docs/benchmarks.md) — performance vs other runtimes + across engines
 - [`docs/migration_v1_to_v2.md`](docs/migration_v1_to_v2.md) — v1 → v2 migration + the honest v1-vs-v2 gap analysis
+- [`docs/handoff_cw_v2_zig_api.md`](docs/handoff_cw_v2_zig_api.md) — current-state Zig embedding API (ClojureWasm handoff)
 - [`docs/v1_contributor_history.md`](docs/v1_contributor_history.md) — v1 community contributors + their PRs/issues
 - [`CHANGELOG.md`](CHANGELOG.md) — release notes
 
