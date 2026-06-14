@@ -898,6 +898,18 @@ pub fn build(b: *std.Build) void {
     const test_realworld_diff_aot_step = b.step("test-realworld-diff-aot", "Realworld differential incl. the opt-in AOT lane (D-283)");
     test_realworld_diff_aot_step.dependOn(&run_realworld_diff_aot.step);
 
+    // `zig build test-realworld-diff-wasmer` — §9.6 A3 second-oracle lane.
+    // Same wasmtime differential PLUS wasmer as a 2nd reference oracle; flags
+    // REF-DISAGREE fixtures (the two reference runtimes disagree — the
+    // divergence a single-reference gate misses). Report-only; Mac-only
+    // (wasmer is not in the x86_64 dev shells), graceful skip off-Mac.
+    const run_realworld_diff_wasmer = b.addRunArtifact(realworld_diff_runner_exe);
+    run_realworld_diff_wasmer.addArg(b.pathFromRoot("test/realworld/wasm"));
+    run_realworld_diff_wasmer.addArg("--wasmer");
+    run_realworld_diff_wasmer.has_side_effects = true;
+    const test_realworld_diff_wasmer_step = b.step("test-realworld-diff-wasmer", "Realworld differential incl. the opt-in wasmer second-oracle lane (§9.6 A3)");
+    test_realworld_diff_wasmer_step.dependOn(&run_realworld_diff_wasmer.step);
+
     // `zig build test-api-zig-facade` — Phase 10 / §10.J / J.6.
     // Walks the realworld corpus driving each fixture through the
     // native Zig facade (`Engine.compile` → `Module.instantiate`).

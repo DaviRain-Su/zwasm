@@ -76,12 +76,21 @@ pub fn main(init: std.process.Init) !void {
     const corpus_dir = try gpa.dupe(u8, corpus_dir_arg);
     defer gpa.free(corpus_dir);
 
-    // Optional `--aot` 2nd arg opts into the AOT lane (D-283 widen / D-251
-    // validate). OFF by default: the AOT lane JIT-compiles every fixture
-    // (slow on large guests) + runs native AOT code in-process, so it is a
-    // dedicated diagnostic target (`test-realworld-diff-aot`), NOT part of the
-    // always-run interp differential gate (`test-realworld-diff`).
-    const aot_lane = if (arg_it.next()) |a| std.mem.eql(u8, a, "--aot") else false;
+    // Opt-in lanes, parsed from any remaining args in any order (both OFF by
+    // default — each is a dedicated diagnostic target, not the always-run gate):
+    //   --aot     in-process AOT-WASI vs wasmtime (D-283 widen / D-251 validate).
+    //   --wasmer  wasmer as a 2nd reference oracle vs wasmtime (§9.6 A3). The
+    //             value: a wasmtime/wasmer disagreement is the divergence a
+    //             single-reference gate can't see.
+    var aot_lane = false;
+    var wasmer_lane = false;
+    while (arg_it.next()) |a| {
+        if (std.mem.eql(u8, a, "--aot")) {
+            aot_lane = true;
+        } else if (std.mem.eql(u8, a, "--wasmer")) {
+            wasmer_lane = true;
+        }
+    }
 
     const wasmtime_path_opt = try resolveWasmtime(gpa, io);
     defer if (wasmtime_path_opt) |p| gpa.free(p);
@@ -97,6 +106,20 @@ pub fn main(init: std.process.Init) !void {
         return;
     }
     const wasmtime_path = wasmtime_path_opt.?;
+
+    // Second-oracle resolution (only when --wasmer): wasmer is Mac-only in the
+    // flake, so it is absent on the x86_64 hosts — the lane then skips with a
+    // notice and the wasmtime gate still runs (parallels SKIP-WASMTIME-MISSING).
+    const wasmer_path_opt: ?[]u8 = if (wasmer_lane) try resolveWasmer(gpa, io) else null;
+    defer if (wasmer_path_opt) |p| gpa.free(p);
+    if (wasmer_lane and wasmer_path_opt == null) {
+        try stdout.print(
+            "SKIP-WASMER-MISSING — wasmer not on PATH; the A3 second-oracle lane needs " ++
+                "`nix develop .#bench` (wasmer is Mac-only per flake.nix). wasmtime gate still runs.\n",
+            .{},
+        );
+        try stdout.flush();
+    }
 
     const cwd = std.Io.Dir.cwd();
     var dir = cwd.openDir(io, corpus_dir, .{ .iterate = true }) catch |err| {
@@ -121,6 +144,13 @@ pub fn main(init: std.process.Init) !void {
     var aot_matched: u32 = 0;
     var aot_mismatched: u32 = 0;
     var aot_skipped: u32 = 0;
+
+    // wasmer second-oracle lane (§9.6 A3, opt-in). Agreement is measured
+    // against the wasmtime reference (not v2) — the point is to corroborate or
+    // contradict the gate's single oracle. REPORT-ONLY.
+    var wasmer_agree: u32 = 0;
+    var wasmer_disagree: u32 = 0;
+    var wasmer_skipped: u32 = 0;
 
     var it = dir.iterate();
     while (try it.next(io)) |entry| {
@@ -227,6 +257,17 @@ pub fn main(init: std.process.Init) !void {
             try stdout.flush();
         }
 
+        // wasmer second-oracle lane (opt-in) — placed before the v2-trap/empty
+        // continues so the references are compared even where v2 can't complete.
+        if (wasmer_lane and wasmer_path_opt != null) {
+            switch (try wasmerCompare(gpa, io, wasmer_path_opt.?, corpus_dir, entry.name, needs_preopen, wt_stdout, wt_exit, v2_stdout.items, stdout)) {
+                .agree => wasmer_agree += 1,
+                .disagree => wasmer_disagree += 1,
+                .skip => wasmer_skipped += 1,
+            }
+            try stdout.flush();
+        }
+
         if (v2_exit != 0 and wt_exit == 0) {
             try stdout.print("SKIP-V2-TRAP  {s} (v2 exit={d}, wasmtime exit=0 — v2 could not complete)\n", .{ entry.name, v2_exit });
             skipped_v2 += 1;
@@ -261,6 +302,12 @@ pub fn main(init: std.process.Init) !void {
         try stdout.print(
             "diff_runner [aot]: {d}/{d} matched, {d} mismatched, {d} skipped (AOT-unsupported / trap) — REPORT-ONLY\n",
             .{ aot_matched, total, aot_mismatched, aot_skipped },
+        );
+    }
+    if (wasmer_lane and wasmer_path_opt != null) {
+        try stdout.print(
+            "diff_runner [wasmer]: {d}/{d} agree-with-wasmtime, {d} REF-DISAGREE, {d} skipped — REPORT-ONLY\n",
+            .{ wasmer_agree, total, wasmer_disagree, wasmer_skipped },
         );
     }
     // Flush the summary unconditionally: the green path (no mismatch, matched
@@ -348,6 +395,75 @@ fn aotCompare(
     return .mismatch;
 }
 
+/// Outcome of the wasmer second-oracle lane for one fixture. `agree` =
+/// wasmer's stdout equals wasmtime's (the gate's oracle is corroborated);
+/// `disagree` = the two reference runtimes differ (REF-DISAGREE — the signal a
+/// single-reference gate misses); `skip` = wasmer could not complete the run.
+const WasmerOutcome = enum { agree, disagree, skip };
+
+/// Run `fixture_path` through `wasmer run` and compare its stdout to the
+/// wasmtime reference. On disagreement, also report which reference v2 (the
+/// interp) matched, so the divergence is immediately triageable. Mirrors the
+/// AOT/interp lanes' skip semantics: a wasmer non-zero exit where wasmtime
+/// exited 0 = wasmer could not complete (skip, not a reference disagreement).
+fn wasmerCompare(
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    wasmer_path: []const u8,
+    corpus_dir: []const u8,
+    name: []const u8,
+    needs_preopen: bool,
+    wt_stdout: []const u8,
+    wt_exit: u8,
+    v2_stdout: []const u8,
+    out: anytype,
+) !WasmerOutcome {
+    // argv[0] convention differs at the CLI frontend: wasmtime (and v2) use the
+    // fixture BASENAME, wasmer uses the path arg verbatim. To measure runtime
+    // SEMANTICS — not the launcher's argv[0] policy — run wasmer FROM the corpus
+    // dir with the bare basename, so its argv[0] matches wasmtime's. Without this
+    // every argv[0]-printing guest is a spurious REF-DISAGREE.
+    // The preopen fixture keeps the inherited cwd + relative `--mapdir` scratch
+    // (its guest does not print a divergent argv[0]); only there is the full path
+    // passed so the relative host scratch still resolves.
+    // wasmer preopen syntax is `--mapdir <GUEST_DIR:HOST_DIR>` (single colon),
+    // vs wasmtime's `--dir <HOST::GUEST>`.
+    const fixture_path = try std.fmt.allocPrint(gpa, "{s}/{s}", .{ corpus_dir, name });
+    defer gpa.free(fixture_path);
+    const wm_argv: []const []const u8 = if (needs_preopen)
+        &.{ wasmer_path, "run", "--mapdir", "." ++ ":" ++ preopen_scratch, fixture_path }
+    else
+        &.{ wasmer_path, "run", name };
+    const cwd_opt: std.process.Child.Cwd = if (needs_preopen) .inherit else .{ .path = corpus_dir };
+    const wm_result = std.process.run(gpa, io, .{ .argv = wm_argv, .cwd = cwd_opt }) catch |err| {
+        try out.print("  SKIP-WASMER-RUN  {s}: {s}\n", .{ name, @errorName(err) });
+        return .skip;
+    };
+    defer gpa.free(wm_result.stdout);
+    defer gpa.free(wm_result.stderr);
+    const wm_exit: u8 = switch (wm_result.term) {
+        .exited => |c| c,
+        else => 1,
+    };
+    if (wm_exit != 0 and wt_exit == 0) {
+        try out.print("  SKIP-WASMER-TRAP  {s} (wasmer exit={d}, wasmtime exit=0)\n", .{ name, wm_exit });
+        return .skip;
+    }
+    if (std.mem.eql(u8, wt_stdout, wm_result.stdout)) return .agree;
+
+    const v2_side = if (std.mem.eql(u8, v2_stdout, wm_result.stdout))
+        "v2==wasmer"
+    else if (std.mem.eql(u8, v2_stdout, wt_stdout))
+        "v2==wasmtime"
+    else
+        "v2!=both";
+    try out.print(
+        "  REF-DISAGREE  {s} (wasmtime={d} bytes, wasmer={d} bytes; {s})\n",
+        .{ name, wt_stdout.len, wm_result.stdout.len, v2_side },
+    );
+    return .disagree;
+}
+
 /// Test whether `wasmtime` is reachable on PATH. Returns the
 /// bare command name (`"wasmtime"`) if reachable, null otherwise.
 ///
@@ -370,4 +486,18 @@ fn resolveWasmtime(allocator: std.mem.Allocator, io: std.Io) !?[]u8 {
     defer allocator.free(result.stderr);
     if (result.term != .exited or result.term.exited != 0) return null;
     return try allocator.dupe(u8, "wasmtime");
+}
+
+/// Test whether `wasmer` is reachable on PATH (the §9.6 A3 second-oracle lane).
+/// wasmer is Mac-only in the flake (no x86_64-linux binary-cache hit), so this
+/// returns null off the Mac dev shell and the lane skips. Bare command name is
+/// returned (PATH lookup) for the same cross-host reason as resolveWasmtime.
+fn resolveWasmer(allocator: std.mem.Allocator, io: std.Io) !?[]u8 {
+    const result = std.process.run(allocator, io, .{
+        .argv = &[_][]const u8{ "wasmer", "--version" },
+    }) catch return null;
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    if (result.term != .exited or result.term.exited != 0) return null;
+    return try allocator.dupe(u8, "wasmer");
 }
