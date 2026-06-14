@@ -1204,6 +1204,18 @@ entries:
       catch → block (result i32 i32), drop top, return first → interp 10, JIT 20.
       Both D-327 + D-328 are CONFORMANCE-NEUTRAL (no spec assert exercises multi-
       value catch result identity; corpus drops the exnref).
+      ATTEMPT 2 (merge_top_vregs): pre-populating the catch label's
+      merge_top_vregs with fresh vregs + merge_captured BEFORE emitEndIntra ALSO
+      regressed the same 3 single-param tests AND did NOT fix first_of_two.
+      DECISIVE → the fix is PURELY IR-LEVEL: the regalloc vreg→slot map follows the
+      IR's vreg numbering, and lower.zig pushes NO values for catch-target block
+      results (catch_entries store only label indices; caught values arrive via the
+      unwinder, invisible to the IR value stack) → both results default to vreg 0 →
+      one slot. NO emit-side change fixes it (drop/return read the IR slot). NEXT:
+      in lower.zig, when lowering the catch clause / catch-target block, push N
+      distinct IR values for the N catch results so the regalloc assigns distinct
+      slots. Investigate the lower.zig value/type-stack model (openTryTable:1096,
+      lowerCatchVec, how normal block results get distinct vregs).
     first_raised: "2026-06-14"
     last_reviewed: "2026-06-14"
     refs: src/engine/codegen/arm64/op_control.zig (emitEndIntra ~665-815, merge_top_vregs); src/ir/lower.zig (catch-block result vreg assignment); src/engine/codegen/arm64/emit.zig (landing-pad ~1646-1740); private/notes/d327-catch_ref-plan.md
