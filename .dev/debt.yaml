@@ -686,24 +686,6 @@ entries:
     last_reviewed: "2026-06-13"
     refs: |-
       include/wasm.h:453-456 + 223-227 + 200-205, `src/api/instance.zig::Global` (current shape), 10.F-c commit `3889661b` (D-171 close note), v0.2 c_api completion
-  - id: "D-195"
-    layer: "code"
-    status: "blocked-by"
-    description: |-
-      blocked-by: (a) ADR-0123 Accept flip — typed-function-reference ValType bytes `0x64` (ref ht) / `0x63` (ref null ht) in the type section. 12 of the 14 newly-baked function-references modules fail with `ParseFailed` because their type sections declare `(ref null 0)` style indexed-function refs (e.g. `ref_null.0.wasm`'s type `(func (result (ref null 0)))`). Touches Zone-1 ValType enum + parser; ADR-grade deviation. (b) Cross-module `(register …)` — sibling to D-192's runner gap; ref_func.1.wasm imports a func from ref_func.0.wasm via `register`. Sub-gap (c) (`ref.func N` declared-funcrefs gate) DISCHARGED cycle 60 (`e7666598`). | **DISCHARGED cyc235** — ADR-0123 ACCEPTED 2026-05-28 ("user-delegated autonomous flip"); typed-funcref ValType `0x63/0x64` parser landed (`zir.zig:191`); the function-references corpus is GREEN (ubuntu `return 39/0, trap 4/0, invalid 18/0, skip 1`). This row's "gated on ADR-0123 Accept" framing was STALE — see lesson `2026-05-30-stale-debt-rows-misroute-the-loop`. (Original: ) **Function-references spec return/trap fixtures gated on ADR-0123 typed-ref parser + cross-module register** — 36/39 assert_return fails + 4/4 assert_trap fails in `function-references/{br_on_null, br_on_non_null, ref_as_non_null, ref_null, ref_is_null, ref_func}/*` (cycle 59 corpus expansion). Per-module breakdown via spec runner's per-module stderr emit. The 3 ADR-independent null-ops are JIT-green on both arches as of cycle 58 (`9a134d78`); pass-rate of the corpus remains gated on ADR-0123 Accept (12 modules) + runner registry (2 modules). Sub-gap (c) closed cycle 60: `frontendValidate` now builds declared-funcrefs bitset (globals init / elements / func-kind exports) and threads it into `validateFunctionWithMemIdxAndTags`; opRefFunc rejects undeclared `ref.func N` → ref_func.4 + ref_func.5 now properly invalid.
-    first_raised: "2026-05-28"
-    last_reviewed: "2026-06-13"
-    refs: |-
-      `test/spec/wasm-3.0-assert/function-references/{br_on_null,br_on_non_null,ref_as_non_null,ref_null,ref_is_null,ref_func}/manifest.txt` + .wasm fixtures (cycle-59 bake), `test/spec/spec_assert_runner_wasm_3_0.zig` (per-module FAIL stderr emit added cycle 59), `src/parse/sections.zig::readValType` (typed-ref bytes 0x63/0x64 reject), `src/runtime/instance/instantiate.zig::frontendValidate` (sub-gap c discharge `e7666598`), ADR-0123 (Proposed), D-188 (sibling — EH invalid-accepted gap), D-192 (sibling — cross-module register), ROADMAP §10 row 10.R
-  - id: "D-186"
-    layer: "code"
-    status: "blocked-by"
-    description: |-
-      blocked-by: ROADMAP §10 row 10.R (`call_ref` codegen + `(ref $sig)` typed-funcref Value shape) | `return_call_ref` (Wasm 3.0 §3.3.8.20) emit body deferred. The op pops a typed funcref `(ref $sig)` from the operand stack and tail-calls it; null-trap on null funcref. Same-module funcref tail-call could reuse the BR X16 / JMP R11 path with `MOV X0,X19` / `MOV RDI,R15`; cross-module funcref needs the bridge thunk shape (ADR-0066) with literal-pool callee_rt load. Pre-req: row 10.R sub-chunks 10.R-3 (br_on_non_null) + 10.R-4 (call_ref) + 10.R-5 (return_call_ref) land. call_ref codegen establishes the funcref-as-X16/R11 dispatch shape; return_call_ref reuses it minus capture + plus frame_teardown. arm64/x86_64 `ops/wasm_3_0/return_call_ref.zig` stubs stay `UnsupportedOp` until 10.R-5. Bundle 10.TC-emit-body closes at HEAD `ae2abab7` with return_call + return_call_indirect on both arches; return_call_ref carved out to its own future bundle once 10.R-3/4 unblock it.
-    first_raised: "2026-05-26"
-    last_reviewed: "2026-06-13"
-    refs: |-
-      `src/engine/codegen/arm64/ops/wasm_3_0/return_call_ref.zig` (stub); `src/engine/codegen/x86_64/ops/wasm_3_0/return_call_ref.zig` (stub); ROADMAP §10 row 10.R; ADR-0112 D5 / ADR-0066 (cross-module bridge thunk)
   - id: "D-197"
     layer: "code"
     status: "blocked-by"
