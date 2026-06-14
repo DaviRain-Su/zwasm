@@ -310,6 +310,18 @@ inline fn invokeAndCheckVoid(
     }
 }
 
+/// Host/test-boundary SAFE call of a raw entry fn-ptr `f` (materialised via
+/// `module.entry` / `LoadedModule.entry`) through the D-245 cohort-clobber
+/// trampoline. Use this instead of calling `f(rt, ...)` directly from a Zig
+/// frame: the JIT prologue MOV-installs the pinned callee-saved cohort from
+/// `rt` WITHOUT saving the caller's values, so a direct inline call lets the
+/// compiler keep a live cohort-reg value across it → seed-dependent
+/// corruption/SEGV (D-311). `R` = result type; `args` = the JIT params after
+/// `rt`. Generic over JIT and AOT fn-ptrs (any `f`).
+pub fn callEntrySafe(rt: *JitRuntime, comptime R: type, f: anytype, args: anytype) Error!R {
+    return invokeAndCheck(rt, R, f, args);
+}
+
 /// Call a no-argument JIT function returning i32.
 ///
 /// Per ADR-0017, X0 carries the runtime pointer; the body's
@@ -2691,8 +2703,9 @@ test "entry: f32 local round-trip — local.get 0 of f32 param via V0" {
     rt.trap_flag = 0;
     const Fn = *const fn (rt: *const JitRuntime, a0: f32) callconv(.c) f32;
     const f = module.entry(0, Fn);
-    try testing.expectEqual(@as(f32, 3.5), f(&rt, 3.5));
-    try testing.expectEqual(@as(f32, -1.25), f(&rt, -1.25));
+    // D-311: route through the cohort-clobber trampoline (NOT a raw `f(&rt,…)`).
+    try testing.expectEqual(@as(f32, 3.5), try callEntrySafe(&rt, f32, f, .{@as(f32, 3.5)}));
+    try testing.expectEqual(@as(f32, -1.25), try callEntrySafe(&rt, f32, f, .{@as(f32, -1.25)}));
 }
 
 test "entry: callI64NoArgs — i64.const 0xDEADBEEFCAFE returns full 64-bit" {

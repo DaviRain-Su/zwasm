@@ -528,6 +528,7 @@ const testing = std.testing;
 const skip = @import("../../../test_support/skip.zig");
 const zir = @import("../../../ir/zir.zig");
 const jit_abi = @import("jit_abi.zig");
+const entry_mod = @import("entry.zig"); // D-311: callEntrySafe for test entry calls
 const ZirFunc = zir.ZirFunc;
 const regalloc = @import("regalloc.zig");
 
@@ -595,7 +596,8 @@ test "link: 2-function module — fn0 calls fn1, returns 7" {
     };
     const Fn = *const fn (rt: *jit_abi.JitRuntime) callconv(.c) u32;
     const f = module.entry(0, Fn);
-    try testing.expectEqual(@as(u32, 7), f(&rt));
+    // D-311: route through the cohort-clobber trampoline (NOT a raw `f(&rt)`).
+    try testing.expectEqual(@as(u32, 7), try entry_mod.callEntrySafe(&rt, u32, f, .{}));
     try testing.expect(rt.jit_executed_flag != 0);
 
     // ADR-0066 (c)-2.3 enabling: `entryAddr` returns the raw byte
@@ -826,7 +828,8 @@ test "link+execute: fn0 return_call fn1 returns 7 via B/JMP fixup (ADR-0112 D3/D
     };
     const Fn = *const fn (rt: *jit_abi.JitRuntime) callconv(.c) u32;
     const f = module.entry(0, Fn);
-    try testing.expectEqual(@as(u32, 7), f(&rt));
+    // D-311: route through the cohort-clobber trampoline (NOT a raw `f(&rt)`).
+    try testing.expectEqual(@as(u32, 7), try entry_mod.callEntrySafe(&rt, u32, f, .{}));
     try testing.expect(rt.jit_executed_flag != 0);
 }
 

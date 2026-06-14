@@ -1751,7 +1751,7 @@ test "AOT<->JIT differential: .cwasm produce->load->execute equals the JIT resul
 
     const Fn = *const fn (*const entry.JitRuntime) callconv(.c) u32;
     const f = mod.entry(0, Fn);
-    const aot_result = f(&owned.rt);
+    const aot_result = try entry.callEntrySafe(&owned.rt, u32, f, .{}); // D-311 trampoline
 
     // Differential equivalence: the AOT-loaded code yields the SAME
     // result as the JIT path for the same module.
@@ -1787,7 +1787,7 @@ test "AOT<->JIT differential: () -> i64 const round-trips through produce->load 
     defer owned.deinit(testing.allocator);
 
     const Fn = *const fn (*const entry.JitRuntime) callconv(.c) u64;
-    const aot_result = mod.entry(0, Fn)(&owned.rt);
+    const aot_result = try entry.callEntrySafe(&owned.rt, u64, mod.entry(0, Fn), .{}); // D-311 trampoline
     try testing.expectEqual(jit_result, aot_result);
 }
 
@@ -1822,7 +1822,7 @@ test "AOT<->JIT differential: internal call's direct-call reloc executes through
     defer owned.deinit(testing.allocator);
 
     const Fn = *const fn (*const entry.JitRuntime) callconv(.c) u32;
-    const aot_result = mod.entry(0, Fn)(&owned.rt);
+    const aot_result = try entry.callEntrySafe(&owned.rt, u32, mod.entry(0, Fn), .{}); // D-311 trampoline
     try testing.expectEqual(jit_result, aot_result);
 }
 
@@ -1857,7 +1857,7 @@ test "AOT producer serialises the func export table → loaded .cwasm resolves e
     defer owned.deinit(testing.allocator);
     const Fn = *const fn (*const entry.JitRuntime) callconv(.c) u32;
     const idx = mod.resolveEntry("f").?;
-    try testing.expectEqual(@as(u32, 7), mod.entry(idx, Fn)(&owned.rt));
+    try testing.expectEqual(@as(u32, 7), try entry.callEntrySafe(&owned.rt, u32, mod.entry(idx, Fn), .{})); // D-311 trampoline
 }
 
 test "stateful .cwasm cycle-1: global.get returns the serialised init value via standalone runEntry (§12.3b)" {

@@ -111,3 +111,29 @@ not tripped — but UNVERIFIED. Before declaring the flaky gone, must (a) decide
 → Scoped as a focused chunk (test-site routing + x86_64 production-path decision +
 many-run verification), NOT inline make-work. 3-host `test-all` remains authority
 (green); this only improves local `zig build test` determinism.
+
+## RESOLVED-as-NOT-A-FAILURE 2026-06-14 (A1) — `zig build test` is green; the flaky is harness noise
+
+Empirically pinned the residual `zig build test` "failed command … --seed=… --listen=-"
+SEGV:
+- **`zig build test` exits 0** on every run (×5 verified).
+- **The test binary passes 2754/0 STANDALONE** (run directly, no `--listen`) across
+  4 distinct seeds — incl. the exact seeds that "crashed" under the build runner.
+
+→ The crash is an artifact of the Zig **build-runner `--listen=-` IPC child-process
+mode**, NOT a real test failure: the build is green and the tests pass when run
+directly. Earlier framing ("seed-flaky raw-entry SEGV blocking local test") was an
+overstatement — it never failed the build.
+
+**Done in A1**: routed the 8 contract-violating test direct-calls (`entry.zig` f32 /
+`linker.zig` ×2 / `runner_test.zig` ×4) through a new pub `entry.callEntrySafe`
+(thin wrapper over the D-245 `invokeAndCheck` cohort-clobber trampoline) — a real
+correctness improvement (they now honor the host-boundary contract like the other
+~97 helpers), though it does NOT remove the `--listen` stderr line (so the line is
+NOT caused by those sites — it's a deeper build-runner interaction). The `fn() i32`
+no-`rt` AOT sites (`aot/load.zig`) install no cohort → already safe.
+
+**Remaining (NOT a failure, deferred)**: the `--listen`-mode stderr crash line is a
+Zig build-runner IPC quirk; chasing it is upstream/harness territory, not a zwasm
+correctness gap. 3-host `test-all` is authority + green. No further action unless it
+ever propagates to a non-zero `zig build test` exit.
