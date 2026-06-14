@@ -27,6 +27,17 @@ entries:
       generic N-tuple multi-value (mirror/generalise `supported_multi`) +
       assert_trap class discrimination → then complete the per-proposal wg-3.0
       re-vendor (refresh raw from wg-3.0 → re-bake → the deferred asserts pass).
+      SCOPED 2026-06-14 (subagent): SMALL-to-MEDIUM (~250-400 LOC, ~2-3 runner
+      files), NOT large. The ENGINE already exposes a generic multi-result invoke
+      — `JitInstance.invokeMulti(name, args:[]u64, results_out:[]TypedResult)`
+      (src/engine/runner.zig:853) over the buffer-write ABI
+      (entry_buffer_write.zig). The blocker is purely the RUNNER's result-check:
+      `dispatchMultiResult` (spec_assert_runner_non_simd.zig:694) hand-codes only
+      3 tuple shapes gated by the distiller's `supported_multi`. FIX: switch
+      handle_assert_return to call `invokeMulti` + generic `[]TypedResult` tuple
+      compare (drop the per-shape ladder) (~150 LOC) + base.zig generic unpack
+      (~80) + tuple tests. assert_trap-class discrimination (the note's other
+      half) is SEPARATE + spec-permissive (any-trap-satisfies) → independent.
       CW-V1 IMPACT = NONE (test-harness only; runtime multi-value is sound).
     first_raised: "2026-06-14"
     last_reviewed: "2026-06-14"
