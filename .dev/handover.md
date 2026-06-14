@@ -67,24 +67,24 @@ vfprintf's register pressure (reduction can't isolate it). Filed **D-325** (focu
 disasm campaign of repro2.wasm's printf_core; private/spikes/jit-vararg has all reductions). The
 `--jit` lane keeps it visible (report-only). Niche (emscripten plain-%s stdout only; values correct).
 
-**9 `go_*` compile-gaps TRIAGED → D-326 `<this commit>`.** NOT a missing opcode (Step-0 instrumented:
-body op-dispatch handles all ops, else-arm + per-op errdefer never fire; NOT memory.init — go uses 0,
-its 29085 data segs are active). It's a **structural emit-SETUP / large-frame limit** (the `>32760`
-imm-offset budget, D-289 large_frame class) hit by FAT standard-Go funcs. Filed D-326 (next: stage-level
-instrument shared/compile.zig → confirm site → raise the offset budget). Niche: TinyGo JIT-fine, interp
-runs all go_* correctly.
+**D-326 PRIMARY GAP FIXED `10d7d2b2`.** Root cause: the JIT liveness pass used a FIXED `[256]Frame`
+control-nesting stack; fat standard-Go funcs (go_hello func[303]: 11151 instrs, >256 nested blocks)
+overflowed it → UnsupportedOp. Made `block_stack` allocator-backed + doubling. Result: realworld JIT
+compile-pass **47/56 → 55/56** (8 of 9 go_* flip compile-op→compile-pass); zig build test green, no
+regression; boundary fixture deep_control_nest_300. D-326 now `partial` — 2 SEPARATE smaller remaining
+gaps: (A) 8 go_* **UnsupportedEntrySignature** (they compile, but JIT run-path can't invoke Go's `_start`
+ABI); (B) **go_regex SlotOverflow** (a different fixed vreg/slot cap — same dynamic-vs-fixed pattern,
+likely a similar fix).
 
-**Phase-B status**: the D-283 `--jit` lane (the deliverable) is done + 3-host green; BOTH real-bug
-clusters now precisely triaged + filed — **D-325** (2 `%s` regalloc-class miscompiles) + **D-326**
-(9 go_* large-frame codegen limit). Both need focused codegen-disassembly campaigns.
+**Phase-B status**: D-283 `--jit` lane done + 3-host green (45/2/9, REPORT-ONLY). Remaining JIT-correctness
+debt: **D-325** (2 `%s` regalloc-class miscompiles) + **D-326** partial (go entry-sig + go_regex slot cap).
 
-**First action on resume**: pick a focused codegen campaign — **D-326** is the more tractable (narrowed
-to the emit-setup large-frame offset budget; likely an escalated-addressing fix for >32760 offsets,
-a known D-289 class). Step 0: stage-level instrument `shared/compile.zig` (which compileOne stage
-rejects go_hello func[303]) → confirm the `>32760` site → escalate the offset addressing. (Alt: D-325
-%s disasm.) (A1 Zig + A2 embenchen + A3 wasmer-oracle +
-runtime-bump + tool-currency-3host + B1 jit-diff-lane DONE; B2→D-325. D-325 disasm campaign is the
-alternative deliberate track when prioritized.)
+**First action on resume**: continue D-326 — **(B) go_regex SlotOverflow** is the more tractable (same
+fixed-cap→dynamic pattern just landed for the control stack; grep `SlotOverflow` in regalloc/emit, find
+the fixed vreg/slot table, make it grow). OR (A) the go `_start` UnsupportedEntrySignature in the JIT
+entry runner (`runVoidExportWasi`/`runWasiLenient` entry resolution). (Alt: D-325 %s disasm.)
+(A1 Zig + A2 embenchen + A3 wasmer-oracle +
+runtime-bump + tool-currency-3host + B1 jit-diff-lane DONE; D-326 primary FIXED; B2→D-325.)
 
 ## State (tag-ready baseline, all 3-host green)
 

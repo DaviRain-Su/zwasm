@@ -1021,8 +1021,20 @@ entries:
       jit-realworld-runtraps-are-null-wasi-harness-artifacts; debug_jit_auto skill
   - id: "D-326"
     layer: "code"
-    status: "blocked-by"
+    status: "partial"
     description: |-
+      **PRIMARY GAP FIXED 2026-06-15 `10d7d2b2`**: the root cause was a FIXED `[256]Frame` control-
+      nesting stack in the JIT liveness pass (`max_control_stack=256`) — fat standard-Go runtime funcs
+      (go_hello_wasi func[303]: 11151 instrs, >256 nested blocks) overflowed it. Made `block_stack` an
+      allocator-backed slice that doubles on demand. Result: realworld JIT compile-pass **47/56 → 55/56**
+      (8 of 9 go_* flip compile-op → compile-pass); `zig build test` green (no regression); boundary
+      fixture `test/edge_cases/p9/block/deep_control_nest_300` (300 blocks → i32:42). REMAINING (partial,
+      both SEPARATE smaller gaps surfaced once compile cleared): (A) **8 go_* `UnsupportedEntrySignature`**
+      — they now COMPILE but the JIT run-path can't invoke Go's `_start` (Go wasip1 entry ABI; the entry
+      runner rejects its signature). (B) **go_regex `SlotOverflow`** — a DIFFERENT fixed cap (vreg/slot
+      count) the giant go_regex func exceeds; same dynamic-vs-fixed pattern as the control stack, likely
+      a similar fix. DISCHARGE: (A) teach the JIT entry runner Go's `_start` sig; (B) dynamic slot table.
+      Then go_* RUN under `test-realworld-diff-jit`. (Historical root-cause trail:)
       blocked-by: a **structural JIT-codegen limit hit by fat standard-Go (GOOS=wasip1) binaries** —
       the 9 `go_*` realworld fixtures (D-283 sub-cluster) JIT-compile-FAIL with `UnsupportedOp` at a
       specific func (e.g. go_hello_wasi func[303] params=1 results=1). Step-0 triage 2026-06-15 RULED
