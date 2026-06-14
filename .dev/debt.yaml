@@ -1034,7 +1034,21 @@ entries:
       runner rejects its signature). (B) **go_regex `SlotOverflow`** — a DIFFERENT fixed cap (vreg/slot
       count) the giant go_regex func exceeds; same dynamic-vs-fixed pattern as the control stack, likely
       a similar fix. DISCHARGE: (A) teach the JIT entry runner Go's `_start` sig; (B) dynamic slot table.
-      Then go_* RUN under `test-realworld-diff-jit`. (Historical root-cause trail:)
+      Then go_* RUN under `test-realworld-diff-jit`.
+      ---
+      REMAINING-GAP LEADS (2026-06-15, after the primary fix): (A) **8 go_* UnsupportedEntrySignature** —
+      Go's `_start` (`_rt0_wasm_wasip1`) is `(func)` = VOID `()->()` (type 11), idx 1326, a DEFINED func
+      (16 imports). `runner.runWasiLenient` (runner.zig:466) HANDLES void at line 502 (`callVoidNoArgs`),
+      `resolveLenientEntryIdx` correctly returns the `_start` idx — yet `zwasm run --engine jit go_hello`
+      still returns UnsupportedEntrySignature. So the reject is a downstream ASYMMETRY (interp's
+      runWasmCaptured runs go_* fine; JIT's runWasiLenient does not) — likely a `compiled.func_sigs[idx]`
+      module-index-vs-defined-index mismatch OR a compile-incomplete-module interaction. Next: instrument
+      runWasiLenient to print which branch rejects for func idx 1326. Likely a SMALL runner fix → flips 8.
+      (B) **go_regex SlotOverflow** = the HARD D-289 large-frame class: `max_slots=4095` (regalloc_compute.zig:32,
+      fixed `active_buf`/`free_buf` buffers) for SIMULTANEOUSLY-LIVE values, AND >4095 live ⇒ spill offsets
+      blow the `>32760` imm limit (op_alu_int.zig:565 etc.). Needs BOTH a dynamic slot table AND large-frame
+      spill addressing — link to **D-289** (large_frame). Lower priority than (A).
+      (Historical root-cause trail:)
       blocked-by: a **structural JIT-codegen limit hit by fat standard-Go (GOOS=wasip1) binaries** —
       the 9 `go_*` realworld fixtures (D-283 sub-cluster) JIT-compile-FAIL with `UnsupportedOp` at a
       specific func (e.g. go_hello_wasi func[303] params=1 results=1). Step-0 triage 2026-06-15 RULED
