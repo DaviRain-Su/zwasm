@@ -15,14 +15,18 @@ ubuntu (lesson `2026-06-14-corpus-revendor-breaks-hardcoded-manifest-tests`).
 memory64/multi-memory/func-refs no-drift; eh + tail-call drift remain (deferred).
 So 3.0 corpus = current-for-wg-3.0 EXCEPT multi-value asserts (D-327) + the
 reverted tail-call/eh deltas. Mechanism DONE (refdialect.py + runbook).
-D-327 SCOPED `bd764663`: SMALL-MEDIUM (~250-400 LOC); engine has
-`JitInstance.invokeMulti`→`[]TypedResult` (runner.zig:853), only the runner
-result-check (`dispatchMultiResult` non_simd:694) lags. **NOTE (new): any corpus
-re-vendor must ALSO update the hardcoded wasm_3_0_manifest.zig counts/values +
-run FULL `zig build test`.**
-NEXT: START D-327 impl (TDD: invokeMulti refactor) → re-vendor deferred
-eh/tail-call/gc-extern asserts (w/ manifest-test updates) → full wg-3.0 →
-surface alpha.3 (user-only). User may pick B (tag now on current state) — honour.
+D-327 scope kept revealing layers (hardcoded manifest tests; DUAL runners —
+`spec_assert_runner_wasm_3_0.zig` ALREADY routes multi-value via `invokeMulti`
+@960-977, while `non_simd.zig`'s `dispatchMultiResult`@694 hand-codes 3 shapes).
+So D-327 is likely NARROWER than the ~250-400 LOC estimate but the EXACT gap is
+unpinned (which runner drives wasm-3.0-assert; why eh try_table still failed).
+A genuine multi-cycle investigate+impl for an ALPHA.
+DECISION (user's call — the alpha effort/release tradeoff): **A** = pin + close
+D-327 → re-vendor deferred asserts (w/ manifest-test updates) → full wg-3.0 →
+tag. **B** = tag `v2.0.0-alpha.3` NOW (3.0 corpus wg-3.0-current-except-multi-value,
+3-host green; gc done; D-327 + deferred asserts → beta/rc debt). Recommend B for
+the alpha. NEXT: honour user pick; if silent, continue D-327 investigation
+(pin the exact runner gap) as autonomous prep.
 
 ## Current state
 
