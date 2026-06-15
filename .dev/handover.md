@@ -3,7 +3,7 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Current state — WASI-0.3 campaign (D-335); D+ζ2+E+F done — async runs from the CLI (`2962dd21`)
+## Current state — WASI-0.3 campaign (D-335); D+ζ2+E+F done, future-drop guard closed (D-337 → `81e5d864`)
 
 **WASI 0.3 / Preview 3 campaign** (Front D, ratified 2026-06-11; CM-async — `async` func / `stream<T>` /
 `future<T>`, NOT core stack-switching). Critical path A→B→C→D(crux)→E→F→G; full unit plan + per-unit DONE-SHAs
@@ -22,7 +22,13 @@ e2e**; **E2a** waitable-set decode 0x1f–0x23 `116287c1`; **E2b** `waitable-set
 builtins `85817b84` (mint a set + join a waitable). **13 async e2e fixtures green.** (Lessons: `zig build
 test`≠`test-all`; `catch {}` in errdefer + `else` on exhaustive switch are gate/lint-blocked; stackless
 single-task can't reach guest-to-guest COMPLETION — `2026-06-16-stackless-stream-completion-needs-host-peer`.
-`D-337` writable-future-drop guard; `D-444` split p2 async host to a sibling.)
+`D-444` split p2 async host to a sibling; `D-445` mapDispatchErr panics on un-narrowed host-fn errors.)
+
+**Future-drop guard DONE** (`81e5d864`, closes D-337): per CanonicalABI.md §Future State a future's writable end
+cannot be dropped before its value is written — `SharedFuture.written` flag + `guardWritableDrop`; `p2StreamFutureDrop`
+surfaces the canonical guest trap. New fixtures: `async_future_read_blocked` (the SharedFuture rendezvous, prior only
+hit via the host-result future) + `async_future_drop_before_write` (the trap). The future readable end never observes
+DROPPED (unlike streams). (Surfaced D-445: WasiP2Error guest-faults panic in mapDispatchErr's narrowing else — latent.)
 
 **E2c DONE** (`249e8e85`, ADR-0191): the WAIT-path e2e. `WasiP2Ctx.pending_reads` ({ptr,cap} keyed by end) +
 `defer_host_source_reads`; `p2StreamFutureCopy` parks a deferred host-source read (record + BLOCKED);

@@ -1478,24 +1478,6 @@ entries:
       "functype rejects transitive borrow in a result type" + exported value);
       src/feature/component/validate.zig checkFuncResultNoBorrow / checkValTypeNoBorrow;
       value-index-space deferral at validate.zig:79 + :605
-  - id: "D-337"
-    layer: "code"
-    status: "now"
-    front: D-wasi03
-    description: |-
-      now (D-335 Unit D polish, small). Spec `CanonicalABI.md` §Future State:
-      `WritableFutureEnd.drop` TRAPS if the writer has neither written its value
-      nor been notified the reader dropped. Unit ε's `SharedFuture` + the generic
-      `StreamFutureEnd.drop` (anytype shared) does not yet enforce this — a
-      writable future end can be dropped pre-write. Needs a `written` flag on
-      `SharedFuture` (set on a successful write rendezvous / DROPPED observation)
-      + a future-writable-specific drop guard (the generic drop can't branch on
-      it cleanly). Fold into a Unit-D future-drop polish chunk.
-    first_raised: "2026-06-15"
-    last_reviewed: "2026-06-15"
-    refs: |-
-      WebAssembly/component-model design/mvp/CanonicalABI.md §Future State
-      (WritableFutureEnd.drop trap); src/feature/component/async.zig SharedFuture / drop
   - id: "D-444"
     layer: "code"
     status: "note"
@@ -1515,6 +1497,27 @@ entries:
     refs: |-
       src/api/component_wasi_p2.zig (FILE-SIZE-EXEMPT marker line 1);
       .dev/decisions/0190_wasi_p3_host_stream_peer.md (sibling module)
+  - id: "D-445"
+    layer: "code"
+    status: "note"
+    front: D-wasi03
+    description: |-
+      note (latent; surfaced while closing D-337). A WASI-P2 host trampoline that
+      returns a domain error during guest dispatch (e.g. WriteFailed, OutOfBounds,
+      async CopyInProgress/NotCopying) hits `mapDispatchErr`'s `else => @panic`
+      (instance.zig) — those WasiP2Error variants are not `runtime.Trap` variants
+      and are not echoed in the narrowing switch, so they abort with a panic
+      instead of surfacing as a clean guest trap. D-337 sidestepped this by
+      translating the future-drop-before-write guard to `error.Unreachable` (the
+      canonical guest trap) at the trampoline. The general fix: either map each
+      guest-faulting WasiP2Error variant to a Trap at the host-call boundary, or
+      have the trampolines return `error.Unreachable` for all spec-trap conditions.
+      Untriggered today (the e2e tests use clean paths); not urgent.
+    first_raised: "2026-06-16"
+    last_reviewed: "2026-06-16"
+    refs: |-
+      src/zwasm/instance.zig (mapDispatchErr else=>@panic);
+      src/api/component_wasi_p2.zig (WasiP2Error; p2StreamFutureDrop translation)
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.
