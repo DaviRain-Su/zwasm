@@ -27,3 +27,15 @@ path = "src/bin/cli-stdout.rs"
 name = "cli-stderr"
 path = "src/bin/cli-stderr.rs"
 
+[[bin]]
+name = "cli-env"
+path = "src/bin/cli-env.rs"
+
+
+[[bin]]
+name = "cli-args"
+path = "src/bin/cli-args.rs"
+
+[[bin]]
+name = "cli-stdin"
+path = "src/bin/cli-stdin.rs"

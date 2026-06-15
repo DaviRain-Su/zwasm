@@ -585,6 +585,28 @@ test "WASI 0.3 conformance (wasip3): cli-exit → exit code 1 (real rust compone
     try testing.expectEqual(@as(?u32, 1), host.exit_code);
 }
 
+test "WASI 0.3 conformance (wasip3): cli-env reads host env (real rust component)" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/wasip3/cli-env.wasm", testing.allocator, .limited(4 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+    try host.setEnvs(&.{"WASI_TEST"}, &.{"ok"});
+
+    // The guest reads `WASI_TEST` via wasi:cli/environment get-environment and
+    // exit(0) iff it equals "ok" — proving the host env list is delivered +
+    // decoded. NB: wasi:cli/exit only carries result<ok,err> (no numeric code),
+    // so the success signal MUST be exit(0)→host exit_code 0, never a non-zero
+    // sentinel (any non-zero rust exit collapses to host exit_code 1).
+    try runWasiMain(&eng, testing.allocator, bytes, &host, .{});
+    try testing.expectEqual(@as(?u32, 0), host.exit_code);
+}
+
 test "WASI 0.3 conformance (wasip3): cli-stdout writes to stdout (real rust component)" {
     var threaded: std.Io.Threaded = .init(testing.allocator, .{});
     defer threaded.deinit();
@@ -622,4 +644,41 @@ test "WASI 0.3 conformance (wasip3): cli-stderr writes to stderr (real rust comp
 
     try runWasiMain(&eng, testing.allocator, bytes, &host, .{});
     try testing.expectEqualStrings("zwasm-wasip3-err", cap_err.items);
+}
+
+test "WASI 0.3 conformance (wasip3): cli-args reads argv (real rust component)" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/wasip3/cli-args.wasm", testing.allocator, .limited(4 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+    try host.setArgs(&.{ "prog", "hello" });
+
+    // Guest reads argv[1] via get-arguments; success signal is exit(0) (the
+    // wasi:cli/exit result<_,_> channel — any non-zero rust exit → host code 1).
+    try runWasiMain(&eng, testing.allocator, bytes, &host, .{});
+    try testing.expectEqual(@as(?u32, 0), host.exit_code);
+}
+
+test "WASI 0.3 conformance (wasip3): cli-stdin reads stdin (real rust component)" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/wasip3/cli-stdin.wasm", testing.allocator, .limited(4 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+    host.stdin_bytes = "hello";
+
+    // Guest reads stdin via wasi:cli/stdin; success (== "hello") = exit(0).
+    try runWasiMain(&eng, testing.allocator, bytes, &host, .{});
+    try testing.expectEqual(@as(?u32, 0), host.exit_code);
 }
