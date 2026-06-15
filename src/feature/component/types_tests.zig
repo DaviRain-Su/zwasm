@@ -275,6 +275,17 @@ test "canon section: canon lift with opts (utf8 + memory 0 + realloc 1)" {
     try testing.expectEqual(@as(?u32, null), lift.opts.post_return);
 }
 
+test "canon section: canon lift with async + callback opts (CM-async)" {
+    // count=1; lift 0x00 0x00 funcidx=0 opts{async 0x06, callback 0x07 f=1} typeidx=0
+    const body = [_]u8{ 0x01, 0x00, 0x00, 0x00, 0x02, 0x06, 0x07, 0x01, 0x00 };
+    const bytes = comptime buildComponent(&.{.{ 8, &body }});
+    var info = try decodeBoth(bytes);
+    defer info.deinit();
+    const lift = info.canons.items[0].lift;
+    try testing.expect(lift.opts.is_async);
+    try testing.expectEqual(@as(?u32, 1), lift.opts.callback);
+}
+
 test "canon section: canon lower + empty opts + utf16/post-return" {
     // lower 0x01 0x00 func=2 opts{} ; then a second lower with utf16 + post-return 3
     const body = [_]u8{
@@ -349,10 +360,13 @@ test "component-instance decode: instantiate with arg + inline exports" {
     try testing.expectEqual(Sort.func, inl[0].sort);
 }
 
-test "canon: async opt defers UnsupportedCanon" {
-    // lift with opts{async 0x06} — the async lift/lower opt is Unit C, still deferred.
+test "canon: bare async opt (no callback) decodes is_async" {
+    // lift with opts{async 0x06}: is_async=true, callback stays null.
     const async_opt = [_]u8{ 0x01, 0x00, 0x00, 0x00, 0x01, 0x06, 0x00 };
-    try testing.expectError(Error.UnsupportedCanon, decodeBoth(comptime buildComponent(&.{.{ 8, &async_opt }})));
+    var info = try decodeBoth(comptime buildComponent(&.{.{ 8, &async_opt }}));
+    defer info.deinit();
+    try testing.expect(info.canons.items[0].lift.opts.is_async);
+    try testing.expectEqual(@as(?u32, null), info.canons.items[0].lift.opts.callback);
 }
 
 test "canon section: stream/future builtins decode (0x0e–0x1b)" {

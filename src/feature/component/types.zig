@@ -271,12 +271,14 @@ pub const Export = struct {
 pub const StringEncoding = enum { utf8, utf16, latin1_utf16 };
 
 /// Decoded `opts` (`Binary.md` `canonopt` vec): the canonical-ABI options for a
-/// lift/lower. async/callback are deferred (async phase).
+/// lift/lower.
 pub const CanonOpts = struct {
     string_encoding: StringEncoding = .utf8,
     memory: ?u32 = null, // core:memidx
     realloc: ?u32 = null, // core:funcidx
     post_return: ?u32 = null, // core:funcidx
+    is_async: bool = false, // CM-async `async` canonopt (0x06)
+    callback: ?u32 = null, // CM-async `callback` core:funcidx (0x07); lift-only, implies async
 };
 
 /// The `canon stream.*` / `future.*` builtins (`Binary.md` 0x0e–0x1b, CM-async
@@ -1310,7 +1312,8 @@ fn decodeCanonOpts(body: []const u8, pos: *usize) Error!CanonOpts {
             0x03 => opts.memory = try leb128.readUleb128(u32, body, pos),
             0x04 => opts.realloc = try leb128.readUleb128(u32, body, pos),
             0x05 => opts.post_return = try leb128.readUleb128(u32, body, pos),
-            0x06, 0x07 => return Error.UnsupportedCanon, // async / callback
+            0x06 => opts.is_async = true, // CM-async `async`
+            0x07 => opts.callback = try leb128.readUleb128(u32, body, pos), // `callback` core:funcidx
             else => return Error.InvalidCanon,
         }
     }
