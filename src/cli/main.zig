@@ -93,8 +93,8 @@ pub fn main(init: std.process.Init) !void {
             std.process.exit(0);
         },
         .version => {
-            var buf: [64]u8 = undefined;
-            const line = std.fmt.bufPrint(&buf, "zwasm v{s}\n", .{zwasm.version}) catch "zwasm\n";
+            var buf: [192]u8 = undefined;
+            const line = cli_dispatch.versionLine(&buf, zwasm.version, @tagName(build_options.wasm_level), @tagName(build_options.wasi_level), @tagName(build_options.engine_mode));
             try printOut(io, line);
             std.process.exit(0);
         },

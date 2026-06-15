@@ -27,6 +27,20 @@ inline fn eq(a: []const u8, b: []const u8) bool {
     return std.mem.eql(u8, a, b);
 }
 
+/// Format the canonical `--version` line: version + build identity, so a
+/// distributed binary's `zwasm --version` reveals which wasm/wasi/engine
+/// build it is (previously only the no-arg banner showed this; the version
+/// flag is the authoritative build identity, wasmtime-aligned). Levels are
+/// passed in as `@tagName` strings to keep this pure (no build_options
+/// coupling) and unit-testable.
+pub fn versionLine(buf: []u8, version: []const u8, wasm_level: []const u8, wasi_level: []const u8, engine: []const u8) []const u8 {
+    return std.fmt.bufPrint(
+        buf,
+        "zwasm v{s} (wasm: {s}, wasi: {s}, engine: {s})\n",
+        .{ version, wasm_level, wasi_level, engine },
+    ) catch "zwasm\n";
+}
+
 pub const usage =
     \\zwasm — a WebAssembly runtime
     \\
@@ -65,6 +79,15 @@ test "classify: null is banner, unknown token is unknown" {
     try std.testing.expectEqual(Action.banner, classify(null));
     try std.testing.expectEqual(Action.unknown, classify("bogus"));
     try std.testing.expectEqual(Action.unknown, classify("foo.wasm"));
+}
+
+test "versionLine: carries version + wasm/wasi/engine build identity" {
+    var buf: [192]u8 = undefined;
+    const line = versionLine(&buf, "9.9.9", "wasm_3_0", "wasi_0_2", "interp_only");
+    try std.testing.expect(std.mem.find(u8, line, "zwasm v9.9.9") != null);
+    try std.testing.expect(std.mem.find(u8, line, "wasm: wasm_3_0") != null);
+    try std.testing.expect(std.mem.find(u8, line, "wasi: wasi_0_2") != null);
+    try std.testing.expect(std.mem.find(u8, line, "engine: interp_only") != null);
 }
 
 test "usage text names both shipped subcommands + every run flag main.zig parses" {
