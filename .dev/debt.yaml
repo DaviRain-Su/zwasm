@@ -1615,7 +1615,7 @@ entries:
       ~/Documents/OSS/wasi-testsuite/tests/rust/wasm32-wasip3/ (BUCK + wit + src/bin)
   - id: "D-450"
     layer: "code"
-    status: "now"
+    status: "note"
     front: D-perf
     description: |-
       now (front ④ perf — measure-first ROI target, 2026-06-16). The all-engine
@@ -1648,10 +1648,26 @@ entries:
       `gpr.zig` gprStoreSpilled/gprLoadSpilled (+ x86_64 sibling). NO new IR pass, NO
       CSE/GVN. Est. ~1.3–2× on base64 (781→~400-600 ms) + broad spill-heavy benefit;
       will NOT reach wasmtime (that needs the forbidden global regalloc). This sits
-      atop a class-B gap. NEXT = ADR-0153 II (pin codegen correctness — full
-      test+spec net is the net; the spill machinery is D-265-class subtle, so
-      correctness-FIRST) → III design (value-equivalence invariant) → IV implement
-      TDD + measure. Lesson `2026-06-16-base64-single-pass-register-pressure-ceiling`.
+      atop a class-B gap.
+      **ROI VERDICT (2026-06-16, after inspecting gpr.zig): NOT PURSUED — accept the
+      ceiling.** The class-A "peephole" is NOT a contained helper tweak: the spill
+      model stages every operand/result through op-LOCAL scratch regs (X14/X15,
+      reused per op; `abi.spill_stage_gprs`), so store-reload-elision needs CROSS-OP
+      emit state (a last-stored-slot→reg cache threaded through every op emitter +
+      invalidated on each clobber) and const-rematerialization needs const-ness
+      threaded through the regalloc Allocation model. Both are cross-cutting
+      emit-layer / regalloc-model changes in the MOST miscompile-prone subsystem
+      (D-265-class), for a PARTIAL win (~1.3-2×, doesn't reach parity) on an outlier
+      workload. High cost + high risk + partial gain = ROI-insufficient
+      (`feedback_perf_measure_first`). Raising `allocatable_gprs` past 8 is likewise
+      non-trivial (prologue save/restore cost on every fn + the ADR-0018/pinned-reg
+      X19/X24-28 invariants). CONCLUSION: zwasm's perf is "lightweight-yet-fast
+      WITHIN single-pass" (1.5-4× of Cranelift on compute, massively beats
+      interpreters, beats wazero on small fixtures); the base64/matrix/keccak gaps
+      are the accepted single-pass-vs-optimizing-tier tradeoff (§1.3/§3.2 forbids
+      the tier that would close them). Re-open ONLY if the spill machinery is
+      reworked for another reason (then the class-A peephole rides along as a
+      general win). Lesson `2026-06-16-base64-single-pass-register-pressure-ceiling`.
     first_raised: "2026-06-16"
     last_reviewed: "2026-06-16"
     refs: |-

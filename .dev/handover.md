@@ -44,9 +44,13 @@ cloned** (`tests/rust/wasm32-wasip3`); wasm-tools/component-model refreshed (`im
   59-68% SPILL traffic — only 8 GPRs allocatable. **Bulk = class-B** (global-regalloc/LICM ceiling — single-pass
   can't close w/o the forbidden optimizing tier; ACCEPTED, don't chase to 57ms). **Class-A residue** (single-pass-
   legal, GENERAL spill-heavy win ~1.3-2×): a peephole — re-materialize spilled i32.const via `mov` (op_const.zig:66)
-  + elide store-then-reload-same-slot via a 1-deep reg cache (gpr.zig). Lesson `…base64-single-pass-register-pressure-
-  ceiling`. **NEXT = D-450 ADR-0153 II** (pin codegen correctness — spill machinery is D-265-class subtle, correctness-
-  FIRST) → III (value-equivalence invariant) → IV implement+measure. A focused codegen campaign (fresh context fits).
+  + elide store-then-reload-same-slot. **④ CONCLUDED — ROI-rejected, accept the ceiling**: on inspecting gpr.zig the
+  class-A "peephole" is NOT contained (spill stages through op-local scratch X14/X15 reused per op → store-reload-
+  elision needs CROSS-OP emit state; const-remat needs const-ness in the regalloc model) — cross-cutting changes in
+  the D-265-class subsystem for a PARTIAL win on an outlier. High cost+risk+partial = ROI-insufficient. zwasm is
+  "lightweight-fast within single-pass" (1.5-4× Cranelift, beats interps/wazero-small); base64/matrix/keccak are the
+  accepted single-pass tradeoff (§1.3/§3.2). D-450→note. **Remaining front: ③ corpus 50→100** (MoonBit/Grain/Kotlin/
+  AssemblyScript toolchains — heavy nix setup, like the wasip3 toolchain build). ②①④ done; ③ is the last 4-front item.
 - **① WASI 0.3 conformance**: compile wasi-testsuite `rust/wasm32-wasip3` via `.#gen` (add wasm32-wasip3 target + wit
   deps), run as a conformance corpus.
 - **③ real-world corpus 50→100**: add MoonBit/Grain/Kotlin (Wasm-GC) + AssemblyScript/Swift/Zig toolchains to
