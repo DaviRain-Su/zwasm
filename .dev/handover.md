@@ -3,15 +3,17 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Current state — Phase-17 完成形 steady-state; branch GREEN, **3-host verified** (`da57e23b`)
+## Current state — Phase-17 完成形 steady-state; branch GREEN (`098d2036`; da57e23b was last 3-host-verified)
 
-**Latest (`240f97de`)**: 完成形 diagnostic-surface polish from a diag-quality audit — CLI `--max-table-elements`
-usage+coherence-test (F1), full `ZWASM_TRAP_*` C #defines mirroring the TrapKind enum (F3), validate-diag
-now renders the captured `(func #N @ 0xXX)` site (F5b). **3-HOST GREEN**: Mac `test` 2767/0 + lint; ubuntu
-x86_64 `OK`; **windows `OK` (recorded da57e23b)**. Deferred diag follow-ups → **D-334** (F5a validator
-expected/found types DEEP; **F6 parser setDiag = best NEXT 完成形 increment**; F4 trap-line `kind=` cosmetic).
-Audit: `private/notes/d-diag-audit-2026-06-15.md`. **NEXT: F6** (wrap ~8 parse reject sites in
-parser.zig/sections.zig with `setDiag(.parse, …, "<msg> at offset 0xNN")` + test; gate = `zig build test`).
+**Diag-quality audit batch (this session) — cheap wins DONE**: F1 CLI `--max-table-elements` usage+test
+(`240f97de`), F3 full `ZWASM_TRAP_*` C #defines (`240f97de`), F5b validate-diag `(func #N @ 0xXX)`
+(`240f97de`), **F6 parser `.parse`-phase diagnostics w/ byte offset (`098d2036`, top-level 8 sites)**.
+240f97de = 3-host green (windows recorded da57e23b); 098d2036 = Mac `test` 2768/0 + lint (parse/CLI only,
+behavior-preserving — ubuntu/windows kicked this turn). **Remaining D-334 = no cheap wins left**: F5a
+(validator expected/found types — DEEP multi-site), F6-deeper (sections*.zig ~70 sites — LOW value), F4
+(trap `kind=` underscore — cosmetic format call). Audit: `private/notes/d-diag-audit-2026-06-15.md`.
+**NEXT: back to steady-state** — diag cheap-wins exhausted; remaining is DEEP/low-value/parked (D-330
+hard-parked, go infra-blocked). Diversify or hold; do NOT thrash the parked items.
 
 c_sha256 `\n`-drop (D-330) deep-investigated this session (5 trace rounds + 3 fix attempts) → **bundle
 d330-blockmerge-liveness CLOSED, demoted to a hard-parked debt note**. Root IS understood (a br/br_if

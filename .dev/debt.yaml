@@ -1256,9 +1256,13 @@ entries:
         `"{s} at op 0x{x}"` (@errorName + opcode), no expected-vs-found ValType, no offending index.
         wasmtime-equivalent is "type mismatch: expected i32, found f64". Needs threading expected/found
         ValType + index into the reject sites (validate/validator.zig ~736-742) — multi-site refactor.
-      (F6, SMALL-multi-site) parse errors have ZERO setDiag (parse/parser.zig + sections.zig): all rejects
-        surface as bare `zwasm: f.wasm: SectionTooLarge`, no offset/section context though `pos` is in hand.
-        Wrap ~8 reject sites with setDiag(.parse, …, "<msg> at offset 0xNN").
+      (F6, PARTIAL) parse errors had ZERO setDiag. **Top-level parser.zig DONE `098d2036`** (8 module-decode
+        rejects → `.parse`-phase setDiag with byte offset; CLI coarse `.instantiate` fallback steps aside).
+        **REMAINING**: the deeper per-section decoders (sections.zig ~53 sites + sections_{codes,data,element}.zig,
+        init_expr.zig — the audit's "~8 sites" undercounted the whole parse layer at ~80) still return bare
+        errors. LOW value (only malformed input sees them) + multi-cycle; do per-file as a focused M2 pass if
+        a real malformed-corpus need surfaces. Pattern set by `098d2036` (setDiag(.parse, .other, .unknown, "…
+        at offset 0x{x}", .{pos})).
       (F4, cosmetic) src/cli/run.zig:590/597/617 print `kind={s}` via @tagName → leaks the Zig
         keyword-avoidance underscore (`unreachable_`) to users on stderr trap lines. Industry-standard
         (wasmtime) prints a human message, no enum tag. Fix = print trapMessageFor(kind) (clean message),
