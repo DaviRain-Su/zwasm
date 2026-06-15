@@ -19,11 +19,13 @@ wasmtime @06-13 (`tests/misc_testsuite/component-model/async/` ~44 `.wast`); WAS
 cloned** (`tests/rust/wasm32-wasip3`); wasm-tools/component-model refreshed (`implements.wast` new). Order ②→①→③→④:
 - **② wasmtime async .wast gap-mining (ACTIVE — highest ROI)**: gap matrix in `private/notes/p17-wasmtime-async-gaps.md`.
   **DONE**: Gap A (`afcf889a`) — an async export declaring a result MUST call task.return before EXIT, else trap
-  (`task-return-traps.wast`); `driveAsyncMain` checks `ctx.task_return` when `asyncExportExpectsResult`. **VERIFY
+  (`task-return-traps.wast`); `driveAsyncMain` checks `ctx.task_return` when `asyncExportExpectsResult`. copy-requires-
+  IDLE (`05b35c28`): `StreamFutureEnd.copy` traps (CopyNotIdle→guest trap) on a non-IDLE end — 2nd concurrent copy or
+  copy on a DONE end (spec `stream_copy`/`future_copy` `trap_if(state!=IDLE)`, `trap-if-done.wast`). **VERIFY
   EACH ROW vs spec** (lesson `2026-06-16-gap-matrix-subagent-verify-against-spec`): the matrix's "cancel-not-copying
   → returns 0" was WRONG (CanonicalABI `cancel_copy` traps; our `async_cancel_no_copy` already correct). NEXT:
-  Gap B (task.return sig/opts must match the lift's result type — `task-return-traps.wast` L108-150) + read/write-on-
-  DONE-end traps (`trap-if-done.wast`). TIER-3 (guest↔guest/scheduler, error-context) = design-grade debt.
+  more `trap-if-done`/`async-builtins` trap edges; **D-446** = Gap B (task.return sig/opts must match the lift — needs
+  task.return↔lift association plumbing, deferred). TIER-3 (guest↔guest/scheduler, error-context) = design debt.
 - **① WASI 0.3 conformance**: compile wasi-testsuite `rust/wasm32-wasip3` via `.#gen` (add wasm32-wasip3 target + wit
   deps), run as a conformance corpus.
 - **③ real-world corpus 50→100**: add MoonBit/Grain/Kotlin (Wasm-GC) + AssemblyScript/Swift/Zig toolchains to

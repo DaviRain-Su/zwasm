@@ -1524,6 +1524,34 @@ entries:
       src/zwasm/instance.zig (mapDispatchErr else=>@panic);
       src/api/component_wasi_p2.zig (mapAsyncFault; copy/drop/cancel wrappers);
       src/api/component_wasi_p3.zig (D-445 trap fixtures)
+  - id: "D-446"
+    layer: "code"
+    status: "note"
+    front: D-wasi03
+    description: |-
+      note (front② gap-mining; wasmtime task-return-traps.wast L106-150). A
+      `canon task.return` MUST have a result type + canonopts that MATCH the
+      current async task's lifted-export result type + opts, else the spec traps
+      "invalid task.return signature and/or options for current task". Three
+      cases: (1) task.return declares `(result u32)` but the lifted export has no
+      result; (2) task.return declares `(memory ..)` the lift's result doesn't
+      need; (3) task.return declares `string-encoding=utf16` ≠ the lift's. zwasm
+      currently only BOUNDS-checks task.return's result type-index + opts
+      (validate.zig checkCanons `.task_return` arm) — it does NOT compare them
+      against the owning lift. BARRIER: associating a task.return canon with its
+      async lift. Statically (validate.zig) requires tracing the lifted core
+      module's import graph to the task.return canon provided via the core
+      instance `with`; at runtime (wasmtime's approach) requires threading the
+      current task's expected result/opts to p2TaskReturn. Either is real
+      plumbing, not a quick local fix. Low real-world risk (a mismatch is a
+      toolchain bug real wit-bindgen output won't emit). Sibling of Gap A
+      (afcf889a, the must-produce-a-result trap, which IS done).
+    first_raised: "2026-06-16"
+    last_reviewed: "2026-06-16"
+    refs: |-
+      src/feature/component/validate.zig (checkCanons .task_return arm ~L1073);
+      src/api/component_wasi_p2.zig (p2TaskReturn);
+      ~/Documents/OSS/wasmtime/tests/misc_testsuite/component-model/async/task-return-traps.wast
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.
