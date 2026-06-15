@@ -22,3 +22,8 @@ strip = true
 [[bin]]
 name = "cli-stdout"
 path = "src/bin/cli-stdout.rs"
+
+[[bin]]
+name = "cli-stderr"
+path = "src/bin/cli-stderr.rs"
+
