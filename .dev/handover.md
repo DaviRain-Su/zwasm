@@ -3,23 +3,21 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Current state — Phase-17 完成形 steady-state; branch GREEN, Mac+ubuntu-verified (`dc463af5`)
+## Current state — Phase-17 完成形 steady-state; branch GREEN, Mac+ubuntu-verified (`79c63a20`)
 
-**Diag-quality audit batch — cheap wins DONE**: F1 CLI `--max-table-elements` (`240f97de`), F3 full
-`ZWASM_TRAP_*` C #defines (`240f97de`), F5b validate-diag `(func #N @ 0xXX)` (`240f97de`), F6 parser
-`.parse`-phase diagnostics w/ byte offset (`098d2036`, top-level 8 sites), **F5a validator type-mismatch
-diagnostics — central `popExpect` site DONE (`dc463af5`)**: "type mismatch: expected i32, found f64 at op
-0x{x}" via a `Validator.mismatch` scratch slot read by the dispatch cold path + new `ValType.name()`
-(zir.zig, Wasm 3.0 text keywords). dc463af5 = Mac `test` 2770/0 + lint clean (ubuntu/windows TBV at next
-Step 0.7). Audit: `private/notes/d-diag-audit-2026-06-15.md`.
+**完成形 surface-audit wins (this session)**: (a) **diag batch** — F5a validator type-mismatch central
+`popExpect` site (`dc463af5`, "type mismatch: expected i32, found f64" via `Validator.mismatch` slot + new
+`ValType.name()`; ubuntu-verified `OK 79c63a20`); F1/F3/F5b (`240f97de`), F6 top-level parser (`098d2036`).
+(b) **CLI surface audit** (vs wasmtime/wasmer) found the CLI tight; landed two cheap wins: `--version`/`-V`
+now carry build identity (`zwasm v… (wasm:… wasi:… engine:…)`, `73fd1fa2`, pure `dispatch.versionLine` +
+test) and a `## Exit codes` table in `docs/reference/cli.md` (`7e2d90fc`). Mac `test` green, lint clean.
 
-**NEXT**: diag cheap wins now exhausted (F5a central + F6 top-level shipped). Remaining diag tails are
-LOW-value, per-site, deferred in D-334: F5a remainder (non-popExpect StackTypeMismatch sites — isRef/label/GC,
-each a different "expected" shape), F6 remainder (~80 per-section parse decoders), F4 (CLI trap @tagName
-underscore leak — user-visible format change, left for a deliberate call). Highest-value next = **a fresh
-完成形 surface audit** of a not-yet-covered dimension (memory-safety/dogfooding were CLEAN per D-297/295/296)
-to surface new cheap wins — OR pick a D-334 tail only if a real diagnostic-quality need surfaces. TDD + gate
-on `zig build test`; codegen/regalloc changes ALSO need `test-spec-wasm-2.0-assert` + Rosetta per lesson
+**NEXT**: diag cheap wins exhausted (D-334 tails are LOW-value per-site: F5a non-popExpect sites, F6 ~80
+per-section decoders, F4 user-gated trap-format). CLI surface audited tight. Highest-value next = continue
+**完成形 surface audits** of the remaining not-yet-swept dimensions — **C-API** (vs upstream wasm-c-api) and
+**Zig-API** ergonomics/completeness — to surface the next cheap wins; memory-safety/dogfooding/CLI now CLEAN
+(D-297/295/296 + this session). OR pick a D-334 tail only if a real diagnostic-quality need surfaces. TDD +
+gate on `zig build test`; codegen/regalloc changes ALSO need `test-spec-wasm-2.0-assert` + Rosetta per lesson
 `spill-stage-reg-clobber-and-spec-gate-gap`. **Do NOT re-attempt parked items** (D-330 conflicting-constraint
 hard-park; D-331 go infra-blocked) — they thrash. Verify any prior remote kick at Step 0.7.
 
