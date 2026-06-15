@@ -54,6 +54,7 @@ pub fn validate(info: *const TypeInfo) Error!void {
         try checkDefTypeOuterAliases(dt, 1);
         try checkDefTypeDeclDups(dt);
         try checkStreamFutureElement(info, dt);
+        try checkFuncResultNoBorrow(info, dt);
     }
     try checkInstances(info);
     try checkCanons(info, type_space_len);
@@ -1136,6 +1137,17 @@ fn checkStreamFutureElement(info: *const TypeInfo, dt: DefType) Error!void {
     }
 }
 
+/// Spec (`Binary.md`): a functype `result` type may not transitively contain a
+/// `borrow` (a borrow in a PARAM is allowed — that is borrow's purpose). The
+/// sibling exported-value rule stays blocked on the untracked value index space
+/// (sort=value deferred). (D-336.)
+fn checkFuncResultNoBorrow(info: *const TypeInfo, dt: DefType) Error!void {
+    switch (dt) {
+        .func => |ft| if (ft.result) |r| try checkValTypeNoBorrow(info, r),
+        else => {},
+    }
+}
+
 fn checkValTypeNoBorrow(info: *const TypeInfo, vt: ValType) Error!void {
     switch (vt) {
         .primitive => {},
@@ -1228,6 +1240,20 @@ test "stream/future element: reject (stream char) + transitive borrow" {
     const borrow_body = [_]u8{ 0x03, 0x3f, 0x7f, 0x00, 0x68, 0x00, 0x66, 0x01, 0x01 };
     const bad_borrow = preamble ++ [_]u8{ 7, borrow_body.len } ++ borrow_body;
     try std.testing.expectError(Error.InvalidDefType, validateBytes(&bad_borrow));
+}
+
+test "functype result rejects transitive borrow; borrow param is allowed (D-336)" {
+    const preamble = [_]u8{ 0x00, 0x61, 0x73, 0x6d, 0x0d, 0x00, 0x01, 0x00 };
+    // type[0]=resource(rep i32); type[1]=borrow<0>.
+    // INVALID: type[2]=(func () -> borrow) — a borrow in the result.
+    const bad_body = [_]u8{ 0x03, 0x3f, 0x7f, 0x00, 0x68, 0x00, 0x40, 0x00, 0x00, 0x01 };
+    const bad = preamble ++ [_]u8{ 7, bad_body.len } ++ bad_body;
+    try std.testing.expectError(Error.InvalidDefType, validateBytes(&bad));
+
+    // VALID: type[2]=(func (param "p" borrow) -> ()) — a borrow PARAM is fine.
+    const ok_body = [_]u8{ 0x03, 0x3f, 0x7f, 0x00, 0x68, 0x00, 0x40, 0x01, 0x01, 'p', 0x01, 0x01, 0x00 };
+    const ok = preamble ++ [_]u8{ 7, ok_body.len } ++ ok_body;
+    try validateBytes(&ok);
 }
 
 test "rule 8: case-insensitive label duplicates" {

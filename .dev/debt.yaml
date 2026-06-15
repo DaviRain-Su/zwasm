@@ -1369,23 +1369,24 @@ entries:
       src/feature/component/{types,decode,canon,validate}.zig; src/api/component_wasi_p2.zig
   - id: "D-336"
     layer: "code"
-    status: "now"
+    status: "blocked-by"
     front: D-wasi03
     description: |-
-      now (spec-completeness, small). Component-model `Binary.md` validation
+      blocked-by: the value index space (sort=value) is not tracked in zwasm
+      (validate.zig:79 + :605 explicitly defer it) — so an exported VALUE type
+      cannot be resolved to check it. Component-model `Binary.md` validation
       rejects any TRANSITIVE use of `borrow` in (a) a functype `result` type and
-      (b) an exported value type. zwasm implements neither today — the only
-      transitive-borrow check is the stream/future-element one added in D-335
-      unit A (`checkValTypeNoBorrow` in validate.zig). Generalise: apply the
-      same walk to functype results (the lift/lower ABI surface) + component/
-      instance exported values. Surfaced WHILE wiring stream/future so the gap
-      is recorded against the same walker; not blocking D-335's critical path.
+      (b) an exported value type. (a) is DONE 2026-06-15 (`checkFuncResultNoBorrow`
+      reuses the `checkValTypeNoBorrow` walk; borrow-param stays allowed). (b)
+      remains: it unblocks the moment value exports resolve their type. Low value
+      until then (value exports are rare); re-evaluate if/when sort=value lands.
     first_raised: "2026-06-15"
     last_reviewed: "2026-06-15"
     refs: |-
       WebAssembly/component-model design/mvp/Binary.md (validation notes:
-      "functype rejects any transitive use of borrow in a result type");
-      src/feature/component/validate.zig checkValTypeNoBorrow / checkDefTypeRefsNamed
+      "functype rejects transitive borrow in a result type" + exported value);
+      src/feature/component/validate.zig checkFuncResultNoBorrow / checkValTypeNoBorrow;
+      value-index-space deferral at validate.zig:79 + :605
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.
