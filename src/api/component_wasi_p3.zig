@@ -57,7 +57,14 @@ const P3CallbackCtx = struct {
 pub fn runWasiP3Main(engine: *Engine, alloc: Allocator, bytes: []const u8, host: *wasi_host.Host, opts: Module.InstantiateOpts) anyerror!void {
     var built = try wasi_p2.buildWasiP2Component(engine, alloc, bytes, host, opts);
     defer built.deinit();
+    try driveAsyncMain(&built);
+}
 
+/// Drive the first async-lifted export of an already-built component through the
+/// stackless callback loop. Split from `runWasiP3Main` so tests (and embedders)
+/// can inspect the result the guest delivered via `task.return`
+/// (`built.ctx.task_return`, ADR-0189 ζ2) after the loop exits.
+pub fn driveAsyncMain(built: *wasi_p2.BuiltComponent) anyerror!void {
     // async is an export property (ADR-0188): the first `canon lift` with
     // `opts.is_async` is the task to drive; its `callback` is the loop re-entry.
     const lift = blk: {
@@ -72,9 +79,9 @@ pub fn runWasiP3Main(engine: *Engine, alloc: Allocator, bytes: []const u8, host:
     const cb_ref = built.info.resolveCoreFuncExport(callback_idx) orelse return error.NoAsyncCallback;
     const inst = built.guestInstance(entry_ref.instance) orelse return error.NoRunExport;
 
-    var streams = try async_mod.StreamFutureTable.init(alloc);
+    var streams = try async_mod.StreamFutureTable.init(built.alloc);
     defer streams.deinit();
-    var sets = try async_mod.WaitableSetTable.init(alloc);
+    var sets = try async_mod.WaitableSetTable.init(built.alloc);
     defer sets.deinit();
 
     var ctx = P3CallbackCtx{ .inst = inst, .callback_name = cb_ref.name, .streams = &streams, .sets = &sets };
@@ -125,4 +132,24 @@ test "D-335 unit D-ηB: a YIELD task entry re-enters the guest callback end-to-e
     // → clean termination after exactly one re-entry. A miswired callback would
     // spin forever on YIELD.
     try runWasiP3Main(&eng, testing.allocator, bytes, &host, .{});
+}
+
+test "D-335 unit D-ζ2: canon task.return delivers the async task result to the host" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/async_task_return.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+
+    // The core entry calls task.return(42) then returns EXIT. Build + drive
+    // directly (not runWasiP3Main) so we can inspect the delivered result.
+    var built = try wasi_p2.buildWasiP2Component(&eng, testing.allocator, bytes, &host, .{});
+    defer built.deinit();
+    try driveAsyncMain(&built);
+    try testing.expectEqual(@as(?u32, 42), built.ctx.task_return);
 }

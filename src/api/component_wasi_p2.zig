@@ -84,6 +84,11 @@ pub const WasiP2Ctx = struct {
     /// Live tcp sockets (ADR-0180); a TCP_SOCKET_RT / SOCK_*_STREAM_RT /
     /// SOCK_POLLABLE_RT handle's rep (low bits) indexes this list.
     tcp_sockets: std.ArrayList(p2sock.TcpSocket) = .empty,
+    /// CM-async (WASI 0.3, ADR-0189 ζ2): the value the async task delivered via
+    /// `canon task.return` — surfaced to the P3 runner after the callback loop
+    /// exits. Minimal single-`i32`-lowered-result form; typed/multi-value is a
+    /// later ζ2 slice. `null` until the guest calls `task.return`.
+    task_return: ?u32 = null,
 
     /// Resource-type ids for the P2 resources the host models (`pub` for the
     /// in-tree tests that mint handles directly).
@@ -1461,6 +1466,10 @@ const Def = union(enum) {
     /// A synthesized `canon resource.new/drop/rep` builtin for a
     /// GUEST-defined resource (D-322); `type_index` keys the handle table.
     resource_builtin: struct { kind: ResourceBuiltinKind, type_index: u32 },
+    /// `canon task.return` (WASI 0.3, ADR-0189 ζ2): the async task's
+    /// result-delivery import; the trampoline records the value in
+    /// `WasiP2Ctx.task_return`.
+    task_return_builtin,
 };
 
 const ResourceBuiltinKind = enum { new, drop, rep };
@@ -1501,10 +1510,13 @@ fn synthDef(info: *const ctypes.TypeInfo, built: []const ?Built, ex: ctypes.Core
                 if (isGuestResourceType(info, ti)) return .{ .resource_builtin = .{ .kind = .drop, .type_index = ti } };
                 return .{ .host_op = .out_stream_drop };
             },
-            // stream/future builtins + task.return are CM-async (WASI 0.3) —
-            // the P2 host runner cannot satisfy them (the P3 runner, Unit E/F,
-            // will). Fail loudly rather than silently mis-bind a core-func index.
-            .stream_future, .task_return => return error.UnsupportedWasiImport,
+            // task.return (CM-async) is satisfied by the P3 runner's host
+            // builtin (ADR-0189 ζ2); it records the task's delivered result.
+            .task_return => return .task_return_builtin,
+            // stream/future builtins are CM-async (WASI 0.3) — wired in a later
+            // ζ2 slice (they need the shared rendezvous arena). Fail loudly
+            // rather than silently mis-bind a core-func index until then.
+            .stream_future => return error.UnsupportedWasiImport,
             .alias => |t| switch (t) {
                 .core_export => |ce| {
                     const prov = built[ce.instance] orelse return error.ImportUnsatisfied;
@@ -1559,6 +1571,13 @@ fn p2GuestResourceDrop(caller: *Caller, handle: u32) WasiP2Error!void {
     }
 }
 
+/// `canon task.return` (WASI 0.3, ADR-0189 ζ2): record the value the async task
+/// delivered as its result. Minimal single-`i32`-lowered-result form; the P3
+/// runner reads `ctx.task_return` after the callback loop exits.
+fn p2TaskReturn(caller: *Caller, val: i32) WasiP2Error!void {
+    caller.data(WasiP2Ctx).task_return = @bitCast(val);
+}
+
 /// Pour one synthetic export into `lk` under namespace `ns` as import `e.name`.
 fn defineSynth(lk: *Linker, ns: []const u8, e: SynthExport, ctx: *WasiP2Ctx) !void {
     switch (e.def) {
@@ -1574,6 +1593,7 @@ fn defineSynth(lk: *Linker, ns: []const u8, e: SynthExport, ctx: *WasiP2Ctx) !vo
                 .rep => try lk.defineFuncCtx(ns, e.name, @ptrCast(rbc), fn (*Caller, u32) WasiP2Error!u32, p2GuestResourceRep),
             }
         },
+        .task_return_builtin => try lk.defineFuncCtx(ns, e.name, ctx, fn (*Caller, i32) WasiP2Error!void, p2TaskReturn),
         .guest_func => |g| try lk.defineCrossModuleFunc(ns, e.name, g.inst, g.name),
         .guest_table => |g| {
             const rt = g.inst.handle.runtime orelse return error.ImportUnsatisfied;
