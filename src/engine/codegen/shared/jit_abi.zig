@@ -981,6 +981,13 @@ pub fn jitGcAllocArrayFill(rt: *JitRuntime, typeidx: u32, length: u32, init: u64
 /// trap (`CMP result,#0; B.EQ → bounds-fixup stub`). `value` is the raw
 /// 8 bytes (GPR-only; FP element types deferred, matching
 /// jitGcAllocArrayFill).
+/// Distinct return from `jitGcArrayFill`/`jitGcArrayCopy` signalling a NULL
+/// array ref (vs `0` = OOB / internal). The array.copy/fill callers route it
+/// to null_reference (code 10) and `0` to oob_memory (code 6), so a null array
+/// matches array.get/set + interp (D-293 array_oob). `1` = success; funcref/
+/// GcRef collisions are impossible (these trampolines return only 0/1/2).
+pub const ARRAY_NULL_SENTINEL: u32 = 2;
+
 pub fn jitGcArrayFill(rt: *JitRuntime, typeidx: u32, ref: u32, idx: u32, value: u64, count: u32) callconv(.c) u32 {
     const heap_opaque = rt.gc_heap orelse return 0;
     const gti_opaque = rt.gc_type_infos_ptr orelse return 0;
@@ -988,7 +995,7 @@ pub fn jitGcArrayFill(rt: *JitRuntime, typeidx: u32, ref: u32, idx: u32, value: 
     const gti: *const gc_type_info.GcTypeInfos = @ptrCast(@alignCast(gti_opaque));
     if (typeidx >= gti.array_infos.len) return 0;
     const ai = gti.array_infos[typeidx] orelse return 0;
-    if (ref == 0) return 0; // null-ref trap
+    if (ref == 0) return ARRAY_NULL_SENTINEL; // null-ref → distinct sentinel (D-293 array_oob)
     const len_off: u32 = @offsetOf(gc_type_info.ArrayHeader, "length");
     const length = std.mem.readInt(u32, heap.bytes[ref + len_off ..][0..4], .little);
     const end = @addWithOverflow(idx, count);
@@ -1020,7 +1027,7 @@ pub fn jitGcArrayFill(rt: *JitRuntime, typeidx: u32, ref: u32, idx: u32, value: 
 pub fn jitGcArrayCopy(rt: *JitRuntime, dst_ref: u32, dst_off: u32, src_ref: u32, src_off: u32, len: u32) callconv(.c) u32 {
     const heap_opaque = rt.gc_heap orelse return 0;
     const heap: *heap_mod.Heap = @ptrCast(@alignCast(heap_opaque));
-    if (dst_ref == 0 or src_ref == 0) return 0; // null-ref trap
+    if (dst_ref == 0 or src_ref == 0) return ARRAY_NULL_SENTINEL; // null-ref → distinct sentinel (D-293 array_oob)
     const len_off: u32 = @offsetOf(gc_type_info.ArrayHeader, "length");
     const ahsz: u32 = @sizeOf(gc_type_info.ArrayHeader);
     const dst_len = std.mem.readInt(u32, heap.bytes[dst_ref + len_off ..][0..4], .little);

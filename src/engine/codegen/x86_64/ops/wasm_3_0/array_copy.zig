@@ -60,10 +60,15 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, _: *const zir.ZirInstr) ctx_mod.Error!void {
     try ctx.buf.appendSlice(ctx.allocator, inst.encMovImm64Q(call_scratch, addr).slice());
     try ctx.buf.appendSlice(ctx.allocator, inst.encCallReg(call_scratch).slice());
 
-    // Trap on result == 0 (null ref / OOB): TEST EAX, EAX ; JE → trap stub.
-    try ctx.buf.appendSlice(ctx.allocator, inst.encTestRR(.d, .rax, .rax).slice());
-    const fixup: u32 = @intCast(ctx.buf.items.len);
+    // EAX: 1=ok, 0=OOB, 2=ARRAY_NULL_SENTINEL (D-293 array_oob). CMP EAX,2 ; JE →
+    // null_reference (10); TEST EAX,EAX ; JE → oob_memory (6); else (1) proceed.
+    try ctx.buf.appendSlice(ctx.allocator, inst.encCmpRImm8(.d, .rax, jit_abi.ARRAY_NULL_SENTINEL).slice());
+    var fixup: u32 = @intCast(ctx.buf.items.len);
     try ctx.buf.appendSlice(ctx.allocator, inst.encJccRel32(.e, 0).slice());
-    try ctx.bounds_fixups.append(ctx.allocator, fixup);
+    try ctx.null_ref_fixups.append(ctx.allocator, fixup);
+    try ctx.buf.appendSlice(ctx.allocator, inst.encTestRR(.d, .rax, .rax).slice());
+    fixup = @intCast(ctx.buf.items.len);
+    try ctx.buf.appendSlice(ctx.allocator, inst.encJccRel32(.e, 0).slice());
+    try ctx.oob_fixups.append(ctx.allocator, fixup);
     // array.copy is 5 → 0: no result vreg pushed.
 }

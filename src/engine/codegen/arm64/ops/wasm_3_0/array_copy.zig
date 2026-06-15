@@ -65,10 +65,15 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, _: *const zir.ZirInstr) ctx_mod.Error!void {
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovkImm16(scratch, @intCast((addr >> 48) & 0xFFFF), 3));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBLR(scratch));
 
-    // Trap on result == 0 (null ref / OOB): CMP W0, #0 ; B.EQ → trap stub.
-    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpImmW(0, 0));
-    const fixup: u32 = @intCast(ctx.buf.items.len);
+    // W0: 1=ok, 0=OOB, 2=ARRAY_NULL_SENTINEL (D-293 array_oob). CMP #2 → null_reference (10);
+    // CMP #0 → oob_memory (6); else (1) proceed. Matches array.get/set + interp.
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpImmW(0, jit_abi.ARRAY_NULL_SENTINEL));
+    var fixup: u32 = @intCast(ctx.buf.items.len);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.eq, 0));
-    try ctx.bounds_fixups.append(ctx.allocator, fixup);
+    try ctx.null_ref_fixups.append(ctx.allocator, fixup);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpImmW(0, 0));
+    fixup = @intCast(ctx.buf.items.len);
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.eq, 0));
+    try ctx.oob_fixups.append(ctx.allocator, fixup);
     // array.copy is 5 → 0: no result vreg pushed.
 }
