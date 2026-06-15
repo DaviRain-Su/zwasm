@@ -1106,6 +1106,31 @@ entries:
       compare+br_if jit-vs-interp (branch-condition register values, not wpos); find why data-dependent
       (last line only — register clobber by prior longer-line iter? wrong compare operand? flag reuse?);
       map mis-taken branch → IR br_if pc + emit site (op_control.zig br_if / op_int compare; arch-indep).
+      ---
+      **ROUND-3 ROOT CONFIRMED 2026-06-15 (`<this-commit>`, lldb single-step func4; trace notes Round 3)**:
+      the Round-2 "line-buffer flush-trigger branch" framing is REFINED — it IS a branch miscompile, but
+      NOT a flush decision. Bug reproduces under FULL buffering too (`> file`: drops `\n`), so no
+      line-buffer/memrchr path is involved. Verify line = `puts("verify: OK")` (bare rodata string, no
+      `\n`) = fputs + `putc('\n')`; the `putc('\n')` is **SKIPPED ENTIRELY** by an earlier branch.
+      MECHANISM (hard disasm + register reads, func4 @0x1007c905c): fputs lowers as `call 10`(__fwritex)
+      → `(if (result i32) (ret==len) (then len)(else ret))` SELECT → `i32.ne(result!=len)` → `br_if @1`
+      that skips putc when true. The SELECT's block-result merge vreg is allocated to **X22**; on the
+      taken (`then len`) edge `captureOrEmitBlockMergeMov` (op_control_merge_mov.zig:199-206) emits NO
+      move (assumes the merge value already lives in X22). BUT that value is **LIVE ACROSS `call 10`**, and
+      X22 (allocatable_callee_saved_gprs, abi.zig:154) is NOT preserved by the JIT prologue (ADR-0060) nor
+      spilled by D-291 homedCallerSavedSpillReload (op_call.zig:86 covers HOMED LOCALS only, not merge
+      temporaries). func10 clobbers X22 → reads **0** at the ne-branch (w0/w9/w11 all correctly 0xa) →
+      `(0 != 10)` true → br_if taken → putc skipped → `\n` dropped. **GENERAL bug**: any cross-call-live
+      block/if-result merge temporary in the X20-X22 / RBX-R14 bank, not just this `\n`.
+      **OPEN FIX-SITE QUESTION (next probe)**: ADR-0060 force-spill (regalloc_compute.zig:284) ALREADY
+      force-spills vregs whose liveness range crosses a call — so WHY did this merge vreg stay in X22?
+      Dump func4's liveness range for the merge vreg vs `call 10` pc: if its range is recorded as NOT
+      crossing (def_pc after / last_use_pc before the call) → fix in liveness.zig (extend merge-vreg range
+      to the post-block consumer); if it DOES cross but stayed in a reg → fix in the force-spill scan / the
+      merge capture (reload spilled source instead of assuming the reg survives). Pick the layer from the
+      dump BEFORE writing the fix (regalloc = high-risk). Correctness-first: add an edge-case fixture
+      `(value)(call f)(if (result i32)(cond)(then value)(else other))` where value crosses the call AND
+      feeds the captured block-merge → RED now, green after. ARCH-INDEP (x86_64 abi.zig:137 same bank).
     first_raised: "2026-06-15"
     last_reviewed: "2026-06-15"
     refs: |-
