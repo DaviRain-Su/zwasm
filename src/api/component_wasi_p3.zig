@@ -365,6 +365,24 @@ test "D-335 / D-445: stream.cancel-read with no copy in flight traps (not host p
     try testing.expectError(error.Unreachable, driveAsyncMain(&built));
 }
 
+test "D-335 front②: stream.read on a DONE end traps — copy requires IDLE (trap-if-done.wast)" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/async_stream_read_after_done_trap.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+
+    // 1st read → DROPPED (end → DONE); 2nd read on the DONE end traps (state != IDLE).
+    var built = try wasi_p2.buildWasiP2Component(&eng, testing.allocator, bytes, &host, .{});
+    defer built.deinit();
+    try testing.expectError(error.Unreachable, driveAsyncMain(&built));
+}
+
 test "D-335 / D-445: waitable.join on a never-minted set handle traps (not host panic)" {
     var threaded: std.Io.Threaded = .init(testing.allocator, .{});
     defer threaded.deinit();

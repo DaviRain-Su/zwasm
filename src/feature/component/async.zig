@@ -38,6 +38,10 @@ pub const Error = error{
     /// whose reader has not dropped (spec `WritableFutureEnd.drop` traps —
     /// `CanonicalABI.md` §Future State).
     FutureDropBeforeWrite,
+    /// `stream.read`/`write` (+ future) on an end whose copy-state is not IDLE —
+    /// a second concurrent copy, or a copy on a DONE end (spec `stream_copy`/
+    /// `future_copy` `trap_if(e.state != CopyState.IDLE)`).
+    CopyNotIdle,
 };
 
 /// Copy-state of a stream/future end (`CanonicalABI.md` §Stream State). The
@@ -188,6 +192,9 @@ pub const StreamFutureEnd = struct {
     /// peer's blocked copy completes and returns to `idle`). `handle` is this
     /// end's own table handle.
     pub fn copy(self: *StreamFutureEnd, shared: anytype, table: *StreamFutureTable, handle: u32, n: u32) Error!Step {
+        // Spec `stream_copy`/`future_copy`: a copy is only valid on an IDLE end —
+        // a second concurrent copy, or a copy on a DONE end (peer dropped), traps.
+        if (self.state != .idle) return Error.CopyNotIdle;
         const step = switch (self.side) {
             .readable => shared.read(n, handle),
             .writable => shared.write(n, handle),

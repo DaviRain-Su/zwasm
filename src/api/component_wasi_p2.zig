@@ -1755,6 +1755,7 @@ fn mapAsyncFault(e: WasiP2Error) WasiP2Error {
         error.NotCopying,
         error.InvalidCallbackCode,
         error.FutureDropBeforeWrite,
+        error.CopyNotIdle,
         error.OutOfBounds,
         => error.Unreachable,
         else => |other| other,
