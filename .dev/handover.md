@@ -3,19 +3,23 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Just closed — Phase-17 codegen refinement: D-294 R1 fixed (`2a53213f`); sandbox triad complete (prior)
+## Just closed — Phase-17 codegen trap-kind parity: D-293 array_oob siblings (`855ca5ca`) + D-294 R1 (`2a53213f`)
 
-**`2a53213f` (D-294 residual 1)**: subtyping `call_indirect` on a null elem trapped `indirect_call_mismatch`
-(code 3) — the resolve trampoline (`jitCallIndirectResolve`) collapsed null/OOB/sig into funcptr=0. Now
-returns a distinct `NULL_ELEM_SENTINEL` (1) for the maxInt no-func typeidx; both arch callers route it to
-`uninit_elem_fixups` (code 13) before the generic 0-trap → matches interp + wasmtime/wasmer. Test via
-wasm-tools-generated rec-group subtyping module. **3-host gate**: windows recorded green `cefdca2b`
-(`25437/0`) — the table-grow-cap ABI batch is 3-host confirmed. D-294 R2 (call_indirect-OOB code-2 channel
-split) remains but is conformance-neutral (spec matches by trap-KIND) + D-293-class → low priority.
+**`855ca5ca` (D-293 array_oob slice-5)**: `array.get_s`/`get_u` (packed reads) still routed null+OOB to the
+generic `bounds_fixups` while `array.get`/`set` were precise (slice-4c) — rerouted both arches to
+null→null_reference (10) + OOB→oob_memory (6); fixed stale array.get header comments; test via wasm-tools
+`(array i8)`. REMAINING array_oob: `array.copy`/`fill` (trampoline collapses null+OOB → needs a D-294-style
+sentinel split; low priority, conformance-neutral). Ubuntu+lint green (2868/2880).
 
-**Sandbox triad (prior, `bd355258`+`fa4678f4`)**: JIT now caps table initial-alloc (early-reject) + runtime
-`table.grow` (rt.store_table_elements_max) + CLI `--max-table-elements`. Triad (fuel/memory/table) cross-
-engine complete. D-314(b) discharged; D-332 fully closed.
+## Earlier this session — D-294 R1 fixed (`2a53213f`); sandbox triad complete
+
+**`2a53213f` (D-294 R1)**: subtyping `call_indirect` on null elem now → uninitialized_elem (13) not
+indirect_call_mismatch (3); trampoline returns `NULL_ELEM_SENTINEL`, callers route to `uninit_elem_fixups`.
+D-294 R2 (code-2 channel split) remains, conformance-neutral. **3-host gate**: windows recorded green
+`cefdca2b` (`25437/0`) — table-grow-cap ABI batch 3-host confirmed.
+
+**Sandbox triad (prior, `bd355258`+`fa4678f4`)**: JIT caps table initial-alloc + runtime `table.grow` + CLI
+`--max-table-elements`. Triad (fuel/memory/table) cross-engine complete. D-314(b) discharged; D-332 closed.
 
 **Phase-B debug tooling (user-directed persistence, prior turns)** — reusable lldb value-trace for JIT
 miscompiles with wrong output but no crash: `ZWASM_DEBUG=jit.dump` (per-func bytes `db3109d8` + runtime
