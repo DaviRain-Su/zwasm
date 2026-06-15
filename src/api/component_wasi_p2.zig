@@ -1508,6 +1508,9 @@ const Def = union(enum) {
     /// selects the trampoline; `type_index` is the stream/future type. Slice 2
     /// wires `stream.new`/`future.new`; the rest are a later slice.
     async_builtin: struct { op: ctypes.StreamFutureOp, type_index: u32 },
+    /// A `canon waitable-set.new` / `waitable.join` builtin (WASI 0.3, ADR-0190
+    /// E2b) on the per-task `WaitableSetTable`. `wait`/`poll`/`drop` defer.
+    waitable_set_builtin: ctypes.WaitableSetOp,
 };
 
 /// Per-definition context for a synthesized async builtin (mirrors
@@ -1555,9 +1558,13 @@ fn synthDef(info: *const ctypes.TypeInfo, built: []const ?Built, ex: ctypes.Core
             // task.return (CM-async) is satisfied by the P3 runner's host
             // builtin (ADR-0189 ζ2); it records the task's delivered result.
             .task_return => return .task_return_builtin,
-            // waitable-set builtins decode (E2a) but the host wiring is E2b —
-            // fail loudly until then rather than silently mis-bind.
-            .waitable_set => return error.UnsupportedWasiImport,
+            // waitable-set.new/join are host-wired (ADR-0190 E2b); wait/poll are
+            // the stackful path (zwasm stackless re-enters via the callback WAIT
+            // return, not a guest wait call), drop defers — fail loudly.
+            .waitable_set => |ws| switch (ws.op) {
+                .new, .join => return .{ .waitable_set_builtin = ws.op },
+                .wait, .poll, .drop => return error.UnsupportedWasiImport,
+            },
             // stream.new/future.new are wired (ADR-0189 ζ2 Slice 2); the rest of
             // the stream/future builtins (read/write/cancel/drop) land in a later
             // slice — fail loudly rather than silently mis-bind until then.
@@ -1678,6 +1685,19 @@ fn p2StdinReadViaStream(caller: *Caller, retptr: u32) WasiP2Error!void {
     try mem.write(retptr + 4, fut.readable);
 }
 
+/// `canon waitable-set.new` (ADR-0190 E2b): mint an empty waitable set.
+fn p2WaitableSetNew(caller: *Caller) WasiP2Error!u32 {
+    const ctx = caller.data(WasiP2Ctx);
+    return ctx.sets.add(async_mod.WaitableSet.init(ctx.alloc));
+}
+
+/// `canon waitable.join` (ADR-0190 E2b): add a waitable handle to a set.
+fn p2WaitableJoin(caller: *Caller, set_handle: u32, waitable: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const set = try ctx.sets.get(set_handle);
+    try set.join(waitable);
+}
+
 /// `canon stream.read`/`stream.write` (+ future) (ADR-0189 ζ2, re-scoped per
 /// lesson 2026-06-16): drive one rendezvous step on the end named by `handle`
 /// (`StreamFutureEnd.copy` dispatches read vs write on the end's side) and
@@ -1771,6 +1791,11 @@ fn defineSynth(lk: *Linker, ns: []const u8, e: SynthExport, ctx: *WasiP2Ctx) !vo
             }
         },
         .task_return_builtin => try lk.defineFuncCtx(ns, e.name, ctx, fn (*Caller, i32) WasiP2Error!void, p2TaskReturn),
+        .waitable_set_builtin => |op| switch (op) {
+            .new => try lk.defineFuncCtx(ns, e.name, ctx, fn (*Caller) WasiP2Error!u32, p2WaitableSetNew),
+            .join => try lk.defineFuncCtx(ns, e.name, ctx, fn (*Caller, u32, u32) WasiP2Error!void, p2WaitableJoin),
+            .wait, .poll, .drop => unreachable, // synthDef rejects these
+        },
         .async_builtin => |ab| {
             const abc = try ctx.alloc.create(AsyncBuiltinCtx);
             errdefer ctx.alloc.destroy(abc);
