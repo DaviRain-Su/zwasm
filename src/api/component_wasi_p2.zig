@@ -52,6 +52,10 @@ const Value = @import("../zwasm.zig").Value;
 /// (1 = stdout); `write` forwards the flat `list<u8>` to `wasi/fd.zig
 /// writeSlice` on that fd; `drop-os` drops the handle. Threaded into each
 /// trampoline via `Caller.data`.
+/// A guest `stream.read` parked at a host source (ADR-0191 E2c): the destination
+/// buffer the delivered bytes are copied into when the source becomes ready.
+pub const PendingRead = struct { ptr: u32, cap: u32 };
+
 pub const WasiP2Ctx = struct {
     host: *wasi_host.Host,
     /// One handle table keyed by resource-type id; each P2 resource the host
@@ -110,6 +114,13 @@ pub const WasiP2Ctx = struct {
     /// host supplies bytes from (stdin). A guest `stream.read` pulls available
     /// bytes from `fd` into guest memory.
     host_sources: std.AutoHashMapUnmanaged(u32, wasi_p1.Fd) = .empty,
+    /// WAIT-path (ADR-0191 E2c): a guest `stream.read` on a host source that is
+    /// not yet ready PARKS — the read request is recorded here (keyed by the
+    /// readable end handle = the waitable a set joins) and delivered at `waitOn`
+    /// time. `defer_host_source_reads` forces the park branch (host policy:
+    /// "source not ready yet"); default off = E3's deliver-immediately.
+    pending_reads: std.AutoHashMapUnmanaged(u32, PendingRead) = .empty,
+    defer_host_source_reads: bool = false,
 
     /// Resource-type ids for the P2 resources the host models (`pub` for the
     /// in-tree tests that mint handles directly).
@@ -173,6 +184,7 @@ pub const WasiP2Ctx = struct {
         self.ab_ctxs.deinit(self.alloc);
         self.host_sinks.deinit(self.alloc);
         self.host_sources.deinit(self.alloc);
+        self.pending_reads.deinit(self.alloc);
         self.streams.deinit();
         self.shared.deinit();
         self.sets.deinit();
@@ -196,6 +208,24 @@ pub const WasiP2Ctx = struct {
         const rt = inst.handle.runtime orelse return WasiP2Error.NoMemory;
         if (rt.memory.len == 0) return WasiP2Error.NoMemory;
         return .{ .rt = rt };
+    }
+
+    /// WAIT-path delivery (ADR-0191 E2c): for each member of `set` with a parked
+    /// host-source read, copy the now-available bytes into the read's buffer and
+    /// set the end's `STREAM_READ` pending event so `WaitableSet.poll` delivers
+    /// it. The runner calls this just before polling at `waitOn`.
+    pub fn deliverParkedReads(self: *WasiP2Ctx, set: *async_mod.WaitableSet) WasiP2Error!void {
+        for (set.elems.items) |m| {
+            const pr = self.pending_reads.get(m) orelse continue;
+            const end = self.streams.get(m) catch continue;
+            if (self.host_sources.get(end.shared) == null) continue;
+            const mem = try self.memory();
+            const buf = mem.sliceAt(pr.ptr, pr.cap) catch return WasiP2Error.OutOfBounds;
+            const n: u32 = @intCast(wasi_fd.readStdinSlice(self.host, buf));
+            end.state = .done;
+            end.setPendingEvent(.{ .code = .stream_read, .index = m, .payload = (async_mod.ReturnCode{ .completed = @intCast(n) }).encode() });
+            _ = self.pending_reads.remove(m);
+        }
     }
 };
 
@@ -1724,6 +1754,14 @@ fn p2StreamFutureCopy(caller: *Caller, handle: u32, ptr: u32, count: u32) WasiP2
     // into guest memory at `ptr`.
     if (end.side == .readable) {
         if (abc.ctx.host_sources.get(end.shared)) |_| {
+            // WAIT-path (ADR-0191 E2c): when the source is "not ready", PARK —
+            // record the read + return BLOCKED; the bytes are delivered at the
+            // next `waitOn` (the guest reaches it after returning WAIT).
+            if (abc.ctx.defer_host_source_reads) {
+                try abc.ctx.pending_reads.put(abc.ctx.alloc, handle, .{ .ptr = ptr, .cap = count });
+                end.state = .async_copying;
+                return (async_mod.ReturnCode{ .blocked = {} }).encode();
+            }
             const mem = try abc.ctx.memory();
             const buf = mem.sliceAt(ptr, count) catch return WasiP2Error.OutOfBounds;
             const n: u32 = @intCast(wasi_fd.readStdinSlice(abc.ctx.host, buf));

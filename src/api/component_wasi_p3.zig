@@ -26,8 +26,9 @@ const Value = @import("../zwasm.zig").Value;
 const P3CallbackCtx = struct {
     inst: *Instance,
     callback_name: []const u8,
-    streams: *async_mod.StreamFutureTable,
-    sets: *async_mod.WaitableSetTable,
+    /// The per-task host ctx (owns the stream/set tables + host source/sink
+    /// state + the parked-read delivery, ADR-0191).
+    wp2: *wasi_p2.WasiP2Ctx,
 
     /// Re-enter the guest `callback(event_code, p1, p2) -> i32` and return its
     /// packed `CallbackResult` bits.
@@ -42,13 +43,15 @@ const P3CallbackCtx = struct {
         return @bitCast(results[0].i32);
     }
 
-    /// The WAIT seam — deliver an event from the named waitable set. With no
-    /// cross-task scheduler yet, an empty poll is a single-task deadlock: trap
-    /// (`error.AsyncDeadlock`), never a silent NONE (`no_workaround.md`). Real
-    /// blocking arrives with the ζ2 / Unit-E host concurrency.
+    /// The WAIT seam — deliver an event from the named waitable set. First the
+    /// host delivers any parked host-source reads (ADR-0191 E2c: the synchronous
+    /// "make progress" hook), then poll. An empty poll with no deliverable work
+    /// is a single-task deadlock: trap (`error.AsyncDeadlock`), never a silent
+    /// NONE (`no_workaround.md`).
     pub fn waitOn(self: *P3CallbackCtx, set_index: u32) !async_mod.EventTuple {
-        const set = try self.sets.get(set_index);
-        return (try set.poll(self.streams)) orelse error.AsyncDeadlock;
+        const set = try self.wp2.sets.get(set_index);
+        try self.wp2.deliverParkedReads(set);
+        return (try set.poll(&self.wp2.streams)) orelse error.AsyncDeadlock;
     }
 };
 
@@ -79,9 +82,10 @@ pub fn driveAsyncMain(built: *wasi_p2.BuiltComponent) anyerror!void {
     const cb_ref = built.info.resolveCoreFuncExport(callback_idx) orelse return error.NoAsyncCallback;
     const inst = built.guestInstance(entry_ref.instance) orelse return error.NoRunExport;
 
-    // The async tables live in the component ctx (ADR-0189 ζ2) so the canon
-    // builtin trampolines (bound at instantiation) and the loop share them.
-    var ctx = P3CallbackCtx{ .inst = inst, .callback_name = cb_ref.name, .streams = &built.ctx.streams, .sets = &built.ctx.sets };
+    // The async tables + host source/sink state live in the component ctx
+    // (ADR-0189 ζ2 / ADR-0191 E2c) so the canon builtin trampolines (bound at
+    // instantiation), the parked-read delivery, and the loop share them.
+    var ctx = P3CallbackCtx{ .inst = inst, .callback_name = cb_ref.name, .wp2 = built.ctx };
 
     // Invoke the async task entry once; its packed i32 return seeds the loop.
     var results = [_]Value{.{ .i32 = 0 }};
@@ -344,4 +348,27 @@ test "D-335 unit E2b: waitable-set.new + waitable.join build a set holding the j
     try driveAsyncMain(&built);
     const set = try built.ctx.sets.get(1);
     try testing.expectEqualSlices(u32, &.{1}, set.elems.items);
+}
+
+test "D-335 unit E2c: the WAIT path — a parked read → WAIT(set) → host delivers → callback re-entry" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/async_wait_path.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+    host.stdin_bytes = "ok"; // the host source delivers these at waitOn
+
+    // Force the host-source read to PARK (ADR-0191 E2c): the guest's read blocks,
+    // it returns WAIT(set), the runner's waitOn delivers "ok" → STREAM_READ →
+    // re-enters the guest callback (which asserts the bytes) → EXIT. A clean run
+    // proves the real driveCallbackLoop WAIT branch end-to-end.
+    var built = try wasi_p2.buildWasiP2Component(&eng, testing.allocator, bytes, &host, .{});
+    defer built.deinit();
+    built.ctx.defer_host_source_reads = true;
+    try driveAsyncMain(&built);
 }
