@@ -1402,6 +1402,24 @@ entries:
       "functype rejects transitive borrow in a result type" + exported value);
       src/feature/component/validate.zig checkFuncResultNoBorrow / checkValTypeNoBorrow;
       value-index-space deferral at validate.zig:79 + :605
+  - id: "D-337"
+    layer: "code"
+    status: "now"
+    front: D-wasi03
+    description: |-
+      now (D-335 Unit D polish, small). Spec `CanonicalABI.md` §Future State:
+      `WritableFutureEnd.drop` TRAPS if the writer has neither written its value
+      nor been notified the reader dropped. Unit ε's `SharedFuture` + the generic
+      `StreamFutureEnd.drop` (anytype shared) does not yet enforce this — a
+      writable future end can be dropped pre-write. Needs a `written` flag on
+      `SharedFuture` (set on a successful write rendezvous / DROPPED observation)
+      + a future-writable-specific drop guard (the generic drop can't branch on
+      it cleanly). Fold into a Unit-D future-drop polish chunk.
+    first_raised: "2026-06-15"
+    last_reviewed: "2026-06-15"
+    refs: |-
+      WebAssembly/component-model design/mvp/CanonicalABI.md §Future State
+      (WritableFutureEnd.drop trap); src/feature/component/async.zig SharedFuture / drop
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.

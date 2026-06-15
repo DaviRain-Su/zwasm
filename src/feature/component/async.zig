@@ -130,7 +130,7 @@ pub const StreamFutureEnd = struct {
     /// the previously-pending peer, its `pending_event` is delivered here (the
     /// peer's blocked copy completes and returns to `idle`). `handle` is this
     /// end's own table handle.
-    pub fn copy(self: *StreamFutureEnd, shared: *SharedStream, table: *StreamFutureTable, handle: u32, n: u32) Error!Step {
+    pub fn copy(self: *StreamFutureEnd, shared: anytype, table: *StreamFutureTable, handle: u32, n: u32) Error!Step {
         const step = switch (self.side) {
             .readable => shared.read(n, handle),
             .writable => shared.write(n, handle),
@@ -152,7 +152,7 @@ pub const StreamFutureEnd = struct {
     /// clearing its pending slot in `shared`. Returns items copied so far (0 in
     /// the rendezvous-count model — partial-copy progress lands with the host
     /// buffer wiring). Errors if no async copy is in flight.
-    pub fn cancel(self: *StreamFutureEnd, shared: *SharedStream) Error!u32 {
+    pub fn cancel(self: *StreamFutureEnd, shared: anytype) Error!u32 {
         if (self.state != .async_copying) return Error.NotCopying;
         self.state = .cancelling_copy;
         if (shared.pending) |p| {
@@ -165,7 +165,7 @@ pub const StreamFutureEnd = struct {
     /// `drop` a readable/writable end — traps (errors) if a copy is in
     /// progress; otherwise marks the shared stream dropped so the peer's next
     /// read/write observes `DROPPED`.
-    pub fn drop(self: *StreamFutureEnd, shared: *SharedStream) Error!void {
+    pub fn drop(self: *StreamFutureEnd, shared: anytype) Error!void {
         if (self.copying()) return Error.CopyInProgress;
         shared.dropped = true;
     }
@@ -344,6 +344,56 @@ pub const SharedStream = struct {
     }
 };
 
+/// The copy-event code for a resolved FUTURE end of the given `side`.
+fn futureEventFor(side: EndSide) EventCode {
+    return switch (side) {
+        .readable => .future_read,
+        .writable => .future_write,
+    };
+}
+
+/// A future's shared state (`CanonicalABI.md` §Future State) — like
+/// `SharedStream` but single-shot: exactly one value passes writer→reader, so
+/// there is no partial copy, no count, and no zero-length cases (both ends
+/// complete with `COMPLETED`, count 0). Asymmetry: only the writable end
+/// observes a reader-drop (`DROPPED`); the reader never observes a drop.
+/// Reuses `SharedStream.Pending` (the `{side, remain, waitable}` slot).
+pub const SharedFuture = struct {
+    elem_type: ?u32,
+    dropped: bool = false,
+    pending: ?SharedStream.Pending = null,
+
+    fn mkNotify(p: SharedStream.Pending) Step.Notify {
+        return .{ .waitable = p.waitable, .code = futureEventFor(p.side), .payload = (ReturnCode{ .completed = 0 }).encode() };
+    }
+
+    /// `ReadableFuture.read` — `n` is ignored (a future copies exactly one
+    /// value). Per spec the readable end never observes a drop.
+    pub fn read(self: *SharedFuture, n: u32, handle: u32) Step {
+        _ = n;
+        const w = self.pending orelse {
+            self.pending = .{ .side = .readable, .remain = 1, .waitable = handle };
+            return .{ .caller = .blocked };
+        };
+        std.debug.assert(w.side == .writable);
+        self.pending = null;
+        return .{ .caller = .{ .completed = 0 }, .notify = mkNotify(w) };
+    }
+
+    /// `WritableFuture.write` — observes a reader-drop as `DROPPED`; `n` ignored.
+    pub fn write(self: *SharedFuture, n: u32, handle: u32) Step {
+        _ = n;
+        if (self.dropped) return .{ .caller = .dropped };
+        const r = self.pending orelse {
+            self.pending = .{ .side = .writable, .remain = 1, .waitable = handle };
+            return .{ .caller = .blocked };
+        };
+        std.debug.assert(r.side == .readable);
+        self.pending = null;
+        return .{ .caller = .{ .completed = 0 }, .notify = mkNotify(r) };
+    }
+};
+
 // ============================================================
 // Tests
 // ============================================================
@@ -487,6 +537,30 @@ test "D-335 unit D-δ: a rendezvous delivers a STREAM_READ event to the blocked 
     try testing.expectEqual(EventCode.stream_read, ev.code);
     try testing.expectEqual(rh, ev.index);
     try testing.expectEqual((ReturnCode{ .completed = 2 }).encode(), ev.payload);
+}
+
+test "D-335 unit D-ε: future single-shot rendezvous delivers FUTURE_READ; writer observes reader-drop" {
+    var t = try StreamFutureTable.init(testing.allocator);
+    defer t.deinit();
+    var fut = SharedFuture{ .elem_type = null };
+    const rh = try t.add(.{ .kind = .future, .side = .readable, .elem_type = null });
+    const wh = try t.add(.{ .kind = .future, .side = .writable, .elem_type = null });
+    var ws = WaitableSet.init(testing.allocator);
+    defer ws.deinit();
+    try ws.join(rh);
+
+    // reader blocks; the writer writes the one value → reader gets FUTURE_READ.
+    try testing.expect((try (try t.get(rh)).copy(&fut, &t, rh, 1)).caller == .blocked);
+    try testing.expectEqual(@as(u32, 0), (try (try t.get(wh)).copy(&fut, &t, wh, 1)).caller.completed);
+    const ev = (try ws.poll(&t)).?;
+    try testing.expectEqual(EventCode.future_read, ev.code);
+    try testing.expectEqual(rh, ev.index);
+    try testing.expectEqual((ReturnCode{ .completed = 0 }).encode(), ev.payload);
+
+    // a writer observes a dropped (reader-dropped) future as DROPPED.
+    var fut2 = SharedFuture{ .elem_type = null, .dropped = true };
+    const wh2 = try t.add(.{ .kind = .future, .side = .writable, .elem_type = null });
+    try testing.expect((try (try t.get(wh2)).copy(&fut2, &t, wh2, 1)).caller == .dropped);
 }
 
 test "stream/future end table: add/get/remove lifecycle + index-0 reserved" {
