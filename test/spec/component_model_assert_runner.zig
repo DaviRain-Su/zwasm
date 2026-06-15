@@ -604,6 +604,9 @@ fn parseTypedValue(a: std.mem.Allocator, text: []const u8, pos: *usize, ct: cano
             }
             return error.BadValue;
         },
+        // stream/future values are async handles, not manifest-text literals
+        // (no P3 corpus exercises them as assert values yet).
+        .stream, .future => return error.BadValue,
     }
 }
 
