@@ -85,6 +85,9 @@ pub const Module = struct {
     c_handle: *_api_instance.Module,
     native: _runtime_module.Module,
 
+    /// Release the compiled module — its c_api handle and native module
+    /// storage. Instances already created from it stay valid until their
+    /// own `deinit`.
     pub fn deinit(self: *Module) void {
         _api_instance.wasm_module_delete(self.c_handle);
         self.native.deinit(self.alloc);

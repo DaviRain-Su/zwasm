@@ -34,6 +34,8 @@ pub const Instance = struct {
     handle: *_api_instance.Instance,
     c_store: *_api_instance.Store,
 
+    /// Release the instance and its underlying runtime state. Does not
+    /// free the owning `Engine` / `Module` (deinit those separately).
     pub fn deinit(self: *Instance) void {
         _api_instance.wasm_instance_delete(self.handle);
     }

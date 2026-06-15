@@ -52,6 +52,9 @@ pub const Engine = struct {
         };
     }
 
+    /// Release the engine, its backing store, and internal allocations.
+    /// Modules + instances derived from it must be deinit'd first (reverse
+    /// construction order; the `defer` idiom in the examples does this).
     pub fn deinit(self: *Engine) void {
         _api_instance.wasm_store_delete(self.c_store);
         _api_instance.wasm_engine_delete(self.c_engine);
