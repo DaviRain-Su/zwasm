@@ -404,6 +404,7 @@ test {
     _ = @import("feature/component/wit/resolve.zig");
     _ = @import("feature/component/canon.zig");
     _ = @import("feature/component/resource_table.zig");
+    _ = @import("feature/component/async.zig");
     _ = @import("feature/component/value.zig");
     _ = @import("api/component.zig");
     _ = @import("api/component_tests.zig");
