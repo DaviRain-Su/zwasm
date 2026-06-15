@@ -1370,8 +1370,12 @@ entries:
         rendezvous result as the peer's pending_event; WaitableSet.poll returns it).
         ε DONE (038214ee): SharedFuture single-shot rendezvous (FUTURE_READ/WRITE; writer-observes-
         drop; copy/cancel/drop generic over shared via anytype; D-337 filed for the writable-future-
-        drop guard). NEXT ζ: subtask + async-lowered import calls — the HOST→guest async call path
-        (Zone-2/3 wiring of the canon builtins into async.zig; likely needs a survey). Then η task.return.
+        drop guard). ζ split into ζ1 (Subtask waitable, Zone-1) + ζ2 (dispatch wiring, Zone-2/3,
+        gates on η). ζ1 DONE (1e3e814b): Subtask state machine + lenders + resolve→SUBTASK event.
+        Zone-1 async model COMPLETE (streams+futures+subtasks). NEXT = the Zone-3 host-integration
+        finale: η (callback event loop + task.return + async export lifting) then ζ2 (replace the
+        component_wasi_p2.zig `.stream_future → UnsupportedWasiImport` arm with real async.zig dispatch).
+        Both engine/Caller-aware (survey the host-trampoline + event-loop seam first).
       - E — WASI-P3 host interfaces (new component_wasi_p3.zig; sockets/http/clocks
         async; ~2000; MED; coexists with P2, does NOT replace it). Needs D.
       - F — async-export ABI + P3 component runner (canon.zig; ~400; MED). Needs E.
