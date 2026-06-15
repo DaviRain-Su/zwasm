@@ -261,6 +261,79 @@ pub const WaitableSet = struct {
     }
 };
 
+/// `Subtask.State` (`CanonicalABI.md`) — the lifecycle of an async-lowered
+/// import call (the waitable a guest receives when it calls an async import).
+pub const SubtaskState = enum(u8) {
+    starting = 0,
+    started = 1,
+    returned = 2,
+    cancelled_before_started = 3,
+    cancelled_before_returned = 4,
+};
+
+/// A `Subtask` waitable (`CanonicalABI.md` `class Subtask`): returned when a
+/// guest calls an async-LOWERED import that blocks. A `Waitable` (it carries a
+/// `pending_event` + `wset` like a stream/future end). `lenders` are the
+/// borrowed resource handles kept alive for the subtask's duration — surrendered
+/// (returned to the resource table by the host) when it resolves. Zone-1 data;
+/// the call that creates/drives a Subtask is the Unit-ζ₂/η host wiring.
+pub const Subtask = struct {
+    state: SubtaskState = .starting,
+    cancellation_requested: bool = false,
+    pending_event: ?EventTuple = null,
+    wset: ?u32 = null,
+    lenders: std.ArrayList(u32),
+    alloc: Allocator,
+
+    pub fn init(alloc: Allocator) Subtask {
+        return .{ .lenders = .empty, .alloc = alloc };
+    }
+
+    pub fn deinit(self: *Subtask) void {
+        self.lenders.deinit(self.alloc);
+    }
+
+    /// Track a borrowed resource handle held alive for this subtask
+    /// (spec `Subtask.lenders`).
+    pub fn addLender(self: *Subtask, handle: u32) Error!void {
+        try self.lenders.append(self.alloc, handle);
+    }
+
+    pub fn requestCancel(self: *Subtask) void {
+        self.cancellation_requested = true;
+    }
+
+    pub fn resolved(self: Subtask) bool {
+        return switch (self.state) {
+            .returned, .cancelled_before_started, .cancelled_before_returned => true,
+            .starting, .started => false,
+        };
+    }
+
+    /// `deliver_resolve` — move to a terminal state, queue the `SUBTASK` event
+    /// (payload = the new state), and surrender the borrowed handles. Returns the
+    /// lender slice for the host to drop from the resource table (Zone-1 here
+    /// cannot touch that table).
+    pub fn resolve(self: *Subtask, handle: u32, new_state: SubtaskState) []const u32 {
+        self.state = new_state;
+        self.pending_event = .{ .code = .subtask, .index = handle, .payload = @intFromEnum(new_state) };
+        return self.lenders.items;
+    }
+
+    pub fn setPendingEvent(self: *Subtask, ev: EventTuple) void {
+        self.pending_event = ev;
+    }
+
+    pub fn hasPendingEvent(self: Subtask) bool {
+        return self.pending_event != null;
+    }
+
+    pub fn takePendingEvent(self: *Subtask) ?EventTuple {
+        defer self.pending_event = null;
+        return self.pending_event;
+    }
+};
+
 /// Outcome of one read/write rendezvous step (`CanonicalABI.md` stream
 /// `read`/`write`). `caller` is what happens to the calling end. When a
 /// rendezvous resolves the previously-pending opposite end, `notify` identifies
@@ -537,6 +610,29 @@ test "D-335 unit D-δ: a rendezvous delivers a STREAM_READ event to the blocked 
     try testing.expectEqual(EventCode.stream_read, ev.code);
     try testing.expectEqual(rh, ev.index);
     try testing.expectEqual((ReturnCode{ .completed = 2 }).encode(), ev.payload);
+}
+
+test "D-335 unit D-ζ: subtask state machine + lender tracking + resolve delivers a SUBTASK event" {
+    var st = Subtask.init(testing.allocator);
+    defer st.deinit();
+    try testing.expectEqual(SubtaskState.starting, st.state);
+    try testing.expect(!st.resolved());
+
+    st.state = .started;
+    try st.addLender(3);
+    try st.addLender(5);
+    st.requestCancel();
+    try testing.expect(st.cancellation_requested);
+
+    // resolve → terminal state, surrenders the borrowed handles, queues SUBTASK.
+    const lent = st.resolve(9, .returned);
+    try testing.expectEqual(SubtaskState.returned, st.state);
+    try testing.expect(st.resolved());
+    try testing.expectEqualSlices(u32, &.{ 3, 5 }, lent);
+    const ev = st.takePendingEvent().?;
+    try testing.expectEqual(EventCode.subtask, ev.code);
+    try testing.expectEqual(@as(u32, 9), ev.index);
+    try testing.expectEqual(@as(u32, @intFromEnum(SubtaskState.returned)), ev.payload);
 }
 
 test "D-335 unit D-ε: future single-shot rendezvous delivers FUTURE_READ; writer observes reader-drop" {
