@@ -143,6 +143,11 @@ pub const StreamFutureEnd = struct {
     pending_event: ?EventTuple = null,
     /// the waitable-set handle this end belongs to, if any (`Waitable.wset`).
     wset: ?u32 = null,
+    /// Handle into the per-task `SharedTable` of the rendezvous this end's peer
+    /// shares (`stream.new`/`future.new` mint a readable+writable pair over one
+    /// shared, ADR-0189 ζ2). 0 = unlinked (a bare end built directly in a test
+    /// / before the arena existed); a minted end always has a ≥1 handle.
+    shared: u32 = 0,
 
     /// `Waitable.set_pending_event`.
     pub fn setPendingEvent(self: *StreamFutureEnd, ev: EventTuple) void {
@@ -568,6 +573,101 @@ pub const SharedFuture = struct {
     }
 };
 
+/// A rendezvous object shared by a stream's (or future's) two ends. Owned by
+/// the per-task `SharedTable`; `StreamFutureEnd.shared` indexes into it.
+pub const Shared = union(EndKind) {
+    stream: SharedStream,
+    future: SharedFuture,
+};
+
+/// The per-task table of `Shared` rendezvous objects (ADR-0189 ζ2). A
+/// `stream.new`/`future.new` mints ONE `Shared` referenced by both ends, so the
+/// slot is refcounted (= live end count) and freed when the second end drops.
+/// Index 0 reserved, free-list reuse — mirrors `StreamFutureTable`.
+pub const SharedTable = struct {
+    const Slot = struct { shared: Shared, refcount: u8 };
+    slots: std.ArrayList(?Slot),
+    free: std.ArrayList(u32),
+    alloc: Allocator,
+
+    pub fn init(alloc: Allocator) SharedTable {
+        return .{ .slots = .empty, .free = .empty, .alloc = alloc };
+    }
+
+    pub fn deinit(self: *SharedTable) void {
+        self.slots.deinit(self.alloc);
+        self.free.deinit(self.alloc);
+    }
+
+    /// Install a new `Shared` with refcount 2 (the readable + writable ends a
+    /// `*.new` mints); returns its handle (≥ 1).
+    fn addPair(self: *SharedTable, shared: Shared) Error!u32 {
+        // Lazily reserve index 0 as the None sentinel on first use.
+        if (self.slots.items.len == 0) try self.slots.append(self.alloc, null);
+        if (self.free.pop()) |i| {
+            self.slots.items[i] = .{ .shared = shared, .refcount = 2 };
+            return i;
+        }
+        const i: u32 = @intCast(self.slots.items.len);
+        if (i > MAX_LENGTH) return Error.TableFull;
+        try self.slots.append(self.alloc, .{ .shared = shared, .refcount = 2 });
+        return i;
+    }
+
+    /// Resolve a handle to its `Shared` (bounds + hole check → use-after-free trap).
+    pub fn get(self: *SharedTable, i: u32) Error!*Shared {
+        if (i == 0 or i >= self.slots.items.len) return Error.InvalidHandle;
+        if (self.slots.items[i] == null) return Error.InvalidHandle;
+        return &self.slots.items[i].?.shared;
+    }
+
+    /// Drop one reference; tombstone + free-list the slot when the last end goes.
+    fn release(self: *SharedTable, i: u32) Error!void {
+        if (i == 0 or i >= self.slots.items.len) return Error.InvalidHandle;
+        const slot = &(self.slots.items[i] orelse return Error.InvalidHandle);
+        slot.refcount -= 1;
+        if (slot.refcount == 0) {
+            self.slots.items[i] = null;
+            try self.free.append(self.alloc, i);
+        }
+    }
+};
+
+/// The handles a `stream.new`/`future.new` mints — a linked readable+writable
+/// pair (spec `canon_stream_new` returns `ri | (wi << 32)`).
+pub const EndPair = struct { readable: u32, writable: u32 };
+
+fn newPair(ends: *StreamFutureTable, shared: *SharedTable, kind: EndKind, init_shared: Shared, elem_type: ?u32) Error!EndPair {
+    // A mid-mint OOM/TableFull leaves a benign partial state (an orphaned end +
+    // a refcount-2 shared slot), reclaimed wholesale at table deinit — so the
+    // error simply propagates (the guest traps); no rollback catch needed.
+    const sh = try shared.addPair(init_shared);
+    const r = try ends.add(.{ .kind = kind, .side = .readable, .elem_type = elem_type, .shared = sh });
+    const w = try ends.add(.{ .kind = kind, .side = .writable, .elem_type = elem_type, .shared = sh });
+    return .{ .readable = r, .writable = w };
+}
+
+/// `canon stream.new` (Zone-1 part): create the shared rendezvous + its two ends.
+pub fn newStreamPair(ends: *StreamFutureTable, shared: *SharedTable, elem_type: ?u32) Error!EndPair {
+    return newPair(ends, shared, .stream, .{ .stream = .{ .elem_type = elem_type } }, elem_type);
+}
+
+/// `canon future.new` (Zone-1 part) — symmetric to `newStreamPair`.
+pub fn newFuturePair(ends: *StreamFutureTable, shared: *SharedTable, elem_type: ?u32) Error!EndPair {
+    return newPair(ends, shared, .future, .{ .future = .{ .elem_type = elem_type } }, elem_type);
+}
+
+/// Drop one end: remove it from the ends table and release its reference to the
+/// shared rendezvous (freed when the second end drops). The rendezvous-DROPPED
+/// semantics (peer sees `.dropped`) layer on with the `*.drop-{readable,
+/// writable}` builtins; this is the MEMORY-lifetime half (ADR-0189 ζ2).
+pub fn dropEnd(ends: *StreamFutureTable, shared: *SharedTable, handle: u32) Error!void {
+    const end = try ends.get(handle);
+    const sh = end.shared;
+    _ = try ends.remove(handle);
+    if (sh != 0) try shared.release(sh);
+}
+
 // ============================================================
 // Tests
 // ============================================================
@@ -884,4 +984,50 @@ test "D-335 unit D-ηB: driveCallbackLoop re-enters callback per delivered event
         try driveCallbackLoop(&ctx, 0);
         try testing.expectEqual(@as(usize, 0), ctx.cb_calls.items.len);
     }
+}
+
+test "D-335 unit D-ζ2: newStreamPair mints linked readable+writable ends; shared freed on 2nd drop" {
+    var ends = try StreamFutureTable.init(testing.allocator);
+    defer ends.deinit();
+    var shared = SharedTable.init(testing.allocator);
+    defer shared.deinit();
+
+    // stream.new: one shared rendezvous, two ends linked to it. Capture the
+    // shared handle by value — the end pointers dangle once dropped.
+    const pair = try newStreamPair(&ends, &shared, 5);
+    const sh = (try ends.get(pair.readable)).shared;
+    try testing.expectEqual(EndSide.readable, (try ends.get(pair.readable)).side);
+    try testing.expectEqual(EndSide.writable, (try ends.get(pair.writable)).side);
+    try testing.expectEqual(sh, (try ends.get(pair.writable)).shared); // same rendezvous
+    try testing.expect(sh >= 1); // never the 0 sentinel
+    try testing.expectEqual(@as(?u32, 5), (try shared.get(sh)).stream.elem_type);
+
+    // refcount = 2: dropping the readable keeps the shared alive for the writer.
+    try dropEnd(&ends, &shared, pair.readable);
+    try testing.expectError(Error.InvalidHandle, ends.get(pair.readable)); // end gone
+    try testing.expect((try shared.get(sh)).* == .stream); // shared alive (1 ref)
+    // dropping the writable releases the last ref → shared freed.
+    try dropEnd(&ends, &shared, pair.writable);
+    try testing.expectError(Error.InvalidHandle, shared.get(sh));
+    try testing.expectError(Error.InvalidHandle, ends.get(pair.writable));
+}
+
+test "D-335 unit D-ζ2: future.new pair + reverse drop order frees the shared symmetrically" {
+    var ends = try StreamFutureTable.init(testing.allocator);
+    defer ends.deinit();
+    var shared = SharedTable.init(testing.allocator);
+    defer shared.deinit();
+
+    const pair = try newFuturePair(&ends, &shared, null);
+    const sh = (try ends.get(pair.readable)).shared;
+    try testing.expect((try shared.get(sh)).* == .future);
+
+    // reverse order: writable first, then readable — shared still freed at 0.
+    try dropEnd(&ends, &shared, pair.writable);
+    try testing.expect((try shared.get(sh)).* == .future); // alive (1 ref left)
+    try dropEnd(&ends, &shared, pair.readable);
+    try testing.expectError(Error.InvalidHandle, shared.get(sh)); // freed at 0
+    // the freed slot is reused by the next pair (free-list).
+    const p2 = try newStreamPair(&ends, &shared, 9);
+    try testing.expectEqual(@as(?u32, 9), (try shared.get((try ends.get(p2.readable)).shared)).stream.elem_type);
 }
