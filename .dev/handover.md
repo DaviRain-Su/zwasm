@@ -3,7 +3,7 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Current state — Phase-17 完成形 steady-state; branch GREEN, 3-host-verified (`0df27418`)
+## Current state — Phase-17 完成形 steady-state; branch GREEN, 3-host-verified (`04985b17`)
 
 **完成形 plateau reached (this session)** — surface-audit sweep (diag/CLI/C-API/Zig-API/docs) + debt-ledger
 sweep all CLEAN: (a) **diag F5a** — `popExpect` (`dc463af5`) + all 12 isRef gates (`4edf267d`); F1/F3/F5b
@@ -45,40 +45,32 @@ component corpus; bundle-mode per unit; 3-host at milestones. Other fronts (A di
 opportunistic; parked D-330/D-331 are hard-but-loop-tacklable (don't re-run the blanket fixes that thrash).
 Verify any prior remote kick at Step 0.7.
 
-c_sha256 `\n`-drop (D-330) deep-investigated this session (5 trace rounds + 3 fix attempts) → **bundle
-d330-blockmerge-liveness CLOSED, demoted to a hard-parked debt note**. Root IS understood (a br/br_if
-block-result merge vreg not extended to the block `.end`), BUT the fix has **CONFLICTING constraints**:
-c_sha256 needs the extension; `labels $switch` (multi-br/br_table) is correct WITHOUT it and breaks WITH it
-(even when liveness perfectly mirrors emit — verified). So a blanket fix is wrong; the real fix is a
-narrower/deeper emit-or-regalloc change — a multi-cycle research problem, disproportionate for a cosmetic
-symptom (one `\n`; values + interp correct; 55/56 byte-exact). Full findings + design + conflicting-constraint
-note preserved in **D-330 debt** (Round 5) + `private/notes/{c_sha256_trace_2026-06-15.md, d330-emit-align-design.md}`
-for a FUTURE fresh-context attempt. **Do NOT immediately re-attempt the blanket fix — it thrashes.**
+## Active bundle
 
-**Branch verified GREEN**: `test` 2766/0, `test-spec-wasm-2.0-assert` 25437/0 (Mac arm64), ubuntu x86_64
-`OK (HEAD=f80df3e4)`. windows batched/deferred. Reverts `a71906fa`+`547d5ce1` (naive fix `960a27b4` undone).
+- **Bundle-ID**: wasi03-D-335 (§9.0 Front D; WASI 0.3 / Preview 3; units A→G)
+- **Cycles-remaining**: ~7+ (≥1 per unit; D = async task/waitable runtime is multi-cycle)
+- **Continuity-memo**: critical path **A→B→C→D(crux)→E→F→G** (full plan in **D-335**). CM-async
+  (`async` func / `stream<T>` / `future<T>`), **NOT** core stack-switching. Spec:
+  `~/Documents/OSS/{WASI, WebAssembly/component-model}` (design/mvp/{Binary,CanonicalABI,Concurrency}.md);
+  ref impl `~/Documents/OSS/wasmtime` (43+). Builds on shipped CM substrate `src/feature/component/` +
+  `src/api/component_wasi_p2.zig` (P3 coexists with P2, does not replace it).
+- **Exit-condition**: a WASI-0.3 async/stream/future component runs end-to-end through zwasm (new P3
+  corpus green, 3-host); each unit lands green per D-335 along the way.
+- **Current unit — A (START HERE)**: `stream<T>`/`future<T>` valtype (0x66/0x65) + async functype (0x43)
+  **decode + validate** in `src/feature/component/{types,decode}.zig` (~400 LOC, LOW risk). Done = green
+  decode/validate test → mark D-335 unit-A, retarget this bundle's Current-unit to B (canon builtins).
 
-**Other long-tail (parked/blocked)**: go corruption D-331(A) (infra-blocked), D-289/D-331(B) go_regex
-emit-side (parked), D-294-R2 (conformance-neutral CLI), D-333 (br_table merge — folds into D-330's future fix).
-**D-293 array_oob** COMPLETE. Scaffolding audit (this session): **0 block, healthy**.
+## Long-tail (debt-tracked / parked — NOT active; see §9.0 fronts + debt.yaml)
 
-## ACTIVE AGENDA (user-directed 2026-06-14) — real-world toolchain/bench reproduction
+- **JIT-correctness** (front B / parked): D-330 c_sha256 `\n` (parked — conflicting-constraint, blanket fix
+  thrashes; full findings in D-330 Round 5 + `private/notes/{c_sha256_trace,d330-emit-align-design}.md`; do
+  NOT re-run the blanket fix) · D-331(A) go runtime-corruption (infra-blocked) · D-331(B)/D-289 go_regex emit
+  (parked) · D-333 (br_table, folds into D-330's deeper fix). Realworld corpus 50/50 interp; JIT run-stage
+  opt-in (`ZWASM_JIT_RUN=1`). Trace: `ZWASM_DEBUG=jit.dump` + `scripts/jit_value_trace.sh` (Recipe 18).
+- Prior agenda (2026-06-14 realworld-reproduction) folded into front B: Phase A infra DONE, Phase B JIT
+  bug-hunt = the JIT-correctness debt above; plan in [`realworld_reproduction_plan.md`](realworld_reproduction_plan.md).
 
-Project feature-complete + tag-ready (**tag = USER-ONLY, ADR-0156**). Plan:
-[`realworld_reproduction_plan.md`](realworld_reproduction_plan.md) (supersedes ROADMAP §9 for these tasks).
-Phase A reproduction infra DONE (A1 Zig `5c044967` / A2 embenchen `1aac480f` / A3 `--wasmer` `897b54d7` /
-runtime bump wasmtime45+wasmer7.1; A4 rust=D-254, hyperfine=D-249). Phase B deep JIT bug-hunt SUSTAINED:
-B1 `--jit` diff-lane `219dbd17` (REPORT-ONLY, 56/56). Tool currency 3-host DONE+VERIFIED (zig PINNED 0.16.0).
-
-**JIT-correctness debt (each its own investigation)**: D-330 c_sha256 = the Active bundle above (was the
-last diff-jit mismatch; corpus otherwise byte-exact). D-331(A) go_* runtime-corruption (panicmem teardown
-deref; INFRA-BLOCKED — needs per-function interp-fallback bisect that doesn't exist). D-331(B)/D-289 go_regex
-emit-side `vreg>=slots.len` (cap raised `682401fd`; remainder parked, recipe in debt). Earlier durable fixes:
-D-330 coalescing `6790c204` + x86_64 fp-select `cccb2313`; sandbox triad `bd355258`+`fa4678f4` (D-314(b)/
-D-332 closed); D-294 R1 `2a53213f`. Trace tooling: `ZWASM_DEBUG=jit.dump` + `scripts/jit_value_trace.sh`
-(Recipe 18 + lesson `2026-06-15-lldb-value-trace-on-jit-code`).
-
-## State (tag-ready baseline, all 3-host green)
+## State (all 3-host green; release = USER-ONLY, ADR-0156)
 
 - **Wasm 1.0/2.0/3.0**: 100% spec, 0 skip. **WASI 0.1** complete; **0.2/CM**
   default-ON (ADR-0182/0183; corpus 158/0/0). Sandboxing triad everywhere.
@@ -88,9 +80,8 @@ D-332 closed); D-294 R1 `2a53213f`. Trace tooling: `ZWASM_DEBUG=jit.dump` + `scr
   Rev 2026-06-14 floored `core_comp` too; `check_releasesafe_runners.sh` guards it).
 - **EH**: cross-instance exception-handling on JIT works on BOTH arches (arm64 `4f73d9ee`
   + x86_64 D-238/ADR-0185 `c534afca`). Interp + JIT EH spec corpus green.
-- **Debt**: 46 entries, **zero `now`**; all blocked-by are external (upstream
-  Zig / hosts) / future-phase (11/12/14) / user-gated, or `note`/`partial` long-tail.
-  D-330 = hard-parked debt note (bundle closed; conflicting-constraint fix, see Round 5); D-331 (go) parked.
+- **Debt**: 48 entries, **one `now`** (D-335 = WASI 0.3 Front-D campaign, the Active bundle); rest are
+  front-tagged (A/B/C/D-wasi03/future-bucket/parked per §9.0 + debt conventions). D-330/D-331 parked.
 - **Realworld corpus**: 50 fixtures (c/cpp/rust/tinygo/go), interp 50/50; JIT run-stage
   opt-in (`ZWASM_JIT_RUN=1`) — the Phase-B signal source. cljw fixtures retired.
 - **Tag**: `v2.0.0-alpha.3` tag-only (no Release → Latest stays v1.11.0), USER-ONLY.
