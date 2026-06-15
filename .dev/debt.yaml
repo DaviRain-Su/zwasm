@@ -1246,6 +1246,31 @@ entries:
       D-283 (parent); src/engine/codegen/arm64/emit.zig (emit-setup >32760 checks 427/430/484-541;
       body else-arm 2148; per-op errdefer 869); src/engine/codegen/shared/compile.zig (compileOne stages);
       D-289 (large_frame offset class); test/realworld/wasm/go_*.wasm
+  - id: "D-334"
+    layer: "code"
+    status: "note"
+    description: |-
+      note (diagnostic 完成形 follow-ups from the 2026-06-15 diag-quality audit; the cheap wins F1/F3/F5b
+      SHIPPED `240f97de`). Remaining, each a real あるべき論 gap but not yet done:
+      (F5a, DEEP) validator messages are generic: the whole 3334-line validator has ONE setDiag —
+        `"{s} at op 0x{x}"` (@errorName + opcode), no expected-vs-found ValType, no offending index.
+        wasmtime-equivalent is "type mismatch: expected i32, found f64". Needs threading expected/found
+        ValType + index into the reject sites (validate/validator.zig ~736-742) — multi-site refactor.
+      (F6, SMALL-multi-site) parse errors have ZERO setDiag (parse/parser.zig + sections.zig): all rejects
+        surface as bare `zwasm: f.wasm: SectionTooLarge`, no offset/section context though `pos` is in hand.
+        Wrap ~8 reject sites with setDiag(.parse, …, "<msg> at offset 0xNN").
+      (F4, cosmetic) src/cli/run.zig:590/597/617 print `kind={s}` via @tagName → leaks the Zig
+        keyword-avoidance underscore (`unreachable_`) to users on stderr trap lines. Industry-standard
+        (wasmtime) prints a human message, no enum tag. Fix = print trapMessageFor(kind) (clean message),
+        drop the @tagName. SAFE (stderr-only, comptime-elided under test, NOT diff-compared) but a
+        user-visible trap-output FORMAT change → left for a deliberate call. Full audit:
+        private/notes/d-diag-audit-2026-06-15.md. (Trap-message table + CLI exit codes audited CLEAN.)
+    first_raised: "2026-06-15"
+    last_reviewed: "2026-06-15"
+    refs: |-
+      `240f97de` (F1/F3/F5b shipped); src/validate/validator.zig (~736-742 reject sites; F5a);
+      src/parse/{parser.zig,sections.zig} (F6); src/cli/run.zig:590-617 (F4 trap format);
+      src/diagnostic/diagnostic.zig (Location.validate); private/notes/d-diag-audit-2026-06-15.md
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.

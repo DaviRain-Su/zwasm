@@ -3,7 +3,13 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Current state — Phase-17 完成形 steady-state; branch GREEN (`f80df3e4`, 2-host verified)
+## Current state — Phase-17 完成形 steady-state; branch GREEN (`240f97de`)
+
+**Latest (`240f97de`)**: 完成形 diagnostic-surface polish from a diag-quality audit — CLI `--max-table-elements`
+usage+coherence-test (F1), full `ZWASM_TRAP_*` C #defines mirroring the TrapKind enum (F3), validate-diag
+now renders the captured `(func #N @ 0xXX)` site (F5b). `test` 2767/0, lint clean (CLI/C-header/diag only,
+no codegen/spec impact). Deferred diag follow-ups → **D-334** (F5a validator expected/found types DEEP;
+F6 parser setDiag; F4 trap-line `kind=` underscore cosmetic). Audit: `private/notes/d-diag-audit-2026-06-15.md`.
 
 c_sha256 `\n`-drop (D-330) deep-investigated this session (5 trace rounds + 3 fix attempts) → **bundle
 d330-blockmerge-liveness CLOSED, demoted to a hard-parked debt note**. Root IS understood (a br/br_if
