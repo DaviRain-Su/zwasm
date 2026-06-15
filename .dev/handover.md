@@ -3,7 +3,7 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Current state — WASI-0.3 campaign (D-335); Unit E host peers (E1/E3/E2a/E2b) done (`85817b84`)
+## Current state — WASI-0.3 campaign (D-335); E host peers done + ADR-0191 E2c WAIT-path plan (`322deee7`)
 
 **WASI 0.3 / Preview 3 campaign** (Front D, ratified 2026-06-11; CM-async — `async` func / `stream<T>` /
 `future<T>`, NOT core stack-switching). Critical path A→B→C→D(crux)→E→F→G; full unit plan + per-unit DONE-SHAs
@@ -28,17 +28,18 @@ WAIT mechanism (survey): zwasm is STACKLESS so the guest's `callback` RETURNS `W
 `waitable-set.wait` builtin); `unpackCallbackResult` already extracts the set index; `waitable-set.wait`/`poll`
 are reject-deferred. The Zone-1 + builtins are all in place; only the e2e wiring remains.
 
-**NEXT — Unit E2c: the WAIT-path e2e** (the last callback-loop gap; today only EXIT/YIELD are e2e):
-- A guest reads a host-SOURCE stream that is INITIALLY empty so `stream.read` BLOCKs (parks `async_copying`),
-  `waitable-set.new` + `waitable.join(set, readable)`, then returns `WAIT(set)` (its `callback`/entry packs
-  `(2 | set<<4)`). The host source then delivers bytes → sets the end's `pending_event` → `driveCallbackLoop`'s
-  WAIT branch → `waitOn(set)` → `WaitableSet.poll` returns STREAM_READ → re-enter `callback` → guest re-reads →
-  COMPLETED + EXIT.
-- **The new bit**: a 2-PHASE host source (initially-empty so the read parks, then a trigger delivers bytes +
-  sets the pending event). The runner's `P3CallbackCtx.waitOn` already polls the set table; the trigger is
-  what's missing. Survey the cleanest trigger (a host-source "deliver" step the runner calls before `waitOn`,
-  or a fixture-driven second guest call). **Likely needs a small ADR** for the 2-phase source + the WAIT-loop
-  drive shape (the e2e must exercise the real `driveCallbackLoop` WAIT branch, not a stub).
+**E2c plan settled — ADR-0191** (`322deee7`): the WAIT-path drive. A host source blocks-then-delivers; `waitOn`
+delivers the event AT wait time (synchronous, no scheduler).
+
+**NEXT — implement E2c per ADR-0191** (the last callback-loop gap; today only EXIT/YIELD are e2e):
+- Add `WasiP2Ctx.pending_reads` (`shared handle → {end, ptr, cap}`) + an armed-source flag. `p2StreamFutureCopy`
+  READ on an armed host source with no bytes → record the parked read + return BLOCKED (end parks `async_copying`).
+- `P3CallbackCtx.waitOn` gains a delivery pass BEFORE `set.poll`: for each set member with a recorded pending
+  read whose source now has bytes → copy bytes to `ptr`, `setPendingEvent(STREAM_READ, completed(n))`, clear the
+  record. Then poll returns it → `driveCallbackLoop` re-enters `callback(STREAM_READ, end, payload)`.
+- **Fixture**: guest `read-via-stream` (armed source) → `stream.read` BLOCKs → `waitable-set.new` +
+  `waitable.join` → return `WAIT(set)` (entry packs `2|set<<4`) → host delivers "ok" → callback re-entered →
+  guest re-reads/asserts → EXIT. First e2e exercising the real `driveCallbackLoop` WAIT branch.
 - Gaps: multi-byte/typed marshalling (E1/E3 did `u8`); return-future resolution. Then F/G. (**D-444** P3-host split.)
 
 ## Active bundle
@@ -51,7 +52,7 @@ are reject-deferred. The Zone-1 + builtins are all in place; only the e2e wiring
   Concurrency}.md); ref impl `~/Documents/OSS/wasmtime` (43+; `concurrent/futures_and_streams.rs`).
 - **Exit-condition**: a WASI-0.3 async/stream/future component runs end-to-end through zwasm (new P3
   corpus green, 3-host); each unit lands green per D-335 along the way.
-- **Unit D + E1/E3/E2a/E2b DONE (HIGH/crux); E2c START HERE**: Zone-1 model + P3 runner + ζ2 + both host stream
+- **Unit D + E1/E3/E2a/E2b DONE (HIGH/crux); E2c IMPL START HERE**: Zone-1 model + P3 runner + ζ2 + both host stream
   peer directions + waitable-set decode + new/join builtins all green. Next = E2c (the WAIT-path e2e: a 2-phase
   host source → guest blocks → returns WAIT(set) → `driveCallbackLoop` WAIT branch re-enters callback; survey+
   small ADR for the 2-phase source + WAIT-loop drive). Then F/G. (D-444 = P3-host split when E settles.)
