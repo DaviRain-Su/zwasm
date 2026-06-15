@@ -1429,7 +1429,8 @@ fn canonTypeFromLocalDefType(arena: std.mem.Allocator, info: *const types.TypeIn
         .flags => |fl| return .{ .flags = @intCast(fl.labels.len) },
         .own => |ti| return .{ .own = ti },
         .borrow => |ti| return .{ .borrow = ti },
-        .func, .instance_type, .component_type, .resource => return TypeBridgeError.UnsupportedType,
+        // stream/future canon lowering lands in WASI-0.3 Unit C (async lift/lower).
+        .func, .stream, .future, .instance_type, .component_type, .resource => return TypeBridgeError.UnsupportedType,
     }
 }
 
@@ -1494,7 +1495,8 @@ pub fn canonTypeFromDefType(arena: std.mem.Allocator, info: *const types.TypeInf
         .flags => |fl| return .{ .flags = @intCast(fl.labels.len) },
         .own => |ti| return .{ .own = ti },
         .borrow => |ti| return .{ .borrow = ti },
-        .func, .instance_type, .component_type, .resource => return TypeBridgeError.UnsupportedType,
+        // stream/future canon lowering lands in WASI-0.3 Unit C (async lift/lower).
+        .func, .stream, .future, .instance_type, .component_type, .resource => return TypeBridgeError.UnsupportedType,
     }
 }
 

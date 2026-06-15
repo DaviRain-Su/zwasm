@@ -341,7 +341,8 @@ fn fromCanonDefType(out_alloc: std.mem.Allocator, scratch: std.mem.Allocator, in
         .flags => |fl| return .{ .flags = .{ .bits = cv.flags, .labels = fl.labels } },
         .own => return .{ .own = cv.handle },
         // Borrow results are spec-invalid; func/type-scope forms aren't values.
-        .func, .borrow, .instance_type, .component_type, .resource => return InvokeTypedError.UnsupportedType,
+        // stream/future typed lifting lands in WASI-0.3 Unit C.
+        .func, .borrow, .stream, .future, .instance_type, .component_type, .resource => return InvokeTypedError.UnsupportedType,
     }
 }
 

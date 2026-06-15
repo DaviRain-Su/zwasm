@@ -397,6 +397,7 @@ test {
     _ = @import("cli/invoke_args.zig");
     _ = @import("feature/component/decode.zig");
     _ = @import("feature/component/types.zig");
+    _ = @import("feature/component/types_tests.zig");
     _ = @import("feature/component/validate.zig");
     _ = @import("feature/component/wit/lexer.zig");
     _ = @import("feature/component/wit/parser.zig");

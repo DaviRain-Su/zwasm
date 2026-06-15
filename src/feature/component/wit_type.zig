@@ -168,6 +168,7 @@ fn resolveDefTypeScoped(arena: std.mem.Allocator, info: *const types.TypeInfo, l
         .flags => |fl| return .{ .flags = fl.labels },
         .own => |ti| return .{ .own = ti },
         .borrow => |ti| return .{ .borrow = ti },
-        .func, .instance_type, .component_type, .resource => return Error.UnsupportedType,
+        // stream/future WIT-shape resolution lands in WASI-0.3 Unit C.
+        .func, .stream, .future, .instance_type, .component_type, .resource => return Error.UnsupportedType,
     }
 }

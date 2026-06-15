@@ -111,7 +111,7 @@ fn checkDefTypeDeclDups(dt: DefType) Error!void {
                 }
             }
         },
-        .value, .func, .enum_, .flags, .record, .list, .tuple, .variant, .option, .result, .own, .borrow, .resource => {},
+        .value, .func, .enum_, .flags, .record, .list, .tuple, .variant, .option, .result, .stream, .future, .own, .borrow, .resource => {},
     }
 }
 
@@ -335,6 +335,8 @@ fn checkDeclDefTypeRefsNamed(dt: DefType, scope: anytype) Error!void {
         .tuple => |t| for (t.types) |vt| try checkDeclValTypeNamed(vt, scope),
         .list => |l| try checkDeclValTypeNamed(l.element.*, scope),
         .option => |o| try checkDeclValTypeNamed(o.payload.*, scope),
+        .stream => |s| if (s.payload) |p| try checkDeclValTypeNamed(p, scope),
+        .future => |f| if (f.payload) |p| try checkDeclValTypeNamed(p, scope),
         .variant => |v| for (v.cases) |c| {
             if (c.payload) |pl| try checkDeclValTypeNamed(pl, scope);
         },
@@ -376,6 +378,12 @@ fn checkDeclRefNamed(idx: u32, scope: anytype) Error!void {
                     .tuple => |t| for (t.types) |vt| try checkDeclValTypeNamed(vt, scope),
                     .list => |l| checkDeclValTypeNamed(l.element.*, scope),
                     .option => |o| checkDeclValTypeNamed(o.payload.*, scope),
+                    .stream => |s| {
+                        if (s.payload) |p| try checkDeclValTypeNamed(p, scope);
+                    },
+                    .future => |f| {
+                        if (f.payload) |p| try checkDeclValTypeNamed(p, scope);
+                    },
                     .result => |res| {
                         if (res.ok) |ok| try checkDeclValTypeNamed(ok, scope);
                         if (res.err) |er| try checkDeclValTypeNamed(er, scope);
@@ -488,6 +496,8 @@ fn checkNotResourceCarrying(info: *const TypeInfo, dt: DefType) Error!void {
         .tuple => |t| for (t.types) |vt| try checkValTypeNotResource(info, vt),
         .list => |l| try checkValTypeNotResource(info, l.element.*),
         .option => |o| try checkValTypeNotResource(info, o.payload.*),
+        .stream => |s| if (s.payload) |p| try checkValTypeNotResource(info, p),
+        .future => |f| if (f.payload) |p| try checkValTypeNotResource(info, p),
         .variant => |v| for (v.cases) |c| {
             if (c.payload) |pl| try checkValTypeNotResource(info, pl);
         },
@@ -666,7 +676,7 @@ fn checkDefTypeLabelDups(dt: DefType) Error!void {
         },
         .enum_ => |e| try checkLabelSliceDups(e.labels),
         .flags => |fl| try checkLabelSliceDups(fl.labels),
-        .value, .list, .tuple, .option, .result, .own, .borrow, .resource => {},
+        .value, .list, .tuple, .option, .result, .stream, .future, .own, .borrow, .resource => {},
         .instance_type, .component_type => {},
     }
 }
@@ -718,6 +728,8 @@ fn checkDefTypeRefsNamed(info: *const TypeInfo, dt: DefType) Error!void {
         .tuple => |t| for (t.types) |vt| try checkValTypeNamed(info, vt),
         .list => |l| try checkValTypeNamed(info, l.element.*),
         .option => |o| try checkValTypeNamed(info, o.payload.*),
+        .stream => |s| if (s.payload) |p| try checkValTypeNamed(info, p),
+        .future => |f| if (f.payload) |p| try checkValTypeNamed(info, p),
         .variant => |v| for (v.cases) |c| {
             if (c.payload) |p| try checkValTypeNamed(info, p);
         },
@@ -756,7 +768,7 @@ fn checkDefTypeLabels(dt: DefType) Error!void {
         .variant => |v| for (v.cases) |c| try checkLabel(c.name),
         .enum_ => |e| for (e.labels) |l| try checkLabel(l),
         .flags => |fl| for (fl.labels) |l| try checkLabel(l),
-        .value, .list, .tuple, .option, .result, .own, .borrow, .resource => {},
+        .value, .list, .tuple, .option, .result, .stream, .future, .own, .borrow, .resource => {},
         .instance_type, .component_type => {},
     }
 }
@@ -1018,7 +1030,7 @@ fn checkDefTypeOuterAliases(dt: DefType, depth: u32) Error!void {
             .import_decl => {},
             .instance_decl => |id| try checkInstanceDeclOuterAlias(id, depth + 1),
         },
-        .value, .func, .enum_, .flags, .record, .list, .tuple, .variant, .option, .result, .own, .borrow, .resource => {},
+        .value, .func, .enum_, .flags, .record, .list, .tuple, .variant, .option, .result, .stream, .future, .own, .borrow, .resource => {},
     }
 }
 
@@ -1078,6 +1090,8 @@ fn checkDefTypeIndices(dt: DefType, type_space_len: u32) Error!void {
         .tuple => |t| for (t.types) |vt| try checkValType(vt, type_space_len),
         .list => |l| try checkValType(l.element.*, type_space_len),
         .option => |o| try checkValType(o.payload.*, type_space_len),
+        .stream => |s| if (s.payload) |p| try checkValType(p, type_space_len),
+        .future => |f| if (f.payload) |p| try checkValType(p, type_space_len),
         .variant => |v| for (v.cases) |c| {
             if (c.payload) |p| try checkValType(p, type_space_len);
         },
