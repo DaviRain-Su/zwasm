@@ -302,6 +302,17 @@ pub const StreamFutureOp = enum {
     future_drop_writable, // 0x1b
 };
 
+/// `canon waitable-set.*` / `waitable.join` builtins (`Binary.md` 0x1f–0x23).
+/// `new`/`drop`/`join` are bare; `wait`/`poll` carry a `cancellable` flag + a
+/// `memory` index (where the delivered event tuple is written).
+pub const WaitableSetOp = enum {
+    new, // 0x1f
+    wait, // 0x20
+    poll, // 0x21
+    drop, // 0x22
+    join, // 0x23
+};
+
 /// One `canon` section definition (`Binary.md` `canon`). B6 models lift/lower +
 /// the resource builtins; the stream/future builtins are the CM-async front.
 pub const Canon = union(enum) {
@@ -319,6 +330,9 @@ pub const Canon = union(enum) {
     /// `canon task.return` (0x09): the core func an async task imports to return
     /// its `result` (a single optional valtype), lifted via `opts`.
     task_return: struct { result: ?ValType, opts: CanonOpts },
+    /// `canon waitable-set.*` / `waitable.join` (0x1f–0x23). `memory`/`cancellable`
+    /// present only for `wait`/`poll`.
+    waitable_set: struct { op: WaitableSetOp, cancellable: bool = false, memory: ?u32 = null },
 };
 
 /// `core:instantiatearg ::= name 0x12 instanceidx` — a `with` argument
@@ -361,6 +375,9 @@ pub const CoreFuncDef = union(enum) {
     /// `canon task.return` (0x09) minted into the core-func space ("(core
     /// func)") — carries the result type + lift `opts` the async runner needs.
     task_return: struct { result: ?ValType, opts: CanonOpts },
+    /// A `canon waitable-set.*` / `waitable.join` (0x1f–0x23) minted into the
+    /// core-func space; `memory` set only for `wait`/`poll`.
+    waitable_set: struct { op: WaitableSetOp, cancellable: bool = false, memory: ?u32 = null },
     /// A core-func `alias` (a core-instance export, or an `outer` alias).
     alias: AliasTarget,
 };
@@ -1357,6 +1374,21 @@ fn decodeStreamFutureCanon(op: StreamFutureOp, body: []const u8, pos: *usize) Er
     return .{ .stream_future = sf };
 }
 
+/// `canon waitable-set.{wait,poll}` (0x20/0x21): `cancel?` flag byte (0x00/0x01)
+/// then a `core:memidx` (where the event tuple is written).
+fn decodeWaitableSetWait(op: WaitableSetOp, body: []const u8, pos: *usize) Error!Canon {
+    if (pos.* >= body.len) return Error.UnsupportedCanon;
+    const cancel_byte = body[pos.*];
+    pos.* += 1;
+    const cancellable = switch (cancel_byte) {
+        0x00 => false,
+        0x01 => true,
+        else => return Error.UnsupportedCanon,
+    };
+    const memory = try leb128.readUleb128(u32, body, pos);
+    return .{ .waitable_set = .{ .op = op, .cancellable = cancellable, .memory = memory } };
+}
+
 fn decodeCanonSection(arena: Allocator, out: *std.ArrayList(Canon), body: []const u8) Error!void {
     var pos: usize = 0;
     const count = try leb128.readUleb128(u32, body, &pos);
@@ -1400,7 +1432,13 @@ fn decodeCanonSection(arena: Allocator, out: *std.ArrayList(Canon), body: []cons
             0x19 => try decodeStreamFutureCanon(.future_cancel_write, body, &pos),
             0x1a => try decodeStreamFutureCanon(.future_drop_readable, body, &pos),
             0x1b => try decodeStreamFutureCanon(.future_drop_writable, body, &pos),
-            // subtask / task / waitable / thread builtins (0x05..0x0d, 0x1c..) defer.
+            0x1f => .{ .waitable_set = .{ .op = .new } },
+            0x20 => try decodeWaitableSetWait(.wait, body, &pos),
+            0x21 => try decodeWaitableSetWait(.poll, body, &pos),
+            0x22 => .{ .waitable_set = .{ .op = .drop } },
+            0x23 => .{ .waitable_set = .{ .op = .join } },
+            // subtask / task / context / thread / error-context builtins
+            // (0x05–0x0d, 0x1c–0x1e, 0x24+) defer.
             else => return Error.UnsupportedCanon,
         };
         try out.append(arena, canon);
@@ -1600,6 +1638,7 @@ pub fn decodeTypeInfo(parent: Allocator, component: *const decode.Component) Err
                 .resource_rep => |t| try core_funcs.append(a, .{ .resource_rep = t }),
                 .stream_future => |sf| try core_funcs.append(a, .{ .stream_future = .{ .op = sf.op, .type_index = sf.type_index } }),
                 .task_return => |tr| try core_funcs.append(a, .{ .task_return = .{ .result = tr.result, .opts = tr.opts } }),
+                .waitable_set => |ws| try core_funcs.append(a, .{ .waitable_set = .{ .op = ws.op, .cancellable = ws.cancellable, .memory = ws.memory } }),
                 .lift => try component_funcs.append(a, .{ .lift = @intCast(abs) }),
             },
             .alias => for (aliases.items[aliases_before..], aliases_before..) |al, al_abs| {

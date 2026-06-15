@@ -1555,6 +1555,9 @@ fn synthDef(info: *const ctypes.TypeInfo, built: []const ?Built, ex: ctypes.Core
             // task.return (CM-async) is satisfied by the P3 runner's host
             // builtin (ADR-0189 ζ2); it records the task's delivered result.
             .task_return => return .task_return_builtin,
+            // waitable-set builtins decode (E2a) but the host wiring is E2b —
+            // fail loudly until then rather than silently mis-bind.
+            .waitable_set => return error.UnsupportedWasiImport,
             // stream.new/future.new are wired (ADR-0189 ζ2 Slice 2); the rest of
             // the stream/future builtins (read/write/cancel/drop) land in a later
             // slice — fail loudly rather than silently mis-bind until then.

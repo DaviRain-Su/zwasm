@@ -418,6 +418,25 @@ test "canon section: stream/future builtins decode (0x0e–0x1b)" {
     try testing.expectEqual(@as(usize, 4), info.core_funcs.items.len);
 }
 
+test "canon section: waitable-set builtins decode (0x1f–0x23)" {
+    // count=4: waitable-set.new 0x1f; waitable.join 0x23; waitable-set.wait 0x20
+    // cancel=0x01 mem=0; waitable-set.drop 0x22 → 4 core funcs.
+    const body = [_]u8{ 0x04, 0x1f, 0x23, 0x20, 0x01, 0x00, 0x22 };
+    const bytes = comptime buildComponent(&.{.{ 8, &body }});
+    var info = try decodeBoth(bytes);
+    defer info.deinit();
+    try testing.expectEqual(types.WaitableSetOp.new, info.canons.items[0].waitable_set.op);
+    try testing.expectEqual(types.WaitableSetOp.join, info.canons.items[1].waitable_set.op);
+    const w = info.canons.items[2].waitable_set;
+    try testing.expectEqual(types.WaitableSetOp.wait, w.op);
+    try testing.expectEqual(true, w.cancellable);
+    try testing.expectEqual(@as(?u32, 0), w.memory);
+    try testing.expectEqual(types.WaitableSetOp.drop, info.canons.items[3].waitable_set.op);
+    // each mints a core func.
+    try testing.expectEqual(@as(usize, 4), info.core_funcs.items.len);
+    try testing.expectEqual(types.WaitableSetOp.wait, info.coreFunc(2).?.waitable_set.op);
+}
+
 test "enum decode: 0x6d label vec" {
     // enum { "red", "green" }: 0x6d count=2, "red" "green"
     const body = [_]u8{ 0x01, 0x6d, 0x02, 0x03, 'r', 'e', 'd', 0x05, 'g', 'r', 'e', 'e', 'n' };

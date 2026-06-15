@@ -1077,6 +1077,10 @@ fn checkCanons(info: *const TypeInfo, type_space_len: u32) Error!void {
             };
             try checkCanonOpts(info, tr.opts);
         },
+        .waitable_set => |ws| {
+            // wait/poll write the event tuple to `(memory m)`; bounds-check it.
+            if (ws.memory) |m| if (m >= info.core_memory_count) return Error.InvalidCanon;
+        },
     };
 }
 
