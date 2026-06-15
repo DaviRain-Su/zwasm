@@ -3,7 +3,7 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Current state — WASI-0.3 campaign (D-335); callback loop + stream peer contract COMPLETE (`13c7afce`)
+## Current state — WASI-0.3 campaign (D-335); D+ζ2+E+F done — async runs from the CLI (`2962dd21`)
 
 **WASI 0.3 / Preview 3 campaign** (Front D, ratified 2026-06-11; CM-async — `async` func / `stream<T>` /
 `future<T>`, NOT core stack-switching). Critical path A→B→C→D(crux)→E→F→G; full unit plan + per-unit DONE-SHAs
@@ -36,35 +36,37 @@ handle); a guest `future.read` on it COMPLETES with the `ok` discriminant (0, 1 
 succeeds, no rendezvous/typed-marshalling. E2E `async_future_result.wat`: write "hi" → future.read →
 COMPLETED(1)+ok. **The write/read-via-stream interface contract (stream + return future) is now complete.**
 
-**NEXT — Unit E breadth / F / G** (the core async mechanism + the stdio stream contract are proven; remaining
-is breadth + the public surface):
-- **Typed/multi-byte element marshalling** — E1/E3/E2c moved `u8` only (count==bytes). Generalise the stream
-  read/write byte math + the marshalling to arbitrary element WIT types via the Unit-C `canon.zig` store/load
-  (resolve the element type from the stream `type_index`, `bytes = count * elem_size`). Needs a typed (non-u8)
-  stream interface or a guest-to-guest path to exercise it — scope a fixture first. (Latent: the current code
-  treats `count` as bytes — correct only for `u8` streams.)
-- **General guest-to-guest stream COMPLETION** — the Zone-1 rendezvous doesn't buffer the in-flight bytes; a
-  true guest↔guest copy needs the host to hold both ends' buffers. Separate harder design (likely an ADR).
-- Then **F** (async-export public API — the C/Zig embedder surface to drive an async component + read its
-  result) and **G** (a `test/component/p3` corpus consolidating the ~15 async fixtures). Per D-335.
-  (**D-444** P3-host file split when E settles.)
+**Unit F DONE** (`2962dd21`): `runWasiMain` builds once + dispatches — a `canon lift` with `opts.is_async` → the
+P3 callback loop, else the sync `wasi:cli/run` path (`runWasiP2MainBuilt`). `cli/run.zig` calls it → an async
+WASI-0.3 component **runs from `zwasm run`** (CLI e2e: write-via-stream → "hi"). **The async runtime is reachable
+through the public CLI/embedder surface.**
+
+**NEXT — Unit G + the deferred breadth** (the campaign's core path D→…→F is e2e-proven CLI-reachable):
+- **G — a `test/component/p3` corpus** consolidating the ~15 async fixtures (`async_*.wat/.wasm`) + a runner
+  entry, so the async surface is a named regression corpus (today they're individual `component_wasi_p3.zig`
+  inline tests). Light reorg + an aggregator. Per D-335.
+- **Deferred breadth** (separate, harder — scope/ADR when picked up): typed/multi-byte element marshalling
+  (E moved `u8` only, `count==bytes`; generalise via `canon.zig` store/load + `bytes=count*elem_size`, needs a
+  non-`u8` exercise path); general guest↔guest stream COMPLETION (Zone-1 rendezvous doesn't buffer bytes — host
+  must hold both ends' buffers); broader WASI-P3 host interfaces (sockets/http/clocks async).
+- (**D-444** P3-host file split when E settles.)
 - Then **F** (async-export public API surface — the embedder C/Zig API for driving an async component) and **G**
   (a `test/component/p3` corpus consolidating the async fixtures). Per D-335. (**D-444** P3-host file split.)
 
 ## Active bundle
 
 - **Bundle-ID**: wasi03-D-335 (§9.0 Front D; WASI 0.3 / Preview 3; units A→G)
-- **Cycles-remaining**: ~3 (D + E callback-loop + stdio stream contract COMPLETE; remaining = E breadth (typed marshalling) → F → G)
+- **Cycles-remaining**: ~2 (D+ζ2+E+F done — async runs from CLI; remaining = G corpus + deferred breadth)
 - **Continuity-memo**: critical path **A→B→C→D(DONE)→E(callback loop EXIT/YIELD/WAIT + both stream dirs e2e DONE; breadth next)→F→G**
   (full plan in **D-335**; design in **ADR-0187** — stackless callback ABI, no fibers). CM-async, NOT core
   stack-switching. Spec: `~/Documents/OSS/{WASI, WebAssembly/component-model}` (design/mvp/{Binary,CanonicalABI,
   Concurrency}.md); ref impl `~/Documents/OSS/wasmtime` (43+; `concurrent/futures_and_streams.rs`).
 - **Exit-condition**: a WASI-0.3 async/stream/future component runs end-to-end through zwasm (new P3
   corpus green, 3-host); each unit lands green per D-335 along the way.
-- **Unit D + E callback-loop + stdio stream contract COMPLETE (HIGH/crux); E breadth START HERE**: Zone-1 model
-  + P3 runner + ζ2 + host stream peers (both directions COMPLETE) + waitable-set + WAIT-path + return-future
-  all e2e green. Next = E breadth: typed/multi-byte element marshalling (needs a non-u8 fixture) → then F
-  (async public API) / G (p3 corpus). (D-444 = P3-host split when E settles.)
+- **Unit D + ζ2 + E + F DONE (HIGH/crux); G START HERE**: the async runtime runs an async WASI-0.3 component
+  from `zwasm run` (callback loop EXIT/YIELD/WAIT + both stream dirs + waitable-set + return-future + CLI
+  dispatch, all e2e green). Next = G (p3 corpus consolidation) + the deferred breadth (typed marshalling,
+  guest↔guest COMPLETION, broader P3 interfaces — separate/harder). (D-444 = P3-host split when E settles.)
 
 ## Long-tail (debt-tracked / parked — NOT active; see §9.0 fronts + debt.yaml)
 
