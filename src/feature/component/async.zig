@@ -27,6 +27,11 @@ pub const Error = error{
     /// The table reached `MAX_LENGTH`.
     TableFull,
     OutOfMemory,
+    /// `drop` of a readable/writable end while a copy is in progress
+    /// (spec `CopyEnd.drop` traps unless the state is IDLE/DONE).
+    CopyInProgress,
+    /// `cancel-read`/`cancel-write` on an end with no async copy in flight.
+    NotCopying,
 };
 
 /// Copy-state of a stream/future end (`CanonicalABI.md` §Stream State). The
@@ -66,6 +71,56 @@ pub const StreamFutureEnd = struct {
     side: EndSide,
     elem_type: ?u32,
     state: CopyState = .idle,
+
+    /// spec `CopyEnd.copying` — true while a copy is in flight or cancelling
+    /// (the states a `drop` must not interrupt).
+    pub fn copying(self: StreamFutureEnd) bool {
+        return switch (self.state) {
+            .idle, .done => false,
+            .sync_copying, .async_copying, .cancelling_copy => true,
+        };
+    }
+
+    /// Initiate a read (readable end) / write (writable end) through `shared`
+    /// and fold the rendezvous result into this end's `CopyState`: a blocked
+    /// op parks the end in `async_copying` (the event loop / Unit-δ resumes it),
+    /// a synchronous rendezvous returns to `idle`, and a dropped peer is `done`.
+    /// A within-call (synchronous) completion never lingers in `sync_copying`,
+    /// so there is nothing to cancel for it — cancel only targets `async_copying`.
+    pub fn copy(self: *StreamFutureEnd, shared: *SharedStream, n: u32) Step {
+        const step = switch (self.side) {
+            .readable => shared.read(n),
+            .writable => shared.write(n),
+        };
+        self.state = switch (step.caller) {
+            .blocked => .async_copying,
+            .completed => .idle,
+            .dropped => .done,
+        };
+        return step;
+    }
+
+    /// `stream.cancel-{read,write}` — cancel this end's in-flight async copy,
+    /// clearing its pending slot in `shared`. Returns items copied so far (0 in
+    /// the rendezvous-count model — partial-copy progress lands with the host
+    /// buffer wiring). Errors if no async copy is in flight.
+    pub fn cancel(self: *StreamFutureEnd, shared: *SharedStream) Error!u32 {
+        if (self.state != .async_copying) return Error.NotCopying;
+        self.state = .cancelling_copy;
+        if (shared.pending) |p| {
+            if (p.side == self.side) shared.pending = null;
+        }
+        self.state = .idle;
+        return 0;
+    }
+
+    /// `drop` a readable/writable end — traps (errors) if a copy is in
+    /// progress; otherwise marks the shared stream dropped so the peer's next
+    /// read/write observes `DROPPED`.
+    pub fn drop(self: *StreamFutureEnd, shared: *SharedStream) Error!void {
+        if (self.copying()) return Error.CopyInProgress;
+        shared.dropped = true;
+    }
 };
 
 /// The per-component stream/future handle table (ADR-0187). Index 0 is the
@@ -223,6 +278,45 @@ test "stream rendezvous: dropped end + zero-length livelock tiebreak (write wins
     const w = s.write(0);
     try testing.expectEqual(@as(u32, 0), w.caller.completed);
     try testing.expect(s.pending != null); // read still pending
+}
+
+test "stream end CopyState: blocked copy → async_copying; cancel → idle; drop traps while copying" {
+    var shared = SharedStream{ .elem_type = null };
+    var reader = StreamFutureEnd{ .kind = .stream, .side = .readable, .elem_type = null };
+    try testing.expect(!reader.copying());
+
+    // a read with no pending writer blocks → the end enters async_copying.
+    try testing.expect(reader.copy(&shared, 4).caller == .blocked);
+    try testing.expectEqual(CopyState.async_copying, reader.state);
+    try testing.expect(reader.copying());
+
+    // dropping an end with a copy in progress traps (spec CopyEnd.drop).
+    try testing.expectError(Error.CopyInProgress, reader.drop(&shared));
+
+    // cancel clears the in-flight copy and the shared pending slot → idle.
+    _ = try reader.cancel(&shared);
+    try testing.expectEqual(CopyState.idle, reader.state);
+    try testing.expect(shared.pending == null);
+
+    // now drop is allowed and sets the shared dropped flag.
+    try reader.drop(&shared);
+    try testing.expect(shared.dropped);
+}
+
+test "stream end copy: synchronous rendezvous stays idle; a dropped peer → done" {
+    var shared = SharedStream{ .elem_type = null };
+    var writer = StreamFutureEnd{ .kind = .stream, .side = .writable, .elem_type = null };
+    var reader = StreamFutureEnd{ .kind = .stream, .side = .readable, .elem_type = null };
+
+    try testing.expect(writer.copy(&shared, 2).caller == .blocked); // writer pends
+    const step = reader.copy(&shared, 4); // reader rendezvous → resolves synchronously
+    try testing.expectEqual(@as(u32, 2), step.caller.completed);
+    try testing.expectEqual(CopyState.idle, reader.state);
+
+    // a peer drop makes the next copy see DROPPED → the end is done.
+    shared.dropped = true;
+    try testing.expect(reader.copy(&shared, 1).caller == .dropped);
+    try testing.expectEqual(CopyState.done, reader.state);
 }
 
 test "stream/future end table: add/get/remove lifecycle + index-0 reserved" {
