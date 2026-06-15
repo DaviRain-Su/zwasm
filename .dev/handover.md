@@ -3,7 +3,7 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Current state — WASI-0.3 campaign (D-335); Units A+B+C done, D-α..δ done; branch GREEN (`55dfd53d`)
+## Current state — WASI-0.3 campaign (D-335); Units A+B+C done, D-α..ε done; branch GREEN (`038214ee`)
 
 **WASI 0.3 / Preview 3 campaign is the active feature work** (Front D, ratified 2026-06-11; CM-async —
 `async` func / `stream<T>` / `future<T>` — NOT core stack-switching). Critical path A→B→C→D(crux)→E→F→G;
@@ -27,29 +27,33 @@ key question: zwasm's **synchronous engine CAN host CM-async via the stackless c
 hard blocker**. Staged α→η in D-335. **α** (`17a810f9`): handle table + `CopyState` + `ReturnCode`.
 **β** (`71ffb302`): `SharedStream` read/write rendezvous. **γ** (`253dcb56`): `StreamFutureEnd` CopyEnd methods
 (`copying`/`copy`/`cancel`/`drop`). **δ** (`be5a3e06`+`55dfd53d`): `EventCode`/`EventTuple`/`Waitable` slot +
-`WaitableSet`, and the delivery wiring — `SharedStream.pending` carries the peer handle, `copy()` delivers the
-rendezvous result as the peer's `pending_event`, `WaitableSet.poll` returns it. A blocked reader now gets a
-`STREAM_READ completed(n)` event end-to-end after the writer rendezvous.
+`WaitableSet`, and the delivery wiring. **ε** (`038214ee`): `SharedFuture` single-shot rendezvous
+(FUTURE_READ/WRITE; only the writable end observes a reader-drop; `copy`/`cancel`/`drop` are now generic over
+the shared type via `anytype`). The full Zone-1 async data model — streams + futures, rendezvous + event
+delivery — is complete and tested. (`D-337` tracks the deferred writable-future-drop-must-write guard.)
 
-**NEXT — Unit D-ε (futures).** Add `SharedFuture` + future-end copy: a future is a single-shot value (at most
-ONE item; no count — `ReturnCode.completed` carries 0), otherwise mirroring `SharedStream`'s read/write
-rendezvous + `Waitable`/event delivery (`FUTURE_READ`/`FUTURE_WRITE` codes). Reuse the `StreamFutureEnd`
-(`kind = .future`) + `WaitableSet` machinery; the rendezvous is simpler (no partial copy). Spec:
-`CanonicalABI.md` §Future State. Verify the prior remote kick at Step 0.7.
+**NEXT — Unit D-ζ (subtask + async-lowered import calls — the HOST→guest async path).** This is the first
+unit that leaves Zone-1 pure data and WIRES async.zig into actual execution: an async-LOWERED import call
+(guest calls an async import) returns a `subtask` waitable; the canon `stream.*`/`future.*` builtins (decoded
+in Unit B) must now DISPATCH into `async.zig` (create ends, run `copy`, deliver events). **Step 0 = survey
+first** how the existing canon resource builtins dispatch to the host (`component_wasi_p2.zig` synthDef /
+the core-func → host-op path) — ζ extends that seam for async. Likely Zone-2/3. Then η = `task.return` +
+async export lifting + the callback event loop. Verify the prior remote kick (ubuntu + the windows batch that
+fires this turn) at Step 0.7.
 
 ## Active bundle
 
 - **Bundle-ID**: wasi03-D-335 (§9.0 Front D; WASI 0.3 / Preview 3; units A→G)
-- **Cycles-remaining**: ~3 (A+B+C + D-α..δ done; D is the multi-cycle crux, staged α→η per ADR-0187)
-- **Continuity-memo**: critical path **A(done)→B(done)→C(done)→D(α..δ done; ε next)→E→F→G** (full plan in
-  **D-335**; design in **ADR-0187** — stackless callback ABI, no fibers). CM-async, NOT core stack-switching.
-  Spec: `~/Documents/OSS/{WASI, WebAssembly/component-model}` (design/mvp/{Binary,CanonicalABI,Concurrency}.md);
-  ref impl `~/Documents/OSS/wasmtime` (43+; `concurrent/futures_and_streams.rs`).
+- **Cycles-remaining**: ~2 (A+B+C + D-α..ε done; D is the multi-cycle crux, staged α→η per ADR-0187)
+- **Continuity-memo**: critical path **A(done)→B(done)→C(done)→D(α..ε done; ζ next = host-wiring)→E→F→G**
+  (full plan in **D-335**; design in **ADR-0187** — stackless callback ABI, no fibers). CM-async, NOT core
+  stack-switching. Spec: `~/Documents/OSS/{WASI, WebAssembly/component-model}` (design/mvp/{Binary,CanonicalABI,
+  Concurrency}.md); ref impl `~/Documents/OSS/wasmtime` (43+; `concurrent/futures_and_streams.rs`).
 - **Exit-condition**: a WASI-0.3 async/stream/future component runs end-to-end through zwasm (new P3
   corpus green, 3-host); each unit lands green per D-335 along the way.
-- **Current unit — D (HIGH/crux; α..δ done, ε START HERE)**: stream handle table + rendezvous + CopyState +
-  event delivery landed. ε = futures (SharedFuture single-shot value; FUTURE_READ/WRITE; reuse the stream
-  machinery). Then ζ subtask · η task.return + callback loop. async.zig is the home.
+- **Current unit — D (HIGH/crux; α..ε done, ζ START HERE)**: the full Zone-1 async data model (streams +
+  futures, rendezvous + events) is done in async.zig. ζ = subtask + async-lowered import calls = the HOST→guest
+  wiring (canon builtins dispatch into async.zig); survey the canon→host seam first. Then η task.return + loop.
 
 ## Long-tail (debt-tracked / parked — NOT active; see §9.0 fronts + debt.yaml)
 
