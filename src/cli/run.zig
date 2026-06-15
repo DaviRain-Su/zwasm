@@ -678,14 +678,18 @@ test "runComponentWasi: a real WASI-P2 component runs from the CLI path + prints
     try testing.expectEqualStrings("hello\n", capture.items);
 }
 
-test "runWasm: malformed wasm produces an instantiate-phase diagnostic" {
+test "runWasm: malformed wasm produces a parse-phase diagnostic with byte offset (F6)" {
+    // D-334 F6: the parser now sets a specific .parse diagnostic, so the coarse
+    // `.instantiate` "module decode/validate failed" fallback (run.zig ~423, set
+    // only when lastDiagnostic()==null) steps aside. malformed_magic_wasm = good
+    // magic + bad version 0xffffffff → UnsupportedVersion @ offset 0x4.
     const result = runWasm(testing.allocator, testing.io, &malformed_magic_wasm, &.{});
     try testing.expectError(error.ModuleAllocFailed, result);
 
     const diag = diagnostic.lastDiagnostic().?;
-    try testing.expectEqual(diagnostic.Phase.instantiate, diag.phase);
-    try testing.expectEqual(diagnostic.Kind.module_alloc_failed, diag.kind);
-    try testing.expect(std.mem.startsWith(u8, diag.message(), "module decode/validate failed"));
+    try testing.expectEqual(diagnostic.Phase.parse, diag.phase);
+    try testing.expect(std.mem.find(u8, diag.message(), "unsupported binary version") != null);
+    try testing.expect(std.mem.find(u8, diag.message(), "0x4") != null);
 }
 
 test "runWasmCaptured: --invoke 'main' on proc_exit_42 fixture returns exit code 42" {

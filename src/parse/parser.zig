@@ -21,6 +21,7 @@ const std = @import("std");
 const leb128 = @import("../support/leb128.zig");
 const module_mod = @import("../runtime/module.zig");
 const needs_heap_detector = @import("../feature/gc/needs_heap_detector.zig");
+const diagnostic = @import("../diagnostic/diagnostic.zig");
 
 const Allocator = std.mem.Allocator;
 const Module = module_mod.Module;
@@ -73,10 +74,19 @@ pub const Error = error{
 /// Section bodies are borrowed slices of `input`; the caller must keep
 /// `input` alive for as long as the returned `Module` is used.
 pub fn parse(alloc: Allocator, input: []const u8) Error!Module {
-    if (input.len < 8) return Error.TruncatedHeader;
-    if (!std.mem.eql(u8, input[0..4], &MAGIC)) return Error.InvalidMagic;
+    if (input.len < 8) {
+        diagnostic.setDiag(.parse, .other, .unknown, "truncated module header: need 8 bytes for magic+version, got {d}", .{input.len});
+        return Error.TruncatedHeader;
+    }
+    if (!std.mem.eql(u8, input[0..4], &MAGIC)) {
+        diagnostic.setDiag(.parse, .other, .unknown, "invalid magic bytes at offset 0x0 (expected 00 61 73 6d '\\0asm')", .{});
+        return Error.InvalidMagic;
+    }
     const version = std.mem.readInt(u32, input[4..8], .little);
-    if (version != VERSION) return Error.UnsupportedVersion;
+    if (version != VERSION) {
+        diagnostic.setDiag(.parse, .other, .unknown, "unsupported binary version {d} at offset 0x4 (expected {d})", .{ version, VERSION });
+        return Error.UnsupportedVersion;
+    }
 
     var sections: std.ArrayList(Section) = .empty;
     errdefer sections.deinit(alloc);
@@ -86,11 +96,15 @@ pub fn parse(alloc: Allocator, input: []const u8) Error!Module {
     var seen = [_]bool{false} ** 14;
 
     while (pos < input.len) {
+        const section_start = pos;
         const id_byte = input[pos];
         pos += 1;
         const size = try leb128.readUleb128(u32, input, &pos);
         const size_usize: usize = @intCast(size);
-        if (size_usize > input.len - pos) return Error.SectionTooLarge;
+        if (size_usize > input.len - pos) {
+            diagnostic.setDiag(.parse, .other, .unknown, "section (id {d}) size {d} exceeds remaining input at offset 0x{x}", .{ id_byte, size_usize, section_start });
+            return Error.SectionTooLarge;
+        }
         const body = input[pos .. pos + size_usize];
         pos += size_usize;
 
@@ -104,17 +118,29 @@ pub fn parse(alloc: Allocator, input: []const u8) Error!Module {
             // overflow).
             var cpos: usize = 0;
             const name_len = try leb128.readUleb128(u32, body, &cpos);
-            if (name_len > body.len - cpos) return Error.SectionTooLarge;
+            if (name_len > body.len - cpos) {
+                diagnostic.setDiag(.parse, .other, .unknown, "custom section name length {d} exceeds section body at offset 0x{x}", .{ name_len, section_start });
+                return Error.SectionTooLarge;
+            }
             try sections.append(alloc, .{ .id = .custom, .body = body });
             continue;
         }
-        if (id_byte > 13) return Error.UnknownSectionId;
+        if (id_byte > 13) {
+            diagnostic.setDiag(.parse, .other, .unknown, "unknown section id {d} at offset 0x{x} (valid: 0-13)", .{ id_byte, section_start });
+            return Error.UnknownSectionId;
+        }
 
-        if (seen[id_byte]) return Error.DuplicateSection;
+        if (seen[id_byte]) {
+            diagnostic.setDiag(.parse, .other, .unknown, "duplicate section id {d} at offset 0x{x}", .{ id_byte, section_start });
+            return Error.DuplicateSection;
+        }
         seen[id_byte] = true;
 
         const ord = orderIndex(id_byte);
-        if (ord <= last_known_order) return Error.SectionOutOfOrder;
+        if (ord <= last_known_order) {
+            diagnostic.setDiag(.parse, .other, .unknown, "section id {d} out of order at offset 0x{x} (Wasm §5.5 ordering)", .{ id_byte, section_start });
+            return Error.SectionOutOfOrder;
+        }
         last_known_order = ord;
 
         try sections.append(alloc, .{ .id = @enumFromInt(id_byte), .body = body });
@@ -210,6 +236,24 @@ test "parse: rejects bad magic" {
         0x01, 0x00, 0x00, 0x00,
     };
     try testing.expectError(Error.InvalidMagic, parse(testing.allocator, &bad));
+}
+
+test "parse: F6 — reject sites populate a parse diagnostic with byte offset" {
+    // bad magic → parse-phase diagnostic, no longer a bare @errorName.
+    diagnostic.clearDiag();
+    const bad_magic = [_]u8{ 0x00, 0x61, 0x73, 0x6e, 0x01, 0x00, 0x00, 0x00 };
+    try testing.expectError(Error.InvalidMagic, parse(testing.allocator, &bad_magic));
+    const d1 = diagnostic.lastDiagnostic().?;
+    try testing.expectEqual(diagnostic.Phase.parse, d1.phase);
+    try testing.expect(std.mem.find(u8, d1.message(), "invalid magic") != null);
+
+    // unknown section id 99 sits at byte offset 0x8 (right after the 8-byte header).
+    diagnostic.clearDiag();
+    const bad_sec = [_]u8{ 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 99, 0x00 };
+    try testing.expectError(Error.UnknownSectionId, parse(testing.allocator, &bad_sec));
+    const d2 = diagnostic.lastDiagnostic().?;
+    try testing.expect(std.mem.find(u8, d2.message(), "unknown section id 99") != null);
+    try testing.expect(std.mem.find(u8, d2.message(), "0x8") != null);
 }
 
 test "parse: rejects bad version (0)" {
