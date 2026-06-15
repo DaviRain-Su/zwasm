@@ -1613,51 +1613,6 @@ entries:
     refs: |-
       flake.nix (devShells.gen rustWasm targets — wasip3 NOT addable yet);
       ~/Documents/OSS/wasi-testsuite/tests/rust/wasm32-wasip3/ (BUCK + wit + src/bin)
-  - id: "D-449"
-    layer: "code"
-    status: "now"
-    front: D-wasi03
-    description: |-
-      now (real correctness gap, surfaced 2026-06-16 by front-① wasip3 fixtures). A
-      wasip3 component guest reads env vars + argv as EMPTY even though the component
-      host path wires `p2GetEnvironment` (from `ctx.host.envs`) + get-arguments (from
-      `ctx.host.args`) — `component_wasi_p2.zig:1046/1064`, bound at `:1445`. REPRO:
-      a real rust wasip3 cli-env (`std::env::var("WASI_TEST")` → exit 42 iff "ok")
-      run via `runWasiMain` with `host.envs = {WASI_TEST: ok}` → exits 1 (guest saw
-      empty), expected 42; same for cli-args (`std::env::args().nth(1)`). NOT import
-      resolution: the SAME-version `wasi:cli/stdout@0.2.6` works (cli-stdout fixture
-      passes). NOT version skew: the component imports environment@0.2.6 and stdout
-      @0.2.6 alike. Leading hypothesis: the `get-environment` `list<tuple<string,
-      string>>` / `get-arguments` `list<string>` retptr LOWERING (nested list-of-
-      string, or string ptr/len encoding) doesn't match what the guest's generated
-      bindings decode → empty list. **INSTRUMENTED 2026-06-16** (eprintln in
-      p2GetEnvironment, cli-env run): get-environment IS CALLED with the correct
-      data — `envs.len=1`, `realloc_set=true` — yet the guest still exits 1. So it
-      is NOT host-delivery and NOT realloc-wiring (both fine); it is a BYTE-LEVEL
-      decode mismatch: the `list<tuple<string,string>>` bytes p2GetEnvironment
-      writes (retptr={list_ptr,n}; each tuple 16B = k{ptr,len},v{ptr,len}) aren't
-      what the wasip3 guest's bindings read. Next probe: dump the exact retptr +
-      list + string bytes and diff vs the canon ABI the guest expects (alignment?
-      the retptr indirection level? string encoding? tuple field order/stride?).
-      FIX then un-skip the cli-env/cli-args fixtures (recreate from this row: 5-line
-      `std::env::var`/`args().nth(1)` → exit 42, add `[[bin]]` + the gen-script loop
-      + the host.envs/args test asserting exit_code==42).
-      RELATED SYMPTOM (2026-06-16, same campaign, DISTINCT mechanism): a plain-std
-      wasip3 `std::io::stdin().read_to_string` ALSO reads EMPTY (cli-stdin fixture
-      exited 1 not 42 with `host.stdin_bytes="hello"`). Pattern: wasip3 component
-      OUTPUTS work (cli-exit ✓ + cli-stdout ✓ + cli-stderr ✓ all green) but INPUTS
-      don't reach the guest (env/args via get-environment list; stdin via cli/stdin
-      get-stdin → input-stream blocking-read). The stdin path is stream-based (not
-      the list marshalling), so likely a separate wiring gap — the component path's
-      blocking input-stream read may not source `host.stdin_bytes` (the async E3
-      read-via-stream used host_sources, a different path). Investigate alongside
-      env/args; both block the input-side conformance fixtures.
-    first_raised: "2026-06-16"
-    last_reviewed: "2026-06-16"
-    refs: |-
-      src/api/component_wasi_p2.zig (p2GetEnvironment ~L1046/L1064; bound ~L1445);
-      test/component/wasip3/ (cli-exit + cli-stdout fixtures; cli-env/args to re-add);
-      scripts/gen_wasip3_fixtures.sh
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.

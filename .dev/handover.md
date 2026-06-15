@@ -29,15 +29,15 @@ cloned** (`tests/rust/wasm32-wasip3`); wasm-tools/component-model refreshed (`im
   real rust wasip3 component hermetically (nightly `-Z build-std` + `wasm-component-ld --wasm-ld-path` nixpkgs
   wasm-ld + `link-self-contained=no` w/ stable wasip2 crt1/libc; pinned nightly 2026-06-14, reproducible). **VERIFIED:
   zwasm runs the output → exit 1** (cli-exit). Recipe: lesson `2026-06-16-wasip3-hermetic-build-recipe`; caveats in
-  D-448. **wasip3 conformance corpus — 3 OUTPUT fixtures GREEN**: cli-exit (`a03a22a1`, exit_code==1) + cli-stdout
-  (`31af8925`, stdout capture) + cli-stderr (`18658846`, stderr capture), via `test/component/wasip3/` + `scripts/
-  gen_wasip3_fixtures.sh`. **FOUND D-449 (now) — wasip3 INPUTS not delivered to the guest**: env/argv read EMPTY
-  (get-environment/get-arguments list<tuple/string> retptr marshalling) AND stdin reads EMPTY (cli/stdin input-
-  stream read) — despite the host wiring; OUTPUTS work, INPUTS don't. cli-env/cli-args/cli-stdin removed pending fix.
-  **D-449 NARROWED** (instrumented 2026-06-16): get-environment IS called with envs.len=1 + realloc OK, yet the guest
-  exits 1 → NOT host-delivery/realloc; a BYTE-LEVEL decode mismatch in the `list<tuple<string,string>>` lowering.
-  **NEXT (front①)**: dump p2GetEnvironment's retptr+list+string bytes vs the canon ABI the wasip3 guest expects
-  (alignment / retptr indirection / string encoding / tuple stride), fix, un-skip cli-env/args/stdin. Then ④ perf.
+  D-448. **wasip3 conformance corpus — 6 fixtures GREEN** (`a03a22a1`/`31af8925`/`18658846`/`32719a76`):
+  cli-exit + cli-stdout + cli-stderr + cli-env + cli-args + cli-stdin (exit + all 3 stdio + env + argv), real rust
+  wasip3 components via `test/component/wasip3/` + `scripts/gen_wasip3_fixtures.sh`. **D-449 RESOLVED — false alarm,
+  not a runtime bug**: env/args/stdin ARE delivered; the "empty input" was a fixture flaw — `wasi:cli/exit` is
+  `func(status: result<_,_>)` (ok/err only), so a guest `exit(N>0)` collapses to exit_code 1, making an `exit(42)`
+  success-sentinel unsatisfiable (subagent-instrumented: p2GetEnvironment called once, envs.len=1, bytes correct).
+  Lesson `2026-06-16-wasi-cli-exit-result-channel-fixture-trap` (signal success via exit(0)/stdout, never a numeric
+  code). **front① cli-conformance DONE.** **NEXT**: front ④ perf (no toolchain — measure benches regressed by the
+  feature additions, optimise within single-pass §1.3/§3.2) OR extend wasip3 conformance to filesystem/clocks/random.
 - **① WASI 0.3 conformance**: compile wasi-testsuite `rust/wasm32-wasip3` via `.#gen` (add wasm32-wasip3 target + wit
   deps), run as a conformance corpus.
 - **③ real-world corpus 50→100**: add MoonBit/Grain/Kotlin (Wasm-GC) + AssemblyScript/Swift/Zig toolchains to
