@@ -1543,8 +1543,9 @@ fn synthDef(info: *const ctypes.TypeInfo, built: []const ?Built, ex: ctypes.Core
             // the stream/future builtins (read/write/cancel/drop) land in a later
             // slice — fail loudly rather than silently mis-bind until then.
             .stream_future => |sf| switch (sf.op) {
-                .stream_new, .future_new, .stream_drop_readable, .stream_drop_writable, .future_drop_readable, .future_drop_writable => return .{ .async_builtin = .{ .op = sf.op, .type_index = sf.type_index } },
-                .stream_read, .stream_write, .stream_cancel_read, .stream_cancel_write, .future_read, .future_write, .future_cancel_read, .future_cancel_write => return error.UnsupportedWasiImport,
+                .stream_new, .future_new, .stream_drop_readable, .stream_drop_writable, .future_drop_readable, .future_drop_writable, .stream_read, .stream_write, .future_read, .future_write => return .{ .async_builtin = .{ .op = sf.op, .type_index = sf.type_index } },
+                // cancel-read/write land in a follow-on slice.
+                .stream_cancel_read, .stream_cancel_write, .future_cancel_read, .future_cancel_write => return error.UnsupportedWasiImport,
             },
             .alias => |t| switch (t) {
                 .core_export => |ce| {
@@ -1622,6 +1623,31 @@ fn p2FutureNew(caller: *Caller) WasiP2Error!u64 {
     return @as(u64, pair.readable) | (@as(u64, pair.writable) << 32);
 }
 
+/// `canon stream.read`/`stream.write` (+ future) (ADR-0189 ζ2, re-scoped per
+/// lesson 2026-06-16): drive one rendezvous step on the end named by `handle`
+/// (`StreamFutureEnd.copy` dispatches read vs write on the end's side) and
+/// return the packed `ReturnCode`. Single-task reaches only BLOCKED (no peer
+/// ready) or DROPPED (peer dropped first); a count > 0 COMPLETION needs a host
+/// stream peer (Unit E) — that path also wires the element marshalling at
+/// `ptr`, so it traps here until then (unreachable single-task).
+fn p2StreamFutureCopy(caller: *Caller, handle: u32, ptr: u32, count: u32) WasiP2Error!u32 {
+    _ = ptr; // the COMPLETION (count>0) marshalling consumer — Unit E
+    const abc = caller.data(AsyncBuiltinCtx);
+    const end = try abc.ctx.streams.get(handle);
+    const sh = try abc.ctx.shared.get(end.shared);
+    const step = switch (sh.*) {
+        .stream => |*s| try end.copy(s, &abc.ctx.streams, handle, count),
+        .future => |*f| try end.copy(f, &abc.ctx.streams, handle, count),
+    };
+    return switch (step.caller) {
+        .blocked => (async_mod.ReturnCode{ .blocked = {} }).encode(),
+        .dropped => (async_mod.ReturnCode{ .dropped = 0 }).encode(),
+        // n==0 moves no bytes; n>0 needs marshalling at `ptr` (Unit E) and is
+        // unreachable in the single-task model (no concurrent peer with data).
+        .completed => |n| if (n == 0) (async_mod.ReturnCode{ .completed = 0 }).encode() else error.OutOfBounds,
+    };
+}
+
 /// `canon stream.drop-{readable,writable}` / `future.drop-{readable,writable}`
 /// (ADR-0189 ζ2): mark the shared rendezvous dropped (so a blocked peer observes
 /// DROPPED — traps if a copy is mid-flight) then release the end + its shared ref
@@ -1662,9 +1688,10 @@ fn defineSynth(lk: *Linker, ns: []const u8, e: SynthExport, ctx: *WasiP2Ctx) !vo
                 .stream_new => try lk.defineFuncCtx(ns, e.name, @ptrCast(abc), fn (*Caller) WasiP2Error!u64, p2StreamNew),
                 .future_new => try lk.defineFuncCtx(ns, e.name, @ptrCast(abc), fn (*Caller) WasiP2Error!u64, p2FutureNew),
                 .stream_drop_readable, .stream_drop_writable, .future_drop_readable, .future_drop_writable => try lk.defineFuncCtx(ns, e.name, @ptrCast(abc), fn (*Caller, u32) WasiP2Error!void, p2StreamFutureDrop),
-                // read/write/cancel are a later ζ2 slice; synthDef already
-                // rejects them, so reaching here is a build-logic bug.
-                .stream_read, .stream_write, .stream_cancel_read, .stream_cancel_write, .future_read, .future_write, .future_cancel_read, .future_cancel_write => unreachable,
+                .stream_read, .stream_write, .future_read, .future_write => try lk.defineFuncCtx(ns, e.name, @ptrCast(abc), fn (*Caller, u32, u32, u32) WasiP2Error!u32, p2StreamFutureCopy),
+                // cancel is a follow-on slice; synthDef already rejects it, so
+                // reaching here is a build-logic bug.
+                .stream_cancel_read, .stream_cancel_write, .future_cancel_read, .future_cancel_write => unreachable,
             }
         },
         .guest_func => |g| try lk.defineCrossModuleFunc(ns, e.name, g.inst, g.name),

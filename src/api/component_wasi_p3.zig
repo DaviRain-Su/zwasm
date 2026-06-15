@@ -194,3 +194,41 @@ test "D-335 unit D-ζ2: canon stream.drop-{readable,writable} tear down both end
     try testing.expectError(async_mod.Error.InvalidHandle, built.ctx.streams.get(1));
     try testing.expectError(async_mod.Error.InvalidHandle, built.ctx.streams.get(2));
 }
+
+test "D-335 unit D-ζ2: stream.read with no writer returns BLOCKED (single-task)" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/async_stream_read_blocked.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+
+    // The guest reads a fresh stream with no writer and traps (unreachable) if
+    // the read did not return BLOCKED — so a clean run proves the BLOCKED path.
+    var built = try wasi_p2.buildWasiP2Component(&eng, testing.allocator, bytes, &host, .{});
+    defer built.deinit();
+    try driveAsyncMain(&built);
+}
+
+test "D-335 unit D-ζ2: stream.read after the writer drops returns DROPPED (single-task)" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/async_stream_read_dropped.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+
+    // The guest drops the writable end then reads the readable end; it traps
+    // unless the read reports DROPPED — a clean run proves the dropped-peer path.
+    var built = try wasi_p2.buildWasiP2Component(&eng, testing.allocator, bytes, &host, .{});
+    defer built.deinit();
+    try driveAsyncMain(&built);
+}
