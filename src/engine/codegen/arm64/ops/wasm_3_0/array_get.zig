@@ -6,9 +6,10 @@
 //! form struct uses; the +12 header is folded into the base first.
 //!
 //! Bounds: a single UNSIGNED compare `index >= length` also catches a
-//! negative index (negative i32 reinterpreted as u32 is huge). Both the
-//! null-ref and the OOB branch route to the generic `bounds_fixups` trap
-//! stub. Slab base chain mirrors struct_get/array_len. Encoders: Arm IHI
+//! negative index (negative i32 reinterpreted as u32 is huge). The null-ref
+//! branch routes to `null_ref_fixups` (code 10) and the OOB branch to
+//! `oob_fixups` (code 6) per D-293 slice-4c (NOT the generic bounds_fixups).
+//! Slab base chain mirrors struct_get/array_len. Encoders: Arm IHI
 //! 0055 §C6.2.65 (CMP imm), §C6.2.66 (CMP reg), §C6.2.26 (B.cond),
 //! §C6.2.131 (LDR imm), §C6.2.130 (LDR reg), §C6.2.4 (ADD).
 

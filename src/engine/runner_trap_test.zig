@@ -298,6 +298,36 @@ test "runVoidExportWasi: JIT struct.get null → null_reference code 10; array.g
     try testing.expectEqual(trap_surface.TrapKind.oob_memory, trap_surface.jitTrapCode(ag).?);
 }
 
+// D-293 array_oob: the packed-array `array.get_s` SIBLING was still on the generic
+// bounds_fixups while array.get/set were precise (slice-4c). Now rerouted to match:
+// null → null_reference (code 10), index OOB → oob_memory (code 6). Bytes from
+// `wasm-tools parse` of `(type $a (array i8))`. Mirrors the array.get test above.
+const arraygets_null_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x07, 0x02, 0x5e,
+    0x78, 0x00, 0x60, 0x00, 0x00, 0x03, 0x02, 0x01, 0x01, 0x07, 0x0a, 0x01,
+    0x06, 0x5f, 0x73, 0x74, 0x61, 0x72, 0x74, 0x00, 0x00, 0x0a, 0x0c, 0x01,
+    0x0a, 0x00, 0xd0, 0x00, 0x41, 0x00, 0xfb, 0x0c, 0x00, 0x1a, 0x0b,
+};
+const arraygets_oob_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x07, 0x02, 0x5e,
+    0x78, 0x00, 0x60, 0x00, 0x00, 0x03, 0x02, 0x01, 0x01, 0x07, 0x0a, 0x01,
+    0x06, 0x5f, 0x73, 0x74, 0x61, 0x72, 0x74, 0x00, 0x00, 0x0a, 0x0f, 0x01,
+    0x0d, 0x00, 0x41, 0x00, 0xfb, 0x07, 0x00, 0x41, 0x00, 0xfb, 0x0c, 0x00,
+    0x1a, 0x0b,
+};
+
+test "runVoidExportWasi: JIT array.get_s null → null_reference code 10; OOB → oob_memory code 6 (D-293 array_oob siblings)" {
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    var n: u32 = 99;
+    try testing.expectError(entry.Error.Trap, runner.runVoidExportWasi(testing.allocator, &arraygets_null_wasm, "_start", null, &n));
+    try testing.expectEqual(@as(u32, 10), n);
+    try testing.expectEqual(trap_surface.TrapKind.null_reference, trap_surface.jitTrapCode(n).?);
+    var o: u32 = 99;
+    try testing.expectError(entry.Error.Trap, runner.runVoidExportWasi(testing.allocator, &arraygets_oob_wasm, "_start", null, &o));
+    try testing.expectEqual(@as(u32, 6), o);
+    try testing.expectEqual(trap_surface.TrapKind.oob_memory, trap_surface.jitTrapCode(o).?);
+}
+
 // `(module (type $a (struct (field i32))) (type $b (struct (field i64)))
 //  (func (export "_start") struct.new_default $a ref.cast (ref $b) drop))` —
 // casting a `(ref $a)` to the unrelated `(ref $b)` fails (Wasm 3.0 GC §4.4.5).

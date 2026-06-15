@@ -3,7 +3,8 @@
 //! index OOB), load the 8-byte element at `base + 12 + index*8`, push it.
 //! Element offset is RUNTIME + 4-mod-8 → register-offset MOV (base+=12
 //! first). A single UNSIGNED compare `index >= length` (JAE) also catches
-//! a negative index. Both null + OOB → the generic `bounds_fixups` stub.
+//! a negative index. null → `null_ref_fixups` (code 10), OOB → `oob_fixups`
+//! (code 6) per D-293 slice-4c (NOT the generic bounds_fixups).
 //!
 //! Registers: ref → stage-0 (R10), index → stage-1 (R11). The object base
 //! needs a 3rd reg while both ref and index are live → RAX (caller-saved,

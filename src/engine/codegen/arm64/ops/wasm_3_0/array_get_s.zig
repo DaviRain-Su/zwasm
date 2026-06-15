@@ -32,22 +32,22 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
     const args = try ctx.popBinary();
     const xref = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.lhs, 0);
     const xidx = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.rhs, 1);
-    // Null-ref trap: CMP Xref, #0 ; B.EQ → trap stub.
+    // Null-ref trap: CMP Xref, #0 ; B.EQ → null_reference (code 10), mirroring array.get/set.
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpImmX(xref, 0));
     var fixup: u32 = @intCast(ctx.buf.items.len);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.eq, 0));
-    try ctx.bounds_fixups.append(ctx.allocator, fixup);
+    try ctx.null_ref_fixups.append(ctx.allocator, fixup); // D-293 array_oob: null → null_reference (code 10)
 
     // base = slab + ref; length [base+8] into X14 (ref dead).
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(base, abi.runtime_ptr_save_gpr, jit_abi.gc_heap_off));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(base, base, @offsetOf(heap_mod.Heap, "bytes")));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddReg(base, base, xref));
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImmW(len_scratch, base, @intCast(length_off)));
-    // OOB trap: CMP Windex, Wlength ; B.HS (unsigned >=) → trap stub.
+    // OOB trap: CMP Windex, Wlength ; B.HS (unsigned >=) → oob_memory (code 6), mirroring array.get/set.
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encCmpRegW(xidx, len_scratch));
     fixup = @intCast(ctx.buf.items.len);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBCond(.hs, 0));
-    try ctx.bounds_fixups.append(ctx.allocator, fixup);
+    try ctx.oob_fixups.append(ctx.allocator, fixup); // D-293 array_oob: index OOB → oob_memory (code 6)
 
     // base += header → element[0] addr; LDR element[index] (8-byte slot).
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12(base, base, @intCast(header_size)));
