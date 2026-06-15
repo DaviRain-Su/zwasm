@@ -3,65 +3,54 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Current state — WASI-0.3 campaign (D-335); ζ2 Slice 3b done — read/write BLOCKED/DROPPED e2e (`90e2bd55`)
+## Current state — WASI-0.3 campaign (D-335); ζ2 COMPLETE (single-task) — all async builtins wired (`e6cfb865`)
 
 **WASI 0.3 / Preview 3 campaign** (Front D, ratified 2026-06-11; CM-async — `async` func / `stream<T>` /
 `future<T>`, NOT core stack-switching). Critical path A→B→C→D(crux)→E→F→G; full unit plan + per-unit DONE-SHAs
 in debt **D-335**. Loop drives all fronts autonomously; only tag-cut is user-reserved (ADR-0156).
 
-**DONE (per-SHA detail in D-335)**: Units A/B/C — stream/future valtypes (0x66/0x65) + 14 canon builtins
-(0x0e–0x1b) + value-ABI as i32 handles · D Zone-1 model α..ζ1+ηA in `async.zig` (handle/stream/future tables,
-rendezvous, `EventCode`/`WaitableSet`, `Subtask`, `driveCallbackLoop`, `WaitableSetTable`; ADR-0187 stackless
-callback ABI, no fibers) · ηB decode (canonopts `async`/`callback`; `task.return` 0x09) · **P3 runner**
-(`component_wasi_p3.zig`, ADR-0188): async export runs end-to-end — `P3CallbackCtx` installs the
-`invokeCallback`(→`Instance.invoke`)/`waitOn`(→`WaitableSetTable.poll`, trap `error.AsyncDeadlock`) seams;
-EXIT + YIELD→callback-reentry both e2e green · **ζ2 Slice 1** (`48b052ca`, ADR-0189): `canon task.return` host
-builtin (`WasiP2Ctx.task_return` + `Def.task_return_builtin` + `p2TaskReturn`) delivers the async result —
-fixture calls task.return(42)→EXIT, `ctx.task_return == 42` · **ζ2 Slice 2 Zone-1** (`eb3107a4`, ADR-0189):
-`SharedTable` (refcounted arena of `Shared = union{SharedStream, SharedFuture}`) + `StreamFutureEnd.shared`
-link + `newStreamPair`/`newFuturePair` (mint a linked readable+writable pair, refcount=2) + `dropEnd` (free
-the shared at the 2nd drop). Adversarial drop-order unit tests (fwd/rev/free-list reuse) · **ζ2 Slice 2 Zone-3** (`dc39cad3`, ADR-0189): async tables (streams/shared/sets)
-moved into `WasiP2Ctx`; `synthDef .stream_future → Def.async_builtin` for stream.new/future.new; `p2StreamNew`/
-`p2FutureNew` trampolines (via `AsyncBuiltinCtx`) wrap `newStreamPair`/`newFuturePair` returning `ri|(wi<<32)`;
-e2e `async_stream_new.wat` calls stream.new→EXIT, two ends minted · **ζ2 Slice 3a** (`6592ed1f`, ADR-0189):
-`p2StreamFutureDrop` wires the 4 `drop-{readable,writable}` ops — `StreamFutureEnd.drop` marks shared dropped
-(traps if copying) + `dropEnd` releases the end/shared ref; `WasiP2Error` widened with `async_mod.Error` so
-trampolines `try`-propagate; e2e `async_stream_drop.wat` mints+drops both ends. (Lesson reminders: `zig build
-test` ≠ `test-all`; `catch {}` in errdefer + `else` on an exhaustive enum switch are gate/lint-blocked.
-`D-337` = deferred writable-future-drop guard.)
+**DONE (per-SHA detail in D-335)**: Units A/B/C (stream/future valtypes + 14 canon builtins + value-ABI) · D —
+Zone-1 async model in `async.zig` (handle/stream/future tables, rendezvous, `EventCode`/`WaitableSet`/
+`WaitableSetTable`, `Subtask`, `driveCallbackLoop`, `SharedTable` refcount arena; ADR-0187 stackless, no fibers)
++ ηB decode (canonopts, `task.return`) + **P3 runner** (`component_wasi_p3.zig`, ADR-0188: async export runs
+e2e via the callback loop; `P3CallbackCtx` installs `invokeCallback`/`waitOn`; EXIT+YIELD e2e) + **ζ2
+canon-async-builtin dispatch — COMPLETE single-task** (ADR-0189): async state in `WasiP2Ctx`, `synthDef →
+Def.{task_return_builtin, async_builtin}`, ALL builtins host-wired — `task.return` (delivers result),
+`stream.new`/`future.new` (`ri|(wi<<32)`), `drop-{r,w}`, `read`/`write` (BLOCKED/DROPPED), `cancel-{r,w}`;
+**8 async e2e fixtures green**. (Lessons: `zig build test`≠`test-all`; `catch {}` in errdefer + `else` on an
+exhaustive switch are gate/lint-blocked; **stackless single-task CANNOT reach a guest-to-guest read/write
+COMPLETION** — needs a host peer, lesson `2026-06-16-stackless-stream-completion-needs-host-peer`; COMPLETION +
+element marshalling (the `error.OutOfBounds` trap in `p2StreamFutureCopy`) + the WAIT-path e2e are deferred to
+Unit E per ADR-0189 Rev (ADR-0132 carve-out). `D-337` = deferred writable-future-drop guard.)
 
-**Investigation (`023a07cd`, lesson `2026-06-16-stackless-stream-completion-needs-host-peer` + ADR-0189 Rev)**:
-the stackless single-task runner (ADR-0187, no fibers) **cannot reach a guest-to-guest stream/future read/write
-COMPLETION** — a blocked op returns to the callback loop with no continuation, so the peer never acts.
-COMPLETION + element marshalling + the WAIT-path e2e payoff **gate on Unit E** (a host stream peer) — NOT pure
-ζ2. ζ2 Slice 3 re-scoped (ADR-0132 carve-out) to the single-task-testable outcomes.
+cancel-read/write wired (`e6cfb865`): `p2StreamFutureCancel` → `StreamFutureEnd.cancel` → `ReturnCode.cancelled`;
+e2e read(BLOCKED→parks)→cancel-read→CANCELLED. **All `.stream_future` ops now host-wired; ζ2 is single-task-
+complete.** 7 async e2e fixtures green (`async_{exit_immediate,yield_then_exit,task_return,stream_new,stream_drop,
+stream_read_blocked,stream_read_dropped,stream_cancel}`).
 
-read/write BLOCKED/DROPPED wired (`90e2bd55`): `p2StreamFutureCopy` (one trampoline; `copy()` dispatches
-read/write on the end's side) → `Step`→`ReturnCode`; e2e read-no-writer→BLOCKED + drop-then-read→DROPPED
-(guest self-asserts via `unreachable`). COMPLETION(n>0) traps until Unit E supplies the marshalling+peer.
-
-**NEXT — ζ2 Slice 3c: `cancel-read`/`cancel-write` (closes ζ2's single-task scope)**:
-- Wire the 4 cancel ops (currently `UnsupportedWasiImport`) → `StreamFutureEnd.cancel(shared)` → `ReturnCode`.
-  Single-task testable: a guest `stream.read`s (→ BLOCKED, end parks `async_copying`), then `stream.cancel-read`
-  → returns cancelled (state → idle). Bind via the existing `AsyncBuiltinCtx`/`p2*` pattern.
-- Fixture: read (BLOCKED) → cancel-read → assert the cancelled code; EXIT.
-- **Then ζ2 is single-task-complete** → **Unit E** (WASI-P3 host interfaces: the host stream peer that unlocks
-  read/write COMPLETION + element marshalling + the WAIT-path e2e), then F (async public API), G (p3 corpus).
+**NEXT — Unit E: WASI-P3 host interfaces** (the host stream peer that unlocks the deferred ζ2 work):
+- New host impls (D-335 unit E: sockets/http/clocks async; ~2000 LOC; coexists w/ P2). The host implements a
+  stream's OTHER end → unblocks guest read/write **COMPLETION** + drives the element marshalling at `ptr`
+  (deferred from ζ2 Slice 3b, the `error.OutOfBounds`-trap path in `p2StreamFutureCopy`) + the **WAIT-path e2e**
+  (`driveCallbackLoop`'s WAIT branch via `waitOn`, today only EXIT/YIELD are e2e).
+- **Survey first** (likely an ADR for the host-stream-peer shape); start with the SIMPLEST host interface (e.g.
+  async clocks, or a host-readable byte stream) to land the first read/write COMPLETION e2e. Then F (async-export
+  public API), G (p3 corpus). Per D-335.
 
 ## Active bundle
 
 - **Bundle-ID**: wasi03-D-335 (§9.0 Front D; WASI 0.3 / Preview 3; units A→G)
-- **Cycles-remaining**: ~1 (ζ2 Slices 1+2+3a+3b done; remaining = Slice 3c cancel → ζ2 single-task-complete, then Unit E)
-- **Continuity-memo**: critical path **A→B→C→D(...Slice3b read/write BLOCKED/DROPPED done; Slice3c=cancel next; COMPLETION→Unit E)→E→F→G**
+- **Cycles-remaining**: ~3 (D incl. ζ2 single-task-complete; remaining = Unit E host interfaces → F → G)
+- **Continuity-memo**: critical path **A→B→C→D(DONE incl. ζ2 single-task-complete)→E(WASI-P3 host interfaces; unlocks read/write COMPLETION)→F→G**
   (full plan in **D-335**; design in **ADR-0187** — stackless callback ABI, no fibers). CM-async, NOT core
   stack-switching. Spec: `~/Documents/OSS/{WASI, WebAssembly/component-model}` (design/mvp/{Binary,CanonicalABI,
   Concurrency}.md); ref impl `~/Documents/OSS/wasmtime` (43+; `concurrent/futures_and_streams.rs`).
 - **Exit-condition**: a WASI-0.3 async/stream/future component runs end-to-end through zwasm (new P3
   corpus green, 3-host); each unit lands green per D-335 along the way.
-- **Current unit — D (HIGH/crux; ζ2 Slice 3b done, Slice 3c cancel START HERE)**: P3 runner
-  + task.return + stream/future new+drop + read/write(BLOCKED/DROPPED) all e2e green. Remaining = Slice 3c
-  (cancel-read/write → closes ζ2's single-task scope) → then **Unit E** unlocks read/write COMPLETION + element
-  marshalling + the WAIT-path e2e. Then F/G.
+- **Unit D DONE (HIGH/crux); Unit E START HERE**: Zone-1 model + P3 runner + ζ2 (all async builtins, single-task)
+  all e2e green. **Unit E** = WASI-P3 host interfaces (the host stream peer) — unlocks read/write COMPLETION +
+  element marshalling + the WAIT-path e2e (the deferred ζ2 work). Survey + likely an ADR for the host-stream-peer
+  shape; start with the simplest host interface. Then F/G.
 
 ## Long-tail (debt-tracked / parked — NOT active; see §9.0 fronts + debt.yaml)
 

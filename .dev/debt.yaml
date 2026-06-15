@@ -1411,9 +1411,12 @@ entries:
         + Step→ReturnCode (no marshalling); fixtures assert BLOCKED + DROPPED. Slice 3b DONE (90e2bd55):
         p2StreamFutureCopy (one trampoline, copy() dispatches read/write on side) → ReturnCode; e2e
         read-no-writer→BLOCKED + drop-then-read→DROPPED (guest self-asserts); COMPLETION(n>0) traps until Unit E.
-        NEXT = Slice 3c: wire cancel-read/write (4 ops, currently UnsupportedWasiImport) → StreamFutureEnd.cancel
-        → ReturnCode; fixture read(BLOCKED)→cancel-read→assert cancelled. Then ζ2 single-task-complete → Unit E
-        unlocks read/write COMPLETION + element marshalling + WAIT e2e. Then units F/G.
+        Slice 3c DONE (e6cfb865): p2StreamFutureCancel → StreamFutureEnd.cancel → ReturnCode.cancelled; e2e
+        read(BLOCKED→parks)→cancel-read→CANCELLED. ALL .stream_future ops now host-wired → ζ2 SINGLE-TASK-COMPLETE
+        (8 async e2e fixtures green). NEXT = Unit E (WASI-P3 host interfaces; sockets/http/clocks async; ~2000;
+        coexists w/ P2): the host implements a stream's other end → unlocks guest read/write COMPLETION + element
+        marshalling (the error.OutOfBounds trap in p2StreamFutureCopy) + the WAIT-path e2e (driveCallbackLoop WAIT
+        branch). Survey + likely ADR for host-stream-peer shape; simplest host interface first. Then F/G.
       - E — WASI-P3 host interfaces (new component_wasi_p3.zig; sockets/http/clocks
         async; ~2000; MED; coexists with P2, does NOT replace it). Needs D.
       - F — async-export ABI + P3 component runner (canon.zig; ~400; MED). Needs E.
