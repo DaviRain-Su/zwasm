@@ -36,19 +36,26 @@ wasi-testsuite, wasm-tools). **②①④ DONE; ③ ACTIVE (GC-corpus).**
   reject; `runWasiLenient` now calls `assertWasiImportsSatisfied` (spec §4.5.4). **GC-stress (the user's core ③
   intent) — CORRECTED: Hoot + dart ARE in nixpkgs** (`guile-hoot` 0.8.0 Scheme→wasm-gc, `dart` 3.12.1 dart2wasm→
   wasm-gc) — NOT "heavy from-source". Corpus today: 56 fixtures (c18/cpp7/emcc3/go9/tinygo4/rust12/zig3), **zero
-  Wasm-GC source-lang programs** (GC backend exercised only by hand-written spec `.wat`). **NEXT = runnability gate**:
-  a real GC-lang module's host-import surface decides if zwasm can run it standalone (Hoot needs a reflect/runtime;
-  dart2wasm needs JS glue). Investigating which (Hoot vs dart) yields a runnable-with-minimal-stub wasm-gc fixture.
+  Wasm-GC source-lang programs** (GC backend exercised only by hand-written spec `.wat`). **Hoot probe RAN — paid off
+  like the AS probe**: a dense-GC Hoot module (struct.new 758 / array.new 360 / ref.cast 2074 / ref.i31 2858) failed
+  zwasm VALIDATION at func #36 on `return_call`, surfacing **2 real validator spec bugs FIXED + 1 latent**: (1)
+  `return_call*` result check used exact eql not subtyping (`9064faa5`); (2) `table.copy` same class (`480809af`);
+  (3) `br_table` labelTypesEq pairwise-eql too strict → **D-452** (restructure, latent, not yet a real blocker).
+  Lesson `…-validator-exact-eql-where-reftype-subtyping-required` (audit recipe: grep `.eql(` in validator, classify
+  numeric-vs-reftype). Hoot import surface is MODERATE+stubbable (~36 imports, ns `rt`/`io`/`debug`; `bignum_*` dead
+  for fixnum programs — far lighter than the "Hoot needs full JS reflect" reputation, via `import-abi? #f`).
 
 ## Active bundle
 
 - **Bundle-ID**: p17-③-gc-corpus (real Wasm-GC source-lang fixtures to stress the GC backend)
 - **Cycles-remaining**: several (new-toolchain integration like wasip3 was)
-- **Continuity-memo**: ②①④ DONE (see above). ③ now active. Candidates BOTH in nixpkgs: `guile-hoot` 0.8.0
-  (Scheme→wasm-gc; CLI is repl/server-only — compiler is the `(hoot compile)` Guile module, invoke via guile script)
-  + `dart` 3.12.1 (`dart compile wasm`→wasm-gc, but imports heavy JS glue). Deciding factor = host-import surface
-  (must be stubbable to run standalone in zwasm). Spike dir `/tmp/hoot-spike`. If runnable → bake a `.#gen-gc` shell
-  + `scripts/gen_gc_fixtures.sh` mirroring the wasip3 hermetic recipe + commit fixtures under `test/realworld/wasm/`.
+- **Continuity-memo**: ②①④ DONE. ③ active — Hoot chosen (lean import surface; dart2wasm needs heavy JS glue,
+  deprioritized). Probe already found+fixed 2 validator bugs (`9064faa5`/`480809af`). **NEXT = re-run the Hoot module
+  under zwasm** now return_call validates; expect next blocker = D-452 (br_table) OR an unsatisfied `io`/`rt` import
+  → write a tiny host stub (write_stdout/quit + bignum identity shims), then bake `.#gen-gc` shell +
+  `scripts/gen_gc_fixtures.sh` (mirror the wasip3 recipe) + commit fixtures under `test/realworld/wasm/`. Spike:
+  `/tmp/hoot-spike` (prog.scm/wasm/wat + compile.scm; recipe = guile w/ Hoot `GUILE_LOAD_PATH`, `(hoot compile)`
+  `compile-file #:import-abi? #f`).
 - **Exit-condition**: ≥1 real Wasm-GC source-language program (Hoot or dart) compiled hermetically + committed +
   running green under zwasm (interp at minimum), exercising struct/array/ref GC opcodes — OR documented impossibility
   (host-import surface too heavy to stub) with the evidence + a debt row for the alternative path.
