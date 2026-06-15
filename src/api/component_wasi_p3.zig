@@ -107,3 +107,22 @@ test "D-335 unit D-ηB: an async-lifted export that returns EXIT runs end-to-end
     // without re-entering the callback. No trap, no deadlock.
     try runWasiP3Main(&eng, testing.allocator, bytes, &host, .{});
 }
+
+test "D-335 unit D-ηB: a YIELD task entry re-enters the guest callback end-to-end (EXIT after one)" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/async_yield_then_exit.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+
+    // run returns YIELD(1) → the loop MUST invoke the guest callback (proving
+    // the invokeCallback seam reaches a real Instance); callback returns EXIT(0)
+    // → clean termination after exactly one re-entry. A miswired callback would
+    // spin forever on YIELD.
+    try runWasiP3Main(&eng, testing.allocator, bytes, &host, .{});
+}
