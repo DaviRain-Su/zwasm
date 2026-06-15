@@ -9,10 +9,15 @@
 **`dafab5ce`**: array.fill/copy trampolines (jitGcArrayFill/Copy) now return `ARRAY_NULL_SENTINEL` (2) so
 both arch callers split null (10) vs OOB (6) — were collapsed to W0=0. **All 6 array trap sites now
 precise + consistent with array.get/set + interp.** Tests via wasm-tools `(array (mut i8))` (fill/copy need
-MUTABLE). 2869/2881 + lint green. **D-293 demux now effectively complete**; only residual = D-294-R2 code-2
-SUB-split (call_indirect vs table-access OOB message, both code 2), conformance-neutral CLI polish (deferred).
-**Codegen quick-win tail exhausted** — remaining: c_sha256 `\n` (deep, parked), go corruption (blocked),
-D-294-R2 (architectural, conformance-neutral). Next = reassess / steady-state Phase-17 refinement.
+MUTABLE). 2869/2881 + lint green. **3-host green** (windows recorded `27a02958`, 25437/0). **D-293 demux
+COMPLETE**; only residual = D-294-R2 code-2 SUB-split (call_indirect vs table-access OOB message, both code
+2), conformance-neutral CLI polish (deferred).
+
+**STEADY-STATE (Phase-17 完成形)**: readily-actionable codegen refinement DONE + 3-host green (sandbox triad
++ full trap-kind demux + JIT value-trace tooling). Remaining = disproportionate-deep / conformance-neutral:
+**c_sha256 `\n`** (real miscompile, confirmed wpos=10 not 11 for verify-line pure-string printf; multi-step
+musl length trace, parked as disproportionate for a cosmetic symptom), **go corruption** (non-deterministic,
+infra-blocked), **D-294-R2** (conformance-neutral CLI msg). No quick wins; loop monitors + holds steady-state.
 
 ## Earlier this session (SHAs durable; detail in commits/debt)
 
@@ -25,12 +30,8 @@ miscompiles with wrong output but no crash: `ZWASM_DEBUG=jit.dump` (per-func byt
 addr `f49b3675`) + **`scripts/jit_value_trace.sh {addr|disasm|trace}`** (`39d53605`, automates the
 arm-`-H`-bp-after-W^X-map flow). Wired into debug_jit_auto Recipe 18 + lesson `2026-06-15-lldb-value-trace-on-jit-code`.
 
-**D-330 c_sha256 `\n` — MECHANISM CONFIRMED (`4365e478`, via the harness)**: c_sha256 is LINE-buffered
-(3 fd_writes). Read iovecs at `jit_dispatch.zig:78`: write 1 (input) iov[1] len=1 → `\n` correct; write 3
-(verify: OK) iov[0] len=**10** not 11, iov[1]=**{0,0}** → `\n` in NEITHER iovec. Buffered `wpos-wbase`=10
-not 11: the final `putc('\n')` didn't advance `wpos` — `\n` dropped at buffer-construction. Same value-
-miscompile family as discharged D-330 primary. **NEXT**: disasm/trace the wpos-store for the verify line
-(jit_value_trace.sh). Deprioritized cosmetic (values+interp correct; 55/56 byte-exact). Trail: D-330 debt.
+**D-330 c_sha256 `\n`** mechanism confirmed `4365e478` (LINE-buffered; verify-line iov[0]=10 not 11, \n
+dropped at buffer-construction). Full trail + next-probe in D-330 debt residual. Deprioritized cosmetic.
 
 ## Prior session (SHAs durable; detail in commits/debt)
 
