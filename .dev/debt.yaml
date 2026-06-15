@@ -1256,11 +1256,18 @@ entries:
         check → "type mismatch: expected i32, found f64", via `Validator.mismatch` slot + `ValType.name()`)
         + **all 12 isRef gates DONE `4edf267d`** (ref.is_null/as_non_null/throw_ref/br_on_null/br_on_cast/GC
         ref ops → "expected a reference type, found i32"; `mismatch` became a tagged union .types|.expected_ref).
-        **REMAINING (small residual)**: the label-type-equality checks (br_table / catch label-type compares
-        ~1261/1273/1280/1287) + GC struct/array field/element-type + mutability checks still emit the bare
-        `@errorName` message; each has a structurally different "expected" shape (a label-type tuple / a
-        field type / a mutability flag) so they're genuinely per-site, not mechanical. LOW value (rarer
-        invalid-module paths); do per-site if a real diagnostic-quality need surfaces.
+        **REMAINING (~39 bespoke sites) is now CAP-BLOCKED, not just low-value**: GC struct/array field-VALUE
+        checks already route through popExpect (so already rich); the ~39 still-bare sites are label-type
+        tuple compares (br_table/catch), select, GC ref-head (struct.get/set, array.get/set), GC-kind +
+        mutability — each a structurally different "expected" shape (per-site, not mechanical). 2026-06-15: a
+        GC-ref-head extension (precise "expected a struct/array reference" via a 3rd `.expected_kind` mismatch
+        variant) was implemented + tested green BUT **reverted** — it pushed `src/validate/validator.zig` from
+        3393 to 3424, over its deliberate **3400 per-file cap** (ADR-0099 Revision; the file is ~7 lines under
+        cap, so ANY form incl. a DRY helper overflows). Bumping the cap / splitting the validator for these
+        LOW-value invalid-module diagnostics isn't justified. **popExpect + isRef is the principled stopping
+        point** for the validator type-mismatch diag surface; revisit only with (a) a real diagnostic-quality
+        signal AND (b) a validator_gc.zig carve (P1 closed sub-language, precedent: validator_simd.zig/ADR-0083)
+        that also relieves the cap. Do NOT re-attempt in-place — it re-hits the cap.
       (F6, PARTIAL) parse errors had ZERO setDiag. **Top-level parser.zig DONE `098d2036`** (8 module-decode
         rejects → `.parse`-phase setDiag with byte offset; CLI coarse `.instantiate` fallback steps aside).
         **REMAINING**: the deeper per-section decoders (sections.zig ~53 sites + sections_{codes,data,element}.zig,

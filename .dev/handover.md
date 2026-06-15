@@ -6,23 +6,26 @@
 ## Current state — Phase-17 完成形 steady-state; branch GREEN, 3-host-verified (`b66f0342`)
 
 **完成形 plateau reached (this session)** — surface-audit sweep (diag/CLI/C-API/Zig-API/docs) + debt-ledger
-sweep all CLEAN: (a) **diag F5a COMPLETE** — `popExpect` (`dc463af5`) + all 12 isRef gates (`4edf267d`),
-validator type-mismatch surface now uniformly rich ("expected i32, found f64" / "expected a reference type,
-found i32"); F1/F3/F5b (`240f97de`), F6 top-level (`098d2036`). (b) **CLI** `--version` identity (`73fd1fa2`)
-+ Exit-codes doc (`7e2d90fc`). (c) **C-API** `zwasm_instance_get_func` declared + conformance test
-(`c40caca9`). (d) **Zig-API** `Instance.call` (`4843488f`) + deinit docs (`8bb4bf41`). (e) **README** flag
-list + Rust example (`5d7334eb`). **Debt sweep: ZERO dischargeable** (46 entries; all barriers genuinely hold
-/ deliberate residuals — ledger healthy). 3-host GREEN (Mac `test` 2876/0, ubuntu `OK b66f0342`, win baseline
-a722c2d8).
+sweep all CLEAN: (a) **diag F5a** — `popExpect` (`dc463af5`) + all 12 isRef gates (`4edf267d`); F1/F3/F5b
+(`240f97de`), F6 top-level (`098d2036`). (b) **CLI** `--version` identity (`73fd1fa2`) + Exit-codes (`7e2d90fc`).
+(c) **C-API** `zwasm_instance_get_func` + conformance test (`c40caca9`). (d) **Zig-API** `Instance.call`
+(`4843488f`) + deinit docs (`8bb4bf41`). (e) **README** flags + Rust example (`5d7334eb`). **Debt sweep: ZERO
+dischargeable** (ledger healthy). 3-host GREEN (Mac `test` 2876/0, ubuntu `OK b66f0342`, win baseline a722c2d8).
 
-**NEXT — diag tails are the only remaining autonomous track, all LOW-value**: the high/medium-value cheap wins
-are genuinely exhausted (5 surface audits + debt sweep confirm it). Remaining D-334 residue, all rarer paths:
-**F5a label-type/GC-field residual** (structurally per-site, not mechanical) and **F6 per-section parse
-decoders** (~80 sites across sections.zig + sub-decoders — uniform `setDiag(.parse, …, "… at offset 0x{x}")`
-pattern from `098d2036`, malformed-module byte-offset diagnostics, done per-file). F6 is the more user-facing
-(bad-`.wasm` input) so it's the next concrete track if continuing; else steady-state refinement. TDD + gate on
-`zig build test`. **Do NOT re-attempt parked items** (D-330 hard-park; D-331 go infra-blocked) — they thrash.
-Verify any prior remote kick at Step 0.7.
+**Validator diag at principled stop (this turn)**: tried extending F5a to GC ref-head sites (precise "expected
+a struct/array reference") — green, but **reverted**: it pushed `validator.zig` 3393→3424 over its deliberate
+3400 cap (ADR-0099). Bumping/splitting the validator for LOW-value invalid-module diags isn't justified →
+popExpect+isRef is the stop point (D-334 row Round-updated). Do NOT re-attempt in-place.
+
+**NEXT — the quick/clean autonomous diag wins are EXHAUSTED**; remaining tracks are all SUBSTANTIAL (not
+chunks): F6 per-section is ADR-grade (decoders run in compile/instantiate not `.parse`, ~10 callers some
+swallow the error, body-relative offsets); validator diag tail is cap-blocked (needs a validator_gc.zig carve,
+only justified WITH a real signal); F4 is user-gated. **Highest-value autonomous track = assess the one
+unmeasured 完成形 pillar, "lightweight-yet-fast"**: run a perf BASELINE (existing `bench/` harness +
+`scripts/bench*`; measure-first per memory `feedback_perf_measure_first`, throwaway counters, commit/revert
+liberally) → either confirms perf健全 (closure) or surfaces a real deficiency (e.g. D-265 regalloc, an
+ADR-0153 rework candidate). TDD + gate on `zig build test`. **Do NOT re-attempt parked items** (D-330
+hard-park; D-331 go infra-blocked) — they thrash. Verify any prior remote kick at Step 0.7.
 
 c_sha256 `\n`-drop (D-330) deep-investigated this session (5 trace rounds + 3 fix attempts) → **bundle
 d330-blockmerge-liveness CLOSED, demoted to a hard-parked debt note**. Root IS understood (a br/br_if
