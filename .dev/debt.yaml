@@ -1334,6 +1334,37 @@ entries:
       src/parse/{parser.zig,sections.zig} (F6); src/cli/run.zig:590-617 (F4 trap format);
       src/diagnostic/diagnostic.zig (Location.validate); private/notes/d-diag-audit-2026-06-15.md
     front: A-diag-tail
+  - id: "D-335"
+    layer: "code"
+    status: "now"
+    front: D-wasi03
+    description: |-
+      now (§9.0 Front D — WASI 0.3 / Preview 3 implementation campaign). WASI 0.3.0
+      RATIFIED 2026-06-11; CM-async-based (`async` func / `stream<T>` / `future<T>`),
+      NOT the core stack-switching proposal. Builds on the shipped CM + WASI-0.2
+      substrate (`src/feature/component/`, `src/api/component_wasi_p2.zig`). Ordered
+      work units (delta survey 2026-06-15; ~5600 LOC; critical path A→B→C→D→E→F→G):
+      - A — `stream<T>`/`future<T>` valtype (0x66/0x65) + async functype (0x43)
+        decode+validate (types.zig, decode.zig; ~400 LOC; LOW). Prereq for all; START HERE.
+      - B — canon stream/future builtins 0x0e–0x1b decode (types.zig; ~200; LOW). Needs A.
+      - C — async lift/lower in canon.zig (MAX_FLAT_ASYNC_PARAMS=4; lift_async_value /
+        lower_stream / lower_future; ~600; MED). Needs A,B.
+      - D — async task/waitable runtime + stream/future handle lifecycle + ReturnCode
+        (new async.zig; ~1200; **HIGH — architectural crux**; spike wasmtime
+        concurrent.rs / futures_and_streams.rs first). Needs A,B,C.
+      - E — WASI-P3 host interfaces (new component_wasi_p3.zig; sockets/http/clocks
+        async; ~2000; MED; coexists with P2, does NOT replace it). Needs D.
+      - F — async-export ABI + P3 component runner (canon.zig; ~400; MED). Needs E.
+      - G — corpus test/edge_cases/p3 + test/e2e/p3 (~800; LOW). All.
+      Spec cited: component-model design/mvp/{Binary,CanonicalABI,Concurrency}.md;
+      WASI sockets/http wit. Use bundle mode per unit; gate `zig build test` +
+      `test-spec`-style component corpus; 3-host at campaign milestones.
+    first_raised: "2026-06-15"
+    last_reviewed: "2026-06-15"
+    refs: |-
+      ROADMAP §9.0 Front D + §1.2 floor + .dev/proposal_watch.md; ADR-0186 Rev1;
+      ~/Documents/OSS/WASI/ + ~/Documents/OSS/WebAssembly/component-model/ + wasmtime 43+;
+      src/feature/component/{types,decode,canon,validate}.zig; src/api/component_wasi_p2.zig
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.
@@ -1389,7 +1420,10 @@ conventions: |-
   - `B-hardening` — steady-state hardening / natural-discharge: external-blocked
     (upstream Zig / 3-host) + future-phase rows; `/continue` Step 0.5 re-walks
     each barrier and discharges what dissolved. **Default** for open rows.
-  - `C-dogfooding` — driven by the cw-v1 `@import("zwasm")` consumer signal.
+  - `C-dogfooding` — cw consumer-side dogfooding DONE (ADR-0168); further signal
+    only if the cw-from-scratch redesign adds a v2 consumer (D-264).
+  - `D-wasi03` — **WASI 0.3 (Preview 3) campaign** (D-335): ratified 2026-06-11,
+    CM-async-based, builds on the shipped CM substrate. Actionable feature front.
   - `future-bucket` — genuinely-future, demand-driven, NO version gate
     (§1.3/§3.3): proposal-gated (stack-switching/WASI 0.3, multi-component),
     distal backends, >4 GiB memory64.

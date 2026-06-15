@@ -97,3 +97,15 @@ terms). We adopt the same shape for zwasm.
 ## Revision history
 
 - 2026-06-15 — created (user-directed near-completion ROADMAP re-organization).
+- 2026-06-15 (Revision 1, user-directed — anti「先回しロック化」) — the initial
+  §9.0 framing over-deferred: it read future-bucket/parked as "demand-driven /
+  not now / do-not-attempt," effectively locking autonomous work away. Corrected:
+  (a) **posture** — `/continue` drives ALL fronts + the future bucket + the
+  hard/parked items autonomously; the ONLY user-reserved act is the release
+  tag-cut (ADR-0156); hardness = plan a campaign (ADR-0153), never defer-lock.
+  (b) **Front C** — cw consumer-side dogfooding is DONE (ADR-0168), not "waiting"
+  (was mis-framed). (c) **WASI 0.3** — ratified 2026-06-11 (CM-async-based,
+  separable from the core stack-switching proposal); **promoted out of the
+  future bucket into actionable Front D / §1.2 floor / D-335**; only the CORE
+  stack-switching continuations proposal stays genuinely-future (D-300). Spec
+  cloned to `~/Documents/OSS/WASI/` + wasmtime updated (43+).

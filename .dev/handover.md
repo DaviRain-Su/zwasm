@@ -29,14 +29,21 @@ ADR-0186)** — zwasm was at the 完成形 plateau but §9 still read as a forwa
   pointer; drift fixed (P2 CLI=run+compile, §3.1 version-gate removed, P14 D-265-rework reality).
 - **Chunk 2 (`0df27418`)**: debt re-placed — each of 47 rows tagged `front:` (A-diag-tail 1 / B-hardening 39 /
   C-dogfooding 1 / future-bucket 4 / parked 2); taxonomy in the conventions block.
-- **Chunk 3**: ADR status-hygiene audited → **corpus CLEAN** (no mis-statused ADR; supersessions bidirectional,
-  e.g. 0025→0109). Only cosmetic Status-format drift in ADRs 0168+ — skipped (no-make-work).
+- **Chunk 3**: ADR status-hygiene audited → corpus CLEAN (no mis-statused ADR).
+- **Chunk 4 — POSTURE RECALIBRATION (user-directed, anti「先回しロック化」; ADR-0186 Rev1)**: the initial §9.0
+  over-deferred (future/parked read as "locked"). Corrected: **`/continue` drives ALL fronts + future bucket +
+  hard/parked autonomously; ONLY tag-cut is user-reserved** (ADR-0156); hardness → plan a campaign, never
+  defer-lock. **cw dogfooding = DONE** (ADR-0168), Front C satisfied (was mis-framed as "waiting"). **WASI 0.3
+  ratified 2026-06-11** (CM-async, separable from core stack-switching) → **promoted to actionable Front D /
+  §1.2 floor / D-335** (spec cloned to `~/Documents/OSS/WASI/`, wasmtime→43+). proposal_watch updated.
 
-**NEXT — §9.0 IS now the steady-state work surface.** Live fronts: A (diag tail, drained → monitor), B (debt
-natural-discharge each Step 0.5), C (cw-v1 dogfooding when it lands). Future bucket is demand-driven (§1.3/§3.3).
-No clean positive-ROI autonomous track is pending; pick up a NEW signal (dogfooding / malformed-input need /
-upstream-Zig unblock / user directive) rather than make-work. Do NOT re-attempt parked (D-330/D-331). Verify
-any prior remote kick at Step 0.7.
+**NEXT — actively drive Front D = WASI 0.3 (D-335), the real feature campaign.** Delta survey done (~5600 LOC,
+critical path A→B→C→D→E→F→G; D = async task/waitable runtime = HIGH-risk crux). **START at Unit A**:
+`stream<T>`/`future<T>` valtype (0x66/0x65) + async functype (0x43) decode+validate in
+`src/feature/component/{types,decode}.zig` (~400 LOC, LOW risk, gates the rest). TDD + `zig build test` +
+component corpus; bundle-mode per unit; 3-host at milestones. Other fronts (A diag-tail / B debt-discharge) are
+opportunistic; parked D-330/D-331 are hard-but-loop-tacklable (don't re-run the blanket fixes that thrash).
+Verify any prior remote kick at Step 0.7.
 
 c_sha256 `\n`-drop (D-330) deep-investigated this session (5 trace rounds + 3 fix attempts) → **bundle
 d330-blockmerge-liveness CLOSED, demoted to a hard-parked debt note**. Root IS understood (a br/br_if

@@ -5,7 +5,17 @@
 > re-evaluated when they advance. Phase 4 non-web proposals are the
 > v0.2.0 line.
 
-Last reviewed: **2026-06-13**.
+Last reviewed: **2026-06-15**.
+
+> **WASI 0.3.0 RATIFIED 2026-06-11** (Bytecode Alliance; Wasmtime 43+). It
+> rebases WASI onto the **Component Model async primitives** (`async` func,
+> `stream<T>`, `future<T>`) — **NOT** the core stack-switching continuations
+> proposal — so it builds on zwasm's already-shipped CM + WASI-0.2 substrate. It
+> is now an **actionable feature front** (ROADMAP §9.0 Front D / **D-335**), not
+> a deferred item. Spec cloned at `~/Documents/OSS/WASI/` +
+> `~/Documents/OSS/WebAssembly/component-model/`; reference impl
+> `~/Documents/OSS/wasmtime/` (43+). The CORE stack-switching proposal stays
+> pre-Phase-4 (D-300) — separable, not on the WASI-0.3 path.
 
 ## Phase 5 — W3C Recommendation (zwasm v2 v0.1.0 MUST implement)
 
@@ -47,7 +57,7 @@ Plus v1 parity items at Phase 5:
 |----------------------------------|-----------------------|---------------------------------|
 | ESM Integration                  | JS modules            | **SKIP**                        |
 | Wide arithmetic (i64x2 mul, ADC) | BigInt-relevant       | Phase 9 alongside SIMD (v0.1.0) |
-| Stack switching (continuations)  | Large; gates WASI 0.3 | **DEFER** (D-300; survey 2026-06-07: format unstable + 3 ADRs + ~25-35cyc) |
+| Stack switching (continuations)  | core proposal, still pre-Phase-4 (format evolving 2026-06) | **DEFER the CORE proposal** (D-300). NOTE: WASI 0.3 does NOT depend on it — 0.3 async is Component-Model-based (async func/stream/future), separable → see the WASI-0.3 callout at top + §9.0 Front D / D-335 |
 | Compact import section           | Size opt              | v0.2.0+                         |
 | Custom page sizes                | memory tuning         | Phase 10 (v0.1.0)               |
 | Custom Descriptors / JS Interop  | JS-only               | **SKIP**                        |

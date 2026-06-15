@@ -95,6 +95,7 @@ ecosystem bar, not because v1 had it):
 | WASI 0.1                    | Complete                                                                                               |
 | **Component Model**         | **wasmtime-equivalent — SHIPPED** (ADR-0170/0181/0182; default-ON, `-Dcomponent=false` = lean opt-out; campaign closed 2026-06-13, corpus 158/0/0) |
 | **WASI 0.2 (preview2)**     | **wasmtime-equivalent native host** (ADR-0170/0180; CLI world + fs + sockets-TCP shipped)              |
+| **WASI 0.3 (preview3)**     | **ratified 2026-06-11; CM-async-based** (async func / stream / future) — now an **actionable front** on the shipped CM substrate (§9.0 Front D / **D-335**), build in progress; NOT a future-bucket lock |
 | 4-platform JIT              | aarch64-darwin / aarch64-linux / x86_64-linux / x86_64-windows                                         |
 | Spec testsuite              | 100 %, 0 skip                                                                                          |
 | **wasm-c-api conformance**  | **Standard `wasm.h`** (the interface wasmtime/wasmer follow) + minimal `wasi.h` / `zwasm.h` extensions |
@@ -235,14 +236,18 @@ These do not change between phases. Changing one requires an ADR.
 
 ### 3.3 Deferred (demand-driven; no version gate — ADR-0181)
 
-> Component Model, WASI 0.2 and the atomics/relaxed-SIMD instruction
-> sets graduated OUT of this list (shipped / active campaign — §1.2
-> floor). The optimising tier moved to §3.2 (permanently out).
+> Component Model, WASI 0.2, and the atomics/relaxed-SIMD instruction
+> sets graduated OUT of this list (shipped — §1.2 floor). **WASI 0.3 also
+> graduated out** (ratified 2026-06-11; CM-async-based, builds on the shipped
+> CM substrate → §9.0 Front D / D-335 — an actionable front, not deferred).
+> The optimising tier moved to §3.2 (permanently out).
 
 - **Threaded EXECUTION** (shared memory + spawning; the atomics
   instruction set is shipped single-threaded): after CM/P2 settles.
-- **WASI 0.3 (async / streams)**: requires stack-switching.
-- **Stack switching**: Phase 3 proposal; gates WASI 0.3.
+- **Stack switching (CORE continuations)**: core-wasm proposal, still
+  pre-Phase-4 (format evolving 2026-06). Genuinely-future (D-300). NOTE: it does
+  NOT gate WASI 0.3 — that was the old (wrong) assumption; WASI 0.3 async is
+  CM-based, separable.
 - **Shared-everything threads**: Phase 1 proposal; watch.
 - **wasi:sockets listeners/UDP/name-lookup** (ADR-0180 Phases 2–3) +
   **fs `*-via-stream` minting**: typed not-supported today; on demand.
@@ -1260,6 +1265,16 @@ stable section anchors** for existing citations (ADRs / debt / handover); the
 named state, never a version (release is user-only, ADR-0156; version lines
 retired, ADR-0181). Modelled on ClojureWasm's ADR-0142 reframe.
 
+**Posture — the loop drives everything; only tag-cut is user-reserved
+(recalibrated 2026-06-15, user-directed; anti「先回しロック化」)**: `/continue`
+tackles **all** of the below autonomously — live fronts, the future bucket, AND
+the hard/parked items. NONE is user-locked. The **only** user-reserved act is the
+release tag-cut (ADR-0156). "future bucket" = not-yet-started + priority-ordered
+(promote the moment a proposal ratifies or demand appears — e.g. WASI 0.3 below),
+**not** "do not touch"; "parked" = hard / multi-cycle research, **not** closed.
+Hardness is a reason to *plan a campaign* (ADR-0153), never to defer-lock. The
+loop self-selects the next unit by value and proceeds.
+
 **Phase → status redirect** (so existing "Phase N" / §9.N citations resolve):
 
 | Former phase       | Status                                                                                          |
@@ -1280,16 +1295,32 @@ retired, ADR-0181). Modelled on ClojureWasm's ADR-0142 reframe.
   external-blocked (upstream Zig / 3-host) + future-phase debt rows; each
   Step 0.5 re-walks the barrier and discharges what dissolved (the 2026-06-15
   ground-truth sweep reconciled D-082(b)/D-026 externref-segment).
-- **Front C — dogfooding-driven**: the cw-v1 `@import("zwasm")` consumer
-  (**D-264**) when it lands → ergonomic / regression signal.
+- **Front C — dogfooding-driven**: cw consumer-side dogfooding is **DONE**
+  (ADR-0168 — cw v1 succeeded against zwasm v2). A *further* v2-consumer signal
+  arrives only if the cw-from-scratch redesign later adds an `@import("zwasm")`
+  (**D-264**); that is a cw-side decision, not a zwasm blocker. Front C is
+  effectively satisfied today.
+- **Front D — WASI 0.3 (Preview 3) — NEW actionable feature front**: WASI 0.3.0
+  was **ratified 2026-06-11** (Bytecode Alliance; Wasmtime 43+). It rebases WASI
+  onto the **Component Model's async primitives** (`async` func, `stream<T>`,
+  `future<T>`) — **not** the core stack-switching continuations proposal — so it
+  builds directly on zwasm's already-shipped CM + WASI-0.2 substrate
+  (`src/feature/component/`, `src/api/component_wasi_p2.zig`). This is an
+  extension of done work, NOT a far-future item. Spec ref cloned at
+  `~/Documents/OSS/WASI/`; reference impl `~/Documents/OSS/wasmtime/` (43+).
+  Work units tracked as **D-335** (CM-async types + canon built-ins + async
+  lift/lower + WASI-P3 host interfaces + corpus); the loop drives it as a
+  campaign.
 
 **Genuinely-future bucket** (demand-driven, NO version gate — the §1.3 + §3.3
 set; not a queue):
 
 - Threaded EXECUTION (shared memory + spawn; the atomics *instruction set* is
   shipped single-threaded).
-- Stack switching / WASI 0.3 (async / streams); `wasi:sockets`
-  listeners/UDP/name-lookup; fs `*-via-stream`.
+- **Core** stack-switching continuations (the core-wasm proposal — still
+  pre-Phase-4, format evolving as of 2026-06; **D-300**). NOTE: WASI 0.3 does
+  NOT need it — see Front D.
+- `wasi:sockets` listeners/UDP/name-lookup; fs `*-via-stream`.
 - RISC-V / s390x backends (separate ADR each).
 - The **optimising tier is permanently OUT** (single-pass is the design — §3.2).
 
