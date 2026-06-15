@@ -307,6 +307,59 @@ pub const WaitableSet = struct {
     }
 };
 
+/// The per-task waitable-set table (`CanonicalABI.md` — sets are created by
+/// `canon waitable-set.new` and named by the `waitable_set_index` a stackless
+/// callback returns for a WAIT). Index 0 reserved (no set), holes reused via the
+/// free list — mirrors `StreamFutureTable`. Owns each `WaitableSet`, so `remove`
+/// (and `deinit`) tear down the member list.
+pub const WaitableSetTable = struct {
+    slots: std.ArrayList(?WaitableSet),
+    free: std.ArrayList(u32),
+    alloc: Allocator,
+
+    pub fn init(alloc: Allocator) Error!WaitableSetTable {
+        var slots: std.ArrayList(?WaitableSet) = .empty;
+        errdefer slots.deinit(alloc);
+        try slots.append(alloc, null); // reserve index 0
+        return .{ .slots = slots, .free = .empty, .alloc = alloc };
+    }
+
+    pub fn deinit(self: *WaitableSetTable) void {
+        for (self.slots.items) |*slot| if (slot.*) |*ws| ws.deinit();
+        self.slots.deinit(self.alloc);
+        self.free.deinit(self.alloc);
+    }
+
+    /// `Table.add` — install a set (the table takes ownership); returns the
+    /// handle (≥ 1).
+    pub fn add(self: *WaitableSetTable, ws: WaitableSet) Error!u32 {
+        if (self.free.pop()) |i| {
+            self.slots.items[i] = ws;
+            return i;
+        }
+        const i: u32 = @intCast(self.slots.items.len);
+        if (i > MAX_LENGTH) return Error.TableFull;
+        try self.slots.append(self.alloc, ws);
+        return i;
+    }
+
+    /// `Table.get` — bounds + hole check (the trap source for stale set indices).
+    pub fn get(self: *WaitableSetTable, i: u32) Error!*WaitableSet {
+        if (i == 0 or i >= self.slots.items.len) return Error.InvalidHandle;
+        if (self.slots.items[i] == null) return Error.InvalidHandle;
+        return &self.slots.items[i].?;
+    }
+
+    /// `Table.remove` — drop the set (tearing down its member list), tombstone
+    /// the slot + push the hole to the free list.
+    pub fn remove(self: *WaitableSetTable, i: u32) Error!void {
+        var ws = (try self.get(i)).*;
+        ws.deinit();
+        self.slots.items[i] = null;
+        try self.free.append(self.alloc, i);
+    }
+};
+
 /// `Subtask.State` (`CanonicalABI.md`) — the lifecycle of an async-lowered
 /// import call (the waitable a guest receives when it calls an async import).
 pub const SubtaskState = enum(u8) {
@@ -742,6 +795,27 @@ test "stream/future end table: add/get/remove lifecycle + index-0 reserved" {
     const h2 = try t.add(.{ .kind = .future, .side = .writable, .elem_type = null });
     try testing.expectEqual(h, h2);
     try testing.expectEqual(EndKind.future, (try t.get(h2)).kind);
+}
+
+test "D-335 unit D-ηB: waitable-set table add/get/remove + index-0 reserved" {
+    var t = try WaitableSetTable.init(testing.allocator);
+    defer t.deinit();
+
+    var ws = WaitableSet.init(testing.allocator);
+    try ws.join(7); // a member waitable handle
+    const h = try t.add(ws); // table takes ownership of ws
+    try testing.expect(h >= 1); // never the 0 sentinel
+    try testing.expectEqualSlices(u32, &.{7}, (try t.get(h)).elems.items);
+
+    try testing.expectError(Error.InvalidHandle, t.get(0)); // reserved sentinel
+
+    try t.remove(h); // drops the set (deinits its member list)
+    try testing.expectError(Error.InvalidHandle, t.get(h)); // tombstoned
+    try testing.expectError(Error.InvalidHandle, t.remove(h)); // double-drop traps
+
+    // a freed slot is reused (free list) for the next add.
+    const h2 = try t.add(WaitableSet.init(testing.allocator));
+    try testing.expectEqual(h, h2);
 }
 
 /// Records what the callback loop asked of the engine + scripts the guest's
