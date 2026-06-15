@@ -3,7 +3,7 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Current state — WASI-0.3 campaign (D-335); Zone-1 async COMPLETE + ADR-0188 P3-runner shape (`249b5747`)
+## Current state — WASI-0.3 campaign (D-335); P3 runner RUNS async end-to-end (EXIT+YIELD) (`87ffa08b`)
 
 **WASI 0.3 / Preview 3 campaign is the active feature work** (Front D, ratified 2026-06-11; CM-async —
 `async` func / `stream<T>` / `future<T>` — NOT core stack-switching). Critical path A→B→C→D(crux)→E→F→G;
@@ -45,40 +45,36 @@ for switches + run `test-all` locally once.
 (`Canon.task_return`/`CoreFuncDef.task_return`; shared `decodeResultList`; P2 rejects loudly; validate bounds-
 checks result type-index + opts + callback core:funcidx). Decode surface for async is now complete.
 
-**Zone-1 async model COMPLETE**: `driveCallbackLoop` (`d8fabc91` — the canon_lift stackless loop body, Zone-1
-generic over `invokeCallback`+`waitOn` seams, mock-tested) + `WaitableSetTable` (`bcb0ca9f` — per-task
-table-of-sets keyed by `waitable_set_index`, mirrors StreamFutureTable). **ADR-0188** (`249b5747`) fixes the
-Zone-3 P3-runner shape (mandatory ADR-first for the new file) incl. the self-provisioned async-lift `.wat`
-fixture spelling (verified vs wasmtime `async/lift.wast`).
+**P3 runner DONE — async runs end-to-end**: `component_wasi_p3.zig` (`cfaff104`) — `P3CallbackCtx` installs
+`driveCallbackLoop`'s `invokeCallback`(→`Instance.invoke`)+`waitOn`(→`WaitableSetTable.poll`, trap
+`error.AsyncDeadlock` on empty) seams; `runWasiP3Main` reuses `buildWasiP2Component`, detects the async lift
+via `opts.is_async`, invokes the task entry, drives the loop. The decode/validate path ACCEPTED async lift
+(no validate.zig change needed). E2E tests (`cfaff104`+`87ffa08b`): immediate-EXIT + YIELD→callback→EXIT, both
+green; wasm-tools-assembled fixtures (`test/component/async_{exit_immediate,yield_then_exit}.wasm`). Zone-1
+model done earlier: `driveCallbackLoop` (`d8fabc91`), `WaitableSetTable` (`bcb0ca9f`); shape in ADR-0188.
 
-**NEXT — implement the P3 runner per ADR-0188** (the architectural chunk; design is now settled):
-- new `src/api/component_wasi_p3.zig` (Zone-3, coexists w/ P2): reuse `buildWasiP2Component`
-  (`component_wasi_p2.zig:1687`); a `P3CallbackCtx{*Instance, callback_name, *StreamFutureTable,
-  *WaitableSetTable}` installing the two seams — `invokeCallback`→`inst.invoke(callback_name,...)`
-  (`src/zwasm/instance.zig:219`) returning the packed i32; `waitOn`→`(sets.get(si)).poll(streams)`, trap
-  `error.AsyncDeadlock` on empty (NO silent NONE). Detect async export via `lift.opts.is_async`; invoke the
-  task entry once → `unpackCallbackResult` → `driveCallbackLoop`.
-- **First green increment**: the immediate-EXIT fixture from ADR-0188 (`run` returns 0=EXIT, no task.return)
-  through instantiate→invoke→loop→EXIT. Assemble `.wat`→`.wasm` via `nix develop .#gen` wasm-tools 1.251.0,
-  commit BOTH (the runner test is the same-cycle consumer, per spike §2). **Watch**: validate.zig may not yet
-  accept an async `canon lift` — if instantiation trips, that validation is part of this chunk.
-- **then ζ2** — replace `component_wasi_p2.zig` `.stream_future / .task_return → UnsupportedWasiImport` with
-  real host builtins calling async.zig (template `p2GuestResourceNew`/`ResourceBuiltinCtx`). Gates on the runner.
+**NEXT — ζ2: canon-builtin dispatch** (wire the async DATA ops into guest execution; the runner is the host):
+- Replace `component_wasi_p2.zig` `.stream_future / .task_return → error.UnsupportedWasiImport` with real host
+  builtins calling `async.zig`'s stream/future ops + `task.return` delivery (template:
+  `p2GuestResourceNew`/`ResourceBuiltinCtx`). This lets a guest actually create/read/write a stream/future
+  and return a task result — then a WAIT-path e2e fixture (a stream that delivers a real event, exercising
+  `driveCallbackLoop`'s WAIT branch + `waitOn` through the runner) becomes possible.
+- After ζ2: units E (WASI-P3 host interfaces), F (async-export ABI/public API), G (p3 corpus). Per D-335.
 
 ## Active bundle
 
 - **Bundle-ID**: wasi03-D-335 (§9.0 Front D; WASI 0.3 / Preview 3; units A→G)
-- **Cycles-remaining**: ~2 (Zone-1 async COMPLETE + ADR-0188; remaining = P3-runner impl + ζ2)
-- **Continuity-memo**: critical path **A→B→C→D(Zone-1 async+driveCallbackLoop+WaitableSetTable+ADR-0188 done; P3-runner impl+ζ2 next)→E→F→G**
+- **Cycles-remaining**: ~2 (P3 runner runs async e2e; remaining = ζ2 canon-builtin dispatch, then E/F/G)
+- **Continuity-memo**: critical path **A→B→C→D(Zone-1 async + driveCallbackLoop + WaitableSetTable + ADR-0188 + P3-runner-e2e done; ζ2 next)→E→F→G**
   (full plan in **D-335**; design in **ADR-0187** — stackless callback ABI, no fibers). CM-async, NOT core
   stack-switching. Spec: `~/Documents/OSS/{WASI, WebAssembly/component-model}` (design/mvp/{Binary,CanonicalABI,
   Concurrency}.md); ref impl `~/Documents/OSS/wasmtime` (43+; `concurrent/futures_and_streams.rs`).
 - **Exit-condition**: a WASI-0.3 async/stream/future component runs end-to-end through zwasm (new P3
   corpus green, 3-host); each unit lands green per D-335 along the way.
-- **Current unit — D (HIGH/crux; Zone-1 async COMPLETE + ADR-0188, P3-runner IMPL START HERE)**: the full
-  Zone-1 async data model + `driveCallbackLoop` + `WaitableSetTable` are done + green; ADR-0188 settles the
-  P3-runner shape + fixture. Remaining = implement `component_wasi_p3.zig` per ADR-0188 (immediate-EXIT
-  fixture end-to-end first), then ζ2 (canon-builtin dispatch). No further design gate — build it.
+- **Current unit — D (HIGH/crux; P3 runner runs async e2e, ζ2 START HERE)**: Zone-1 model + `driveCallbackLoop`
+  + `WaitableSetTable` + the P3 runner (`component_wasi_p3.zig`, EXIT+YIELD e2e) are all done + green. Remaining
+  = ζ2 (replace P2's `.stream_future/.task_return → UnsupportedWasiImport` with real async.zig-backed host
+  builtins + task.return delivery), enabling a WAIT-path e2e fixture. Then units E/F/G.
 
 ## Long-tail (debt-tracked / parked — NOT active; see §9.0 fronts + debt.yaml)
 
