@@ -349,13 +349,47 @@ test "component-instance decode: instantiate with arg + inline exports" {
     try testing.expectEqual(Sort.func, inl[0].sort);
 }
 
-test "canon: async opt + async builtin defer UnsupportedCanon" {
-    // lift with opts{async 0x06}
+test "canon: async opt defers UnsupportedCanon" {
+    // lift with opts{async 0x06} — the async lift/lower opt is Unit C, still deferred.
     const async_opt = [_]u8{ 0x01, 0x00, 0x00, 0x00, 0x01, 0x06, 0x00 };
     try testing.expectError(Error.UnsupportedCanon, decodeBoth(comptime buildComponent(&.{.{ 8, &async_opt }})));
-    // a stream/future builtin opcode (0x0e)
-    const builtin = [_]u8{ 0x01, 0x0e, 0x00 };
-    try testing.expectError(Error.UnsupportedCanon, decodeBoth(comptime buildComponent(&.{.{ 8, &builtin }})));
+}
+
+test "canon section: stream/future builtins decode (0x0e–0x1b)" {
+    // stream.new<5>: 0x0e 0x05; stream.read<5> opts{utf8}: 0x0f 0x05 0x01 0x00;
+    // stream.cancel-read<5> async: 0x11 0x05 0x01; future.drop-writable<7>: 0x1b 0x07.
+    const body = [_]u8{
+        0x04,
+        0x0e,
+        0x05,
+        0x0f,
+        0x05,
+        0x01,
+        0x00,
+        0x11,
+        0x05,
+        0x01,
+        0x1b,
+        0x07,
+    };
+    const bytes = comptime buildComponent(&.{.{ 8, &body }});
+    var info = try decodeBoth(bytes);
+    defer info.deinit();
+    try testing.expectEqual(@as(usize, 4), info.canons.items.len);
+    const c0 = info.canons.items[0].stream_future;
+    try testing.expectEqual(types.StreamFutureOp.stream_new, c0.op);
+    try testing.expectEqual(@as(u32, 5), c0.type_index);
+    const c1 = info.canons.items[1].stream_future;
+    try testing.expectEqual(types.StreamFutureOp.stream_read, c1.op);
+    try testing.expectEqual(StringEncoding.utf8, c1.opts.?.string_encoding);
+    const c2 = info.canons.items[2].stream_future;
+    try testing.expectEqual(types.StreamFutureOp.stream_cancel_read, c2.op);
+    try testing.expectEqual(@as(?bool, true), c2.is_async);
+    const c3 = info.canons.items[3].stream_future;
+    try testing.expectEqual(types.StreamFutureOp.future_drop_writable, c3.op);
+    try testing.expectEqual(@as(u32, 7), c3.type_index);
+    // Each builtin mints a core func (Binary.md: "(core func)").
+    try testing.expectEqual(@as(usize, 4), info.core_funcs.items.len);
 }
 
 test "enum decode: 0x6d label vec" {

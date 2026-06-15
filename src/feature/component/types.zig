@@ -279,8 +279,29 @@ pub const CanonOpts = struct {
     post_return: ?u32 = null, // core:funcidx
 };
 
+/// The `canon stream.*` / `future.*` builtins (`Binary.md` 0x0e–0x1b, CM-async
+/// / WASI 0.3). The tag selects the operation; the payload shape varies
+/// (new/drop carry only the element typeidx, read/write add `opts`,
+/// cancel-read/write add an `async?` flag).
+pub const StreamFutureOp = enum {
+    stream_new, // 0x0e
+    stream_read, // 0x0f
+    stream_write, // 0x10
+    stream_cancel_read, // 0x11
+    stream_cancel_write, // 0x12
+    stream_drop_readable, // 0x13
+    stream_drop_writable, // 0x14
+    future_new, // 0x15
+    future_read, // 0x16
+    future_write, // 0x17
+    future_cancel_read, // 0x18
+    future_cancel_write, // 0x19
+    future_drop_readable, // 0x1a
+    future_drop_writable, // 0x1b
+};
+
 /// One `canon` section definition (`Binary.md` `canon`). B6 models lift/lower +
-/// the resource builtins; the async/stream/future/thread builtins defer.
+/// the resource builtins; the stream/future builtins are the CM-async front.
 pub const Canon = union(enum) {
     /// `canon lift` (0x00 0x00): a core func exposed as a component func of
     /// `type_index`, with `opts`.
@@ -290,6 +311,9 @@ pub const Canon = union(enum) {
     resource_new: u32, // 0x02 typeidx
     resource_drop: u32, // 0x03 typeidx
     resource_rep: u32, // 0x04 typeidx
+    /// `canon stream.*` / `future.*` (0x0e–0x1b) over element type `type_index`.
+    /// `opts` present only for read/write; `is_async` only for cancel-read/write.
+    stream_future: struct { op: StreamFutureOp, type_index: u32, opts: ?CanonOpts = null, is_async: ?bool = null },
 };
 
 /// `core:instantiatearg ::= name 0x12 instanceidx` — a `with` argument
@@ -326,6 +350,9 @@ pub const CoreFuncDef = union(enum) {
     resource_new: u32,
     resource_drop: u32,
     resource_rep: u32,
+    /// A `canon stream.*`/`future.*` builtin (0x0e–0x1b) over element type
+    /// `type_index` — minted into the core-func index space ("(core func)").
+    stream_future: struct { op: StreamFutureOp, type_index: u32 },
     /// A core-func `alias` (a core-instance export, or an `outer` alias).
     alias: AliasTarget,
 };
@@ -1290,6 +1317,32 @@ fn decodeCanonOpts(body: []const u8, pos: *usize) Error!CanonOpts {
     return opts;
 }
 
+/// `async?` immediate (`Binary.md`): a single byte 0x00 (sync) | 0x01 (async).
+fn decodeAsyncFlag(body: []const u8, pos: *usize) Error!bool {
+    if (pos.* >= body.len) return Error.Truncated;
+    const b = body[pos.*];
+    pos.* += 1;
+    return switch (b) {
+        0x00 => false,
+        0x01 => true,
+        else => return Error.InvalidCanon,
+    };
+}
+
+/// `canon stream.*`/`future.*` (0x0e–0x1b): `op t:<typeidx>` then, per op,
+/// `opts` (read/write) or an `async?` flag (cancel-read/write).
+fn decodeStreamFutureCanon(op: StreamFutureOp, body: []const u8, pos: *usize) Error!Canon {
+    const type_index = try leb128.readUleb128(u32, body, pos);
+    var sf: @FieldType(Canon, "stream_future") = .{ .op = op, .type_index = type_index };
+    switch (op) {
+        .stream_read, .stream_write, .future_read, .future_write => sf.opts = try decodeCanonOpts(body, pos),
+        .stream_cancel_read, .stream_cancel_write, .future_cancel_read, .future_cancel_write => sf.is_async = try decodeAsyncFlag(body, pos),
+        // new / drop-readable / drop-writable carry only the element typeidx.
+        .stream_new, .stream_drop_readable, .stream_drop_writable, .future_new, .future_drop_readable, .future_drop_writable => {},
+    }
+    return .{ .stream_future = sf };
+}
+
 fn decodeCanonSection(arena: Allocator, out: *std.ArrayList(Canon), body: []const u8) Error!void {
     var pos: usize = 0;
     const count = try leb128.readUleb128(u32, body, &pos);
@@ -1315,7 +1368,21 @@ fn decodeCanonSection(arena: Allocator, out: *std.ArrayList(Canon), body: []cons
             0x02 => .{ .resource_new = try leb128.readUleb128(u32, body, &pos) },
             0x03 => .{ .resource_drop = try leb128.readUleb128(u32, body, &pos) },
             0x04 => .{ .resource_rep = try leb128.readUleb128(u32, body, &pos) },
-            // async / stream / future / thread builtins (0x05..0x26) defer.
+            0x0e => try decodeStreamFutureCanon(.stream_new, body, &pos),
+            0x0f => try decodeStreamFutureCanon(.stream_read, body, &pos),
+            0x10 => try decodeStreamFutureCanon(.stream_write, body, &pos),
+            0x11 => try decodeStreamFutureCanon(.stream_cancel_read, body, &pos),
+            0x12 => try decodeStreamFutureCanon(.stream_cancel_write, body, &pos),
+            0x13 => try decodeStreamFutureCanon(.stream_drop_readable, body, &pos),
+            0x14 => try decodeStreamFutureCanon(.stream_drop_writable, body, &pos),
+            0x15 => try decodeStreamFutureCanon(.future_new, body, &pos),
+            0x16 => try decodeStreamFutureCanon(.future_read, body, &pos),
+            0x17 => try decodeStreamFutureCanon(.future_write, body, &pos),
+            0x18 => try decodeStreamFutureCanon(.future_cancel_read, body, &pos),
+            0x19 => try decodeStreamFutureCanon(.future_cancel_write, body, &pos),
+            0x1a => try decodeStreamFutureCanon(.future_drop_readable, body, &pos),
+            0x1b => try decodeStreamFutureCanon(.future_drop_writable, body, &pos),
+            // subtask / task / waitable / thread builtins (0x05..0x0d, 0x1c..) defer.
             else => return Error.UnsupportedCanon,
         };
         try out.append(arena, canon);
@@ -1513,6 +1580,7 @@ pub fn decodeTypeInfo(parent: Allocator, component: *const decode.Component) Err
                 .resource_new => |t| try core_funcs.append(a, .{ .resource_new = t }),
                 .resource_drop => |t| try core_funcs.append(a, .{ .resource_drop = t }),
                 .resource_rep => |t| try core_funcs.append(a, .{ .resource_rep = t }),
+                .stream_future => |sf| try core_funcs.append(a, .{ .stream_future = .{ .op = sf.op, .type_index = sf.type_index } }),
                 .lift => try component_funcs.append(a, .{ .lift = @intCast(abs) }),
             },
             .alias => for (aliases.items[aliases_before..], aliases_before..) |al, al_abs| {

@@ -1065,6 +1065,10 @@ fn checkCanons(info: *const TypeInfo, type_space_len: u32) Error!void {
             try checkCanonOpts(info, l.opts);
         },
         .resource_new, .resource_drop, .resource_rep => |t| if (t >= type_space_len) return Error.InvalidTypeIndex,
+        .stream_future => |sf| {
+            if (sf.type_index >= type_space_len) return Error.InvalidTypeIndex;
+            if (sf.opts) |o| try checkCanonOpts(info, o);
+        },
     };
 }
 
