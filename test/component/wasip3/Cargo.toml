@@ -1,0 +1,18 @@
+# WASI 0.3 (wasm32-wasip3) conformance fixtures — plain rust, no wit-bindgen.
+# Built Mac-host-only via the recipe in flake.nix `.#gen-wasip3` (Tier-3 target,
+# nightly + -Z build-std). Regenerate: scripts/gen_wasip3_fixtures.sh.
+# The emitted `.wasm` is committed + run on the test hosts by the edge-runner.
+[package]
+name = "zwasm-wasip3-fixtures"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "cli-exit"
+path = "src/bin/cli-exit.rs"
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+strip = true

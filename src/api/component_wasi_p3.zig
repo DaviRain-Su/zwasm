@@ -560,3 +560,27 @@ test "D-335 unit E: write-via-stream's result future resolves to ok (future.read
     try driveAsyncMain(&built);
     try testing.expectEqualStrings("hi", capture.items);
 }
+
+// ---- WASI 0.3 (wasm32-wasip3) conformance corpus (front ①, real rust components) ----
+// Plain-rust wasip3 components built Mac-host-only via the recipe in flake.nix
+// `.#gen-wasip3` (regen: scripts/gen_wasip3_fixtures.sh); the committed `.wasm`
+// runs on every host through the edge-runner. Each test mirrors a wasi-testsuite
+// `.json` expectation (operations: run / wait exit_code).
+
+test "WASI 0.3 conformance (wasip3): cli-exit → exit code 1 (real rust component)" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/wasip3/cli-exit.wasm", testing.allocator, .limited(4 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+
+    // std::process::exit(1) → wasi:cli/exit → ProcExit (caught by the runner),
+    // host records exit code 1 — matches test/component/wasip3/cli-exit.json.
+    try runWasiMain(&eng, testing.allocator, bytes, &host, .{});
+    try testing.expectEqual(@as(?u32, 1), host.exit_code);
+}

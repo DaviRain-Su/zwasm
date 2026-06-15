@@ -43,3 +43,4 @@ bench/results/recent.yaml
 # --record after a successful windowsmini run; per-clone, not authoritative)
 .dev/last_windowsmini_sha
 scripts/spec_distill/__pycache__/
+test/component/wasip3/target/
