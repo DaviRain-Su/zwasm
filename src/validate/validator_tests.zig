@@ -1843,6 +1843,18 @@ test "validate: table.copy with mismatched elem types → StackTypeMismatch" {
     try testing.expectError(Error.StackTypeMismatch, r);
 }
 
+test "validate: table.copy src elem subtype of dst elem (Wasm 3.0 §3.3.6, not exact eql)" {
+    // dst table[0] = funcref (ref null func); src table[1] = (ref func) non-null.
+    // Spec requires src elem <: dst elem; (ref func) <: funcref, so the copy is
+    // valid. Same exact-eql-vs-subtyping class as the return_call fix.
+    const tables = [_]zir.TableEntry{
+        .{ .elem_type = ValType.funcref, .min = 0 },
+        .{ .elem_type = .{ .ref = zir.RefType.abs(.func, false) }, .min = 0 },
+    };
+    const body = [_]u8{ 0x41, 0x00, 0x41, 0x00, 0x41, 0x00, 0xFC, 0x0E, 0x00, 0x01, 0x0B };
+    try validateFunction(empty_sig, &.{}, &body, &.{}, &.{}, &.{}, 0, &tables, 0);
+}
+
 test "validate: table.init pops three i32; bounds-checks elemidx+tableidx" {
     const tables = [_]zir.TableEntry{.{ .elem_type = .funcref, .min = 0 }};
     const body = [_]u8{ 0x41, 0x00, 0x41, 0x00, 0x41, 0x00, 0xFC, 0x0C, 0x00, 0x00, 0x0B };

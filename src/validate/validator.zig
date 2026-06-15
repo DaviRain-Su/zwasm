@@ -2710,13 +2710,16 @@ pub const Validator = struct {
     }
 
     /// table.copy x y (0xFC 14): dst-tableidx, src-tableidx; pops
-    /// three i32 (n, src, dst). Both tables must have the same
-    /// elem_type.
+    /// three i32 (n, src, dst). Wasm 3.0 §3.3.6 requires the SOURCE
+    /// elem type to be a subtype of the DEST elem type (not exact
+    /// equality) — e.g. copying a `(ref func)` table into a `funcref`
+    /// table is valid. Same exact-eql-vs-subtyping class as the
+    /// return_call result check.
     fn opTableCopy(self: *Validator) Error!void {
         const dst = try leb128.readUleb128(u32, self.body, &self.pos);
         const src = try leb128.readUleb128(u32, self.body, &self.pos);
         if (dst >= self.tables.len or src >= self.tables.len) return Error.InvalidFuncIndex;
-        if (!self.tables[dst].elem_type.eql(self.tables[src].elem_type)) {
+        if (!self.subtypeCtx(self.tables[src].elem_type, self.tables[dst].elem_type)) {
             return Error.StackTypeMismatch;
         }
         try self.popExpect(.i32);
