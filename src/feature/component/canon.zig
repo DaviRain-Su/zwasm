@@ -81,6 +81,13 @@ pub const CanonType = union(enum) {
     /// `borrow<i>` — a borrowed handle (lowered to the REP when the callee
     /// component owns the resource type — `CanonicalABI.md` lower_borrow).
     borrow: u32,
+    /// `stream<T>` — an async stream handle (the readable end; element type
+    /// `T`, or null for `stream`). ABI: a single i32 table-index handle, like
+    /// `own`. The async read/write/state runtime is WASI-0.3 Unit D.
+    stream: ?*const CanonType,
+    /// `future<T>` — an async single-shot handle (value type `T`, or null).
+    /// ABI: a single i32 handle, like `own`.
+    future: ?*const CanonType,
 
     pub const Field = struct {
         name: []const u8,
@@ -162,7 +169,7 @@ fn maxCaseAlignment(cases: []const CanonType.VCase) usize {
 /// In-memory alignment of a value type (recursive).
 pub fn alignmentOf(t: CanonType) usize {
     return switch (t) {
-        .own, .borrow => 4,
+        .own, .borrow, .stream, .future => 4,
         .prim => |p| primAlignment(p),
         .enum_ => |n| discriminantSize(n),
         .flags => |n| flagsSize(n),
@@ -179,7 +186,7 @@ pub fn alignmentOf(t: CanonType) usize {
 /// In-memory size of a value type (recursive; `CanonicalABI.md` `elem_size`).
 pub fn sizeOf(t: CanonType) usize {
     return switch (t) {
-        .own, .borrow => 4,
+        .own, .borrow, .stream, .future => 4,
         .prim => |p| primSize(p),
         .enum_ => |n| discriminantSize(n),
         .flags => |n| flagsSize(n),
@@ -368,7 +375,7 @@ pub fn lift(c: CoreValue, ty: PrimValType) LiftError!Value {
 /// single-value flat form (`NotFlatScalar`) — use `load`.
 pub fn liftTyped(c: CoreValue, t: CanonType) LiftError!Value {
     return switch (t) {
-        .own => .{ .handle = @bitCast(c.i32) },
+        .own, .stream, .future => .{ .handle = @bitCast(c.i32) },
         .borrow => LiftError.NotFlatScalar,
         .prim => |p| lift(c, p),
         .enum_ => |n| blk: {
@@ -413,7 +420,7 @@ fn loadInt(cx: CanonContext, ptr: u32, nbytes: usize) LoadError!u64 {
 /// (`CanonicalABI.md` `store`). Recursive over list/record.
 pub fn store(cx: CanonContext, value: Value, ty: CanonType, ptr: u32) StoreError!void {
     switch (ty) {
-        .own => {
+        .own, .stream, .future => {
             const h = if (value == .handle) value.handle else return StoreError.ValueTypeMismatch;
             try storeInt(cx, h, ptr, 4);
         },
@@ -478,7 +485,7 @@ pub fn store(cx: CanonContext, value: Value, ty: CanonType, ptr: u32) StoreError
 /// list/record allocate their element/field slices from `arena`.
 pub fn load(cx: CanonContext, arena: std.mem.Allocator, ty: CanonType, ptr: u32) LoadError!Value {
     switch (ty) {
-        .own => return .{ .handle = @truncate(try loadInt(cx, ptr, 4)) },
+        .own, .stream, .future => return .{ .handle = @truncate(try loadInt(cx, ptr, 4)) },
         .borrow => return LoadError.ValueTypeMismatch, // borrow results are spec-invalid
         .prim => |p| switch (p) {
             .string => {
@@ -926,7 +933,7 @@ pub fn flattenType(alloc: std.mem.Allocator, t: CanonType, out: *std.ArrayList(C
             .string, .error_context => try out.appendSlice(alloc, &.{ .i32, .i32 }),
             .bool, .s8, .u8, .s16, .u16, .s32, .u32, .s64, .u64, .f32, .f64, .char => try out.append(alloc, flatCoreType(p).?),
         },
-        .enum_, .flags, .own, .borrow => try out.append(alloc, .i32),
+        .enum_, .flags, .own, .borrow, .stream, .future => try out.append(alloc, .i32),
         .list => try out.appendSlice(alloc, &.{ .i32, .i32 }),
         .record => |fields| for (fields) |f| try flattenType(alloc, f.ty, out),
         .variant => |cases| {
@@ -1028,7 +1035,9 @@ pub fn lowerFlat(cx: CanonContext, alloc: std.mem.Allocator, value: Value, t: Ca
         // D-322 guest resources: an OWN handle transfers as-is (the callee
         // owns the table); a BORROW lowers to the REP when the callee
         // component owns the resource type (`lower_borrow`).
-        .own => {
+        // stream/future values lower exactly like an OWN handle: the i32
+        // table index passes through (the table lifecycle is Unit D).
+        .own, .stream, .future => {
             const h = if (value == .handle) value.handle else return StoreError.ValueTypeMismatch;
             try out.append(alloc, CoreValue.fromI32(@bitCast(h)));
         },
@@ -1104,7 +1113,9 @@ pub const LiftFlatError = LoadError || StringError || FlattenError || error{Flat
 /// guest memory; slices allocate from `arena`.
 pub fn liftFlat(cx: CanonContext, arena: std.mem.Allocator, t: CanonType, flats: []const CoreValue, idx: *usize) LiftFlatError!Value {
     switch (t) {
-        .own => return .{ .handle = @bitCast((try takeFlat(flats, idx, .i32)).i32) },
+        // stream/future results lift like an OWN handle (valid as results,
+        // unlike borrow); the table remove/validate is Unit D.
+        .own, .stream, .future => return .{ .handle = @bitCast((try takeFlat(flats, idx, .i32)).i32) },
         .borrow => return LiftFlatError.ValueTypeMismatch, // borrow results are spec-invalid
 
         .prim => |p| switch (p) {
@@ -1429,9 +1440,19 @@ fn canonTypeFromLocalDefType(arena: std.mem.Allocator, info: *const types.TypeIn
         .flags => |fl| return .{ .flags = @intCast(fl.labels.len) },
         .own => |ti| return .{ .own = ti },
         .borrow => |ti| return .{ .borrow = ti },
-        // stream/future canon lowering lands in WASI-0.3 Unit C (async lift/lower).
-        .func, .stream, .future, .instance_type, .component_type, .resource => return TypeBridgeError.UnsupportedType,
+        .stream => |s| return .{ .stream = try boxedLocalElem(arena, info, locals, s.payload) },
+        .future => |f| return .{ .future = try boxedLocalElem(arena, info, locals, f.payload) },
+        .func, .instance_type, .component_type, .resource => return TypeBridgeError.UnsupportedType,
     }
+}
+
+/// Build the boxed element `CanonType` for a `stream<T>`/`future<T>` whose
+/// element is the optional valtype `payload` (null → `stream`/`future`).
+fn boxedLocalElem(arena: std.mem.Allocator, info: *const types.TypeInfo, locals: []const ?*const types.DefType, payload: ?types.ValType) TypeBridgeError!?*const CanonType {
+    const vt = payload orelse return null;
+    const p = try arena.create(CanonType);
+    p.* = try canonTypeFromLocalValType(arena, info, locals, vt);
+    return p;
 }
 
 fn canonTypeFromLocalValType(arena: std.mem.Allocator, info: *const types.TypeInfo, locals: []const ?*const types.DefType, vt: types.ValType) TypeBridgeError!CanonType {
@@ -1495,9 +1516,19 @@ pub fn canonTypeFromDefType(arena: std.mem.Allocator, info: *const types.TypeInf
         .flags => |fl| return .{ .flags = @intCast(fl.labels.len) },
         .own => |ti| return .{ .own = ti },
         .borrow => |ti| return .{ .borrow = ti },
-        // stream/future canon lowering lands in WASI-0.3 Unit C (async lift/lower).
-        .func, .stream, .future, .instance_type, .component_type, .resource => return TypeBridgeError.UnsupportedType,
+        .stream => |s| return .{ .stream = try boxedDecodedElem(arena, info, s.payload) },
+        .future => |f| return .{ .future = try boxedDecodedElem(arena, info, f.payload) },
+        .func, .instance_type, .component_type, .resource => return TypeBridgeError.UnsupportedType,
     }
+}
+
+/// Build the boxed element `CanonType` for a top-level `stream<T>`/`future<T>`
+/// whose element is the optional valtype `payload` (null → no element).
+fn boxedDecodedElem(arena: std.mem.Allocator, info: *const types.TypeInfo, payload: ?types.ValType) TypeBridgeError!?*const CanonType {
+    const vt = payload orelse return null;
+    const p = try arena.create(CanonType);
+    p.* = try canonTypeFromDecoded(arena, info, vt);
+    return p;
 }
 
 test "D-322: own handles flatten/lower/lift as i32 pass-through; borrow lowers to the rep via the context hook" {
@@ -1548,4 +1579,52 @@ test "D-322: own handles flatten/lower/lift as i32 pass-through; borrow lowers t
     var idx: usize = 0;
     const lifted = try liftFlat(cx, a, .{ .own = 7 }, &.{CoreValue.fromI32(5)}, &idx);
     try testing_.expectEqual(@as(u32, 5), lifted.handle);
+}
+
+test "D-335 unit C: stream/future values flatten/lower/lift as i32 handles" {
+    const testing_ = std.testing;
+    var arena = std.heap.ArenaAllocator.init(testing_.allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    var mem_buf = [_]u8{0} ** 16;
+    var mem_slice: []u8 = &mem_buf;
+    const Hook = struct {
+        fn borrowRep(_: *anyopaque, _: u32, _: u32) BorrowRepError!u32 {
+            return BorrowRepError.InvalidHandle;
+        }
+        fn realloc(_: *anyopaque, _: u32, _: u32, _: u32, _: u32) ReallocError!u32 {
+            return ReallocError.AllocFailed;
+        }
+    };
+    var dummy: u8 = 0;
+    const cx = CanonContext{
+        .memory_ctx = @ptrCast(&mem_slice),
+        .memory_fn = CanonContext.sliceMemoryFn,
+        .realloc_ctx = @ptrCast(&dummy),
+        .realloc_fn = Hook.realloc,
+        .resource_ctx = @ptrCast(&dummy),
+        .borrow_rep_fn = Hook.borrowRep,
+    };
+
+    const u32_ty = CanonType{ .prim = .u32 };
+    const stream_ty = CanonType{ .stream = &u32_ty };
+    const future_ty = CanonType{ .future = null }; // future<> (no element)
+
+    // flatten: each is a single i32 slot (like own/borrow).
+    var fl: std.ArrayList(CoreType) = .empty;
+    try flattenType(a, stream_ty, &fl);
+    try flattenType(a, future_ty, &fl);
+    try testing_.expectEqual(@as(usize, 2), fl.items.len);
+    try testing_.expectEqual(CoreType.i32, fl.items[0]);
+
+    // lower: the handle passes through as i32 (no rep hook, unlike borrow).
+    var out: std.ArrayList(CoreValue) = .empty;
+    try lowerFlat(cx, a, .{ .handle = 11 }, stream_ty, &out);
+    try testing_.expectEqual(@as(i32, 11), out.items[0].i32);
+
+    // lift: a stream/future RESULT is a valid handle (borrow results are not).
+    var idx: usize = 0;
+    const lifted = try liftFlat(cx, a, future_ty, &.{CoreValue.fromI32(7)}, &idx);
+    try testing_.expectEqual(@as(u32, 7), lifted.handle);
 }

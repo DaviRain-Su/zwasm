@@ -233,6 +233,9 @@ fn toCanonValue(arena: std.mem.Allocator, v: ComponentValue, ty: canon.CanonType
             if (cv.payload != null) return InvokeTypedError.ValueShapeMismatch;
             return .{ .variant = .{ .case = cv.case, .payload = null } };
         },
+        // stream/future values aren't exposed through the typed public API yet
+        // (CM-async; WASI-0.3 Unit F). Symmetric with fromCanonDefType.
+        .stream, .future => return InvokeTypedError.UnsupportedType,
     }
 }
 
