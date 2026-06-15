@@ -69,8 +69,13 @@ zwasm run <file.wasm|.cwasm> [args...] # run a module (WASI _start / main)
     [--invoke <name>[=a,b,…]]          #   run a named export; =args prints typed results
     [--engine <interp|jit>]            #   interp (default) or jit (both full WASI; jit adds SIMD)
     [--dir <host>[:<guest>]]           #   preopen a host directory for WASI
+    [--env <KEY=VAL>]                  #   set a WASI env var (repeatable)
+    [--fuel <N>]                       #   trap after a deterministic budget (error.OutOfFuel)
+    [--timeout <ms>]                   #   interrupt after a wall-clock deadline
+    [--max-memory <bytes>]             #   refuse memory.grow past this many bytes
+    [--max-table-elements <N>]         #   refuse table growth past this many elements
 zwasm compile <file.wasm> -o <out.cwasm>  # compile to a .cwasm AOT artifact
-zwasm --version | -V
+zwasm --version | -V                   # version + build identity (wasm/wasi/engine)
 zwasm --help | -h | help
 ```
 
@@ -78,6 +83,7 @@ The CLI is deliberately `run` + `compile` (ADR-0159) — the
 wasmtime/wazero-aligned shape for a runtime. Validation is programmatic
 (C-API `wasm_module_validate` / Zig `Engine.compile`); wat↔wasm
 conversion and module introspection are `wasm-tools` / `wabt`'s job.
+Full flag table + exit codes: [`docs/reference/cli.md`](docs/reference/cli.md).
 
 Runtime env vars: `ZWASM_DEBUG=<categories>` (dbg category filter),
 `ZWASM_DIAG=<channels>` (diagnostic trace ringbuffer drain).
@@ -127,6 +133,11 @@ to the upstream standard (the interface wasmtime/wasmer follow); WASI
 host-setup is the hand-authored [`include/wasi.h`](include/wasi.h). See
 [`examples/c_host/`](examples/c_host/) and
 [`docs/reference/c_api.md`](docs/reference/c_api.md).
+
+**Any FFI language** — [`examples/rust_host/`](examples/rust_host/)
+(`zig build run-rust-host`) declares the same `wasm.h` ABI from Rust and
+links `libzwasm`, demonstrating the C surface is consumable from any
+FFI-capable language, not just C.
 
 ## Build flags
 
