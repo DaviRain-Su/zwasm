@@ -1348,7 +1348,10 @@ entries:
         decode+validate (types.zig; ~400 LOC; LOW). DONE 2026-06-15: 95a23c53 (decode;
         stream/future carry an OPTIONAL element — `<valtype>?`, not bare typeidx; 0x43
         already decoded) + e5acb989 (validate: reject char + transitive borrow). Prereq for all.
-      - B — canon stream/future builtins 0x0e–0x1b decode (types.zig; ~200; LOW). Needs A. START HERE.
+      - B — canon stream/future builtins 0x0e–0x1b decode (types.zig; ~200; LOW). Needs A.
+        DONE 2026-06-15 (0376ee44): StreamFutureOp + Canon.stream_future (typeidx +
+        opts for read/write + async? for cancel); each mints a CoreFuncDef.stream_future;
+        P2 host runner rejects them (UnsupportedWasiImport, P3 = Unit E/F).
       - C — async lift/lower in canon.zig (MAX_FLAT_ASYNC_PARAMS=4; lift_async_value /
         lower_stream / lower_future; ~600; MED). Needs A,B.
       - D — async task/waitable runtime + stream/future handle lifecycle + ReturnCode

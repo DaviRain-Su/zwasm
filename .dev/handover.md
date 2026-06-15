@@ -3,45 +3,43 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Current state — WASI-0.3 campaign (D-335); Unit A DONE; branch GREEN (`e5acb989`)
+## Current state — WASI-0.3 campaign (D-335); Units A+B DONE; branch GREEN (`210f081d`)
 
 **WASI 0.3 / Preview 3 campaign is the active feature work** (Front D, ratified 2026-06-11; CM-async —
 `async` func / `stream<T>` / `future<T>` — NOT core stack-switching). Critical path A→B→C→D(crux)→E→F→G;
-full unit plan in debt **D-335**. The completion-grade re-org that promoted this (ADR-0186, §9.0 model) is
-landed history; the loop drives ALL fronts autonomously, only tag-cut is user-reserved (ADR-0156).
+full unit plan + per-unit DONE-SHAs in debt **D-335**. The loop drives ALL fronts autonomously, only
+tag-cut is user-reserved (ADR-0156).
 
-**Unit A DONE this turn** (decode + validate of `stream<t?>`/`future<t?>` valtypes 0x66/0x65):
-- **A1 (`95a23c53`)**: new `StreamType`/`FutureType` DefType variants; decode via the existing
-  `decodeOptionalValType` — KEY spec point, the element type is **optional** (`<valtype>?`), unlike `list`.
-  Validation walks the optional payload (typeidx bounds + name/label + resource-carry). Runtime/canon/wit/
-  typed lowering defers to `UnsupportedType` (Unit C). The async functype tag `0x43` was already decoded
-  (types.zig:958) — only stream/future remained. **Forced refactor**: the feature pushed `types.zig` past the
-  2000-line hard cap → extracted its test block to `types_tests.zig` (validator_tests/lower_tests pattern,
-  wired in zwasm.zig); types.zig now 1572.
-- **A2 (`e5acb989`)**: stream/future-specific validation — reject `(stream char)` + transitive `borrow` in the
-  element (`checkStreamFutureElement`/`checkValTypeNoBorrow`). Filed **D-336** for the sibling functype-result
-  / exported-value transitive-borrow gap (pre-existing; same walker generalises).
+**Done so far** (decode is now complete for the CM-async type + canon surface):
+- **Unit A** (`95a23c53` decode + `e5acb989` validate): `stream<t?>`/`future<t?>` valtypes (0x66/0x65) — the
+  element type is **optional** (`<valtype>?`), unlike `list`; `0x43` async functype was already decoded.
+  Validation: payload bounds + reject `(stream char)` + transitive `borrow`. Test block extracted to
+  `types_tests.zig` (hard-cap-forced); types.zig 1639.
+- **Unit B** (`0376ee44`): the 14 canon `stream.*`/`future.*` builtins (0x0e–0x1b) — `StreamFutureOp` +
+  `Canon.stream_future` (typeidx; `opts` for read/write; `async?` for cancel); each mints a
+  `CoreFuncDef.stream_future`; P2 host runner rejects them (P3 = Units E/F).
+- **D-336 part a** (`210f081d`): functype `result` rejects transitive `borrow` (param borrow stays allowed).
+  Part b (exported value) is now **blocked-by** the untracked value index space (sort=value deferred).
 
-**NEXT — Unit B (canon stream/future builtins decode).** `stream.new/read/write/cancel/drop` +
-`future.new/read/write/cancel/drop` builtins `0x0e–0x1b` decode in `src/feature/component/types.zig`
-(canon section; ~200 LOC, LOW risk). Needs A (done). Per Binary.md §canon (lines 310–323): each is
-`opcode t:<typeidx>` (+ `opts` for read/write, `async?` for cancel). Mirror the existing resource-builtin
-canon decode. Opportunistic: discharge **D-336** (now-row, small) alongside or just after B. Verify the
-prior remote kick at Step 0.7.
+**NEXT — Unit C (async lift/lower in canon.zig).** `MAX_FLAT_ASYNC_PARAMS=4` + `lift_async_value` /
+`lower_stream` / `lower_future` (~600 LOC, MED; needs A+B). This is the first RUNTIME-shape unit — read
+`CanonicalABI.md` (async lift/lower) + wasmtime `concurrent.rs`/`futures_and_streams.rs` first (Step 0
+survey mandatory). The canon/wit/typed `UnsupportedType` defer-arms added in Unit A are the slots to fill.
+Verify the prior remote kick (ubuntu+windows BOTH batched last turn) at Step 0.7.
 
 ## Active bundle
 
 - **Bundle-ID**: wasi03-D-335 (§9.0 Front D; WASI 0.3 / Preview 3; units A→G)
-- **Cycles-remaining**: ~6+ (A done; D = async task/waitable runtime is the multi-cycle crux)
-- **Continuity-memo**: critical path **A(done)→B→C→D(crux)→E→F→G** (full plan in **D-335**). CM-async,
+- **Cycles-remaining**: ~5+ (A+B done; D = async task/waitable runtime is the multi-cycle crux)
+- **Continuity-memo**: critical path **A(done)→B(done)→C→D(crux)→E→F→G** (full plan in **D-335**). CM-async,
   NOT core stack-switching. Spec: `~/Documents/OSS/{WASI, WebAssembly/component-model}`
   (design/mvp/{Binary,CanonicalABI,Concurrency}.md); ref impl `~/Documents/OSS/wasmtime` (43+). Builds on
   shipped CM substrate `src/feature/component/` + `src/api/component_wasi_p2.zig` (P3 coexists with P2).
 - **Exit-condition**: a WASI-0.3 async/stream/future component runs end-to-end through zwasm (new P3
   corpus green, 3-host); each unit lands green per D-335 along the way.
-- **Current unit — B (START HERE)**: canon `stream.*`/`future.*` builtins `0x0e–0x1b` decode in
-  `types.zig` canon section (~200 LOC, LOW). Done = green decode test for the builtin opcodes → retarget
-  this bundle's Current-unit to C (async lift/lower in canon.zig).
+- **Current unit — C (START HERE)**: async lift/lower in `canon.zig` (`MAX_FLAT_ASYNC_PARAMS=4`,
+  `lift_async_value`/`lower_stream`/`lower_future`; ~600 LOC, MED). Fill the `stream_future`/`is_async`
+  `UnsupportedType` defer-arms. Done = green async lift/lower test → retarget Current-unit to D (the crux).
 
 ## Long-tail (debt-tracked / parked — NOT active; see §9.0 fronts + debt.yaml)
 
@@ -63,8 +61,8 @@ prior remote kick at Step 0.7.
   Rev 2026-06-14 floored `core_comp` too; `check_releasesafe_runners.sh` guards it).
 - **EH**: cross-instance exception-handling on JIT works on BOTH arches (arm64 `4f73d9ee`
   + x86_64 D-238/ADR-0185 `c534afca`). Interp + JIT EH spec corpus green.
-- **Debt**: 49 entries, **two `now`** (D-335 = WASI 0.3 Front-D campaign / Active bundle; D-336 = functype-
-  result transitive-borrow gap, small); rest front-tagged (A/B/C/D-wasi03/future-bucket/parked). D-330/D-331 parked.
+- **Debt**: 49 entries, **one `now`** (D-335 = WASI 0.3 Front-D campaign / Active bundle); D-336 part-a done →
+  now blocked-by (value index space). Rest front-tagged (A/B/C/D-wasi03/future-bucket/parked). D-330/D-331 parked.
 - **Realworld corpus**: 50 fixtures (c/cpp/rust/tinygo/go), interp 50/50; JIT run-stage
   opt-in (`ZWASM_JIT_RUN=1`) — the Phase-B signal source. cljw fixtures retired.
 - **Tag**: `v2.0.0-alpha.3` tag-only (no Release → Latest stays v1.11.0), USER-ONLY.
