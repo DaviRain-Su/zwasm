@@ -251,3 +251,28 @@ test "D-335 unit D-ζ2: stream.cancel-read cancels a parked read (single-task)" 
     defer built.deinit();
     try driveAsyncMain(&built);
 }
+
+test "D-335 unit E1: wasi:cli/stdout write-via-stream — a guest stream.write COMPLETES to the host sink" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/async_stdout_write_via_stream.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+    var capture: std.ArrayList(u8) = .empty;
+    defer capture.deinit(testing.allocator);
+    host.stdout_buffer = &capture;
+
+    // The guest hands a stream's readable end to stdout.write-via-stream (host
+    // becomes the always-ready reader = fd 1 sink), writes "hi\n" → the write
+    // COMPLETES and the bytes are marshalled to the host sink. First guest
+    // stream.write COMPLETION + element marshalling e2e.
+    var built = try wasi_p2.buildWasiP2Component(&eng, testing.allocator, bytes, &host, .{});
+    defer built.deinit();
+    try driveAsyncMain(&built);
+    try testing.expectEqualStrings("hi\n", capture.items);
+}

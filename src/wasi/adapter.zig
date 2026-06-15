@@ -99,6 +99,9 @@ pub const P2Op = enum {
     cli_get_stdout,
     cli_get_stderr,
     cli_get_stdin,
+    // WASI 0.3 async stdio (ADR-0190): the host is the stream's reader peer.
+    cli_stdout_write_via_stream,
+    cli_stderr_write_via_stream,
     // wasi:io/streams — output-stream methods.
     out_stream_write,
     out_stream_blocking_write_and_flush,
@@ -271,6 +274,9 @@ pub fn p1Target(op: P2Op) P1Target {
         .cli_get_stdin => .{ .std_stream = 0 },
         .out_stream_write, .out_stream_blocking_write_and_flush => .{ .fd_write = 1 }, // fd resolved from the handle at call time
         .out_stream_blocking_flush, .out_stream_drop, .in_stream_drop => .noop,
+        // WASI 0.3 write-via-stream is served by a dedicated host-peer trampoline
+        // (ADR-0190), not the generic P1-target path.
+        .cli_stdout_write_via_stream, .cli_stderr_write_via_stream => .noop,
         .in_stream_read, .in_stream_blocking_read => .{ .fd_read = 0 },
         .cli_exit => .proc_exit,
         .clocks_wall_now => .{ .clock_time_get = 0 },
@@ -365,6 +371,10 @@ const table = [_]Entry{
     .{ .iface = "wasi:cli/stderr", .func = "get-stderr", .op = .cli_get_stderr },
     .{ .iface = "wasi:cli/stdin", .func = "get-stdin", .op = .cli_get_stdin },
     .{ .iface = "wasi:cli/exit", .func = "exit", .op = .cli_exit },
+    // WASI 0.3 (Preview 3) async stdio: the host becomes a stream peer
+    // (ADR-0190). write-via-stream(stream<u8>) -> future<result<_,error-code>>.
+    .{ .iface = "wasi:cli/stdout", .func = "write-via-stream", .op = .cli_stdout_write_via_stream },
+    .{ .iface = "wasi:cli/stderr", .func = "write-via-stream", .op = .cli_stderr_write_via_stream },
     .{ .iface = "wasi:io/streams", .func = "[method]output-stream.write", .op = .out_stream_write },
     .{ .iface = "wasi:io/streams", .func = "[method]output-stream.blocking-write-and-flush", .op = .out_stream_blocking_write_and_flush },
     .{ .iface = "wasi:io/streams", .func = "[method]output-stream.blocking-flush", .op = .out_stream_blocking_flush },

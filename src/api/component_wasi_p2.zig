@@ -1,3 +1,4 @@
+// FILE-SIZE-EXEMPT: WASI P2 + growing WASI-0.3 (P3) async host-peer surface; split of the P3 async host to a sibling component_wasi_p3_host.zig is planned (debt D-444), deferred so the E1..E3 host interfaces land first (per ADR-0190, ADR-0099).
 //! WASI **Preview 2** host trampolines + the single-component WASI-P2 runner
 //! (CM campaign Phase D). Extracted from `component.zig` (D-309): the
 //! Component-Model orchestration there crossed the file-size smell cap as the
@@ -99,6 +100,11 @@ pub const WasiP2Ctx = struct {
     sets: async_mod.WaitableSetTable,
     /// Per-definition contexts for the synthesized async builtins.
     ab_ctxs: std.ArrayList(*AsyncBuiltinCtx) = .empty,
+    /// WASI 0.3 host stream peers (ADR-0190): a `SharedStream` handle whose
+    /// readable end the host drains → the P1 fd it sinks to. A guest
+    /// `stream.write` to such a stream COMPLETES immediately (stdout/stderr are
+    /// always write-ready), the bytes marshalled to `fd`.
+    host_sinks: std.AutoHashMapUnmanaged(u32, wasi_p1.Fd) = .empty,
 
     /// Resource-type ids for the P2 resources the host models (`pub` for the
     /// in-tree tests that mint handles directly).
@@ -160,6 +166,7 @@ pub const WasiP2Ctx = struct {
         self.guest_dtors.deinit(self.alloc);
         for (self.ab_ctxs.items) |p| self.alloc.destroy(p);
         self.ab_ctxs.deinit(self.alloc);
+        self.host_sinks.deinit(self.alloc);
         self.streams.deinit();
         self.shared.deinit();
         self.sets.deinit();
@@ -1364,6 +1371,8 @@ fn defineClassifiedFunc(lk: *Linker, module: []const u8, name: []const u8, op: a
     switch (op) {
         .cli_get_stdout => try lk.defineFuncCtx(module, name, ctx, fn (*Caller) WasiP2Error!u32, p2GetStdout),
         .cli_get_stderr => try lk.defineFuncCtx(module, name, ctx, fn (*Caller) WasiP2Error!u32, p2GetStderr),
+        .cli_stdout_write_via_stream => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!u32, p2StdoutWriteViaStream),
+        .cli_stderr_write_via_stream => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!u32, p2StderrWriteViaStream),
         .out_stream_write, .out_stream_blocking_write_and_flush => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32, u32, u32) WasiP2Error!void, p2OutStreamWrite),
         // Any classified `canon resource.drop` (classifyCoreExport returns
         // out_stream_drop for all) routes to the generic drop — correct for both
@@ -1621,6 +1630,27 @@ fn p2FutureNew(caller: *Caller) WasiP2Error!u64 {
     return @as(u64, pair.readable) | (@as(u64, pair.writable) << 32);
 }
 
+/// `wasi:cli/stdout.write-via-stream` (WASI 0.3, ADR-0190): the host becomes the
+/// readable end's reader, sinking to a P1 fd. Register the host sink keyed by
+/// the stream's `SharedStream` handle (a guest `stream.write` then COMPLETES into
+/// it), and return a fresh future handle (the spec's `future<result<_, error>>`;
+/// its resolution is a later E-slice — the guest may drop it).
+fn p2WriteViaStream(caller: *Caller, stream_handle: u32, fd: wasi_p1.Fd) WasiP2Error!u32 {
+    const ctx = caller.data(WasiP2Ctx);
+    const end = try ctx.streams.get(stream_handle);
+    try ctx.host_sinks.put(ctx.alloc, end.shared, fd);
+    const fut = try async_mod.newFuturePair(&ctx.streams, &ctx.shared, null);
+    return fut.readable;
+}
+
+fn p2StdoutWriteViaStream(caller: *Caller, stream_handle: u32) WasiP2Error!u32 {
+    return p2WriteViaStream(caller, stream_handle, 1);
+}
+
+fn p2StderrWriteViaStream(caller: *Caller, stream_handle: u32) WasiP2Error!u32 {
+    return p2WriteViaStream(caller, stream_handle, 2);
+}
+
 /// `canon stream.read`/`stream.write` (+ future) (ADR-0189 ζ2, re-scoped per
 /// lesson 2026-06-16): drive one rendezvous step on the end named by `handle`
 /// (`StreamFutureEnd.copy` dispatches read vs write on the end's side) and
@@ -1629,9 +1659,19 @@ fn p2FutureNew(caller: *Caller) WasiP2Error!u64 {
 /// stream peer (Unit E) — that path also wires the element marshalling at
 /// `ptr`, so it traps here until then (unreachable single-task).
 fn p2StreamFutureCopy(caller: *Caller, handle: u32, ptr: u32, count: u32) WasiP2Error!u32 {
-    _ = ptr; // the COMPLETION (count>0) marshalling consumer — Unit E
     const abc = caller.data(AsyncBuiltinCtx);
     const end = try abc.ctx.streams.get(handle);
+    // Host stream peer (Unit E, ADR-0190): the host is the always-ready reader,
+    // so a guest write COMPLETES immediately — marshal the `count` u8s from guest
+    // memory at `ptr` to the sink fd (the deferred ζ2 COMPLETION + marshalling).
+    if (end.side == .writable) {
+        if (abc.ctx.host_sinks.get(end.shared)) |fd| {
+            const mem = try abc.ctx.memory();
+            const bytes = mem.sliceAt(ptr, count) catch return WasiP2Error.OutOfBounds;
+            if (wasi_fd.writeSlice(abc.ctx.host, fd, bytes) != .success) return WasiP2Error.WriteFailed;
+            return (async_mod.ReturnCode{ .completed = @intCast(count) }).encode();
+        }
+    }
     const sh = try abc.ctx.shared.get(end.shared);
     const step = switch (sh.*) {
         .stream => |*s| try end.copy(s, &abc.ctx.streams, handle, count),
