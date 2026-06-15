@@ -232,3 +232,22 @@ test "D-335 unit D-ζ2: stream.read after the writer drops returns DROPPED (sing
     defer built.deinit();
     try driveAsyncMain(&built);
 }
+
+test "D-335 unit D-ζ2: stream.cancel-read cancels a parked read (single-task)" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/async_stream_cancel.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+
+    // The guest reads (BLOCKED → parks async-copying) then cancel-reads; it
+    // traps unless cancel reports CANCELLED count 0 — a clean run proves it.
+    var built = try wasi_p2.buildWasiP2Component(&eng, testing.allocator, bytes, &host, .{});
+    defer built.deinit();
+    try driveAsyncMain(&built);
+}
