@@ -7,9 +7,9 @@
  * (the hardened default engine); `--engine jit` budgets are the CLI
  * surface. All functions are null-tolerant (null instance = no-op).
  *
- * Older extensions (zwasm_instance_get_func, zwasm_store_set_wasi, the
- * zwasm_wasi_config_* family) are exported by the library but not yet
- * declared here; the Phase-16 C-surface audit owns completing this header.
+ * The WASI config family (zwasm_wasi_config_*, zwasm_store_set_wasi) is
+ * declared in wasi.h; zwasm_instance_get_func is declared below — the
+ * Phase-16 C-surface audit completed this header.
  */
 #ifndef ZWASM_H
 #define ZWASM_H
@@ -74,6 +74,14 @@ WASM_API_EXTERN void zwasm_instance_clear_interrupt(wasm_instance_t*);
 #define ZWASM_TRAP_INTERRUPTED 16
 #define ZWASM_TRAP_OUT_OF_FUEL 17
 WASM_API_EXTERN int32_t zwasm_trap_kind(const wasm_trap_t*);
+
+/* ── Instance helpers ────────────────────────────────────────────────── */
+
+/* Resolve an instance + defined-function index into a fresh, owned func
+ * handle — a convenience over wasm_instance_exports + wasm_extern_vec_t
+ * indexing. Returns NULL on a null instance or an out-of-range index. The
+ * caller owns the result and must release it with wasm_func_delete. */
+WASM_API_EXTERN wasm_func_t* zwasm_instance_get_func(wasm_instance_t*, uint32_t idx);
 
 #ifdef __cplusplus
 }  /* extern "C" */
