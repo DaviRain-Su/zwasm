@@ -24,8 +24,11 @@ cloned** (`tests/rust/wasm32-wasip3`); wasm-tools/component-model refreshed (`im
   copy on a DONE end (spec `stream_copy`/`future_copy` `trap_if(state!=IDLE)`, `trap-if-done.wast`). **VERIFY
   EACH ROW vs spec** (lesson `2026-06-16-gap-matrix-subagent-verify-against-spec`): the matrix's "cancel-not-copying
   → returns 0" was WRONG (CanonicalABI `cancel_copy` traps; our `async_cancel_no_copy` already correct). NEXT:
-  more `trap-if-done`/`async-builtins` trap edges; **D-446** = Gap B (task.return sig/opts must match the lift — needs
-  task.return↔lift association plumbing, deferred). TIER-3 (guest↔guest/scheduler, error-context) = design debt.
+  **front② TIER-1 DONE** (single-task-reachable gaps exhausted: + cancel-not-copying-traps verified-correct,
+  async-builtins decode already covered). Deferred: **D-446** Gap B (task.return sig/opts match — assoc plumbing);
+  **D-447** TIER-2/3 (guest↔guest COMPLETION+scheduler, typed marshalling, error-context — design-grade, see gap
+  matrix). **NEXT = front ① WASI 0.3 conformance**: add `wasm32-wasip3` target + wit deps to `.#gen`, compile
+  `wasi-testsuite/tests/rust/wasm32-wasip3`, run as a conformance corpus (fresh-context setup task).
 - **① WASI 0.3 conformance**: compile wasi-testsuite `rust/wasm32-wasip3` via `.#gen` (add wasm32-wasip3 target + wit
   deps), run as a conformance corpus.
 - **③ real-world corpus 50→100**: add MoonBit/Grain/Kotlin (Wasm-GC) + AssemblyScript/Swift/Zig toolchains to
@@ -36,14 +39,14 @@ cloned** (`tests/rust/wasm32-wasip3`); wasm-tools/component-model refreshed (`im
 ## Active bundle
 
 - **Bundle-ID**: p17-async-maturity-4front (②wasmtime-gaps → ①wasip3-conformance → ③corpus-100 → ④perf-rework)
-- **Cycles-remaining**: many (multi-front; ② active first)
-- **Continuity-memo**: ② = gap-mine wasmtime `tests/misc_testsuite/component-model/async/*.wast` (~44) vs zwasm async
-  builtins (`component_wasi_p2.zig` / `feature/component/async.zig` / `types.zig`) → prioritized gap matrix in
-  `private/notes/`. Clones updated 2026-06-16. zwasm stackless single-task (no fibers, ADR-0187); guest↔guest
-  COMPLETION + multi-task subtask scheduling are the big known gaps (design-grade). Spec: `~/Documents/OSS/{WASI,
-  WebAssembly/component-model}` design/mvp/{Binary,CanonicalABI,Concurrency}.md.
-- **Exit-condition**: (front ②) gap matrix produced + top cleanly-bounded gaps landed (green fixtures+impl OR precise debt
-  rows with named barriers); then advance to ①. Unit G (corpus consolidation) folds into ① conformance harness.
+- **Cycles-remaining**: many (multi-front; ② TIER-1 DONE → ① active next)
+- **Continuity-memo**: ② DONE (gap matrix `private/notes/p17-wasmtime-async-gaps.md`; Gap A `afcf889a` + copy-IDLE
+  `05b35c28`; cancel verified; D-446/D-447 deferred). **① NEXT**: `flake.nix` `devShells.gen` needs a `wasm32-wasip3`
+  rustc target + the testsuite's wit deps (`wasi-testsuite/tests/rust/wasm32-wasip3/{wit,wkg.lock}`); compile its
+  `src/bin/*` → components, run through zwasm's edge-runner as a conformance corpus. zwasm stackless single-task (no
+  fibers, ADR-0187). Spec: `~/Documents/OSS/{WASI,WebAssembly/component-model}` design/mvp/*.md.
+- **Exit-condition**: (front ①) wasi-testsuite `wasm32-wasip3` cases compile via `.#gen` + run as a corpus (pass/
+  skip-with-reason), 3-host; gaps surfaced → fixtures/debt. Unit G (corpus consolidation) folds into this harness.
 
 ## Long-tail (debt-tracked / parked — NOT active; see §9.0 fronts + debt.yaml)
 

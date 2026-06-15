@@ -1552,6 +1552,40 @@ entries:
       src/feature/component/validate.zig (checkCanons .task_return arm ~L1073);
       src/api/component_wasi_p2.zig (p2TaskReturn);
       ~/Documents/OSS/wasmtime/tests/misc_testsuite/component-model/async/task-return-traps.wast
+  - id: "D-447"
+    layer: "code"
+    status: "note"
+    front: D-wasi03
+    description: |-
+      note (front② gap-mining TIER-2/3; design-grade async breadth not single-task
+      reachable). The wasmtime async corpus surfaced gaps zwasm's stackless single-
+      task model (ADR-0187, no fibers) cannot reach without a scheduler/peer or new
+      machinery. Gap matrix: `private/notes/p17-wasmtime-async-gaps.md`. Front②
+      TIER-1 (single-task reachable) is DONE: task.return-or-trap (afcf889a),
+      copy-requires-IDLE (05b35c28), cancel-not-copying-traps (already correct).
+      REMAINING, each its own future sub-effort:
+      (a) **guest↔guest stream/future COMPLETION** (`intra-streams.wast`,
+      `intra-futures.wast`): a completed copy needs BOTH ends progressing — the
+      Zone-1 rendezvous doesn't buffer bytes; needs a host buffer-ring or a task
+      scheduler. Also unblocks future write-after-write-succeeded traps
+      (`trap-if-done.wast`) which need a completed write. Lesson
+      `2026-06-16-stackless-stream-completion-needs-host-peer`. ADR-grade.
+      (b) **typed/multi-byte element marshalling** (`partial-stream-copies.wast`,
+      `stream-big-read-and-writes.wast`): E moved u8 only (count==bytes); generalise
+      via canon.zig store/load + bytes=count*elem_size. Needs (a) for an exercise
+      path (host stdio is u8).
+      (c) **error-context** type + `error-context.{new,debug-message,drop}` canon
+      builtins (`error-context.wast`): a new CM-async value type + ops, currently
+      undecoded/unimplemented.
+      (d) **subtask scheduler** (`task-deletion.wast`, `backpressure-deadlock.wast`,
+      `cancel-sibling-subtask.wast`, `subtask-wait.wast`): multi-task concurrency —
+      the biggest gap; the stackless model runs one task. Post-MVP.
+    first_raised: "2026-06-16"
+    last_reviewed: "2026-06-16"
+    refs: |-
+      private/notes/p17-wasmtime-async-gaps.md (gap matrix);
+      src/feature/component/async.zig (SharedStream/SharedFuture rendezvous);
+      ~/Documents/OSS/wasmtime/tests/misc_testsuite/component-model/async/
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.
