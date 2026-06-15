@@ -1737,6 +1737,27 @@ fn p2WaitableJoin(caller: *Caller, set_handle: u32, waitable: u32) WasiP2Error!v
     try set.join(waitable);
 }
 
+/// Map a WASI-P2 async-builtin error to the host-fn surface (D-445). A guest
+/// supplies the handle/ptr, so a bad handle, illegal drop/cancel sequencing,
+/// an exhausted table, or an out-of-bounds buffer is a GUEST fault → surface
+/// the canonical guest trap (`error.Unreachable`), which `mapDispatchErr`
+/// narrows cleanly. Without this those un-narrowed variants would hit
+/// `mapDispatchErr`'s `else => @panic` and abort the host on guest input.
+/// Genuine host failures (NoMemory, realloc, host I/O, OOM) propagate unchanged.
+fn mapAsyncFault(e: WasiP2Error) WasiP2Error {
+    return switch (e) {
+        error.InvalidHandle,
+        error.TableFull,
+        error.CopyInProgress,
+        error.NotCopying,
+        error.InvalidCallbackCode,
+        error.FutureDropBeforeWrite,
+        error.OutOfBounds,
+        => error.Unreachable,
+        else => |other| other,
+    };
+}
+
 /// `canon stream.read`/`stream.write` (+ future) (ADR-0189 ζ2, re-scoped per
 /// lesson 2026-06-16): drive one rendezvous step on the end named by `handle`
 /// (`StreamFutureEnd.copy` dispatches read vs write on the end's side) and
@@ -1745,6 +1766,9 @@ fn p2WaitableJoin(caller: *Caller, set_handle: u32, waitable: u32) WasiP2Error!v
 /// stream peer (Unit E) — that path also wires the element marshalling at
 /// `ptr`, so it traps here until then (unreachable single-task).
 fn p2StreamFutureCopy(caller: *Caller, handle: u32, ptr: u32, count: u32) WasiP2Error!u32 {
+    return p2StreamFutureCopyInner(caller, handle, ptr, count) catch |e| mapAsyncFault(e);
+}
+fn p2StreamFutureCopyInner(caller: *Caller, handle: u32, ptr: u32, count: u32) WasiP2Error!u32 {
     const abc = caller.data(AsyncBuiltinCtx);
     const end = try abc.ctx.streams.get(handle);
     // Host result future (ADR-0190): the `future<result<_,error-code>>` returned
@@ -1807,6 +1831,9 @@ fn p2StreamFutureCopy(caller: *Caller, handle: u32, ptr: u32, count: u32) WasiP2
 /// and return the packed `ReturnCode.cancelled` (count of elements transferred
 /// before cancel — 0 for a still-blocked copy).
 fn p2StreamFutureCancel(caller: *Caller, handle: u32) WasiP2Error!u32 {
+    return p2StreamFutureCancelInner(caller, handle) catch |e| mapAsyncFault(e);
+}
+fn p2StreamFutureCancelInner(caller: *Caller, handle: u32) WasiP2Error!u32 {
     const abc = caller.data(AsyncBuiltinCtx);
     const end = try abc.ctx.streams.get(handle);
     const sh = try abc.ctx.shared.get(end.shared);
@@ -1822,6 +1849,9 @@ fn p2StreamFutureCancel(caller: *Caller, handle: u32) WasiP2Error!u32 {
 /// DROPPED — traps if a copy is mid-flight) then release the end + its shared ref
 /// (freed when the second end drops).
 fn p2StreamFutureDrop(caller: *Caller, handle: u32) WasiP2Error!void {
+    return p2StreamFutureDropInner(caller, handle) catch |e| mapAsyncFault(e);
+}
+fn p2StreamFutureDropInner(caller: *Caller, handle: u32) WasiP2Error!void {
     const abc = caller.data(AsyncBuiltinCtx);
     const end = try abc.ctx.streams.get(handle);
     const sh = try abc.ctx.shared.get(end.shared);
@@ -1829,9 +1859,9 @@ fn p2StreamFutureDrop(caller: *Caller, handle: u32) WasiP2Error!void {
         .stream => |*s| try end.drop(s),
         .future => |*f| {
             // Spec: a future's writable end traps if dropped before its value
-            // is written (D-337, CanonicalABI.md §Future State). The CM "trap"
-            // has no distinct code → surface the canonical guest trap.
-            if (end.side == .writable) f.guardWritableDrop() catch return error.Unreachable;
+            // is written (D-337, CanonicalABI.md §Future State). mapAsyncFault
+            // turns the guard's FutureDropBeforeWrite into the guest trap.
+            if (end.side == .writable) try f.guardWritableDrop();
             try end.drop(f);
         },
     }
