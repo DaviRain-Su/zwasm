@@ -172,3 +172,25 @@ test "D-335 unit D-ζ2: canon stream.new mints a stream end pair via the host bu
     _ = try built.ctx.streams.get(1); // readable end minted
     _ = try built.ctx.streams.get(2); // writable end minted
 }
+
+test "D-335 unit D-ζ2: canon stream.drop-{readable,writable} tear down both ends + free the shared" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/async_stream_drop.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+
+    // The core entry mints a stream then drops both ends. After the run, both
+    // end handles are tombstoned (a re-get traps) — the shared was freed at the
+    // 2nd drop (no leak; the table's deinit would catch a stuck slot).
+    var built = try wasi_p2.buildWasiP2Component(&eng, testing.allocator, bytes, &host, .{});
+    defer built.deinit();
+    try driveAsyncMain(&built);
+    try testing.expectError(async_mod.Error.InvalidHandle, built.ctx.streams.get(1));
+    try testing.expectError(async_mod.Error.InvalidHandle, built.ctx.streams.get(2));
+}
