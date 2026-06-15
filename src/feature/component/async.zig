@@ -115,6 +115,70 @@ pub const StreamFutureTable = struct {
     }
 };
 
+/// Outcome of one read/write rendezvous step (`CanonicalABI.md` stream
+/// `read`/`write`). `caller` is what happens to the calling end; if
+/// `notify_pending` is non-null the previously-pending opposite end completes
+/// with that item count (the event loop / Unit-δ delivers that notification).
+pub const Step = struct {
+    caller: union(enum) { blocked, completed: u32, dropped },
+    notify_pending: ?u32 = null,
+};
+
+/// The state shared by a stream's two ends (`CanonicalABI.md` §Stream State,
+/// the `SharedStreamImpl` rendezvous). Zone-1 control logic only: it computes
+/// the transfer COUNT (`min` of the two buffers) and the state transitions; the
+/// actual element bytes are moved by the host via the Unit-C canon store/load
+/// (this module never touches guest memory). At most one end is `pending` at a
+/// time (one-reader / one-writer invariant).
+pub const SharedStream = struct {
+    elem_type: ?u32,
+    dropped: bool = false,
+    pending: ?Pending = null,
+
+    pub const Pending = struct { side: EndSide, remain: u32 };
+
+    /// `ReadableStream.read` — `cap` is the destination buffer capacity.
+    pub fn read(self: *SharedStream, cap: u32) Step {
+        if (self.dropped) return .{ .caller = .dropped };
+        const w = self.pending orelse {
+            self.pending = .{ .side = .readable, .remain = cap };
+            return .{ .caller = .blocked };
+        };
+        std.debug.assert(w.side == .writable);
+        if (w.remain > 0) {
+            if (cap == 0) return .{ .caller = .{ .completed = 0 } }; // writer stays pending
+            const n = @min(cap, w.remain);
+            self.pending = null;
+            return .{ .caller = .{ .completed = n }, .notify_pending = n };
+        }
+        // Zero-length pending write: notify the writer COMPLETED(0); this read
+        // becomes pending. (read has NO zero-zero shortcut — see write.)
+        self.pending = .{ .side = .readable, .remain = cap };
+        return .{ .caller = .blocked, .notify_pending = 0 };
+    }
+
+    /// `WritableStream.write` — `count` is the source item count. The zero-zero
+    /// rendezvous resolves in the writer's favour (livelock avoidance).
+    pub fn write(self: *SharedStream, count: u32) Step {
+        if (self.dropped) return .{ .caller = .dropped };
+        const r = self.pending orelse {
+            self.pending = .{ .side = .writable, .remain = count };
+            return .{ .caller = .blocked };
+        };
+        std.debug.assert(r.side == .readable);
+        if (r.remain > 0) {
+            if (count == 0) return .{ .caller = .{ .completed = 0 } }; // reader stays pending
+            const n = @min(count, r.remain);
+            self.pending = null;
+            return .{ .caller = .{ .completed = n }, .notify_pending = n };
+        }
+        // Pending reader is zero-length.
+        if (count == 0) return .{ .caller = .{ .completed = 0 } }; // both zero → write wins, read pends
+        self.pending = .{ .side = .writable, .remain = count };
+        return .{ .caller = .blocked, .notify_pending = 0 };
+    }
+};
+
 // ============================================================
 // Tests
 // ============================================================
@@ -127,6 +191,38 @@ test "ReturnCode packs per the canonical-ABI encoding" {
     try testing.expectEqual(@as(u32, (2 << 4) | 2), (ReturnCode{ .cancelled = 2 }).encode());
     // futures carry a zero count → just the code in the low bits.
     try testing.expectEqual(@as(u32, 0), (ReturnCode{ .completed = 0 }).encode());
+}
+
+test "stream rendezvous: write-then-read copies min(counts); both complete" {
+    var s = SharedStream{ .elem_type = 5 };
+    try testing.expect(s.write(2).caller == .blocked); // writer arrives first → pending
+    const step = s.read(4); // reader rendezvous with the pending writer
+    try testing.expectEqual(@as(u32, 2), step.caller.completed);
+    try testing.expectEqual(@as(?u32, 2), step.notify_pending); // writer notified COMPLETED(2)
+    try testing.expect(s.pending == null); // both ends resolved
+}
+
+test "stream rendezvous: read-then-write is symmetric" {
+    var s = SharedStream{ .elem_type = null };
+    try testing.expect(s.read(4).caller == .blocked);
+    const step = s.write(2);
+    try testing.expectEqual(@as(u32, 2), step.caller.completed);
+    try testing.expectEqual(@as(?u32, 2), step.notify_pending);
+    try testing.expect(s.pending == null);
+}
+
+test "stream rendezvous: dropped end + zero-length livelock tiebreak (write wins)" {
+    var dropped = SharedStream{ .elem_type = null, .dropped = true };
+    try testing.expect(dropped.read(4).caller == .dropped);
+    try testing.expect(dropped.write(4).caller == .dropped);
+
+    // zero-length read pends; a following zero-length write COMPLETES while the
+    // read stays pending (the spec's livelock-avoidance asymmetry).
+    var s = SharedStream{ .elem_type = null };
+    try testing.expect(s.read(0).caller == .blocked);
+    const w = s.write(0);
+    try testing.expectEqual(@as(u32, 0), w.caller.completed);
+    try testing.expect(s.pending != null); // read still pending
 }
 
 test "stream/future end table: add/get/remove lifecycle + index-0 reserved" {
