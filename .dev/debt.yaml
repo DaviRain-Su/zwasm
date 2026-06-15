@@ -1399,11 +1399,13 @@ entries:
         tests (fwd/rev/free-list). ζ2 Slice 2 Zone-3 DONE (dc39cad3): async tables (streams/shared/sets) moved
         into WasiP2Ctx; synthDef .stream_future → Def.async_builtin for stream.new/future.new; p2StreamNew/
         p2FutureNew trampolines (via AsyncBuiltinCtx) wrap newStreamPair/newFuturePair → ri|(wi<<32); e2e
-        async_stream_new.wat (stream.new→EXIT, 2 ends minted). NEXT = Slice 3: wire remaining .stream_future ops
-        (read/write/cancel/drop, currently UnsupportedWasiImport) to StreamFutureEnd.copy/cancel/drop over the
-        SharedTable rendezvous + rendezvous-DROPPED semantics; payoff = a WAIT-path e2e (guest blocks on
-        stream.read → WAIT, a write delivers STREAM_READ) exercising driveCallbackLoop's WAIT branch (needs
-        waitable-set builtins too). Then units E/F/G.
+        async_stream_new.wat (stream.new→EXIT, 2 ends minted). ζ2 Slice 3a DONE (6592ed1f): p2StreamFutureDrop
+        wires the 4 drop-{readable,writable} ops (StreamFutureEnd.drop marks shared dropped + dropEnd releases
+        end/ref); WasiP2Error widened w/ async_mod.Error for try-propagation; e2e async_stream_drop.wat. NEXT =
+        Slice 3b: wire stream/future read/write (currently UnsupportedWasiImport) to StreamFutureEnd.copy over
+        the SharedTable rendezvous + Unit-C element marshalling (resolve element WIT type from stream type_index,
+        move len elements guest-mem↔host); cancel-read/write small. Then Slice 3c (waitable-set builtins +
+        WAIT-path e2e exercising driveCallbackLoop's WAIT branch). Then units E/F/G.
       - E — WASI-P3 host interfaces (new component_wasi_p3.zig; sockets/http/clocks
         async; ~2000; MED; coexists with P2, does NOT replace it). Needs D.
       - F — async-export ABI + P3 component runner (canon.zig; ~400; MED). Needs E.

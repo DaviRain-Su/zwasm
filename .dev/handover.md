@@ -3,7 +3,7 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Current state — WASI-0.3 campaign (D-335); ζ2 Slice 2 done — stream.new/future.new run (`dc39cad3`)
+## Current state — WASI-0.3 campaign (D-335); ζ2 Slice 3a done — stream/future drop builtins (`6592ed1f`)
 
 **WASI 0.3 / Preview 3 campaign** (Front D, ratified 2026-06-11; CM-async — `async` func / `stream<T>` /
 `future<T>`, NOT core stack-switching). Critical path A→B→C→D(crux)→E→F→G; full unit plan + per-unit DONE-SHAs
@@ -23,34 +23,38 @@ link + `newStreamPair`/`newFuturePair` (mint a linked readable+writable pair, re
 the shared at the 2nd drop). Adversarial drop-order unit tests (fwd/rev/free-list reuse) · **ζ2 Slice 2 Zone-3** (`dc39cad3`, ADR-0189): async tables (streams/shared/sets)
 moved into `WasiP2Ctx`; `synthDef .stream_future → Def.async_builtin` for stream.new/future.new; `p2StreamNew`/
 `p2FutureNew` trampolines (via `AsyncBuiltinCtx`) wrap `newStreamPair`/`newFuturePair` returning `ri|(wi<<32)`;
-e2e `async_stream_new.wat` calls stream.new→EXIT, two ends minted. (Lesson reminders: `zig build test` ≠
-`test-all`; `catch {}` in errdefer + `else` on an exhaustive enum switch are both gate/lint-blocked. `D-337` =
-deferred writable-future-drop guard.)
+e2e `async_stream_new.wat` calls stream.new→EXIT, two ends minted · **ζ2 Slice 3a** (`6592ed1f`, ADR-0189):
+`p2StreamFutureDrop` wires the 4 `drop-{readable,writable}` ops — `StreamFutureEnd.drop` marks shared dropped
+(traps if copying) + `dropEnd` releases the end/shared ref; `WasiP2Error` widened with `async_mod.Error` so
+trampolines `try`-propagate; e2e `async_stream_drop.wat` mints+drops both ends. (Lesson reminders: `zig build
+test` ≠ `test-all`; `catch {}` in errdefer + `else` on an exhaustive enum switch are gate/lint-blocked.
+`D-337` = deferred writable-future-drop guard.)
 
-**NEXT — ζ2 Slice 3: stream/future `read`/`write`/`cancel`/`drop` + a WAIT-path e2e** (the rendezvous wiring):
-- Wire the remaining `.stream_future` ops (currently `UnsupportedWasiImport` in `synthDef`/`defineSynth`) to
-  `StreamFutureEnd.copy`/`cancel`/`drop` over the `SharedTable` rendezvous (Zone-1 logic exists from α–ε).
-  read/write take guest mem ptr+len; `dropEnd` already handles the memory side — add the rendezvous-DROPPED
-  semantics (`shared.dropped = true` so the peer sees it).
-- **The payoff fixture**: a guest that `stream.new`s, blocks on `stream.read` (→ WAIT on a waitable set), and a
-  write rendezvous delivers a STREAM_READ event — exercising `driveCallbackLoop`'s WAIT branch + `waitOn`
-  through the P3 runner end-to-end (today only EXIT/YIELD are e2e). Needs the waitable-set builtins too
-  (`waitable-set.new`/`.join`/`waitable.join`) — scope-check vs a focused first read/write fixture.
-- After ζ2: units E (WASI-P3 host interfaces), F (async-export public API), G (p3 corpus). Per D-335.
+**NEXT — ζ2 Slice 3b: stream/future `read`/`write` (the rendezvous payoff)**:
+- Wire `.stream_read`/`.stream_write` (+ future) — currently `UnsupportedWasiImport` — to `StreamFutureEnd.copy`
+  over the `SharedTable` rendezvous (Zone-1 logic from α–ε). read/write take guest mem `(ptr, len)`; the
+  ELEMENT bytes move via the Unit-C canon store/load (this is the new part — resolve the element WIT type from
+  the stream type_index, marshal `len` elements between guest mem and a host buffer). `copy` returns a `Step`
+  (blocked → ReturnCode.blocked, completed(n), or a peer `notify` → deliver its `pending_event`).
+- `cancel-read`/`cancel-write` (`StreamFutureEnd.cancel`) are small; bundle if cheap.
+- **Then Slice 3c — the WAIT payoff**: waitable-set builtins (`waitable-set.new`/`.join`/`waitable.join`) +
+  a fixture where a guest blocks on `stream.read` → WAIT, a write delivers STREAM_READ, exercising
+  `driveCallbackLoop`'s WAIT branch + `waitOn` e2e (today only EXIT/YIELD are e2e). May want a small ADR for
+  the waitable-set builtin shape. After ζ2: units E/F/G per D-335.
 
 ## Active bundle
 
 - **Bundle-ID**: wasi03-D-335 (§9.0 Front D; WASI 0.3 / Preview 3; units A→G)
-- **Cycles-remaining**: ~3 (ζ2 Slice 1 + Slice 2 done; remaining = ζ2 Slice 3 read/write/drop+WAIT, then E/F/G)
-- **Continuity-memo**: critical path **A→B→C→D(...ζ2-Slice1 + Slice2(stream.new/future.new e2e) done; Slice3=read/write/drop+WAIT next)→E→F→G**
+- **Cycles-remaining**: ~3 (ζ2 Slices 1+2+3a done; remaining = Slice 3b read/write, 3c WAIT-e2e, then E/F/G)
+- **Continuity-memo**: critical path **A→B→C→D(...Slice2 + Slice3a(drop builtins) done; Slice3b=read/write next)→E→F→G**
   (full plan in **D-335**; design in **ADR-0187** — stackless callback ABI, no fibers). CM-async, NOT core
   stack-switching. Spec: `~/Documents/OSS/{WASI, WebAssembly/component-model}` (design/mvp/{Binary,CanonicalABI,
   Concurrency}.md); ref impl `~/Documents/OSS/wasmtime` (43+; `concurrent/futures_and_streams.rs`).
 - **Exit-condition**: a WASI-0.3 async/stream/future component runs end-to-end through zwasm (new P3
   corpus green, 3-host); each unit lands green per D-335 along the way.
-- **Current unit — D (HIGH/crux; ζ2 Slice 2 done, Slice 3 START HERE)**: P3 runner + task.return + stream.new/
-  future.new (Zone-1 arena + Zone-3 trampolines) all e2e green. Remaining = Slice 3 (read/write/cancel/drop +
-  the WAIT-path e2e fixture exercising driveCallbackLoop's WAIT branch). Then E/F/G.
+- **Current unit — D (HIGH/crux; ζ2 Slice 3a done, Slice 3b START HERE)**: P3 runner + task.return + stream/
+  future new+drop all e2e green. Remaining = Slice 3b (read/write — the rendezvous + Unit-C element marshalling)
+  → 3c (waitable-sets + WAIT-path e2e). Then E/F/G.
 
 ## Long-tail (debt-tracked / parked — NOT active; see §9.0 fronts + debt.yaml)
 
