@@ -138,10 +138,10 @@ entries:
       call_indirect + return_call_indirect, table-0 + multi-table, both arches. jitTrapCode 13 =>
       uninitialized_elem. Tests: runner_trap_test exec (null → 13) + byte-exact emit tests updated. Verified
       JIT+interp both emit "uninitialized element". 3-host pending (ubuntu test-all kicked @4fa16b29).
-      RESIDUAL 1 (narrow): the SUBTYPING resolve-trampoline path (jitCallIndirectResolve, op_call.zig arm64 ~309
-      / x86_64 equiv) collapses OOB/sig/NULL all into funcptr=0 → a null elem under a subtyping module still
-      reports code 3. Fixing it needs the trampoline to RETURN a distinct null sentinel (not funcptr=0) so the
-      caller can branch to code 13 — a different (non-inline) mechanism. Low priority (subtyping + null elem is rare).
+      ~~RESIDUAL 1 (narrow): the SUBTYPING resolve-trampoline path~~ FIXED 2026-06-15 (`2a53213f`):
+      `jitCallIndirectResolve` returns a distinct `NULL_ELEM_SENTINEL` (1) when the slot's typeidx is the
+      maxInt no-func sentinel; both arch callers `CMP X0/RAX,1 → uninit_elem_fixups` (code 13) before the
+      generic 0-trap. Test: rec-group subtyping module + null table[0] (wasm-tools-generated) → code 13.
       RESIDUAL 2 (cosmetic): call_indirect OOB-INDEX prints `out of bounds table access` (oob_table) but spec
       canonical is "undefined element"; table.get OOB stays "out of bounds table access".
       REASSESSED 2026-06-06 (NOT cheap — folds into D-293): JIT trap-code 2 (oob_table) is SHARED by
@@ -154,7 +154,7 @@ entries:
       → Both residuals (R1 subtyping-trampoline sentinel, R2 code-2 channel split) are D-293-class; the
       load-bearing D-294 bug (inline null-elem mislabel) is FIXED (4fa16b29). Residuals fold into D-293.
     first_raised: "2026-06-06"
-    last_reviewed: "2026-06-06"
+    last_reviewed: "2026-06-15"
     refs: |-
       Fixed: 4fa16b29. src/engine/codegen/{arm64,x86_64}/{op_call,op_tail_call,ctx,emit}.zig +
       x86_64/op_control.zig (demux) + api/trap_surface.zig (jitTrapCode 13). Tests: runner_trap_test.zig,

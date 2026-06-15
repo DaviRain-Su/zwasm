@@ -3,25 +3,24 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Just closed — JIT sandbox-triad table leg COMPLETE (`bd355258` + `fa4678f4`, Phase-17 refinement)
+## Just closed — Phase-17 codegen refinement: D-294 R1 fixed (`2a53213f`); sandbox triad complete (prior)
 
-The JIT runner enforced fuel + max_memory but NOT a table-elements cap (interp did) — asymmetric
-triad gap + a setup.zig comment that falsely claimed the bound. **`bd355258`**: `RunLimits.max_table_elements`
-+ `Error.TableLimitExceeded`, early-reject in `runWasiLenient` (Σ declared table mins > cap) before setup's
-eager alloc; CLI `--max-table-elements` mirrors `--max-memory`. **`fa4678f4` (D-314(b))**: `jitTableGrow`
-now honors `rt.store_table_elements_max` too (runtime `table.grow`, not just initial alloc) — added a
-trailing `store_table_elements_max` to the extern JitRuntime (maxInt=unlimited; offsets intact; size
-592→600). null = unlimited (no regression); test+lint green (2866/2878, 0 fail). **Sandbox triad
-(fuel/memory/table) now cross-engine complete on JIT.** D-314(b) discharged; D-332 fully closed.
+**`2a53213f` (D-294 residual 1)**: subtyping `call_indirect` on a null elem trapped `indirect_call_mismatch`
+(code 3) — the resolve trampoline (`jitCallIndirectResolve`) collapsed null/OOB/sig into funcptr=0. Now
+returns a distinct `NULL_ELEM_SENTINEL` (1) for the maxInt no-func typeidx; both arch callers route it to
+`uninit_elem_fixups` (code 13) before the generic 0-trap → matches interp + wasmtime/wasmer. Test via
+wasm-tools-generated rec-group subtyping module. **3-host gate**: windows recorded green `cefdca2b`
+(`25437/0`) — the table-grow-cap ABI batch is 3-host confirmed. D-294 R2 (call_indirect-OOB code-2 channel
+split) remains but is conformance-neutral (spec matches by trap-KIND) + D-293-class → low priority.
 
-**Phase-B debug tooling (user-directed persistence, prior turns)** — a reusable lldb value-trace stack for JIT
-miscompiles that produce wrong output but DON'T crash:
-- `ZWASM_DEBUG=jit.dump` prints per-func machine bytes (`db3109d8`, compile.zig) + runtime entry
-  addr (`f49b3675`, setup.zig) — the instruction-level lens the 4 prior IR-level c_sha256 attempts lacked.
-- **`scripts/jit_value_trace.sh {addr|disasm|trace}`** (`39d53605`) automates the ~9-attempt lldb-on-JIT
-  flow (disable-aslr stable addrs; arm `-H` bp AFTER the W^X page maps by stopping at a host symbol;
-  llvm-mc disasm). VALIDATED: `-H` bp fires on a JIT page (func 11). Wired into debug_jit_auto Recipe 18
-  + decision-tree + lesson `2026-06-15-lldb-value-trace-on-jit-code`.
+**Sandbox triad (prior, `bd355258`+`fa4678f4`)**: JIT now caps table initial-alloc (early-reject) + runtime
+`table.grow` (rt.store_table_elements_max) + CLI `--max-table-elements`. Triad (fuel/memory/table) cross-
+engine complete. D-314(b) discharged; D-332 fully closed.
+
+**Phase-B debug tooling (user-directed persistence, prior turns)** — reusable lldb value-trace for JIT
+miscompiles with wrong output but no crash: `ZWASM_DEBUG=jit.dump` (per-func bytes `db3109d8` + runtime
+addr `f49b3675`) + **`scripts/jit_value_trace.sh {addr|disasm|trace}`** (`39d53605`, automates the
+arm-`-H`-bp-after-W^X-map flow). Wired into debug_jit_auto Recipe 18 + lesson `2026-06-15-lldb-value-trace-on-jit-code`.
 
 **D-330 c_sha256 `\n` — MECHANISM CONFIRMED (`4365e478`, via the harness)**: c_sha256 is LINE-buffered
 (3 fd_writes). Read iovecs at `jit_dispatch.zig:78`: write 1 (input) iov[1] len=1 → `\n` correct; write 3
