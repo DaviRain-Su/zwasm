@@ -3,7 +3,7 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Current state — WASI-0.3 campaign (D-335); E host peers done + ADR-0191 E2c WAIT-path plan (`322deee7`)
+## Current state — WASI-0.3 campaign (D-335); E2c WAIT-path e2e — callback loop COMPLETE (`249e8e85`)
 
 **WASI 0.3 / Preview 3 campaign** (Front D, ratified 2026-06-11; CM-async — `async` func / `stream<T>` /
 `future<T>`, NOT core stack-switching). Critical path A→B→C→D(crux)→E→F→G; full unit plan + per-unit DONE-SHAs
@@ -24,38 +24,38 @@ test`≠`test-all`; `catch {}` in errdefer + `else` on exhaustive switch are gat
 single-task can't reach guest-to-guest COMPLETION — `2026-06-16-stackless-stream-completion-needs-host-peer`.
 `D-337` writable-future-drop guard; `D-444` split p2 async host to a sibling.)
 
-WAIT mechanism (survey): zwasm is STACKLESS so the guest's `callback` RETURNS `WAIT(set)` (not the stackful
-`waitable-set.wait` builtin); `unpackCallbackResult` already extracts the set index; `waitable-set.wait`/`poll`
-are reject-deferred. The Zone-1 + builtins are all in place; only the e2e wiring remains.
+**E2c DONE** (`249e8e85`, ADR-0191): the WAIT-path e2e. `WasiP2Ctx.pending_reads` ({ptr,cap} keyed by end) +
+`defer_host_source_reads`; `p2StreamFutureCopy` parks a deferred host-source read (record + BLOCKED);
+`WasiP2Ctx.deliverParkedReads` copies the ready bytes + `setPendingEvent(STREAM_READ)` for each set member at
+`waitOn`; `P3CallbackCtx` holds the `WasiP2Ctx`, `waitOn` delivers-then-polls. E2E `async_wait_path.wat`: guest
+read PARKS → returns `WAIT(set)` → host delivers "ok" → `driveCallbackLoop` WAIT branch re-enters callback →
+EXIT. **The callback loop is now COMPLETE e2e (EXIT + YIELD + WAIT); both stream directions COMPLETE.**
 
-**E2c plan settled — ADR-0191** (`322deee7`): the WAIT-path drive. A host source blocks-then-delivers; `waitOn`
-delivers the event AT wait time (synchronous, no scheduler).
-
-**NEXT — implement E2c per ADR-0191** (the last callback-loop gap; today only EXIT/YIELD are e2e):
-- Add `WasiP2Ctx.pending_reads` (`shared handle → {end, ptr, cap}`) + an armed-source flag. `p2StreamFutureCopy`
-  READ on an armed host source with no bytes → record the parked read + return BLOCKED (end parks `async_copying`).
-- `P3CallbackCtx.waitOn` gains a delivery pass BEFORE `set.poll`: for each set member with a recorded pending
-  read whose source now has bytes → copy bytes to `ptr`, `setPendingEvent(STREAM_READ, completed(n))`, clear the
-  record. Then poll returns it → `driveCallbackLoop` re-enters `callback(STREAM_READ, end, payload)`.
-- **Fixture**: guest `read-via-stream` (armed source) → `stream.read` BLOCKs → `waitable-set.new` +
-  `waitable.join` → return `WAIT(set)` (entry packs `2|set<<4`) → host delivers "ok" → callback re-entered →
-  guest re-reads/asserts → EXIT. First e2e exercising the real `driveCallbackLoop` WAIT branch.
-- Gaps: multi-byte/typed marshalling (E1/E3 did `u8`); return-future resolution. Then F/G. (**D-444** P3-host split.)
+**NEXT — Unit E extensions / F / G** (the core async mechanism is proven; what remains is breadth + polish):
+- **Multi-byte/typed element marshalling** — E1/E3/E2c moved `u8` only. Generalise the stream read/write
+  marshalling to arbitrary element WIT types via the Unit-C `canon.zig` store/load (resolve the element type
+  from the stream `type_index`). The first real non-`u8` stream fixture.
+- **Return-future resolution** — `write-via-stream`/`read-via-stream` return a `future<result<_,error-code>>`
+  the guest can read for completion; today the host returns an unresolved future. Resolve it (ok on
+  drop-writable / EOF) + a `future.read` e2e.
+- Then **F** (async-export public API surface — the embedder C/Zig API for driving an async component) and **G**
+  (a `test/component/p3` corpus consolidating the async fixtures). Per D-335. (**D-444** P3-host file split.)
 
 ## Active bundle
 
 - **Bundle-ID**: wasi03-D-335 (§9.0 Front D; WASI 0.3 / Preview 3; units A→G)
-- **Cycles-remaining**: ~3 (D + E1/E3 + E2a/E2b done; remaining = E2c WAIT-path e2e → F → G)
-- **Continuity-memo**: critical path **A→B→C→D(DONE)→E(host peers: E1/E3/E2a/E2b done; E2c WAIT-e2e next)→F→G**
+- **Cycles-remaining**: ~3 (D + E callback-loop COMPLETE e2e; remaining = E breadth (typed marshalling, future
+  resolution) → F → G)
+- **Continuity-memo**: critical path **A→B→C→D(DONE)→E(callback loop EXIT/YIELD/WAIT + both stream dirs e2e DONE; breadth next)→F→G**
   (full plan in **D-335**; design in **ADR-0187** — stackless callback ABI, no fibers). CM-async, NOT core
   stack-switching. Spec: `~/Documents/OSS/{WASI, WebAssembly/component-model}` (design/mvp/{Binary,CanonicalABI,
   Concurrency}.md); ref impl `~/Documents/OSS/wasmtime` (43+; `concurrent/futures_and_streams.rs`).
 - **Exit-condition**: a WASI-0.3 async/stream/future component runs end-to-end through zwasm (new P3
   corpus green, 3-host); each unit lands green per D-335 along the way.
-- **Unit D + E1/E3/E2a/E2b DONE (HIGH/crux); E2c IMPL START HERE**: Zone-1 model + P3 runner + ζ2 + both host stream
-  peer directions + waitable-set decode + new/join builtins all green. Next = E2c (the WAIT-path e2e: a 2-phase
-  host source → guest blocks → returns WAIT(set) → `driveCallbackLoop` WAIT branch re-enters callback; survey+
-  small ADR for the 2-phase source + WAIT-loop drive). Then F/G. (D-444 = P3-host split when E settles.)
+- **Unit D + E callback-loop COMPLETE (HIGH/crux); E breadth START HERE**: Zone-1 model + P3 runner + ζ2 + host
+  stream peers (both directions COMPLETE) + waitable-set + the WAIT-path all e2e green — the async callback loop
+  (EXIT/YIELD/WAIT) is proven end-to-end. Next = E breadth: typed/multi-byte element marshalling + return-future
+  resolution → then F (async public API) / G (p3 corpus). (D-444 = P3-host split when E settles.)
 
 ## Long-tail (debt-tracked / parked — NOT active; see §9.0 fronts + debt.yaml)
 

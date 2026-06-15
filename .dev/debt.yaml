@@ -1430,9 +1430,14 @@ entries:
         + join + return WAIT(set) → driveCallbackLoop WAIT branch → waitOn poll → re-enter callback → COMPLETED).
         E2c plan: ADR-0191 (322deee7) — 2-phase host source (read parks; waitOn delivers AT wait time, no
         scheduler) + WasiP2Ctx.pending_reads {end,ptr,cap} + armed-source flag; waitOn delivery pass before poll.
-        NEXT = implement E2c per ADR-0191 (fixture: guest read parks → WAIT(set) → host delivers → callback
-        re-entry; first real driveCallbackLoop WAIT-branch e2e). Gaps: multi-byte/typed marshalling (E1/E3 did
-        u8); return-future resolution. Then F/G. (D-444 = P3-host split.)
+        E2c DONE (249e8e85): WAIT-path e2e. WasiP2Ctx.pending_reads + defer_host_source_reads; p2StreamFutureCopy
+        parks a deferred host-source read; WasiP2Ctx.deliverParkedReads delivers bytes + setPendingEvent at
+        waitOn; P3CallbackCtx holds WasiP2Ctx, waitOn delivers-then-polls. async_wait_path.wat: read PARKS →
+        WAIT(set) → host delivers "ok" → driveCallbackLoop WAIT branch re-enters callback → EXIT. CALLBACK LOOP
+        COMPLETE e2e (EXIT/YIELD/WAIT); both stream directions COMPLETE. NEXT = E breadth: typed/multi-byte
+        element marshalling (E1/E3/E2c did u8) via canon.zig store/load; return-future resolution (write/read-
+        via-stream return an unresolved future) + future.read e2e. Then F (async public API), G (p3 corpus).
+        (D-444 = P3-host split.)
       - E — WASI-P3 host interfaces (new component_wasi_p3.zig; sockets/http/clocks
         async; ~2000; MED; coexists with P2, does NOT replace it). Needs D.
       - F — async-export ABI + P3 component runner (canon.zig; ~400; MED). Needs E.
