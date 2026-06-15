@@ -49,6 +49,16 @@ wasi-testsuite, wasm-tools). **②①④ DONE; ③ ACTIVE (GC-corpus).**
 
 - **Bundle-ID**: p17-③-gc-corpus (real Wasm-GC source-lang fixtures to stress the GC backend)
 - **Cycles-remaining**: several (new-toolchain integration like wasip3 was)
+- **Hoot bring-up — validator bug chain (each blocker = a real spec fix; wasm-tools validates the whole module)**:
+  func #84 op 0x10 canonical-equality **FIXED** (`9ec68a75`): per-function `subtypeCtx` now threads the full
+  `*const sections.Types` + uses `gcConcreteReachesCanonical` (iso-recursive cross-rec-group identity) on
+  concrete→concrete, matching the module path; wired both entry points (compile/run + interp frontendValidate);
+  edge fixture `gc/canonical_eq_call_arg`; validator.zig cap 3400→3450. **NEXT BLOCKER (func #354 op 0x20 =
+  `local.get`): `UninitializedLocal`** — a non-defaultable `(ref $t)` local read before definite-assignment on
+  this path. wasm-tools validates the module → likely a real bug in zwasm's local-init / definite-assignment
+  analysis (control-flow merge?), NOT Hoot. Fresh subsystem (`track_local_init` / `locals_init`). Investigate next:
+  reduce a minimal repro (probably a `(ref $t)` local set inside one control arm, read after the merge) like the
+  canonical repro, confirm wasm-tools accepts, then fix the merge logic. Spike: `/tmp/hoot-spike/prog.wasm`.
 - **Continuity-memo**: ②①④ DONE. ③ active — Hoot chosen (lean import surface; dart2wasm needs heavy JS glue,
   deprioritized). Probe already found+fixed 2 validator bugs (`9064faa5`/`480809af`). **NEXT = re-run the Hoot module
   under zwasm** now return_call validates; expect next blocker = D-452 (br_table) OR an unsatisfied `io`/`rt` import
