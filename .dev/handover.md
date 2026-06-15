@@ -3,7 +3,7 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Current state — WASI-0.3 campaign (D-335); A+B+C + D-α..ε + D-ζ1 done; branch GREEN (`1e3e814b`)
+## Current state — WASI-0.3 campaign (D-335); A+B+C + D-α..ε + ζ1 + ηA done; test-all GREEN (`5e0610a1`)
 
 **WASI 0.3 / Preview 3 campaign is the active feature work** (Front D, ratified 2026-06-11; CM-async —
 `async` func / `stream<T>` / `future<T>` — NOT core stack-switching). Critical path A→B→C→D(crux)→E→F→G;
@@ -30,34 +30,41 @@ hard blocker**. Staged α→η in D-335. **α** (`17a810f9`): handle table + `Co
 `WaitableSet`, and the delivery wiring. **ε** (`038214ee`): `SharedFuture` single-shot rendezvous
 (FUTURE_READ/WRITE; only the writable end observes a reader-drop; `copy`/`cancel`/`drop` are now generic over
 the shared type via `anytype`). **ζ1** (`1e3e814b`): `Subtask` waitable (state machine + lenders + resolve→
-SUBTASK event). **The full Zone-1 async data model — streams + futures + subtasks, rendezvous + event
-delivery — is complete and tested.** (`D-337` tracks the deferred writable-future-drop guard.)
+SUBTASK event). **ηA** (`55452135`): `CallbackCode` (exit/yield/wait) + `unpackCallbackResult`. **The full
+Zone-1 async data model — streams + futures + subtasks, rendezvous + event delivery + the callback-ABI
+return-code — is complete and tested.** (`D-337` tracks the deferred writable-future-drop guard.)
 
-**NEXT — the Zone-3 host-integration finale (η then ζ2; both engine/Caller-aware, survey-first).** Everything
-so far is Zone-1 pure data; the remaining units WIRE it into real guest execution:
-- **η — the callback event loop + `task.return` + async export lifting.** The host driver that, per ADR-0187's
-  stackless callback ABI, repeatedly calls the guest's `callback` with ready `WaitableSet` events until EXIT.
-  Needs the engine/`Caller` host→guest call path.
-- **ζ2 — canon-builtin dispatch.** Replace the `.stream_future → error.UnsupportedWasiImport` arm in
-  `component_wasi_p2.zig:1507` (synthDef) with a real host builtin that calls async.zig's stream/future ops
-  (the resource-builtin path `p2GuestResourceNew`/`ResourceBuiltinCtx` ~`:1536` is the template). Gates on η.
-**Step 0 = survey the host-trampoline + event-loop seam first** (the ζ survey mapped synthDef/Caller/Subtask;
-re-read it). Verify the ubuntu + windows (batch fired @844758d2) verdicts at Step 0.7.
+**`zig build test` ≠ `test-all`** (lesson `2026-06-15-test-all-builds-exes-zig-build-test-skips`): Unit C's
+CanonType `.stream`/`.future` had been latently breaking the `test-all`-only `component_model_assert_runner`
+exe (local `zig build test` never builds it) since `58e3f46a` — fixed `5e0610a1` (arm added), **test-all now
+green locally** (spec_assert 212/0, wast_runtime 359/0, wasi 3/0). When adding a union variant, grep `test/`
+for switches + run `test-all` locally once.
+
+**NEXT — Unit D-ηB (the callback event LOOP) then ζ2 — the Zone-3 engine-wiring finale.** Everything so far is
+Zone-1 pure data; these WIRE it into real guest execution (engine/`Caller`-aware, survey-first — re-read the
+η + ζ surveys in this session's transcript):
+- **ηB — the stackless callback loop** (likely a new `src/api/component_wasi_p3.zig` runner): call the
+  async-lifted export once → `unpackCallbackResult` → while ≠ EXIT: on WAIT `WaitableSet.poll(si)`, call the
+  guest `callback(event_code,p1,p2)` via `Instance.invoke`, repeat. + decode `task.return` (canon builtin,
+  currently UnsupportedCanon) + async export lifting. Spec `CanonicalABI.md` canon_lift stackless ~3498–3590.
+- **ζ2 — canon-builtin dispatch.** Replace `component_wasi_p2.zig:1507` `.stream_future →
+  error.UnsupportedWasiImport` with a real host builtin calling async.zig's stream/future ops (template:
+  `p2GuestResourceNew`/`ResourceBuiltinCtx` ~`:1536`). Gates on ηB. May want a P3-runner-shape ADR first.
 
 ## Active bundle
 
 - **Bundle-ID**: wasi03-D-335 (§9.0 Front D; WASI 0.3 / Preview 3; units A→G)
-- **Cycles-remaining**: ~2 (A+B+C + D-α..ε + ζ1 done; remaining = the Zone-3 host-integration finale η + ζ2)
-- **Continuity-memo**: critical path **A(done)→B(done)→C(done)→D(α..ε+ζ1 done; η+ζ2 = host-wiring next)→E→F→G**
+- **Cycles-remaining**: ~2 (A+B+C + D-α..ε + ζ1 + ηA done; remaining = the Zone-3 engine-wiring finale ηB + ζ2)
+- **Continuity-memo**: critical path **A(done)→B(done)→C(done)→D(α..ε+ζ1+ηA done; ηB+ζ2 = engine-wiring next)→E→F→G**
   (full plan in **D-335**; design in **ADR-0187** — stackless callback ABI, no fibers). CM-async, NOT core
   stack-switching. Spec: `~/Documents/OSS/{WASI, WebAssembly/component-model}` (design/mvp/{Binary,CanonicalABI,
   Concurrency}.md); ref impl `~/Documents/OSS/wasmtime` (43+; `concurrent/futures_and_streams.rs`).
 - **Exit-condition**: a WASI-0.3 async/stream/future component runs end-to-end through zwasm (new P3
   corpus green, 3-host); each unit lands green per D-335 along the way.
-- **Current unit — D (HIGH/crux; α..ε+ζ1 done, η START HERE)**: the full Zone-1 async data model (streams,
-  futures, subtasks + rendezvous + event delivery) is done in async.zig. Remaining = Zone-3 host wiring: η
-  (callback event loop + task.return) then ζ2 (canon-builtin dispatch into async.zig). Survey the engine/Caller
-  + event-loop seam first.
+- **Current unit — D (HIGH/crux; α..ε+ζ1+ηA done, ηB START HERE)**: the full Zone-1 async data model + the
+  callback-ABI return-code are done in async.zig. Remaining = Zone-3 engine wiring: ηB (the callback LOOP in a
+  P3 runner + task.return + async export lifting) then ζ2 (canon-builtin dispatch into async.zig). Survey the
+  engine/Caller + event-loop seam first (η+ζ surveys are in this session's transcript).
 
 ## Long-tail (debt-tracked / parked — NOT active; see §9.0 fronts + debt.yaml)
 

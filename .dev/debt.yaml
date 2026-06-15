@@ -1372,10 +1372,12 @@ entries:
         drop; copy/cancel/drop generic over shared via anytype; D-337 filed for the writable-future-
         drop guard). ζ split into ζ1 (Subtask waitable, Zone-1) + ζ2 (dispatch wiring, Zone-2/3,
         gates on η). ζ1 DONE (1e3e814b): Subtask state machine + lenders + resolve→SUBTASK event.
-        Zone-1 async model COMPLETE (streams+futures+subtasks). NEXT = the Zone-3 host-integration
-        finale: η (callback event loop + task.return + async export lifting) then ζ2 (replace the
-        component_wasi_p2.zig `.stream_future → UnsupportedWasiImport` arm with real async.zig dispatch).
-        Both engine/Caller-aware (survey the host-trampoline + event-loop seam first).
+        ηA DONE (55452135): CallbackCode (exit/yield/wait) + unpackCallbackResult. Zone-1 async model +
+        callback-ABI return-code COMPLETE. test-all gap fixed (5e0610a1): Unit C CanonType .stream/.future
+        broke the test-all-only component_model_assert_runner switch (latent since 58e3f46a; lesson
+        2026-06-15-test-all-builds-exes). NEXT = Zone-3 engine-wiring finale: ηB (the callback LOOP in a P3
+        runner + task.return + async export lifting) then ζ2 (replace component_wasi_p2.zig `.stream_future →
+        UnsupportedWasiImport` with real async.zig dispatch; gates on ηB). May want a P3-runner ADR first.
       - E — WASI-P3 host interfaces (new component_wasi_p3.zig; sockets/http/clocks
         async; ~2000; MED; coexists with P2, does NOT replace it). Needs D.
       - F — async-export ABI + P3 component runner (canon.zig; ~400; MED). Needs E.
