@@ -3,7 +3,7 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Current state — WASI-0.3 campaign (D-335); ζ2 Slice 1 (task.return) runs e2e (`48b052ca`)
+## Current state — WASI-0.3 campaign (D-335); ζ2 Slice 2 Zone-1 (shared arena) done (`eb3107a4`)
 
 **WASI 0.3 / Preview 3 campaign** (Front D, ratified 2026-06-11; CM-async — `async` func / `stream<T>` /
 `future<T>`, NOT core stack-switching). Critical path A→B→C→D(crux)→E→F→G; full unit plan + per-unit DONE-SHAs
@@ -17,34 +17,37 @@ callback ABI, no fibers) · ηB decode (canonopts `async`/`callback`; `task.retu
 `invokeCallback`(→`Instance.invoke`)/`waitOn`(→`WaitableSetTable.poll`, trap `error.AsyncDeadlock`) seams;
 EXIT + YIELD→callback-reentry both e2e green · **ζ2 Slice 1** (`48b052ca`, ADR-0189): `canon task.return` host
 builtin (`WasiP2Ctx.task_return` + `Def.task_return_builtin` + `p2TaskReturn`) delivers the async result —
-fixture calls task.return(42)→EXIT, `ctx.task_return == 42`. (Lesson: `zig build test` ≠ `test-all` — a new
-union variant can break the test-all-only `component_model_assert_runner`; grep `test/` switches + run
-`test-all` locally. `D-337` tracks the deferred writable-future-drop guard.)
+fixture calls task.return(42)→EXIT, `ctx.task_return == 42` · **ζ2 Slice 2 Zone-1** (`eb3107a4`, ADR-0189):
+`SharedTable` (refcounted arena of `Shared = union{SharedStream, SharedFuture}`) + `StreamFutureEnd.shared`
+link + `newStreamPair`/`newFuturePair` (mint a linked readable+writable pair, refcount=2) + `dropEnd` (free
+the shared at the 2nd drop). Adversarial drop-order unit tests (fwd/rev/free-list reuse). (Lesson reminders:
+`zig build test` ≠ `test-all` — a new union variant can break the test-all-only assert runner; `catch {}` in
+errdefer is a forbidden silent-fallback — the gate blocks it. `D-337` = deferred writable-future-drop guard.)
 
-**NEXT — ζ2 Slice 2: `stream.new`/`future.new` + the shared arena, per ADR-0189** (the one genuinely new
-lifetime piece — land it with adversarial drop-order tests):
-- `StreamFutureEnd` gains a `shared` handle into a NEW ctx-owned shared-stream/future arena (refcount = 2 ends,
-  freed on the 2nd drop). Move `streams`/`sets` tables into `WasiP2Ctx` (now there's a consumer).
-- `stream.new` trampoline `() -> i64`: create the shared, mint readable+writable ends linked to it, return
-  `ri | (wi<<32)` (spec `canon_stream_new`); same for `future.new`.
-- `synthDef` `.stream_future` → real `Def.async_builtin{op,type_index}` (was `UnsupportedWasiImport`);
+**NEXT — ζ2 Slice 2 Zone-3: the `stream.new`/`future.new` trampolines** (wrap the Zone-1 primitive):
+- Move `streams`/`sets` tables into `WasiP2Ctx` (now there's a consumer) + add a `shared: SharedTable`.
+- `synthDef` `.stream_future` → real `Def.async_builtin{op, type_index}` (was `UnsupportedWasiImport`);
   `defineSynth` binds per-op trampolines (template `p2GuestResourceNew`+`ResourceBuiltinCtx` `~:1536`).
+- `stream.new`/`future.new` trampoline `() -> i64`: call `newStreamPair`/`newFuturePair`, return
+  `ri | (wi<<32)` (spec `canon_stream_new`). Fixture: a guest core entry calls `stream.new`, returns EXIT;
+  assert it runs (was `UnsupportedWasiImport`). The P3 runner's `driveAsyncMain` uses `built.ctx.{streams,sets}`.
 - **Then** Slice 3+ (read/write/cancel/drop + a WAIT-path e2e fixture exercising `driveCallbackLoop`'s WAIT
   branch through the runner). After ζ2: units E/F/G per D-335.
 
 ## Active bundle
 
 - **Bundle-ID**: wasi03-D-335 (§9.0 Front D; WASI 0.3 / Preview 3; units A→G)
-- **Cycles-remaining**: ~3 (ζ2 Slice 1 done; remaining = ζ2 Slices 2-3, then E/F/G)
-- **Continuity-memo**: critical path **A→B→C→D(...P3-runner-e2e + ζ2-Slice1=task.return done; ζ2-Slice2=stream/future.new next)→E→F→G**
+- **Cycles-remaining**: ~3 (ζ2 Slice 1 + Slice 2 Zone-1 done; remaining = Slice 2 trampolines, Slice 3, E/F/G)
+- **Continuity-memo**: critical path **A→B→C→D(...ζ2-Slice1 + Slice2-Zone1(shared arena) done; Slice2-trampolines next)→E→F→G**
   (full plan in **D-335**; design in **ADR-0187** — stackless callback ABI, no fibers). CM-async, NOT core
   stack-switching. Spec: `~/Documents/OSS/{WASI, WebAssembly/component-model}` (design/mvp/{Binary,CanonicalABI,
   Concurrency}.md); ref impl `~/Documents/OSS/wasmtime` (43+; `concurrent/futures_and_streams.rs`).
 - **Exit-condition**: a WASI-0.3 async/stream/future component runs end-to-end through zwasm (new P3
   corpus green, 3-host); each unit lands green per D-335 along the way.
-- **Current unit — D (HIGH/crux; P3 runner e2e + ζ2 Slice 1 done, ζ2 Slice 2 START HERE)**: Zone-1 model +
-  P3 runner + task.return all green; ADR-0189 settles ζ2 wiring. Remaining = Slice 2 (stream/future.new +
-  ctx-owned shared arena + `StreamFutureEnd.shared` link) → Slice 3+ (read/write/drop + WAIT e2e). Then E/F/G.
+- **Current unit — D (HIGH/crux; ζ2 Slice 2 Zone-1 done, Slice 2 trampolines START HERE)**: P3 runner +
+  task.return + the shared-arena Zone-1 primitive (`newStreamPair`/`dropEnd`, refcount) all green. Remaining =
+  Slice 2 Zone-3 (stream/future.new trampolines + move tables into WasiP2Ctx) → Slice 3+ (read/write/drop +
+  WAIT e2e). Then E/F/G.
 
 ## Long-tail (debt-tracked / parked — NOT active; see §9.0 fronts + debt.yaml)
 

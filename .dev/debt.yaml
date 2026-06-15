@@ -1393,9 +1393,13 @@ entries:
         Slice 1 DONE (48b052ca): WasiP2Ctx.task_return + Def.task_return_builtin + p2TaskReturn trampoline;
         synthDef now satisfies canon task.return (was UnsupportedWasiImport); P3 runner split runWasiP3Main +
         driveAsyncMain(built) for inspectability; fixture async_task_return.wat (task.return(42)→EXIT, ctx==42).
-        Minimal single-i32 result (typed/multi-value later). NEXT = ζ2 Slice 2: stream.new/future.new ()->i64
-        (ri|(wi<<32)) + ctx-owned shared arena (refcount=2 ends) + StreamFutureEnd.shared link + move streams/sets
-        into WasiP2Ctx; synthDef .stream_future → Def.async_builtin. Then Slice 3+ (read/write/drop + WAIT e2e).
+        Minimal single-i32 result (typed/multi-value later). ζ2 Slice 2 Zone-1 DONE (eb3107a4): SharedTable
+        (refcounted arena of Shared=union{SharedStream,SharedFuture}) + StreamFutureEnd.shared link +
+        newStreamPair/newFuturePair (refcount=2) + dropEnd (free shared at 2nd drop); adversarial drop-order
+        tests (fwd/rev/free-list). NEXT = Slice 2 Zone-3 trampolines: move streams/sets + add shared:SharedTable
+        to WasiP2Ctx; synthDef .stream_future → Def.async_builtin; stream.new/future.new trampoline ()->i64
+        (ri|(wi<<32)) wrapping newStreamPair; fixture (guest calls stream.new → EXIT). Then Slice 3+ (read/write/
+        drop + WAIT-path e2e). Then units E/F/G.
       - E — WASI-P3 host interfaces (new component_wasi_p3.zig; sockets/http/clocks
         async; ~2000; MED; coexists with P2, does NOT replace it). Needs D.
       - F — async-export ABI + P3 component runner (canon.zig; ~400; MED). Needs E.
