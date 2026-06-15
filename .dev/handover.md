@@ -3,7 +3,7 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Current state — WASI-0.3 campaign (D-335); D+ζ2+E+F done, future-drop guard closed (D-337 → `81e5d864`)
+## Current state — WASI-0.3 campaign (D-335); D+ζ2+E+F done; async guest-fault hardening (D-445 → `76d9dd20`)
 
 **WASI 0.3 / Preview 3 campaign** (Front D, ratified 2026-06-11; CM-async — `async` func / `stream<T>` /
 `future<T>`, NOT core stack-switching). Critical path A→B→C→D(crux)→E→F→G; full unit plan + per-unit DONE-SHAs
@@ -28,7 +28,14 @@ single-task can't reach guest-to-guest COMPLETION — `2026-06-16-stackless-stre
 cannot be dropped before its value is written — `SharedFuture.written` flag + `guardWritableDrop`; `p2StreamFutureDrop`
 surfaces the canonical guest trap. New fixtures: `async_future_read_blocked` (the SharedFuture rendezvous, prior only
 hit via the host-result future) + `async_future_drop_before_write` (the trap). The future readable end never observes
-DROPPED (unlike streams). (Surfaced D-445: WasiP2Error guest-faults panic in mapDispatchErr's narrowing else — latent.)
+DROPPED (unlike streams).
+
+**Async guest-fault hardening DONE** (`c79be25d`+`76d9dd20`, D-445 partial): a guest supplies the handle/ptr to the
+async builtins, so a bad handle / illegal drop-cancel sequencing / OOB buffer is a GUEST fault — but those WasiP2Error
+variants aren't `runtime.Trap` variants, so they hit `mapDispatchErr`'s `else => @panic` and **aborted the host on guest
+input** (a sandboxing hole). `mapAsyncFault` now narrows the guest-fault subset → the canonical guest trap at the
+copy/drop/cancel/waitable.join trampolines (3 trap fixtures). REMAINING in D-445: mint TableFull (unrealistic) + a
+host-call error contract for host-FAILURE errors (WriteFailed/NoMemory — ADR-grade, deferred).
 
 **E2c DONE** (`249e8e85`, ADR-0191): the WAIT-path e2e. `WasiP2Ctx.pending_reads` ({ptr,cap} keyed by end) +
 `defer_host_source_reads`; `p2StreamFutureCopy` parks a deferred host-source read (record + BLOCKED);

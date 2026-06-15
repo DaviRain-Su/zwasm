@@ -1502,22 +1502,28 @@ entries:
     status: "note"
     front: D-wasi03
     description: |-
-      note (latent; surfaced while closing D-337). A WASI-P2 host trampoline that
-      returns a domain error during guest dispatch (e.g. WriteFailed, OutOfBounds,
-      async CopyInProgress/NotCopying) hits `mapDispatchErr`'s `else => @panic`
-      (instance.zig) — those WasiP2Error variants are not `runtime.Trap` variants
-      and are not echoed in the narrowing switch, so they abort with a panic
-      instead of surfacing as a clean guest trap. D-337 sidestepped this by
-      translating the future-drop-before-write guard to `error.Unreachable` (the
-      canonical guest trap) at the trampoline. The general fix: either map each
-      guest-faulting WasiP2Error variant to a Trap at the host-call boundary, or
-      have the trampolines return `error.Unreachable` for all spec-trap conditions.
-      Untriggered today (the e2e tests use clean paths); not urgent.
+      partial (guest-crash vector closed for the handle-driven async ops; surfaced
+      while closing D-337). A WASI-P2 host trampoline that returns a domain error
+      during guest dispatch hits `mapDispatchErr`'s `else => @panic` (instance.zig)
+      — those WasiP2Error variants are not `runtime.Trap` variants, so they abort
+      the HOST on guest input. DONE (c79be25d): `mapAsyncFault` narrows the guest-
+      fault subset (InvalidHandle/TableFull/CopyInProgress/NotCopying/InvalidCallback
+      Code/FutureDropBeforeWrite/OutOfBounds) to `error.Unreachable` at the
+      copy/drop/cancel + waitable.join trampolines (fixtures: bad-handle read,
+      cancel-no-copy, bad-set-handle join). All handle-driven async ops a guest
+      can fault are now covered.
+      REMAINING: (1) the mint trampolines (p2StreamNew/FutureNew → TableFull) are
+      not wrapped — TableFull needs MAX_LENGTH mints (unrealistic), low priority;
+      (2) host-FAILURE errors (WriteFailed, NoMemory, realloc) still hit the @panic
+      if ever returned mid-dispatch — but those are host-side, not guest-triggerable.
+      The clean general fix is a host-call error contract (guest-fault => trap,
+      host-failure => a propagating InvokeError.HostError) — ADR-grade, deferred.
     first_raised: "2026-06-16"
     last_reviewed: "2026-06-16"
     refs: |-
       src/zwasm/instance.zig (mapDispatchErr else=>@panic);
-      src/api/component_wasi_p2.zig (WasiP2Error; p2StreamFutureDrop translation)
+      src/api/component_wasi_p2.zig (mapAsyncFault; copy/drop/cancel wrappers);
+      src/api/component_wasi_p3.zig (D-445 trap fixtures)
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.
