@@ -40,9 +40,13 @@ cloned** (`tests/rust/wasm32-wasip3`); wasm-tools/component-model refreshed (`im
   code). **front① cli+clocks conformance DONE (7 fixtures).** **front ④ perf LAUNCHED (measure-first done → D-450)**:
   the all-engine matrix shows zwasm-jit vs wasmtime clusters ~1.5–4× (single-pass tradeoff) EXCEPT **shootout/base64
   at 13.6×** (781 vs 57 ms; all optimizing comparators ~60-80 → zwasm-specific hotspot) = the highest-ROI target.
-  **NEXT**: D-450 Phase-I — profile base64's hot loop under `--engine jit` (`ZWASM_DEBUG=jit.dump` + Recipe 18; suspects
-  = unreduced div/mod for /3,%3,/4, table-lookup load8 addressing, byte mask/shift spills), then a single-pass-bounded
-  fix (§1.3/§3.2, NO optimising tier). matrix/keccak (3.7-3.9×) secondary. ROI-first — only fix a cheap single-pass win.
+  **D-450 Phase-I DONE** (profiled): base64's hot loop (func 52 encode kernel, 15 locals + 30 mask consts) emits
+  59-68% SPILL traffic — only 8 GPRs allocatable. **Bulk = class-B** (global-regalloc/LICM ceiling — single-pass
+  can't close w/o the forbidden optimizing tier; ACCEPTED, don't chase to 57ms). **Class-A residue** (single-pass-
+  legal, GENERAL spill-heavy win ~1.3-2×): a peephole — re-materialize spilled i32.const via `mov` (op_const.zig:66)
+  + elide store-then-reload-same-slot via a 1-deep reg cache (gpr.zig). Lesson `…base64-single-pass-register-pressure-
+  ceiling`. **NEXT = D-450 ADR-0153 II** (pin codegen correctness — spill machinery is D-265-class subtle, correctness-
+  FIRST) → III (value-equivalence invariant) → IV implement+measure. A focused codegen campaign (fresh context fits).
 - **① WASI 0.3 conformance**: compile wasi-testsuite `rust/wasm32-wasip3` via `.#gen` (add wasm32-wasip3 target + wit
   deps), run as a conformance corpus.
 - **③ real-world corpus 50→100**: add MoonBit/Grain/Kotlin (Wasm-GC) + AssemblyScript/Swift/Zig toolchains to
