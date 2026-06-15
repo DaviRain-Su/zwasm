@@ -3,7 +3,7 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Current state — Phase-17 完成形 steady-state; branch GREEN, 3-host-verified (`b66f0342`)
+## Current state — Phase-17 完成形 steady-state; branch GREEN, 3-host-verified (`b6efb00a`)
 
 **完成形 plateau reached (this session)** — surface-audit sweep (diag/CLI/C-API/Zig-API/docs) + debt-ledger
 sweep all CLEAN: (a) **diag F5a** — `popExpect` (`dc463af5`) + all 12 isRef gates (`4edf267d`); F1/F3/F5b
@@ -17,15 +17,21 @@ a struct/array reference") — green, but **reverted**: it pushed `validator.zig
 3400 cap (ADR-0099). Bumping/splitting the validator for LOW-value invalid-module diags isn't justified →
 popExpect+isRef is the stop point (D-334 row Round-updated). Do NOT re-attempt in-place.
 
-**NEXT — the quick/clean autonomous diag wins are EXHAUSTED**; remaining tracks are all SUBSTANTIAL (not
-chunks): F6 per-section is ADR-grade (decoders run in compile/instantiate not `.parse`, ~10 callers some
-swallow the error, body-relative offsets); validator diag tail is cap-blocked (needs a validator_gc.zig carve,
-only justified WITH a real signal); F4 is user-gated. **Highest-value autonomous track = assess the one
-unmeasured 完成形 pillar, "lightweight-yet-fast"**: run a perf BASELINE (existing `bench/` harness +
-`scripts/bench*`; measure-first per memory `feedback_perf_measure_first`, throwaway counters, commit/revert
-liberally) → either confirms perf健全 (closure) or surfaces a real deficiency (e.g. D-265 regalloc, an
-ADR-0153 rework candidate). TDD + gate on `zig build test`. **Do NOT re-attempt parked items** (D-330
-hard-park; D-331 go infra-blocked) — they thrash. Verify any prior remote kick at Step 0.7.
+**Verified this turn**: scaffolding-drift audit = CLEAN (only this header SHA lagged, now fixed); **perf
+pillar already addressed** — D-265 (deterministic-slot regalloc 2.3× miss) was reworked + CLOSED earlier via
+register-homed locals (ADR-0154/0155, closed per ADR-0156); perf is deliberately NOT target-gated (bench
+README / ROADMAP §12.1, Goodhart). So there is no known open perf deficiency and no perf-baseline lead.
+
+**NEXT — 完成形 plateau: no clean positive-ROI autonomous track remains.** Every surface (diag/CLI/C-API/
+Zig-API/docs/perf) is swept/addressed; debt healthy; scaffolding clean. The remaining tracks are deliberately
+NOT to be forced as make-work: **F6 per-section** parse diags = marginal (those errors already surface WITH a
+message since `098d2036`; this only adds byte-offset precision) + multi-cycle + phase/offset design questions;
+**validator_gc.zig carve** = forbidden as make-work (`file_size_smell`: don't split to satisfy the cap; ADR-0099
+deliberately kept it whole; no high-value addition is blocked); **F4** trap-format = user-gated. So the right
+posture is **steady-state monitoring**: the next cycle should pick up a NEW signal (cw dogfooding feedback, a
+real malformed-input/diag need, a perf regression in CI bench, or a user directive) rather than manufacture
+churn. Re-arm continues the loop so a future signal is caught. **Do NOT** force F6/validator-carve, and do NOT
+re-attempt parked items (D-330 hard-park; D-331 go infra-blocked). Verify any prior remote kick at Step 0.7.
 
 c_sha256 `\n`-drop (D-330) deep-investigated this session (5 trace rounds + 3 fix attempts) → **bundle
 d330-blockmerge-liveness CLOSED, demoted to a hard-parked debt note**. Root IS understood (a br/br_if
