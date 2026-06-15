@@ -1087,6 +1087,25 @@ entries:
       buffer (the `wpos` store) — find why `wpos` ends at +10 not +11. Reproduce the iovec read above to
       re-confirm, then `jit_value_trace.sh disasm`/`trace` the buffering func at its `wpos`-store,
       interp-vs-jit. STILL DEPRIORITIZED (niche cosmetic; values+interp correct; 55/56 byte-exact).
+      ---
+      **CORRECTION 2026-06-15 (`<this-commit>`, runtime lldb + linear-mem reads; trace
+      private/notes/c_sha256_trace_2026-06-15.md)**: the "wpos ends +10 not +11 / buffer-construction
+      miscompute" mechanism above is ~~DISPROVEN~~ by hard data — at the verify-line flush BOTH engines
+      read `wpos`=2290 `wbase`=2280 (FILE struct: wpos@byte1996, wbase@byte2004), buffered len 10 in
+      both. `wpos` is NOT miscomputed. The guest uses `puts()` = fputs(str)+putc('\n'); 3 line-buffered
+      writes. The REAL divergence is the UNBUFFERED-TAIL iovec into `__stdio_write` (func 11): interp
+      emits an EXTRA per-line immediate flush `__stdio_write(buf=&'\n', len=1)` for the verify line; JIT
+      does NOT (its only func-11 call is the correct exit `{0,0}` flush via func4 _start atexit). So the
+      verify line's `putc('\n')` did NOT trigger its OWN line-buffered immediate-flush under JIT, while
+      writes 1&2 (longer lines) DID → a **CONTROL-FLOW / `br_if` miscompile in the line-buffered putc
+      flush-trigger** (`char=='\n' → flush now`, or the `wpos==wend` full-buffer branch), mis-taken for
+      the LAST line only (data-dependent). This is the SHAPE of disproven-hyp#3 (a branch gating a flush)
+      but at the putc `\n`-flush site (func 8 `__overflow` 0x1007cc084 / func 10 `__fwritex` 0x1007cd268),
+      NOT func-4 block-merge. **RAISES PRIORITY**: a mis-taken br_if is a potential GENERAL codegen bug,
+      not just this cosmetic `\n`. **NEW NEXT PROBE**: single-step the verify-line putc flush-decision
+      compare+br_if jit-vs-interp (branch-condition register values, not wpos); find why data-dependent
+      (last line only — register clobber by prior longer-line iter? wrong compare operand? flag reuse?);
+      map mis-taken branch → IR br_if pc + emit site (op_control.zig br_if / op_int compare; arch-indep).
     first_raised: "2026-06-15"
     last_reviewed: "2026-06-15"
     refs: |-
