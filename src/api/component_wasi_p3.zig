@@ -108,6 +108,25 @@ pub fn driveAsyncMain(built: *wasi_p2.BuiltComponent) anyerror!void {
     };
     const initial: u32 = @bitCast(results[0].i32);
     try async_mod.driveCallbackLoop(&ctx, initial);
+    // Spec (CanonicalABI.md `task.return`; wasmtime task-return-traps.wast): an
+    // async-lifted export that declares a result MUST deliver it via task.return
+    // before exiting — otherwise it "failed to produce a result" → guest trap.
+    if (built.ctx.task_return == null and asyncExportExpectsResult(built, lift.type_index))
+        return error.Unreachable;
+}
+
+/// True if the async-lifted export (component func type at `type_index`) declares
+/// a result valtype — gating the task.return-was-called check above.
+fn asyncExportExpectsResult(built: *wasi_p2.BuiltComponent, type_index: u32) bool {
+    const info = &built.info;
+    if (type_index >= info.type_space.items.len) return false;
+    return switch (info.type_space.items[type_index]) {
+        .def => |d| switch (info.deftypes.items[d]) {
+            .func => |ft| ft.result != null,
+            else => false,
+        },
+        .named => false,
+    };
 }
 
 const testing = std.testing;
@@ -166,6 +185,25 @@ test "D-335 unit D-ζ2: canon task.return delivers the async task result to the 
     defer built.deinit();
     try driveAsyncMain(&built);
     try testing.expectEqual(@as(?u32, 42), built.ctx.task_return);
+}
+
+test "D-335 front②: an async export with a result that EXITs without task.return traps (task-return-traps.wast)" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/async_no_task_return_trap.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+
+    // The export's lifted type declares `result u32` but the core entry exits
+    // without task.return → the runner traps (failed to produce a result).
+    var built = try wasi_p2.buildWasiP2Component(&eng, testing.allocator, bytes, &host, .{});
+    defer built.deinit();
+    try testing.expectError(error.Unreachable, driveAsyncMain(&built));
 }
 
 test "D-335 unit D-ζ2: canon stream.new mints a stream end pair via the host builtin" {
