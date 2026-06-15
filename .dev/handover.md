@@ -3,7 +3,7 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Current state — WASI-0.3 campaign (D-335); P3 runner RUNS async end-to-end (EXIT+YIELD) (`87ffa08b`)
+## Current state — WASI-0.3 campaign (D-335); P3 runner runs async e2e + ADR-0189 ζ2 plan (`4b9704d8`)
 
 **WASI 0.3 / Preview 3 campaign is the active feature work** (Front D, ratified 2026-06-11; CM-async —
 `async` func / `stream<T>` / `future<T>` — NOT core stack-switching). Critical path A→B→C→D(crux)→E→F→G;
@@ -53,28 +53,35 @@ via `opts.is_async`, invokes the task entry, drives the loop. The decode/validat
 green; wasm-tools-assembled fixtures (`test/component/async_{exit_immediate,yield_then_exit}.wasm`). Zone-1
 model done earlier: `driveCallbackLoop` (`d8fabc91`), `WaitableSetTable` (`bcb0ca9f`); shape in ADR-0188.
 
-**NEXT — ζ2: canon-builtin dispatch** (wire the async DATA ops into guest execution; the runner is the host):
-- Replace `component_wasi_p2.zig` `.stream_future / .task_return → error.UnsupportedWasiImport` with real host
-  builtins calling `async.zig`'s stream/future ops + `task.return` delivery (template:
-  `p2GuestResourceNew`/`ResourceBuiltinCtx`). This lets a guest actually create/read/write a stream/future
-  and return a task result — then a WAIT-path e2e fixture (a stream that delivers a real event, exercising
-  `driveCallbackLoop`'s WAIT branch + `waitOn` through the runner) becomes possible.
-- After ζ2: units E (WASI-P3 host interfaces), F (async-export ABI/public API), G (p3 corpus). Per D-335.
+**NEXT — ζ2 Slice 1: `task.return`, per ADR-0189** (design settled; build it):
+- Move `streams`/`sets` tables from the P3-runner locals INTO `WasiP2Ctx` (init/deinit); `runWasiP3Main` uses
+  `built.ctx.streams`/`.sets`. Add `task_return: ?u32` to `WasiP2Ctx`.
+- `synthDef` (`component_wasi_p2.zig:1507`): replace `.task_return → UnsupportedWasiImport` with a new
+  `Def.task_return_builtin`; `defineSynth` binds `p2TaskReturn(caller, val: i32)` (template
+  `p2GuestResourceNew`+`ResourceBuiltinCtx` ~`:1536`) storing `val` in `ctx.task_return`. `runWasiP3Main`
+  surfaces it.
+- **Red→green**: fixture `test/component/async_task_return.wat` — a `(result u32)` async export whose core
+  entry calls `task.return(42)` then returns EXIT; assert the surfaced value == 42. WAT plumbing (verified vs
+  `wasi_p2_cli_env.wat`): `(core func $tr (canon task.return (result u32)))` → `(core instance $deps (export
+  "task-return" (func $tr)))` → `(with ...)`; core module `(import ... (func $tr (param i32)))`. Assemble via
+  `nix develop .#gen` wasm-tools.
+- **Then** ζ2 Slice 2 (`stream.new`/`future.new` + ctx-owned shared arena + `StreamFutureEnd.shared` link, per
+  ADR-0189), Slice 3+ (read/write/drop + WAIT-path e2e). After ζ2: units E/F/G per D-335.
 
 ## Active bundle
 
 - **Bundle-ID**: wasi03-D-335 (§9.0 Front D; WASI 0.3 / Preview 3; units A→G)
-- **Cycles-remaining**: ~2 (P3 runner runs async e2e; remaining = ζ2 canon-builtin dispatch, then E/F/G)
-- **Continuity-memo**: critical path **A→B→C→D(Zone-1 async + driveCallbackLoop + WaitableSetTable + ADR-0188 + P3-runner-e2e done; ζ2 next)→E→F→G**
+- **Cycles-remaining**: ~3 (P3 runner e2e + ADR-0189 ζ2 plan done; remaining = ζ2 Slices 1-3, then E/F/G)
+- **Continuity-memo**: critical path **A→B→C→D(...P3-runner-e2e + ADR-0189 done; ζ2 Slice1=task.return next)→E→F→G**
   (full plan in **D-335**; design in **ADR-0187** — stackless callback ABI, no fibers). CM-async, NOT core
   stack-switching. Spec: `~/Documents/OSS/{WASI, WebAssembly/component-model}` (design/mvp/{Binary,CanonicalABI,
   Concurrency}.md); ref impl `~/Documents/OSS/wasmtime` (43+; `concurrent/futures_and_streams.rs`).
 - **Exit-condition**: a WASI-0.3 async/stream/future component runs end-to-end through zwasm (new P3
   corpus green, 3-host); each unit lands green per D-335 along the way.
-- **Current unit — D (HIGH/crux; P3 runner runs async e2e, ζ2 START HERE)**: Zone-1 model + `driveCallbackLoop`
-  + `WaitableSetTable` + the P3 runner (`component_wasi_p3.zig`, EXIT+YIELD e2e) are all done + green. Remaining
-  = ζ2 (replace P2's `.stream_future/.task_return → UnsupportedWasiImport` with real async.zig-backed host
-  builtins + task.return delivery), enabling a WAIT-path e2e fixture. Then units E/F/G.
+- **Current unit — D (HIGH/crux; P3 runner e2e + ADR-0189, ζ2 Slice1 START HERE)**: Zone-1 model +
+  `driveCallbackLoop` + `WaitableSetTable` + the P3 runner (EXIT+YIELD e2e) done + green; ADR-0189 settles the
+  ζ2 wiring (state in WasiP2Ctx; task.return first; stream/future need a shared arena). Remaining = ζ2 Slice 1
+  (task.return) → Slice 2 (stream/future.new + shared arena) → Slice 3+ (read/write/drop + WAIT e2e). Then E/F/G.
 
 ## Long-tail (debt-tracked / parked — NOT active; see §9.0 fronts + debt.yaml)
 

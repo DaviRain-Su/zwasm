@@ -1387,9 +1387,12 @@ entries:
         trap error.AsyncDeadlock on empty) seams; runWasiP3Main reuses buildWasiP2Component, detects async lift
         via opts.is_async. decode/validate ACCEPTED async lift unchanged. E2E green (cfaff104 immediate-EXIT +
         87ffa08b YIELD→callback→EXIT; wasm-tools fixtures test/component/async_{exit_immediate,yield_then_exit}).
-        async runs end-to-end through zwasm. NEXT = ζ2: replace component_wasi_p2.zig `.stream_future/.task_return
-        → UnsupportedWasiImport` with real async.zig-backed host builtins + task.return delivery (template
-        p2GuestResourceNew/ResourceBuiltinCtx), enabling a WAIT-path e2e fixture. Then units E/F/G.
+        async runs end-to-end through zwasm. ADR-0189 (4b9704d8) settles ζ2 wiring: async state (streams/sets)
+        moves into WasiP2Ctx (trampolines reach via Caller.data); task.return wired FIRST (no SharedStream dep);
+        stream/future need a ctx-owned shared arena + StreamFutureEnd.shared link (the ends↔shared fork). NEXT =
+        ζ2 Slice 1 (task.return): WasiP2Ctx.task_return + Def.task_return_builtin + p2TaskReturn trampoline +
+        fixture async_task_return.wat (core entry calls task.return(42) → EXIT; assert 42). Then Slice 2
+        (stream/future.new + shared arena), Slice 3+ (read/write/drop + WAIT-path e2e). Then units E/F/G.
       - E — WASI-P3 host interfaces (new component_wasi_p3.zig; sockets/http/clocks
         async; ~2000; MED; coexists with P2, does NOT replace it). Needs D.
       - F — async-export ABI + P3 component runner (canon.zig; ~400; MED). Needs E.
