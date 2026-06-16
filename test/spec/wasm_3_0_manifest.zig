@@ -147,6 +147,14 @@ pub fn parsePayload(tv: TypedValue) PayloadError!runtime.Value {
         const u = std.fmt.parseInt(u64, tv.payload, 10) catch |err| return mapParseErr(err);
         return runtime.Value{ .f64 = @bitCast(u) };
     }
+    // `ref.null <ht>` distills to `<reftype>:null` (externref/funcref/
+    // anyref/structref/...). All null refs share the null_ref sentinel (0).
+    // Without this, a null-ref ARG (e.g. table.grow's init in
+    // function-references/table_grow) failed parseInt → the call was skipped
+    // → false value mismatches downstream (ADR-0192; companion to D-456).
+    if (std.mem.eql(u8, tv.payload, "null")) {
+        return runtime.Value{ .ref = runtime.Value.null_ref };
+    }
     if (std.mem.eql(u8, tv.ty, "externref")) {
         // Host externref `ref.extern N`: bind a non-null opaque sentinel
         // distinct per N. Placed far above the GC heap range + low-bit-0
@@ -453,8 +461,16 @@ pub fn runtimeToZwasm(rv: runtime.Value, ty: []const u8) zwasm_root.Value {
     if (std.mem.eql(u8, ty, "i64")) return .{ .i64 = rv.i64 };
     if (std.mem.eql(u8, ty, "f32")) return .{ .f32 = @bitCast(rv.f32) };
     if (std.mem.eql(u8, ty, "f64")) return .{ .f64 = @bitCast(rv.f64) };
-    if (std.mem.eql(u8, ty, "externref")) return .{ .externref = rv.ref };
-    unreachable; // caller already validated via parsePayload
+    // funcref: null → null, else the ref bits.
+    if (std.mem.eql(u8, ty, "funcref")) return .{ .funcref = if (rv.ref == runtime.Value.null_ref) null else rv.ref };
+    // externref + every other ref type (GC abstract/concrete heads — anyref/
+    // structref/i31ref/(ref null $t)) collapse to the externref slot: the
+    // C-API Value has no GC-ref variant. null → null; a non-null host
+    // externref carries its sentinel. Result-side comparison skips
+    // uncomparable refs (D-456), so a collapsed GC ref never asserts a bug —
+    // this keeps the converter TOTAL so a null GC-ref ARG marshals instead of
+    // hitting unreachable.
+    return .{ .externref = if (rv.ref == runtime.Value.null_ref) null else rv.ref };
 }
 
 /// Parse one manifest line into a `Directive`. The caller owns
@@ -774,6 +790,13 @@ test "parsePayload: f32 round-trip via @bitCast (corpus-style payload)" {
     const s = try std.fmt.bufPrint(&buf, "{d}", .{bits});
     const v = try parsePayload(.{ .ty = "f32", .payload = s });
     try testing.expectEqual(@as(f32, 3.14), v.f32);
+}
+
+test "parsePayload: ref.null <ht> (any reftype):null → null_ref sentinel" {
+    for ([_][]const u8{ "externref", "funcref", "anyref", "structref" }) |ty| {
+        const v = try parsePayload(.{ .ty = ty, .payload = "null" });
+        try testing.expectEqual(runtime.Value.null_ref, v.ref);
+    }
 }
 
 test "parsePayload: unknown type returns PayloadError.UnknownType" {

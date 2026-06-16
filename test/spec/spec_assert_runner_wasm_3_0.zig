@@ -1092,28 +1092,55 @@ pub fn main(init: std.process.Init) !void {
                         }
                         const expected_tv = d.results[0];
                         const expected_rv = manifest_parser.parsePayload(expected_tv) catch continue;
-                        const expected_zv = manifest_parser.runtimeToZwasm(expected_rv, expected_tv.ty);
                         const got = manifest_parser.invokeInstance(instance, d.func_name, call_args[0..d.args_len]) catch |e| {
                             summary.asserts_return_fail += 1;
                             if (fail_detail) try stdout.print("  FAILtrap [{s}/{s}] {s} err={s}\n", .{ proposal, entry.name, d.func_name, @errorName(e) });
                             continue;
                         };
-                        // Compare by the result type's discriminator.
-                        const match = if (std.mem.eql(u8, expected_tv.ty, "i32")) got.i32 == expected_zv.i32 else if (std.mem.eql(u8, expected_tv.ty, "i64")) got.i64 == expected_zv.i64 else if (std.mem.eql(u8, expected_tv.ty, "f32")) got.f32 == expected_zv.f32 else if (std.mem.eql(u8, expected_tv.ty, "f64")) got.f64 == expected_zv.f64 else false;
+                        const ty = expected_tv.ty;
+                        const is_numeric = std.mem.eql(u8, ty, "i32") or std.mem.eql(u8, ty, "i64") or std.mem.eql(u8, ty, "f32") or std.mem.eql(u8, ty, "f64");
+                        if (!is_numeric) {
+                            // Ref-typed result (D-456). Switch on `got`'s ACTIVE tag
+                            // (never cross-access a union field). Exactly comparable:
+                            // an externref result (null or the `ref.extern N` host
+                            // sentinel) and a NULL funcref. Non-null funcref identity +
+                            // GC refs (anyref/structref/i31ref — collapsed to externref
+                            // by runtimeToZwasm, no native variant) + v128 are not yet
+                            // modelled → skip (not fail), so an uncomparable result
+                            // never masquerades as a value bug.
+                            const is_null = std.mem.eql(u8, expected_tv.payload, "null");
+                            const verdict: ?bool = switch (got) {
+                                .externref => |g| if (std.mem.eql(u8, ty, "externref"))
+                                    (g == (if (is_null) null else expected_rv.ref))
+                                else
+                                    null,
+                                .funcref => |g| if (is_null) (g == null) else null,
+                                else => null,
+                            };
+                            if (verdict) |ok| {
+                                if (ok) {
+                                    summary.asserts_return_pass += 1;
+                                } else {
+                                    summary.asserts_return_fail += 1;
+                                    if (fail_detail) try stdout.print("  FAILref [{s}/{s}] {s} ty={s} exp_null={}\n", .{ proposal, entry.name, d.func_name, ty, is_null });
+                                }
+                            } else {
+                                summary.skips += 1;
+                            }
+                            continue;
+                        }
+                        const expected_zv = manifest_parser.runtimeToZwasm(expected_rv, ty);
+                        // Compare by the result type's discriminator (is_numeric ⇒ one of i32/i64/f32/f64).
+                        const match = if (std.mem.eql(u8, ty, "i32")) got.i32 == expected_zv.i32 else if (std.mem.eql(u8, ty, "i64")) got.i64 == expected_zv.i64 else if (std.mem.eql(u8, ty, "f32")) got.f32 == expected_zv.f32 else got.f64 == expected_zv.f64;
                         if (match) summary.asserts_return_pass += 1 else {
                             summary.asserts_return_fail += 1;
-                            // Type-safe fail print: only read the union field the
-                            // result type actually populated. ref/v128/fp types
-                            // (which `match` treats as not-yet-comparable, D-222)
-                            // print type-only — reading `.i32` on an externref slot
-                            // would panic "access of union field".
                             if (fail_detail) {
-                                if (std.mem.eql(u8, expected_tv.ty, "i32")) {
+                                if (std.mem.eql(u8, ty, "i32")) {
                                     try stdout.print("  FAILval [{s}/{s}] {s} exp={d} got={d} ty=i32\n", .{ proposal, entry.name, d.func_name, expected_zv.i32, got.i32 });
-                                } else if (std.mem.eql(u8, expected_tv.ty, "i64")) {
+                                } else if (std.mem.eql(u8, ty, "i64")) {
                                     try stdout.print("  FAILval [{s}/{s}] {s} exp={d} got={d} ty=i64\n", .{ proposal, entry.name, d.func_name, expected_zv.i64, got.i64 });
                                 } else {
-                                    try stdout.print("  FAILval [{s}/{s}] {s} ty={s} (ref/fp/v128 result — not value-compared, D-222)\n", .{ proposal, entry.name, d.func_name, expected_tv.ty });
+                                    try stdout.print("  FAILval [{s}/{s}] {s} ty={s} (fp result)\n", .{ proposal, entry.name, d.func_name, ty });
                                 }
                             }
                         }
