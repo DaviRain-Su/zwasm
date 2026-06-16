@@ -73,6 +73,11 @@ pub const Blocker = enum {
     /// v128 field/element). arm64 landed first (`f79a3ced`/`41015a9b`); the
     /// x86_64 SSE movdqu mirror is the remaining D-460 bundle work.
     @"D-460",
+    /// x86_64 SIMD-under-heavy-v128-spill: a separate regalloc spill-offset
+    /// class-boundary OOB (regalloc.zig:222 uses max_reg_slots_gpr to index the
+    /// fp spill_offsets) crashes the x86_64 codegen before the lane-op spill
+    /// path is reached. arm64 lane-op spill-awareness landed first.
+    @"D-461",
     // (D-186 / D-179 / D-194 / D-212 variants removed 2026-06-14 — their
     // debt rows were discharged; check_skip_helpers enforces enum↔debt pairing.)
 };

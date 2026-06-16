@@ -85,11 +85,13 @@ pub fn emitI32x4ExtractLane(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const result_vreg = ctx.next_vreg.*;
     ctx.next_vreg.* += 1;
     if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
-    // SPILL-EXEMPT: i32 result (GPR); spill-aware path is its own follow-on alongside other GPR sites.
-    const result_w = try gpr.resolveGpr(ctx.alloc, result_vreg);
-
+    // D-461: spill-aware i32 result (was resolveGpr-reject). The v128 source
+    // uses qLoadSpilled stage 0 (V-file); the GPR result uses gprDef/Store stage
+    // 0 (X-file) — disjoint reg files, so stage 0 is safe for both.
+    const result_w = try gpr.gprDefSpilled(ctx.alloc, result_vreg, 0);
     const lane: u2 = @intCast(ins.payload & 3);
     try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon_lane_cmp.encUmovWFromS(result_w, src_v, lane));
+    try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 0);
     try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
 }
 
