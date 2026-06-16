@@ -27,7 +27,11 @@ test+comp-spec+lint green). D-305 now does string/list PARAMS + string RESULT ac
 Milestone (string+list params) 3-HOST-VERIFIED (win @8895176d OK, recorded). **NEXT (autonomous)**: `184b5e05`
 x86_64-verify pending (ubuntu kicked) + windows next batch. Remaining D-305: `(params..)->string`, list/record
 results, record params, >2-param arities, + the trampoline error-trap follow-up (error paths silently fall back —
-should trap per Canonical ABI; D-305 debt). Each consumer-gated future-bucket — drive next or maintenance.
+should trap per Canonical ABI; D-305 debt). **Posture = plateau maintenance**: the common aggregate shapes (string/
+list params + string result) are DONE + verified — the remaining permutations are a diminishing-returns
+consumer-gated long-tail, each a small precisely-scoped delegation when a real consumer demands that shape (NOT
+grinding them all speculatively; poor token-ROI vs measure-first). Periodic fuzz / debt sweeps / surface micro-audits;
+windows verifies @184b5e05 next batch.
 ADR-0193 (D-462) + D-461 (ADR-0194) CLOSED (below). **windowsmini RESUMED**. Version `2.0.0-alpha.3`.
 
 ## D-305 component-composition — first milestone CLOSED 2026-06-17 (@4cceeb1e, ADR-0196)
