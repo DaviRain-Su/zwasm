@@ -51,19 +51,18 @@ focused bundle if a real program needs it.
 
 - **Bundle-ID**: D-335-typed-marshalling
 - **Cycles-remaining**: ~2-3
-- **Continuity-memo**: (Step-0 survey DONE this cycle) stream<T>/future<T> copy currently assumes **u8 / count==bytes**.
-  The byte-copy sites are `component_wasi_p2.zig:1795` (host sink write), `:1814` (host source read), `:1809`
-  (pending-read park), `:231` (deliverParkedReads) — all `mem.sliceAt(ptr, count)` = count BYTES. The Zone-1
-  rendezvous (`async.zig:517 SharedStream.read/write`) is element-agnostic (count only; host moves bytes) → NO change
-  there. **elem_type IS threaded** (`StreamFutureEnd.elem_type`, `SharedStream.elem_type` — async.zig:147/483/552)
-  from mint (`p2StreamNew` :1677 passes `abc.type_index`) but NEVER read at copy. `canon.sizeOf(CanonType)→{1,2,4,8}`
-  exists (canon.zig:186). **PLAN**: resolve `elem_size = canon.sizeOf(T)` where `stream<T>` is canon-decoded (find
-  the StreamFutureOp.type_index decode site — the type table is available there) → store `elem_size: u32` (default 1)
-  on StreamFutureOp → thread through AsyncBuiltinCtx → StreamFutureEnd/SharedStream → the 4 copy sites multiply
-  `count * elem_size`. **RISK**: confirm the type table is reachable at the decode site (if only the index survives to
-  the copy, store the resolved size at mint instead). **TEST**: author `test/component/async_*stream_u32*.wat` (mirror
-  the u8 stdout-via-stream fixture; write N u32s → host sees N*4 bytes); `wasm-tools parse` + a bespoke
-  `component_wasi_p3.zig` test (the existing async-fixture test pattern).
+- **Continuity-memo**: Step-0+investigation DONE (2 cycles) → MECHANICAL edit list ready. stream<T>/future<T> copy
+  assumes u8/count==bytes; `type_index` = the ELEMENT type index (types.zig:286). RESOLVER EXISTS:
+  `canon.canonTypeFromTypeIndex(arena, info, ti) → CanonType` (canon.zig:1273) + `canon.sizeOf → {1,2,4,8}` (:187).
+  `info` is ONLY in scope in `synthDef` (component_wasi_p2.zig:1579), NOT in `defineSynth` (:1877) → resolve in
+  synthDef. **EDIT LIST**: (1) in `synthDef`, for stream_future: `elem_size = canon.sizeOf(canonTypeFromTypeIndex(
+  tmpArena, info, type_index)) catch 1` (default 1; free tmpArena after) → store on the Def `async_builtin` variant
+  (add `elem_size: u32 = 1`; find the Def union). (2) `defineSynth` :1900 set `abc.elem_size = ab.elem_size` (add
+  `elem_size: u32` to AsyncBuiltinCtx). (3) `async.zig`: add `elem_size: u32 = 1` to StreamFutureEnd (:140) + thread
+  through `newPair`/`newStreamPair`/`newFuturePair` (:663/674/679; +1 param), and `p2StreamNew`/`p2FutureNew`
+  (:1675/1682) pass `abc.elem_size`. (4) the 4 copy sites (:1795/:1814/:1809/:231): `mem.sliceAt(ptr, count * end.elem_size)`
+  for the byte slice; **return `n / end.elem_size`** (n is BYTES moved, return ELEMENTS). (5) `stream<u32>` fixture:
+  `.wat` → `wasm-tools parse` → bespoke test mirroring the u8 stdout-via-stream async fixture, assert host sees N*4 bytes.
 - **Exit-condition**: a `stream<u32>` (or `future<u32>`) e2e test passes with N*4-byte host transfer; u8 streams
   unchanged (existing 158/0/0 component + async corpora green).
 
