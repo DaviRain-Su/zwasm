@@ -1355,8 +1355,13 @@ entries:
       have HETEROGENEOUS expected outcomes (EXIT / YIELD / trap / task.return value / host side-effect like stdout
       capture) a uniform-assert corpus runner can't express — the per-fixture Zig tests ARE the correct finished
       form (lesson `feature-separation-finished-form-preference`: not every structure fits; don't force one).
-      **REMAINING (keeps this `now`, all HARDER + ADR-needed — no tractable quick win left)**: typed/multi-byte
-      element marshalling (E1/E3/E2c did only u8, count==bytes), general guest↔guest stream COMPLETION (Zone-1
+      **typed/multi-byte element marshalling DONE** 2026-06-16: stream<T>/future<T> copy resolves the element's
+      lowered byte size (`streamElemByteSize`: resolveTypeIndex→.stream/.future payload→canonTypeFromDecoded→sizeOf,
+      default 1; threaded synthDef→Def→AsyncBuiltinCtx→copy) and moves `count*elem_size` bytes. stream<u32> fixture
+      transfers 8 bytes (was 2); u8 corpus regression-free. NOTE: the read-direction copy (read-immediate + parked)
+      shares the identical `*elem_size`/`/elem_size` pattern but only the WRITE path has a typed e2e test (read
+      covered for u8 only) — add a stdin stream<u32> fixture when convenient.
+      **REMAINING (keeps this `now`, HARDER + ADR-needed)**: general guest↔guest stream COMPLETION (Zone-1
       rendezvous doesn't buffer bytes — separate design), broader P3 host interfaces (sockets/http async = Unit E
       full). Detailed unit-by-unit history below.
       GATES the ADR-0193 default flip: `-Dwasi` default stays `.p2` (async opt-in via `-Dwasi=p3`) until this

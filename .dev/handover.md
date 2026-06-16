@@ -19,10 +19,12 @@ CLI surface audit (@4e5e42fe): code↔`--help` fully consistent. Gate change @b1
 (windows `[run_remote_windows] OK.` wasm-3.0-assert pass=10234 fail=0 / simd 24805/0 / spec 25539/0; ubuntu OK
 @f1a1d503). win-specassert campaign fully closed; the fail-gate is clean.
 
-**NEXT (autonomous)**: **ADR-0193 feature-separation migration CLOSED** (P1-P4, D-462) — one ordered `-Dwasi`
-axis (default p2), `-Dcomponent` removed, p3/async comptime-fenced (`test-wasi-p3` + DCE), docs synced (WASI D+→B,
-component D→B; default `p2→p3` flip tracked under D-335). Now driving the **D-461 rework campaign** (see below).
-Then `D-209` memory64. **windowsmini gating RESUMED**. Version → `2.0.0-alpha.3`.
+**NEXT (autonomous)**: **D-335 typed multi-byte stream/future element marshalling DONE** (@HEAD, default test +
+`test-wasi-p3` green: stream<u32> transfers N*4 bytes via `streamElemByteSize` resolving the element's lowered size;
+u8 corpus regression-free). The default `p2→p3` flip is now gated only on D-335's BIGGER remainders (guest↔guest
+stream byte-buffering = Zone-1 rendezvous redesign; sockets/http async = Unit E full). ADR-0193 feature-separation
+(P1-P4, D-462) + D-461 regalloc-origin rework (ADR-0194) both CLOSED (see below). Fronts after: D-335 remainder OR
+`D-209` memory64. **windowsmini gating RESUMED**. Version → `2.0.0-alpha.3`.
 
 ## D-461 regalloc-origin rework (ADR-0153/ADR-0194) — CLOSED Phase I-V 2026-06-16
 
@@ -47,27 +49,6 @@ per-op scratch-XMM audit (LANDMINE). EXOTIC (high-v128-pressure only). Full per-
 recipe (`.wat` → `wasm-tools parse`, build the or-chain programmatically) are in the D-461 debt row. Re-open as a
 focused bundle if a real program needs it.
 
-## Active bundle — D-335 typed stream/future element marshalling (Unit E first slice)
-
-- **Bundle-ID**: D-335-typed-marshalling
-- **Cycles-remaining**: ~2-3
-- **Continuity-memo**: Step-0+investigation DONE (2 cycles) → MECHANICAL edit list ready. stream<T>/future<T> copy
-  assumes u8/count==bytes; `type_index` = the ELEMENT type index (types.zig:286). RESOLVER EXISTS:
-  `canon.canonTypeFromTypeIndex(arena, info, ti) → CanonType` (canon.zig:1273) + `canon.sizeOf → {1,2,4,8}` (:187).
-  `info` is ONLY in scope in `synthDef` (component_wasi_p2.zig:1579), NOT in `defineSynth` (:1877) → resolve in
-  synthDef. **EDIT LIST**: (1) in `synthDef`, for stream_future: `elem_size = canon.sizeOf(canonTypeFromTypeIndex(
-  tmpArena, info, type_index)) catch 1` (default 1; free tmpArena after) → store on the Def `async_builtin` variant
-  (add `elem_size: u32 = 1`; find the Def union). (2) `defineSynth` :1900 set `abc.elem_size = ab.elem_size` (add
-  `elem_size: u32` to AsyncBuiltinCtx). (3) `async.zig`: add `elem_size: u32 = 1` to StreamFutureEnd (:140) + thread
-  through `newPair`/`newStreamPair`/`newFuturePair` (:663/674/679; +1 param), and `p2StreamNew`/`p2FutureNew`
-  (:1675/1682) pass `abc.elem_size`. (4) the 4 copy sites (:1795/:1814/:1809/:231): `mem.sliceAt(ptr, count * end.elem_size)`
-  for the byte slice; **return `n / end.elem_size`** (n is BYTES moved, return ELEMENTS). (5) `stream<u32>` fixture:
-  `.wat` → `wasm-tools parse` → bespoke test mirroring the u8 stdout-via-stream async fixture, assert host sees N*4 bytes.
-- **Exit-condition**: a `stream<u32>` (or `future<u32>`) e2e test passes with N*4-byte host transfer; u8 streams
-  unchanged (existing 158/0/0 component + async corpora green).
-
-Other D-335 remainders (guest↔guest stream byte-buffering, sockets/http async = big Unit E) + `D-209` memory64 are
-the fronts after this bundle. D-461 result-write = tracked debt (above).
 
 ## Closed/paused (detail in git + debt.yaml)
 
