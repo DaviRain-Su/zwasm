@@ -50,15 +50,15 @@ wasi-testsuite, wasm-tools). **②①④ DONE; ③ ACTIVE (GC-corpus).**
 - **Bundle-ID**: p17-③-gc-corpus (real Wasm-GC source-lang fixtures to stress the GC backend)
 - **Cycles-remaining**: several (new-toolchain integration like wasip3 was)
 - **Hoot bring-up — validator bug chain (each blocker = a real spec fix; wasm-tools validates the whole module)**:
-  func #84 op 0x10 canonical-equality **FIXED** (`9ec68a75`): per-function `subtypeCtx` now threads the full
-  `*const sections.Types` + uses `gcConcreteReachesCanonical` (iso-recursive cross-rec-group identity) on
-  concrete→concrete, matching the module path; wired both entry points (compile/run + interp frontendValidate);
-  edge fixture `gc/canonical_eq_call_arg`; validator.zig cap 3400→3450. **NEXT BLOCKER (func #354 op 0x20 =
-  `local.get`): `UninitializedLocal`** — a non-defaultable `(ref $t)` local read before definite-assignment on
-  this path. wasm-tools validates the module → likely a real bug in zwasm's local-init / definite-assignment
-  analysis (control-flow merge?), NOT Hoot. Fresh subsystem (`track_local_init` / `locals_init`). Investigate next:
-  reduce a minimal repro (probably a `(ref $t)` local set inside one control arm, read after the merge) like the
-  canonical repro, confirm wasm-tools accepts, then fix the merge logic. Spike: `/tmp/hoot-spike/prog.wasm`.
+  func #84 op 0x10 canonical-equality **FIXED** (`9ec68a75`). func #354 `UninitializedLocal` **ROOT-CAUSED → D-453**
+  (NOT definite-assignment): ref.test/ref.cast/br_on_cast decode the heap-type immediate as a single BYTE, but it's
+  an SLEB128 — a concrete type index ≥ 64 takes 2+ bytes, so the continuation byte mis-reads as `unreachable`,
+  poisoning reachability → a skipped local.set → false UninitializedLocal downstream. Multi-file (validator + lower +
+  ref_test_ops + mvp) + an IR-encoding crux (br_on_cast packs flags|ht1|ht2 in one u32 `extra`, no room for a u32
+  idx). **NEXT = execute D-453 (correctness-first ADR-0153 II)**: characterization-pin the current abstract-head +
+  idx<64 path FIRST, then thread the full heaptype (validator → readTypedRef; lower → SLEB; ref_test_ops/mvp → u32 ht;
+  design the br_on_cast IR encoding). Repro: `private/notes/d453_refcast_idx64_repro.wat` (wasm-tools accepts, zwasm
+  false-rejects; boundary exactly idx 64).
 - **Continuity-memo**: ②①④ DONE. ③ active — Hoot chosen (lean import surface; dart2wasm needs heavy JS glue,
   deprioritized). Probe already found+fixed 2 validator bugs (`9064faa5`/`480809af`). **NEXT = re-run the Hoot module
   under zwasm** now return_call validates; expect next blocker = D-452 (br_table) OR an unsatisfied `io`/`rt` import
