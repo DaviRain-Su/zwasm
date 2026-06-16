@@ -35,31 +35,28 @@ ADR-0193 (P1-P4, D-462) + D-461 (ADR-0194) CLOSED (below). **windowsmini gating 
 - **Continuity-memo**: ADR-0195 is the design. Correctness-FIRST. Phase II(a) ASSESSED: the single-task net in
   `component_wasi_p3.zig` is already STRONG (EXIT@121 / YIELD@138 / task.return@157 / BLOCKED@240 / DROPPED@259 /
   host-peer COMPLETION write@410 read@487 / WAIT-path@550 / cancel / all trap cases). The ONE gap = no test DRIVES a
-  single task to `AsyncDeadlock` (raised at `component_wasi_p3.zig:54` `waitOn` empty-set) — the exact behavior the
-  scheduler generalizes (all-tasks-blocked→trap). Step (a) NEXT = author `async_deadlock_single.wat` (mint stream,
-  read→BLOCKED, join readable to a set, return WAIT(set), NO host delivery) mirroring `async_wait_path.wat` MINUS the
-  host source; test asserts `driveAsyncMain` returns `error.AsyncDeadlock`. THEN (b) `TaskDescriptor`+`TaskTable`
-  (Zone-1, `async.zig:~397` near Subtask) + refactor the driver
-  to a 1-entry table (single-task byte-identical, corpus green); (c) async-lowered-import→enqueue-task + scheduler
-  dispatch loop in the Zone-3 P3 runner (`component_wasi_p3.zig` `driveAsyncMain`/`P3CallbackCtx`); (d) e2e
-  `async_two_tasks_stream_rendezvous.wat` (main mints `stream<u8>`, spawns subtask, writes; subtask reads → both
-  COMPLETE) = exit-condition; (e) adversarial (both-read→deadlock, drop-mid-rendezvous→DROPPED, cancel-before-start).
-  Key files: `src/feature/component/async.zig` (Zone-1 driver+tables), `src/api/component_wasi_p3.zig` (Zone-3 runner).
+  single task to `AsyncDeadlock`. **(a) DONE @80ec1f63** (`async_deadlock_single.wat` + test asserts
+  `error.AsyncDeadlock`). **NEXT = the IMPL (b+c+d together — a big coherent chunk best on FRESH context; the 1-entry
+  refactor alone is unobservable infra per spike §2, so land it WITH the multi-task path + the two-task e2e).**
+  CRUX TO SOLVE FIRST (before code): how to express TWO guest tasks in one in-process test component. Options: (i)
+  a self-referential component where the main async export calls an async-lowered IMPORT that the host wires back to
+  a SECOND async export of the same instance (→ Subtask); (ii) two async exports both seeded into the TaskTable by
+  the runner sharing a stream handle. `driveCallbackLoop` (`async.zig:124`) is implicitly single-task — `ctx.invokeCallback`
+  re-enters THE one callback; multi-task needs the seam to take a task-id (which task's callback). Plan: `TaskDescriptor`
+  {task_id, callback ref, set_index, state:{ready,waiting,done}} + `TaskTable` (Zone-1, `async.zig` near `Subtask`@397);
+  generalise the runner's drive loop (Zone-3 `component_wasi_p3.zig` `driveAsyncMain`/`P3CallbackCtx`@26-103) to
+  iterate the table (drive ready, poll waiting, deliver cross-task events via the existing `StreamFutureEnd.copy`
+  peer-notify@209, trap AsyncDeadlock when all waiting+no event); wire async-lowered-import→mint Subtask+enqueue task.
+  (d) two-task `stream<u8>` rendezvous fixture = exit-condition. THEN (e) adversarial (both-read→deadlock,
+  drop-mid-rendezvous→DROPPED, cancel-before-start). Key files: `async.zig` (Zone-1), `component_wasi_p3.zig` (Zone-3).
 - **Exit-condition**: a guest↔guest `stream<u8>` rendezvous e2e (two guest tasks COMPLETE a copy, count>0) passes,
   AND all existing single-task async fixtures stay green.
 
 ## D-461 regalloc-origin rework (ADR-0153/ADR-0194) — CLOSED Phase I-V 2026-06-16
 
-- **CLOSED**: the x86_64 regalloc v128-spill OOB (`regalloc.zig:222`) is FIXED. Root was THREE inconsistent
-  spill-frame origins (mint `max(gpr,fp)` / `spill_offsets` sizing hardcoded-8 / `slot()` resolve patched-pool).
-  **Fix (ADR-0194)**: thread the per-arch `max_reg_slots_gpr` into `computeWith`→`computeSpillOffsets` so the array
-  is sized+indexed from the same origin `slot()` resolves with, set at BUILD time (dropped compile.zig's GPR
-  post-patch). Phases: I (`ccf49f4c` instrumented dump), II (`c4c1d567` characterization + the zero-coverage
-  spill_offsets resolve path), III (`6500a611` ADR-0194 design), IV (`3cd2ede6` impl). **Verified**: arm64
-  byte-identical 2922 green; x86_64-Rosetta rc=0, OOB gone; lesson `x86_64-regalloc-fp-spill-origin-mismatch`.
-- **Phase V retrospective**: hit the 完成形 (one coherent origin, no arch-tuned-default trap); rejected the
-  class-aware-mint over-reach + the array-elimination (scalars still pack 8-byte). New debt = none beyond the
-  pre-existing D-461 continuation below.
+CLOSED: x86_64 regalloc v128-spill OOB (`regalloc.zig:222`) fixed — three inconsistent spill-frame origins unified
+by threading per-arch `max_reg_slots_gpr` into `computeSpillOffsets` (ADR-0194; impl `3cd2ede6`). Verified arm64
+2922 green + x86_64-Rosetta rc=0. Full detail: ADR-0194 + lesson `x86_64-regalloc-fp-spill-origin-mismatch`.
 
 ## D-461 SIMD v128-spill — high-value DONE (3-host green); result-write remainder = tracked debt (exotic)
 
