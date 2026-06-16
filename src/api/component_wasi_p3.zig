@@ -53,6 +53,26 @@ const P3CallbackCtx = struct {
         try self.wp2.deliverParkedReads(set);
         return (try set.poll(&self.wp2.streams)) orelse error.AsyncDeadlock;
     }
+
+    /// Multi-task seam (ADR-0195 step c): re-enter a specific task's callback.
+    /// The single-component runner has exactly ONE callback (`callback_name`), so
+    /// `funcidx` is ignored here; the cross-component graph runner (c-2b)
+    /// dispatches by funcidx across instances.
+    pub fn invokeTaskCallback(self: *P3CallbackCtx, funcidx: u32, event_code: u32, p1: u32, p2: u32) !u32 {
+        _ = funcidx;
+        return self.invokeCallback(event_code, p1, p2);
+    }
+
+    /// Non-blocking WAIT seam for `driveScheduler` (ADR-0195 step c): deliver any
+    /// parked host-source reads (the synchronous "make progress" hook, ADR-0191
+    /// E2c) then poll. Returns null when no event is deliverable — the scheduler
+    /// decides deadlock across ALL tasks (vs single-task `waitOn`, which traps
+    /// directly because its one task IS the whole program).
+    pub fn pollSet(self: *P3CallbackCtx, set_index: u32) !?async_mod.EventTuple {
+        const set = try self.wp2.sets.get(set_index);
+        try self.wp2.deliverParkedReads(set);
+        return try set.poll(&self.wp2.streams);
+    }
 };
 
 /// Run the first async-lifted export of `bytes` to completion through the
@@ -94,7 +114,16 @@ pub fn driveAsyncMain(built: *wasi_p2.BuiltComponent) anyerror!void {
         return err;
     };
     const initial: u32 = @bitCast(results[0].i32);
-    try async_mod.driveCallbackLoop(&ctx, initial);
+    // Drive via the round-robin scheduler over a 1-entry TaskTable (ADR-0195
+    // step c): single-task = the byte-identical 1-entry case (pollSet-returns-null
+    // ≡ the old waitOn-traps-AsyncDeadlock for one task). The cross-component
+    // graph runner (c-2b) seeds N tasks into the same table.
+    var tasks = try async_mod.TaskTable.init(built.ctx.alloc);
+    defer tasks.deinit();
+    var seed = try async_mod.seedTask(initial);
+    seed.callback_funcidx = callback_idx;
+    _ = try tasks.add(seed);
+    try async_mod.driveScheduler(&ctx, &tasks);
     // Spec (CanonicalABI.md `task.return`; wasmtime task-return-traps.wast): an
     // async-lifted export that declares a result MUST deliver it via task.return
     // before exiting — otherwise it "failed to produce a result" → guest trap.
