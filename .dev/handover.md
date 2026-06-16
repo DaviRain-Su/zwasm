@@ -19,9 +19,20 @@ CLI surface audit (@4e5e42fe): code↔`--help` fully consistent. Gate change @b1
 (windows `[run_remote_windows] OK.` wasm-3.0-assert pass=10234 fail=0 / simd 24805/0 / spec 25539/0; ubuntu OK
 @f1a1d503). win-specassert campaign fully closed; the fail-gate is clean.
 
-**NEXT (autonomous)**: **doc-inventory phase** (USER-requested, below) — the wasmtime campaign's substantive
-bug-fixing is DONE (9 real bugs) and its 3 residuals are exotic + debt-tracked (D-460 partial / D-461 / D-209), so
-the loop pivots to the user-requested doc freshening. Secondary: ADR-0174 Phase-2 windows-suspension; debt sweep.
+**NEXT (autonomous)**: two USER-flagged tracks open — (1) **doc-inventory** (below) and (2) **`D-462` feature-
+separation finished-form audit** (below): a careful INVESTIGATION → true-finished-form design + realistic
+Phase-split migration (ADR-grade; do NOT rush code). Version fixed this turn: 0.0.0-pre → `2.0.0-alpha.3`
+(`46e900ce`, matches the planned next tag-cut). Secondary: ADR-0174 Phase-2 windows-suspension; debt sweep.
+
+## USER-flagged D-462 — feature-separation finished-form (audit FILED 2026-06-16; needs investigation+design)
+
+- **What**: WASI (and Wasm-level + component) build/runtime version separation has eroded. North-star = the user's
+  finished-form preference **directory > file > function-cluster > comptime/runtime branch** (lesson
+  `feature-separation-finished-form-preference`). Wasm-level ops are near-finished (dir + file-metadata); WASI-P2/P3
+  component host eroded to an `enable_component` bool + scattered `if`s + runtime import-name resolution; no
+  `-Dwasi=p3`; P2 double-gated; combos unvalidated. Full findings + discharge in debt `D-462`.
+- **Next**: this is an ADR-grade rework (touches build.zig §4.6 flags + WasiLevel/WasmLevel enums) — investigate &
+  design the true finished form vs unavoidable branches + a phased plan BEFORE any code (user-directed).
 
 ## Active phase — doc-inventory + freshening (USER-requested 2026-06-16)
 
