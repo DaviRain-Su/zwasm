@@ -8,13 +8,16 @@
 ## Active bundle
 
 - **Bundle-ID**: simd-convert-ops-e2e (D-457)
-- **Cycles-remaining**: ~2-3
-- **Continuity-memo**: 8 SIMD float↔int conversions (opcodes 248-255) never worked e2e (validate FIXED 79fd589e;
-  lower_simd.zig else=>NotImplemented:407, interp anchors NotMigrated, f64x2_convert_low_i32x4_u unregistered in
-  dispatch_collector_ops, JIT emit exists but unreachable). NOT a C-API constraint — a real completeness gap the
-  vendored official simd corpus never tested.
-- **Exit-condition**: all 8 ops validate+lower+interp+JIT e2e (extract-to-scalar runtime fixtures pass on both engines)
-  + promoted to committed simd corpus + audit for other untested-op families.
+- **Cycles-remaining**: ~2
+- **Continuity-memo**: 8 SIMD float↔int conversions (opcodes 248-255). SIMD is JIT-ONLY (no interp; 13420 simd
+  asserts run via JIT). DONE: validate (79fd589e), lower_simd all 8 (58e88f32). **3/8 run e2e** (252/253/255 had JIT
+  emit; edge fixtures test/edge_cases/p9/simd_convert/ pass). **REMAINING: per-arch JIT emit for 5** —
+  i32x4.trunc_sat_f32x4_{s,u} (248/249), f32x4.convert_i32x4_{s,u} (250/251), f64x2.convert_low_i32x4_s (254).
+  Each needs arm64 emit.zig + x86_64 emit.zig handler arms (mirror the existing trunc_sat_f64x2/convert_low_u recipes
+  in op_simd_float.zig). f64x2_convert_low_i32x4_u still missing from ir/dispatch_collector_ops (works anyway since
+  SIMD validate/lower are opcode-based; tidy later).
+- **Exit-condition**: all 8 run e2e via JIT (edge fixtures, extract-to-scalar) + promote to committed simd corpus +
+  audit for other untested-op families (the corpus gap is systemic — convert ops were 100% untested).
 
 ## Planned future phase (USER-requested 2026-06-16, AFTER this campaign)
 
