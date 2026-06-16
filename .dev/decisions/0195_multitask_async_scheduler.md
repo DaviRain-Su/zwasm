@@ -1,10 +1,33 @@
 # ADR-0195 — Multi-task async scheduler for guest↔guest stream/future completion (D-335 remainder)
 
-- Status: **Accepted** (autonomous; opens a bundle, not a flag-day). Extends the ADR-0187 stackless
-  callback ABI to dispatch events to *any* waiting guest task, not only the main export task. No fiber
-  system; ADR-0187 (NO fibers) stays intact. Closes the D-335 "guest↔guest stream COMPLETION" gap that
-  gates the `-Dwasi` p2→p3 default flip.
+- Status: **Accepted (design) — IMPLEMENTATION PARKED, blocked-by D-305** (component linker). The design
+  below is sound and stands for when the blocker lands; the *scheduler is downstream of cross-component async
+  import routing*, which D-305 owns. See **Revision 2026-06-17** below. The Phase II(a) correctness gate
+  (single-task `AsyncDeadlock`, `80ec1f63`) is the retained deliverable.
 - Date: 2026-06-17
+
+## Revision 2026-06-17 — implementation PARKED (blocked-by D-305)
+
+A Phase-II design verification (before any scheduler code) found the campaign's exit-condition (a guest↔guest
+`stream<u8>` rendezvous e2e) is **not in-process achievable today**, blocked one layer deeper than Phase I
+assumed:
+
+- **Async-lowered imports resolve to HOST functions ONLY.** Cross-component import resolution is name-match
+  (`component.zig:~488`); there is no path routing a `canon lower`-with-`async` import call to a *guest*
+  async callee in another instance.
+- **`Subtask` (async.zig:397) is built but entirely UNWIRED** — zero production callers of `.resolve()` /
+  subtask creation (only the `async.zig:~865` unit test). It was scaffolding for exactly this step.
+- **CM-async spawns a subtask ONLY via an async-lowered import targeting an async callee in ANOTHER
+  component instance** = cross-component composition. There is NO intra-component multi-task path (one async
+  export per instance; no `spawn` builtin; cyclic self-import disallowed).
+- Therefore guest↔guest needs **D-305 (the fully-general component linker)** to route async-import→guest-callee
+  FIRST; the ADR-0195 scheduler (`TaskTable` + per-task dispatch) is the layer ABOVE that. Building it now =
+  speculative infra with no real consumer (spike §2). PARKED until D-305.
+
+What was retained as genuine value: **Phase II(a)** pinned single-task `AsyncDeadlock` (the behavior the
+scheduler would generalise) — a permanent regression guard. The design (TaskTable + cooperative round-robin)
+is recorded here intact; revive this ADR's Decision when D-305 lands. Lesson:
+`2026-06-17-guest-guest-async-is-downstream-of-component-linker`.
 - Relates: ADR-0187 (stackless callback ABI), ADR-0189 (ζ2 wiring / WasiP2Ctx async state), ADR-0190/0191
   (host-peer Unit E + WAIT path), lesson `2026-06-16-stackless-stream-completion-needs-host-peer`. Builds on
   the committed ζ1 `Subtask` machinery (1e3e814b).

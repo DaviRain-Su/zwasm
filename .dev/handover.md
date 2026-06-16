@@ -19,38 +19,25 @@ CLI surface audit (@4e5e42fe): code↔`--help` fully consistent. Gate change @b1
 (windows `[run_remote_windows] OK.` wasm-3.0-assert pass=10234 fail=0 / simd 24805/0 / spec 25539/0; ubuntu OK
 @f1a1d503). win-specassert campaign fully closed; the fail-gate is clean.
 
-**Multi-task async campaign OPENED** (this turn, ADR-0195): Phase I investigation DONE — the guest↔guest stream
-completion gap (D-335; gates `p2→p3`) needs a **cooperative multi-task scheduler**, a clean ~400 LOC ADDITIVE
-extension of `driveCallbackLoop` (a `TaskTable` + per-task event dispatch). Zone-1 machinery (Subtask ζ1 /
-SharedStream rendezvous / WaitableSet delivery) is ALREADY complete; NO ADR-0187 amendment (stackless/no-fibers
-intact). In-process testable (no networking). See `## Active bundle` below. Prior arcs: fuzz campaign 808 mods 0
-crashes (robustness verified); bounded 完成形 vein plateaued (WASI sync surface, C-API @b4d75506, decoder, CLI all
-clean); wasi:random COMPLETE; ADR-0193 follow-up + version SSOT; D-335 typed marshalling DONE both directions.
-ADR-0193 (P1-P4, D-462) + D-461 (ADR-0194) CLOSED (below). **windowsmini gating RESUMED**. Version `2.0.0-alpha.3`.
+**Multi-task async campaign OPENED then PARKED** (this turn, ADR-0195 Revision): a Phase-II design check (before
+any scheduler code) found guest↔guest stream completion is **blocked-by D-305** (component linker), one layer
+deeper than Phase I assumed. CM-async creates a subtask ONLY via an async-lowered import to a GUEST callee in
+ANOTHER component instance (cross-component) — but zwasm's async imports are host-only (name-match), `Subtask` is
+built-but-UNWIRED, and there's NO intra-component multi-task path. The scheduler is the layer ABOVE D-305; building
+it now = speculative infra (spike §2, no consumer). **Retained**: Phase II(a) single-task `AsyncDeadlock` char test
+(`80ec1f63`, permanent guard). ADR-0195 design stands for when D-305 lands; lesson
+`2026-06-17-guest-guest-async-is-downstream-of-component-linker`. The ADR-0153 design-gate caught this, saving
+~400 LOC. Prior arcs: fuzz campaign 808 mods 0 crashes; bounded 完成形 vein plateaued (WASI sync surface, C-API
+@b4d75506, decoder, CLI clean); wasi:random COMPLETE; ADR-0193 follow-up + version SSOT; D-335 typed marshalling DONE.
 
-## Active bundle — WASI-0.3 multi-task async scheduler (ADR-0195)
-
-- **Bundle-ID**: wasi-p3-multitask-scheduler
-- **Cycles-remaining**: ~4-5
-- **Continuity-memo**: ADR-0195 is the design. Correctness-FIRST. Phase II(a) ASSESSED: the single-task net in
-  `component_wasi_p3.zig` is already STRONG (EXIT@121 / YIELD@138 / task.return@157 / BLOCKED@240 / DROPPED@259 /
-  host-peer COMPLETION write@410 read@487 / WAIT-path@550 / cancel / all trap cases). The ONE gap = no test DRIVES a
-  single task to `AsyncDeadlock`. **(a) DONE @80ec1f63** (`async_deadlock_single.wat` + test asserts
-  `error.AsyncDeadlock`). **NEXT = the IMPL (b+c+d together — a big coherent chunk best on FRESH context; the 1-entry
-  refactor alone is unobservable infra per spike §2, so land it WITH the multi-task path + the two-task e2e).**
-  CRUX TO SOLVE FIRST (before code): how to express TWO guest tasks in one in-process test component. Options: (i)
-  a self-referential component where the main async export calls an async-lowered IMPORT that the host wires back to
-  a SECOND async export of the same instance (→ Subtask); (ii) two async exports both seeded into the TaskTable by
-  the runner sharing a stream handle. `driveCallbackLoop` (`async.zig:124`) is implicitly single-task — `ctx.invokeCallback`
-  re-enters THE one callback; multi-task needs the seam to take a task-id (which task's callback). Plan: `TaskDescriptor`
-  {task_id, callback ref, set_index, state:{ready,waiting,done}} + `TaskTable` (Zone-1, `async.zig` near `Subtask`@397);
-  generalise the runner's drive loop (Zone-3 `component_wasi_p3.zig` `driveAsyncMain`/`P3CallbackCtx`@26-103) to
-  iterate the table (drive ready, poll waiting, deliver cross-task events via the existing `StreamFutureEnd.copy`
-  peer-notify@209, trap AsyncDeadlock when all waiting+no event); wire async-lowered-import→mint Subtask+enqueue task.
-  (d) two-task `stream<u8>` rendezvous fixture = exit-condition. THEN (e) adversarial (both-read→deadlock,
-  drop-mid-rendezvous→DROPPED, cancel-before-start). Key files: `async.zig` (Zone-1), `component_wasi_p3.zig` (Zone-3).
-- **Exit-condition**: a guest↔guest `stream<u8>` rendezvous e2e (two guest tasks COMPLETE a copy, count>0) passes,
-  AND all existing single-task async fixtures stay green.
+**NEXT (autonomous)**: the big async features (guest↔guest + sockets/http) are correctly **blocked-by D-305** (the
+fully-general component linker; itself `blocked-by` disproportionate-effort). The component linker is the genuine
+gating front but is a very large undertaking for a not-urgent feature — NOT opened now (the ADR-0195 mis-scope is a
+fresh reminder to verify in-process testability + true blockers before opening big campaigns). Posture = **light
+maintenance on the high-quality plateau**: periodic fuzz campaigns (find real crashes), debt-sweep barrier checks,
+surface micro-audits (the wasi.h `WASM_API_EXTERN` fix was one), proposal_watch. If a concrete defect surfaces, fix
+it; otherwise keep the plateau healthy. ADR-0193 (P1-P4, D-462) + D-461 (ADR-0194) CLOSED (below). **windowsmini
+gating RESUMED**. Version `2.0.0-alpha.3`.
 
 ## D-461 regalloc-origin rework (ADR-0153/ADR-0194) — CLOSED Phase I-V 2026-06-16
 
