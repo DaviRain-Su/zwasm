@@ -804,6 +804,25 @@ test "WASI random: a component calls insecure.get-insecure-random-bytes(16) — 
     try testing.expectEqual(@as(u32, 0), host.exit_code.?);
 }
 
+test "WASI random: a component calls insecure-seed() → tuple<u64,u64> at retptr → exit 0" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, "test/component/wasi_p2_insecure_seed.wasm", testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var host = try wasi_host.Host.init(testing.allocator);
+    defer host.deinit();
+    host.io = io;
+
+    // insecure-seed flattens past MAX_FLAT_RESULTS=1 → the two u64 land at retptr;
+    // exit(0) iff some bit is set proves the tuple marshalled end-to-end.
+    try runWasiP2Main(&eng, testing.allocator, bytes, &host, .{});
+    try testing.expectEqual(@as(u32, 0), host.exit_code.?);
+}
+
 test "D3: a WASI-P2 component reads stdin via get-stdin+input-stream.read — echo check → exit 0" {
     var threaded: std.Io.Threaded = .init(testing.allocator, .{});
     defer threaded.deinit();

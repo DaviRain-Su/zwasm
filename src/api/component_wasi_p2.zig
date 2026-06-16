@@ -891,6 +891,20 @@ fn p2RandomGetU64(caller: *Caller) WasiP2Error!i64 {
     return @bitCast(std.mem.readInt(u64, &buf, .little));
 }
 
+/// `wasi:random/insecure-seed` `insecure-seed` `() -> tuple<u64, u64>`: a
+/// 128-bit seed for hashing. The contract permits a non-crypto source, so the
+/// host's secure fill over-satisfies it. The tuple flattens past
+/// MAX_FLAT_RESULTS=1 → the two u64 land at `retptr` (+0, +8).
+fn p2RandomInsecureSeed(caller: *Caller, retptr: u32) WasiP2Error!void {
+    const ctx = caller.data(WasiP2Ctx);
+    const mem = try ctxMemory(caller);
+    var buf: [16]u8 = undefined;
+    if (wasi_clocks.randomFill(ctx.host, &buf) != .success)
+        @panic("WASI-P2 insecure-seed: secure random unavailable (host.io unset)");
+    try mem.write(retptr, std.mem.readInt(u64, buf[0..8], .little));
+    try mem.write(retptr + 8, std.mem.readInt(u64, buf[8..16], .little));
+}
+
 /// `wasi:filesystem/types` `[method]descriptor.read` (self, length, offset,
 /// retptr): positionally read up to `length` bytes at `offset` into a
 /// `cabi_realloc`'d buffer via P1 `fd_pread`, then store `result<tuple<list<u8>,
@@ -1452,6 +1466,7 @@ fn defineClassifiedFunc(lk: *Linker, module: []const u8, name: []const u8, op: a
         .cli_initial_cwd, .cli_get_terminal_stdin, .cli_get_terminal_stdout, .cli_get_terminal_stderr => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!void, p2ReturnNone),
         .out_stream_check_write => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32) WasiP2Error!void, p2CheckWrite),
         .random_get_u64, .random_insecure_get_u64 => try lk.defineFuncCtx(module, name, ctx, fn (*Caller) WasiP2Error!i64, p2RandomGetU64),
+        .random_insecure_seed => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32) WasiP2Error!void, p2RandomInsecureSeed),
         .fs_descriptor_stat_at => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32, u32, u32, u32) WasiP2Error!void, p2DescriptorStatAt),
         .fs_descriptor_create_directory_at => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32, u32, u32) WasiP2Error!void, p2DescriptorCreateDirectoryAt),
         .fs_descriptor_remove_directory_at => try lk.defineFuncCtx(module, name, ctx, fn (*Caller, u32, u32, u32, u32) WasiP2Error!void, p2DescriptorRemoveDirectoryAt),

@@ -160,6 +160,8 @@ pub const P2Op = enum {
     // source, so a host's secure fill over-satisfies it (same handler/P1 target).
     random_insecure_get_bytes,
     random_insecure_get_u64,
+    // wasi:random/insecure-seed — a 128-bit hash seed (tuple<u64,u64>).
+    random_insecure_seed,
     // wasi:filesystem/types — path-addressed descriptor methods (the *-at
     // family) + sync-data. Each maps onto the existing P1 path_* facility;
     // the dirfd is resolved from the descriptor handle rep at call time.
@@ -297,7 +299,7 @@ pub fn p1Target(op: P2Op) P1Target {
         .fs_descriptor_drop => .fd_close,
         .fs_get_directories => .preopens_get_directories,
         .random_get_u64 => .random_get,
-        .random_insecure_get_bytes, .random_insecure_get_u64 => .random_get,
+        .random_insecure_get_bytes, .random_insecure_get_u64, .random_insecure_seed => .random_get,
         .fs_descriptor_stat_at => .path_filestat_get,
         .fs_descriptor_create_directory_at => .path_create_directory,
         .fs_descriptor_link_at => .path_link,
@@ -418,6 +420,7 @@ const table = [_]Entry{
     .{ .iface = "wasi:random/random", .func = "get-random-u64", .op = .random_get_u64 },
     .{ .iface = "wasi:random/insecure", .func = "get-insecure-random-bytes", .op = .random_insecure_get_bytes },
     .{ .iface = "wasi:random/insecure", .func = "get-insecure-random-u64", .op = .random_insecure_get_u64 },
+    .{ .iface = "wasi:random/insecure-seed", .func = "insecure-seed", .op = .random_insecure_seed },
     .{ .iface = "wasi:filesystem/types", .func = "[method]descriptor.stat-at", .op = .fs_descriptor_stat_at },
     .{ .iface = "wasi:filesystem/types", .func = "[method]descriptor.create-directory-at", .op = .fs_descriptor_create_directory_at },
     .{ .iface = "wasi:filesystem/types", .func = "[method]descriptor.link-at", .op = .fs_descriptor_link_at },
@@ -589,6 +592,7 @@ test "p1Target: descriptor ops map to fd syscalls (fd from the handle rep at cal
 test "classify: wasi:random/insecure resolves to the insecure ops (secure-fill backed)" {
     try testing.expectEqual(P2Op.random_insecure_get_bytes, classifyImport("wasi:random/insecure", "get-insecure-random-bytes").?);
     try testing.expectEqual(P2Op.random_insecure_get_u64, classifyImport("wasi:random/insecure", "get-insecure-random-u64").?);
+    try testing.expectEqual(P2Op.random_insecure_seed, classifyImport("wasi:random/insecure-seed", "insecure-seed").?);
     try testing.expectEqual(P1Target.random_get, p1Target(.random_insecure_get_bytes));
 }
 
