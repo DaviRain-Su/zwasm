@@ -1040,10 +1040,16 @@ entries:
       marshalling landed in new `src/api/component_graph.zig` (outer component_instances × inner core_instances loop
       + boundary trampoline via `canon.CanonContext` copying the string caller-mem→callee-mem; typed
       `UnsupportedBoundaryType` for unimpl shapes). `component_model_assert` 159/0/0 (strlen `firstbyte("Z")→0x5A`
-      PASS + adder flat intact); 3-host pending. **REMAINING (keeps this row)**: other aggregate shapes (list/record/
-      result/tuple) + result-direction string + >2-component/deeper graphs across the boundary — they reuse
-      `BoundaryCtx`/`CanonContext` but are untested; each lands when a fixture demands it. Async cross-component
-      routing (the ADR-0195 scheduler prerequisite) is a further axis.
+      PASS + adder flat intact); 3-host pending. **REMAINING (keeps this row)**: other aggregate shapes
+      (list/record/result/tuple) + result-direction string + >2-component/deeper graphs. PROBED 2026-06-17: a
+      `list<u32>` cross-component fixture correctly hits the typed `UnsupportedBoundaryType` deferral (NOT a silent
+      mis-marshal — the design's safety verified). NEXT-INCREMENT SCOPE (component_graph.zig): the marshaller is
+      string-only — `flattensTo2i32Result` (`:468`) accepts a 1-param `isString`, and `boundaryMarshal` (`:513`)
+      uses `canon.lowerString`. To add `list<T>`: accept a 1-param `isList(primitive)` in `flattensTo2i32Result`,
+      and add a list branch in `boundaryMarshal` that copies `len*sizeOf(elem)` bytes (canon has `sizeOf` `:187`
+      but NO generic `lowerList` — write the alloc-in-callee-via-realloc + copy). Records (multi-flat-param) +
+      aggregate results + arity-general trampolines (fixed `(i32,i32)->i32` BoundarySig) are further. Each lands
+      when demanded. Async cross-component routing (the ADR-0195 scheduler prerequisite) is a further axis.
     first_raised: "2026-06-07"
     last_reviewed: "2026-06-07"
     refs: src/api/component.zig (instantiateGraph); test/component/adder_graph.wasm; .dev/component_model_plan.md (Phase C/D)
