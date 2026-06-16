@@ -282,6 +282,76 @@ pub const StreamFutureTable = struct {
     }
 };
 
+/// ADR-0195 §1 — cooperative scheduler task state. A task is `ready` to be driven
+/// (its callback should run with a delivered event), `waiting` on a waitable-set
+/// for an event to arrive, or `done` (the callback returned EXIT).
+pub const TaskState = enum { ready, waiting, done };
+
+/// ADR-0195 §1 — one cooperative task in the per-component `TaskTable`. Pure data:
+/// the Zone-3 scheduler loop (step c) drives a `ready` task's callback, polls a
+/// `waiting` task's `set_index`, and marks it `done` on EXIT. The main export seeds
+/// task 0; an async-lowered import to a guest callee enqueues more. A pure
+/// single-task component is a 1-entry table — the byte-identical regression case.
+/// The table handle index serves as the task id (`Subtask` links via it, step c).
+pub const TaskDescriptor = struct {
+    /// Core function index of this task's stackless callback (the `callback<f>`
+    /// canonopt funcidx the driver re-enters per delivered event).
+    callback_funcidx: u32,
+    /// The waitable-set handle this task blocks on while `state == .waiting`
+    /// (set when the callback returns WAIT(set); meaningless in other states).
+    set_index: u32 = 0,
+    state: TaskState = .ready,
+};
+
+/// ADR-0195 §1 — per-component table of cooperative tasks (mirrors
+/// `StreamFutureTable`: index 0 reserved, free-list reuse, `MAX_LENGTH` cap).
+/// Pure data; the scheduler policy (round-robin over `ready`, deadlock when all
+/// `waiting` with no pending event) lives in the Zone-3 driver (step c).
+pub const TaskTable = struct {
+    slots: std.ArrayList(?TaskDescriptor),
+    free: std.ArrayList(u32),
+    alloc: Allocator,
+
+    pub fn init(alloc: Allocator) Error!TaskTable {
+        var slots: std.ArrayList(?TaskDescriptor) = .empty;
+        errdefer slots.deinit(alloc);
+        try slots.append(alloc, null); // reserve index 0
+        return .{ .slots = slots, .free = .empty, .alloc = alloc };
+    }
+
+    pub fn deinit(self: *TaskTable) void {
+        self.slots.deinit(self.alloc);
+        self.free.deinit(self.alloc);
+    }
+
+    /// `Table.add` — reuse a free hole or grow; returns the task id (≥ 1).
+    pub fn add(self: *TaskTable, task: TaskDescriptor) Error!u32 {
+        if (self.free.pop()) |i| {
+            self.slots.items[i] = task;
+            return i;
+        }
+        const i: u32 = @intCast(self.slots.items.len);
+        if (i > MAX_LENGTH) return Error.TableFull;
+        try self.slots.append(self.alloc, task);
+        return i;
+    }
+
+    /// `Table.get` — bounds + hole check (the trap source for stale task ids).
+    pub fn get(self: *TaskTable, i: u32) Error!*TaskDescriptor {
+        if (i == 0 or i >= self.slots.items.len) return Error.InvalidHandle;
+        if (self.slots.items[i] == null) return Error.InvalidHandle;
+        return &self.slots.items[i].?;
+    }
+
+    /// `Table.remove` — tombstone the slot + push the hole to the free list.
+    pub fn remove(self: *TaskTable, i: u32) Error!TaskDescriptor {
+        const task = (try self.get(i)).*;
+        self.slots.items[i] = null;
+        try self.free.append(self.alloc, i);
+        return task;
+    }
+};
+
 /// A "waitable set" (`CanonicalABI.md` `WaitableSet`): a collection of waitable
 /// handles that core wasm waits on / polls for *any* member to make progress.
 /// `elems` holds the member handle indices into the `StreamFutureTable`; a real
@@ -932,6 +1002,38 @@ test "stream/future end table: add/get/remove lifecycle + index-0 reserved" {
     const h2 = try t.add(.{ .kind = .future, .side = .writable, .elem_type = null });
     try testing.expectEqual(h, h2);
     try testing.expectEqual(EndKind.future, (try t.get(h2)).kind);
+}
+
+test "ADR-0195 step (b): TaskTable add/get/remove lifecycle + index-0 reserved + free-list reuse" {
+    var t = try TaskTable.init(testing.allocator);
+    defer t.deinit();
+
+    // a fresh task defaults to .ready with set_index 0.
+    const id = try t.add(.{ .callback_funcidx = 7 });
+    try testing.expect(id >= 1); // task id is never the 0 sentinel
+    const task = try t.get(id);
+    try testing.expectEqual(@as(u32, 7), task.callback_funcidx);
+    try testing.expectEqual(TaskState.ready, task.state);
+    try testing.expectEqual(@as(u32, 0), task.set_index);
+
+    // mutate through the pointer: the callback returned WAIT(set 4).
+    task.state = .waiting;
+    task.set_index = 4;
+    try testing.expectEqual(TaskState.waiting, (try t.get(id)).state);
+    try testing.expectEqual(@as(u32, 4), (try t.get(id)).set_index);
+
+    // index 0 is the reserved None sentinel.
+    try testing.expectError(Error.InvalidHandle, t.get(0));
+
+    // remove tombstones → use-after-free / double-remove trap.
+    _ = try t.remove(id);
+    try testing.expectError(Error.InvalidHandle, t.get(id));
+    try testing.expectError(Error.InvalidHandle, t.remove(id));
+
+    // a freed slot is reused (free list) for the next add.
+    const id2 = try t.add(.{ .callback_funcidx = 9, .state = .done });
+    try testing.expectEqual(id, id2);
+    try testing.expectEqual(TaskState.done, (try t.get(id2)).state);
 }
 
 test "D-335 unit D-ηB: waitable-set table add/get/remove + index-0 reserved" {
