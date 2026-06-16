@@ -1037,6 +1037,7 @@ pub fn build(b: *std.Build) void {
         .{ .src = "test/c_api_conformance/trap.c", .name = "trap" },
         .{ .src = "test/c_api_conformance/funcref_table_call.c", .name = "funcref_table_call" },
         .{ .src = "test/c_api_conformance/funcref_result_call.c", .name = "funcref_result_call" },
+        .{ .src = "test/c_api_conformance/data_active_drop.c", .name = "data_active_drop" },
         .{ .src = "test/c_api_conformance/instance_get_func.c", .name = "instance_get_func" },
         .{
             .src = "test/c_api_conformance/wasi_preopen.c",

@@ -1676,6 +1676,8 @@ pub fn instantiateRuntime(
         // `a`. (Production previously never set rt.datas; only a test
         // helper did, so passive segments + array.new_data found it empty.)
         const seg_bytes = try a.alloc([]const u8, datas.items.len);
+        rt.data_dropped = try a.alloc(bool, datas.items.len);
+        @memset(rt.data_dropped, false);
         for (datas.items, 0..) |seg, di| {
             seg_bytes[di] = try a.dupe(u8, seg.bytes);
             if (seg.kind != .active) continue;
@@ -1687,10 +1689,14 @@ pub fn instantiateRuntime(
             if (dst_end_u128 > target.bytes.len) return error.DataSegmentOutOfRange;
             const dst_end: usize = @intCast(dst_end_u128);
             @memcpy(target.bytes[@intCast(offset)..dst_end], seg.bytes);
+            // Wasm spec §4.5.4 (instantiation) step 15: after writing an
+            // active data segment, it is DROPPED — a later memory.init
+            // referencing it sees a 0-length source and traps on any
+            // non-empty access. Mirrors the active-elem drop above; the
+            // synthetic spec suite under-covers this (wasmtime memory_init).
+            rt.data_dropped[di] = true;
         }
         rt.datas = seg_bytes;
-        rt.data_dropped = try a.alloc(bool, datas.items.len);
-        @memset(rt.data_dropped, false);
     }
 
     if (module.find(.@"export")) |export_section| {
