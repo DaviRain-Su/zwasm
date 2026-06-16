@@ -9,36 +9,32 @@ Project at the **完成形 plateau** (all dims confirmed): clean (C/Zig/CLI audi
 now cross-component STRING composition, D-305 milestone), 100% spec (`test-spec` 25539/0), lightweight-yet-fast
 (v1-JIT parity, D-265 closed). Robustness: interp+JIT fuzz 0 crashes. Closed-arc detail lives in git/ADRs/lessons.
 
-**ADR-0195 multi-task async scheduler PARKED** (blocked-by D-305): guest↔guest async needs a subtask = cross-component
-async import to a GUEST callee = the component linker. Retained the Phase II(a) `AsyncDeadlock` char test (`80ec1f63`);
-design stands (ADR-0195 Rev + lesson `2026-06-17-guest-guest-async-is-downstream-of-component-linker`).
+**D-305 cross-component linker — COMMON shapes ALL DONE + 3-host/x86_64-verified** (ADR-0196; detail in the
+D-305 debt row + git): string/list params (@689040e6), string result (@184b5e05), `(string)->string` (@2b9b14ee),
+boundary error-trap (@30bd1881, SECURITY — marshalling failures now TRAP, not silent-wrong). component_model
+163/0; ubuntu OK @dfdcfdcf. Remaining rare shapes (record/result aggregates, >2-param arities) = consumer-gated
+debt, do NOT grind speculatively.
 
-**Prior arcs**: wasi:random COMPLETE; ADR-0193 feature-separation follow-up + version SSOT; D-335 typed marshalling
-DONE; C-API @b4d75506 (Windows export fix); interp+JIT fuzz 808 mods 0 crashes (robustness verified).
+**Prior arcs**: wasi:random COMPLETE; ADR-0193 feature-separation + version SSOT; D-335 typed marshalling DONE;
+C-API @b4d75506 (Windows export fix); interp+JIT fuzz 808 mods 0 crashes. ADR-0193 (D-462) + D-461 (ADR-0194)
+CLOSED (below). **windowsmini RESUMED**. Version `2.0.0-alpha.3`. Windows batch verifies @…+@2b9b14ee next fire.
 
-**D-305 component-composition first milestone DONE** (this turn, @4cceeb1e, ADR-0196 — see closed-arc below):
-cross-component STRING + `list<primitive>` marshalling works (strlen + listu32 + listu64 PASS, 161/0; @689040e6).
-The fully-general linker now exists; remaining
-aggregate shapes are consumer-gated D-305 debt.
+## Active bundle — ADR-0195 multi-task async scheduler (UNBLOCKED 2026-06-17 PM)
 
-**D-305 string RESULT path DONE** (this turn, @184b5e05, subagent + main-loop-verified): a `() -> string`
-cross-component func marshals its result via a retptr trampoline (`strret_graph` PASS, component_model 162/0; build+
-test+comp-spec+lint green). D-305 now does string/list PARAMS + string RESULT across the component boundary.
-Milestone (string+list params) 3-HOST-VERIFIED (win @8895176d OK, recorded). **NEXT (autonomous)**: `184b5e05`
-x86_64-verify pending (ubuntu kicked) + windows next batch. Remaining D-305: `(params..)->string`, list/record
-results, record params, >2-param arities, + the trampoline error-trap follow-up (error paths silently fall back —
-should trap per Canonical ABI; D-305 debt). **error-trap follow-up DONE** (this turn, @30bd1881, subagent +
-main-loop-verified, SECURITY): the graph boundary trampolines now use error-union sigs (like the WASI host fns) that
-TRAP on a marshalling failure instead of `catch 0`/untouched — a malicious component passing an OOB `(ptr,len)` now
-traps (`oob_param_graph` test asserts `error.OutOfBoundsLoad`) instead of a silent-wrong result; EXEMPT-FALLBACK
-removed. **`(string)->string` boundary DONE** (this turn, @2b9b14ee, subagent + main-loop-verified): the `dup`
-shape (string param AND string result) marshals via a `(ptr,len,retptr)->void` trampoline composing the existing
-param-side lower + result-side retptr lift/lower (`dup_graph` PASS, component_model **163/0**; build+test+comp-spec+
-lint+fallback-check green; x86_64 verify pending next ubuntu kick). **D-305 COMMON shapes now ALL covered**
-(string/list params, string result, `(string)->string`, boundary error-trap). **Posture = plateau maintenance**:
-remaining rare shapes (record/result aggregates, >2-param arities, list results) stay scoped consumer-gated debt —
-land when a consumer demands; do NOT grind speculatively. Windows verifies @184b5e05+@30bd1881+@2b9b14ee next batch.
-ADR-0193 (D-462) + D-461 (ADR-0194) CLOSED (below). **windowsmini RESUMED**. Version `2.0.0-alpha.3`.
+- **Bundle-ID**: adr0195-scheduler-IIa..b (guest↔guest async = D-335 last functional gap)
+- **Cycles-remaining**: ~4 (II(a) correctness corpus → (b) TaskTable → (c) async trampoline + (d) e2e → (e) adversarial)
+- **Why now**: the D-305 SYNC linker landed → ADR-0195's parking precondition ("route async-import→guest-callee
+  first") is OBSOLETE (ADR-0195 Rev 2026-06-17 PM). The async routing trampoline is a ~100 LOC mirror of the
+  sync `boundaryTrampoline` (folds into step c); the TRUE remaining bottleneck is scheduler-internal: step (b)
+  `TaskTable` + 1-entry-table refactor of `driveCallbackLoop` (~200 LOC, Zone-1/3, in-process testable).
+- **Continuity-memo**: Phase II(a) correctness-FIRST — pin the single-task driver (EXIT/YIELD/WAIT/host-peer/
+  `AsyncDeadlock`) with char tests BEFORE the TaskTable generalisation (the single-task path must stay
+  byte-identical). `Subtask` (`async.zig:397`) is built-but-unwired ζ1 machinery to revive.
+- **NEXT**: Phase II(a) — author/confirm the single-task driver characterization corpus (adversarial), then
+  step (b) TaskTable. ADR-0195 (a)–(e) is the plan; ROI ~300–350 LOC total, MEDIUM risk.
+- **Exit-condition**: `async_two_tasks_stream_rendezvous.wat` (2-component: A async-imports B's async export)
+  builds + asserts Subtask creation→resolution + waitable-set delivery, e2e green; full async corpus + (e)
+  adversarial (deadlock/dropped/cancelled) green; single-task path unchanged.
 
 ## D-305 component-composition — first milestone CLOSED 2026-06-17 (@4cceeb1e, ADR-0196)
 

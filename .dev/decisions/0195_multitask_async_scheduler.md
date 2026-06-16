@@ -1,10 +1,34 @@
 # ADR-0195 — Multi-task async scheduler for guest↔guest stream/future completion (D-335 remainder)
 
-- Status: **Accepted (design) — IMPLEMENTATION PARKED, blocked-by D-305** (component linker). The design
-  below is sound and stands for when the blocker lands; the *scheduler is downstream of cross-component async
-  import routing*, which D-305 owns. See **Revision 2026-06-17** below. The Phase II(a) correctness gate
-  (single-task `AsyncDeadlock`, `80ec1f63`) is the retained deliverable.
+- Status: **Accepted (design) — UNBLOCKED 2026-06-17 (the D-305 blocker landed); ready to revive**. The D-305
+  sync cross-component linker (`src/api/component_graph.zig`, @2b9b14ee) now provides the routing substrate the
+  scheduler sat above; the async-import→guest-callee routing is a small trampoline variant within step (c)
+  below (see **Revision 2026-06-17 (PM)**). The (a)–(e) plan stands; next is the Phase II(a) correctness gate.
+  The single-task `AsyncDeadlock` char test (`80ec1f63`) is retained.
 - Date: 2026-06-17
+
+## Revision 2026-06-17 (PM) — UNBLOCKED (the D-305 blocker landed)
+
+A read-only feasibility investigation (after the D-305 sync linker reached common-shape completion: string/list
+params + string result + `(string)->string` + boundary error-trap, @2b9b14ee) re-checked the parking reason
+below and found it **obsolete**:
+
+- The parking precondition was "D-305 must route async-import→guest-callee FIRST." D-305 now routes SYNC
+  cross-component calls through `component_graph.zig`'s two-level instantiation + boundary trampolines
+  (`installBoundaryTrampoline` / `buildChild`). That IS the routing substrate the scheduler needed.
+- The **async** routing trampoline is now a clear **~100 LOC mirror** of the sync `boundaryTrampoline`: detect
+  `is_async` on the imported func's canonopts → instead of `invoke()→return-flat`, create a `Subtask`
+  (`async.zig:397`, the built-but-unwired ζ1 machinery) + return its handle, re-entering via the driver loop.
+  This folds into step (c) below; it is NOT a separate D-305 deliverable.
+- The **true** remaining bottleneck is now scheduler-internal: step (b) `TaskTable` + the 1-entry-table refactor
+  of `driveCallbackLoop` (generalise "drive THE task" → "drive the task TABLE"), ~200 LOC Zone-1/3. In-process
+  testable: a 2-component fixture (A async-imports B's async export) asserts Subtask creation→resolution +
+  waitable-set delivery, no OS scheduler. ROI ~300–350 LOC total, MEDIUM risk (regression surface = the
+  single-task path, kept byte-identical by the (a)+(e) corpus hard gate).
+
+CAMPAIGN REVIVED. Next-cycle entry = Phase II(a) correctness corpus FIRST (pin the single-task driver before
+the TaskTable generalisation), then (b). Lesson `2026-06-17-guest-guest-async-is-downstream-of-component-linker`
+gets a closing note: the downstream dependency is satisfied; the scheduler is now the frontier.
 
 ## Revision 2026-06-17 — implementation PARKED (blocked-by D-305)
 

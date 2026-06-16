@@ -47,8 +47,16 @@ parked, not driven into speculative infra (spike §2: no real consumer).
   (single-task `AsyncDeadlock`, `80ec1f63`) is a permanent regression guard the
   scheduler would have needed anyway.
 
+## Closing note (2026-06-17 PM) — the downstream dep is satisfied
+
+The D-305 SYNC cross-component linker landed (`component_graph.zig` @2b9b14ee). The async-import→guest-callee
+routing is a ~100 LOC mirror of the sync `boundaryTrampoline`, so the scheduler is no longer "downstream of an
+unbuilt linker" — it is now the frontier. ADR-0195 flipped PARKED → UNBLOCKED (Rev 2026-06-17 PM); the real
+remaining work is scheduler-internal (`TaskTable` + multi-task driver), not linker routing. The lesson's
+sequencing insight held: the linker genuinely had to come first.
+
 ## Related
 
-- ADR-0195 (Revision 2026-06-17, PARKED), D-305 (component linker), D-335
-  (guest↔guest now blocked-by D-305), lesson
+- ADR-0195 (Revision 2026-06-17 PM, UNBLOCKED), D-305 (component linker, sync common shapes DONE), D-335
+  (guest↔guest now gated on the ADR-0195 scheduler, not D-305), lesson
   `2026-06-16-stackless-stream-completion-needs-host-peer` (the single-task half).
