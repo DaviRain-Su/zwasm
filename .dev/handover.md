@@ -22,10 +22,18 @@
   gc 45→42. ALL remaining fails are `FAILsetup`/`FAILtrapSetup`/`UnknownImport` (47+3+9) — fixtures that import host
   functions the runner doesn't define (+ memory64 `more-than-4gb` = environmental). NO zwasm value/behaviour bug remains
   in the native buckets beyond the 3 fixed.
-- **NEXT (Phase II)**: native-bucket real-bug extraction is DONE (0 mismatches). Remaining options (lower yield):
-  (a) wire the host imports the FAILsetup fixtures need → re-sweep (likely confirms more passes, unlikely new bugs);
-  (b) run simd via `simd_assert_runner`; (c) C-API-subset triage (canonicalize-nan reinterpret, embenchen env-skip);
-  (d) the top-level 75 core + winch buckets. Then campaign retrospective (V).
+- **4th real bug — C-API instantiate path didn't drop active DATA segments** (`c1f727d4`): instantiateRuntime wrote
+  active data to memory but left data_dropped=false (the elem path + native setupRuntime/populateDataSegments already
+  dropped) → memory.init from the dropped segment didn't trap (§4.5.4 step 15). Found via top-level memory_init.
+  Coverage: `test/c_api_conformance/data_active_drop.c`. Spec suite stays green (Wasm-2.0 25437/0).
+- **Top-level core triaged**: canonicalize-nan = spec-legal NaN divergence (wasmtime over-asserts exact bits; lesson
+  `wasmtime-fixtures-over-assert-exact-canonical-nan`, NOT a bug). Rest (memory-combos/int-to-float-splat/issue6562/
+  alias-region = ModuleAllocFailed multi-mem/SIMD/region modules the C-API rejects; embenchen = env-import; wast-syntax/
+  many-results-with-exceptions = setup/EH harness). memory_init was the one real bug.
+- **Campaign tally: 6 real zwasm bugs fixed** (array.copy alias ×interp+JIT, array.new overflow, bottom-reftype decode,
+  active-data-drop) + harness now compares refs. Native buckets + top-level core extracted.
+- **NEXT (Phase II→V)**: (a) run simd via `simd_assert_runner` (last unchecked bucket); (b) optional host-import wiring;
+  then campaign retrospective (V) + consider promoting legit fixtures into the committed corpus.
 - **Harness**: `scripts/wasmtime_misc_sweep.sh` (C-API) + `scripts/wasmtime_misc_native_sweep.sh` (native GC-capable) +
   distillers `scripts/wast_to_manifest.py` / `scripts/spec_distill/wast_to_native_manifest.py`. Both runners installed.
 
