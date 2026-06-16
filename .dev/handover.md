@@ -27,9 +27,15 @@ the loop pivots to the user-requested doc freshening. Secondary: ADR-0174 Phase-
 
 - **Goal**: walk ALL zwasm_from_scratch docs (CLAUDE.md, `.dev/`, `.claude/`, README, `docs/`) and reconcile against
   CODE TRUTH — find+fix stale claims (e.g. "100% SIMD spec" was once overstated; conversion ops were missing).
-- **Phase I (survey, NOT started)**: fan out an Explore subagent to grep docs for quantified/absolute claims
-  ("100%", "0 skip", "complete", version/count numbers, "DONE") and cross-check each against the code/tests. Output a
-  ranked stale-claim list. Then fix the top findings (TDD-style: cite the code truth in the doc edit).
+- **Phase I survey DONE** (Explore subagent): main staleness was README version-line anchors. **README FRESHENED**
+  (`42441634`): retired `v0.1.0`/Phase-16 anchors (ADR-0181) → 完成形 framing + `v2.0.0-alpha.*` pre-release. VERIFIED
+  the coverage claims (Wasm 2.0 `skip-impl==0`, 3.0 all-9-proposals) are ACCURATE vs current test output (the
+  survey's "skip-impl 1790" finding was a Phase-9 historical false positive — always re-verify against CURRENT
+  state). Other docs clean of the retired-anchor class (only CLAUDE.md:108 uses `v0.1.0` as intentional design-
+  priority shorthand — left as-is).
+- **NEXT (remaining doc targets)**: deeper reconcile of `docs/**` (reference/*.md, design docs) + `.dev/ROADMAP.md`
+  widget vs code truth — spot-check feature-completeness + count claims (C-API 293/293, corpus counts, GC 362/0)
+  against current runners. Lower-priority: the README was the high-risk surface.
 
 ## ADR-0192 wasmtime campaign — substantive work DONE; residuals debt-tracked (paused 2026-06-16)
 
