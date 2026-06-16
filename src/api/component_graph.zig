@@ -452,10 +452,13 @@ fn installBoundaryTrampoline(
     // retptr-result trampoline (no value params; the result string is lifted
     // from B and lowered into A's memory).
     if (resultIsString(graph.alloc, &provider.child.info, ft)) {
-        // Only the no-param shape `() -> string` is implemented: it flattens to
-        // core `(retptr) -> ()`. Value params alongside a string result flatten
-        // to `(params.., retptr)` — a broader shape (typed deferral).
-        if (ft.params.len != 0) return GraphError.UnsupportedBoundaryType;
+        // Two retptr-result shapes are implemented:
+        //   `() -> string`         → core `(retptr) -> ()`
+        //   `(string) -> string`   → core `(param_ptr, param_len, retptr) -> ()`
+        // Any other param list alongside a string result is a broader shape
+        // (typed deferral — no silent mis-marshal).
+        const param_is_string = ft.params.len == 1 and isString(ft.params[0].ty);
+        if (ft.params.len != 0 and !param_is_string) return GraphError.UnsupportedBoundaryType;
         const bctx = try graph.alloc.create(BoundaryCtx);
         errdefer graph.alloc.destroy(bctx);
         bctx.* = .{
@@ -466,7 +469,11 @@ fn installBoundaryTrampoline(
             .importer = importer,
         };
         try graph.boundaries.append(graph.alloc, bctx);
-        try lk.defineFuncCtx(ns, core_export_name, @ptrCast(bctx), RetPtrSig, retPtrTrampoline);
+        if (param_is_string) {
+            try lk.defineFuncCtx(ns, core_export_name, @ptrCast(bctx), StrRetStrSig, strRetStrTrampoline);
+        } else {
+            try lk.defineFuncCtx(ns, core_export_name, @ptrCast(bctx), RetPtrSig, retPtrTrampoline);
+        }
         return;
     }
 
@@ -677,6 +684,62 @@ fn retPtrMarshal(caller: *Caller, bctx: *BoundaryCtx, retptr: u32) BoundaryError
     const lifted = canon.liftString(callee_cx, b_ptr, b_len) catch |e| return stringErrToTrap(e);
 
     // 3. Lower the string into the IMPORTER's memory (snapshot first: the lift
+    //    borrows callee memory, the lower realloc may move it). Then write the
+    //    A-side (ptr,len) at the importer's retptr in the importer's memory.
+    const importer = bctx.importer orelse return error.OutOfBoundsStore;
+    const tmp = try caller.allocator().dupe(u8, lifted);
+    defer caller.allocator().free(tmp);
+    const importer_cx = importer.canonContext();
+    const lowered = canon.lowerString(importer_cx, tmp) catch |e| return stringErrToTrap(e);
+    if (@as(usize, retptr) + 8 > importer_cx.mem().len) return error.OutOfBoundsStore;
+    std.mem.writeInt(u32, importer_cx.mem()[retptr..][0..4], lowered.ptr, .little);
+    std.mem.writeInt(u32, importer_cx.mem()[retptr + 4 ..][0..4], lowered.packed_length, .little);
+}
+
+/// The `(string) -> string` boundary's flattened core signature:
+/// `(param_ptr:i32, param_len:i32, retptr:i32) -> ()`, returning
+/// `BoundaryError!void` so a marshalling failure PROPAGATES as a guest trap. It
+/// composes the string PARAM lower (importer-memory → callee-memory) with the
+/// string RESULT lift+lower (callee-memory → importer-memory, written at retptr).
+const StrRetStrSig = fn (*Caller, u32, u32, u32) BoundaryError!void;
+
+/// Host trampoline for `(string) -> string`: lower the caller's string param
+/// into the CALLEE's memory (via the callee's realloc), invoke the callee core
+/// func with `(callee_ptr, callee_len, callee_retptr)`, then lift the callee's
+/// returned string and lower it into the IMPORTER's memory, writing the A-side
+/// `(ptr,len)` at the importer's retptr. A marshalling failure (out-of-bounds
+/// (ptr,len), invalid UTF-8, realloc overflow) propagates as a trap — never a
+/// silent fallback.
+fn strRetStrTrampoline(caller: *Caller, param_ptr: u32, param_len: u32, retptr: u32) BoundaryError!void {
+    const bctx = caller.data(BoundaryCtx);
+    const callee_cx = bctx.callee.canonContext();
+
+    // 1. Lower the caller's string param into the CALLEE's memory (snapshot the
+    //    caller bytes first: the callee realloc may grow/move its own memory).
+    const caller_mem: Memory = caller.memory() orelse return error.OutOfBoundsLoad;
+    const src = try caller_mem.sliceAt(param_ptr, param_len); // OOB read → trap
+    const param_tmp = try caller.allocator().dupe(u8, src);
+    defer caller.allocator().free(param_tmp);
+    const lowered_param = canon.lowerString(callee_cx, param_tmp) catch |e| return stringErrToTrap(e);
+
+    // 2. Allocate the callee's return area and invoke its core func, which writes
+    //    the result string (ptr,len) there (B writes B's memory).
+    const callee_ret = callee_cx.realloc(0, 0, 4, 8) catch return error.OutOfBoundsStore;
+    var args = [_]Value{
+        .{ .i32 = @bitCast(lowered_param.ptr) },
+        .{ .i32 = @bitCast(lowered_param.packed_length) },
+        .{ .i32 = @bitCast(callee_ret) },
+    };
+    var res = [_]Value{};
+    try bctx.core_inst.invoke(bctx.core_func_name, &args, &res);
+
+    // 3. Lift the result string from the CALLEE's memory at its return area.
+    if (@as(usize, callee_ret) + 8 > callee_cx.mem().len) return error.OutOfBoundsLoad;
+    const b_ptr = std.mem.readInt(u32, callee_cx.mem()[callee_ret..][0..4], .little);
+    const b_len = std.mem.readInt(u32, callee_cx.mem()[callee_ret + 4 ..][0..4], .little);
+    const lifted = canon.liftString(callee_cx, b_ptr, b_len) catch |e| return stringErrToTrap(e);
+
+    // 4. Lower the string into the IMPORTER's memory (snapshot first: the lift
     //    borrows callee memory, the lower realloc may move it). Then write the
     //    A-side (ptr,len) at the importer's retptr in the importer's memory.
     const importer = bctx.importer orelse return error.OutOfBoundsStore;
