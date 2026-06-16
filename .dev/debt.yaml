@@ -1358,9 +1358,9 @@ entries:
       **typed/multi-byte element marshalling DONE** 2026-06-16: stream<T>/future<T> copy resolves the element's
       lowered byte size (`streamElemByteSize`: resolveTypeIndex→.stream/.future payload→canonTypeFromDecoded→sizeOf,
       default 1; threaded synthDef→Def→AsyncBuiltinCtx→copy) and moves `count*elem_size` bytes. stream<u32> fixture
-      transfers 8 bytes (was 2); u8 corpus regression-free. NOTE: the read-direction copy (read-immediate + parked)
-      shares the identical `*elem_size`/`/elem_size` pattern but only the WRITE path has a typed e2e test (read
-      covered for u8 only) — add a stdin stream<u32> fixture when convenient.
+      transfers 8 bytes (was 2); u8 corpus regression-free. Read-direction typed coverage DONE (@f2a002f4):
+      async_stdin_read_via_stream_u32.wat reads 2 u32 elements from an 8-byte host source → COMPLETED(2). Both
+      stream directions now carry a typed (elem_size=4) e2e test.
       **REMAINING (keeps this `now`, HARDER + ADR-needed)**: general guest↔guest stream COMPLETION (Zone-1
       rendezvous doesn't buffer bytes — separate design), broader P3 host interfaces (sockets/http async = Unit E
       full). Detailed unit-by-unit history below.

@@ -19,12 +19,13 @@ CLI surface audit (@4e5e42fe): code↔`--help` fully consistent. Gate change @b1
 (windows `[run_remote_windows] OK.` wasm-3.0-assert pass=10234 fail=0 / simd 24805/0 / spec 25539/0; ubuntu OK
 @f1a1d503). win-specassert campaign fully closed; the fail-gate is clean.
 
-**NEXT (autonomous)**: **D-335 typed multi-byte stream/future element marshalling DONE** (@HEAD, default test +
-`test-wasi-p3` green: stream<u32> transfers N*4 bytes via `streamElemByteSize` resolving the element's lowered size;
-u8 corpus regression-free). The default `p2→p3` flip is now gated only on D-335's BIGGER remainders (guest↔guest
-stream byte-buffering = Zone-1 rendezvous redesign; sockets/http async = Unit E full). ADR-0193 feature-separation
-(P1-P4, D-462) + D-461 regalloc-origin rework (ADR-0194) both CLOSED (see below). Fronts after: D-335 remainder OR
-`D-209` memory64. **windowsmini gating RESUMED**. Version → `2.0.0-alpha.3`.
+**NEXT (autonomous)**: **D-335 typed multi-byte stream/future marshalling DONE — BOTH directions** (write @630e7141
+stream<u32> 8-byte; read @f2a002f4 stdin stream<u32> → COMPLETED(2); `streamElemByteSize` resolves the element's
+lowered size; u8 corpus regression-free; `test-wasi-p3` + default `zig build test` exit 0). The default `p2→p3`
+flip is now gated only on D-335's BIGGER remainders (guest↔guest stream byte-buffering = Zone-1 rendezvous redesign;
+sockets/http async = Unit E full — each a fresh multi-cycle bundle). ADR-0193 feature-separation (P1-P4, D-462) +
+D-461 regalloc-origin rework (ADR-0194) both CLOSED (see below). Fronts after: D-335 big remainder OR `D-209`
+memory64. **windowsmini gating RESUMED**. Version → `2.0.0-alpha.3`.
 
 ## D-461 regalloc-origin rework (ADR-0153/ADR-0194) — CLOSED Phase I-V 2026-06-16
 
