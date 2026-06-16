@@ -14,16 +14,18 @@
   mapDispatchErr OutOfHeap wiring (`7e527dba`); (3) `readValType` rejected abbreviated bottom reftypes 0x71-0x74
   (nullref/nullexternref/nullfuncref/nullexnref) → BadValType on valid GC modules (`d54b789f`, wasmtime gc/issue-13152).
   All three the synthetic spec suite (362/0) never hit. Lesson `gc-bulk-op-memcpy-aliases-on-self-region-copy`.
-- **Native sweep COMPLETES on ALL 5 proposal buckets** (after a runner fail-detail print fix `9e5122f0`): gc
-  return 174/45 trap 36/0; memory64 2/8, 13/3; tail-call 0/1; function-references 39/35, trap 33/0, invalid 30/0;
-  multi-memory 15/2. My fixes moved gc trap-fails 3→0, return-pass 170→174.
-- **KEY remaining-signal caveat (D-456)**: the native runner does NOT compare ref-typed assert_return results (D-222)
-  → every ref-returning assert counts as a fail. This inflates return-fails (function-references 35, gc ~45) with
-  false-fails, NOT zwasm bugs. The genuine numeric value-mismatches (memory64 8, tail-call 1, multi-memory 2) + any
-  decode/instantiate fails are the real residue.
-- **NEXT (Phase II)**: implement ref-result comparison in the runner (D-456) to get the TRUE signal, then triage the
-  numeric value-mismatches (memory64/tail-call/multi-memory first — smallest, no ref noise). simd via `simd_assert_runner`
-  + C-API-subset triage (canonicalize-nan reinterpret, embenchen env-skip) still pending.
+- **Ref arg+result comparison wired into the native runner** (`7ae5f54c`, D-456 ref-part DONE): parsePayload null-ref
+  args, runtimeToZwasm made total, assert_return compares refs by got's active tag. Committed wasm-3.0-assert corpus
+  stays green (11997 directives, 0 fails).
+- **CLEAN RESULT — native sweep shows 0 value/ref mismatches** across gc/memory64/tail-call/function-references/
+  multi-memory: **every assert the runner can evaluate passes**. After the harness fix function-references fails 35→9,
+  gc 45→42. ALL remaining fails are `FAILsetup`/`FAILtrapSetup`/`UnknownImport` (47+3+9) — fixtures that import host
+  functions the runner doesn't define (+ memory64 `more-than-4gb` = environmental). NO zwasm value/behaviour bug remains
+  in the native buckets beyond the 3 fixed.
+- **NEXT (Phase II)**: native-bucket real-bug extraction is DONE (0 mismatches). Remaining options (lower yield):
+  (a) wire the host imports the FAILsetup fixtures need → re-sweep (likely confirms more passes, unlikely new bugs);
+  (b) run simd via `simd_assert_runner`; (c) C-API-subset triage (canonicalize-nan reinterpret, embenchen env-skip);
+  (d) the top-level 75 core + winch buckets. Then campaign retrospective (V).
 - **Harness**: `scripts/wasmtime_misc_sweep.sh` (C-API) + `scripts/wasmtime_misc_native_sweep.sh` (native GC-capable) +
   distillers `scripts/wast_to_manifest.py` / `scripts/spec_distill/wast_to_native_manifest.py`. Both runners installed.
 

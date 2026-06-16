@@ -1796,7 +1796,8 @@ conventions: |-
       EVERY ref-returning assert counts as a fail. This inflates the wasmtime-misc
       native-sweep return-fail counts (esp. function-references 35, gc ~45) with
       false-fails that are NOT zwasm bugs. To get a TRUE differential signal, the
-      runner needs ref-result comparison (structref/anyref/i31ref/funcref/extern +
-      null vs concrete). Also many remaining fails are UnknownImport (fixtures need
-      host imports the runner doesn't define). Discharge: ref-result compare wired
-      → re-sweep → residual fails are real value/behaviour gaps to fix.
+      runner needs ref-result comparison. RESOLVED (ref-part, 7ae5f54c): null-ref
+      args + externref/null-funcref result compare wired; re-sweep shows 0 value/ref
+      mismatches across all native buckets. REMAINING (downgraded to note): the
+      FAILsetup/UnknownImport fails are fixtures importing host functions the runner
+      doesn't define — wiring those host imports is the only path to running them.
