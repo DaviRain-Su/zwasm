@@ -14,10 +14,22 @@ allocArrayObject (@83c90264: one allocator/one size-arith site; behavior-preserv
 (note): broad regen non-idempotency (~727-file churn under current wasm-tools). Lessons
 `hardcoded-corpus-subset-hides-whole-op-families`.
 
-**NEXT (autonomous)**: continue Phase-17 完成形 surface audits — Zig-API + CLI あるべき論 (industry-standard,
-breaking-allowed), memory-safety spot-checks, OR debt long-tail repayment (31 note: pick genuinely-dischargeable; D-456
-host-import-wiring is larger). Partials all parked/zero-gain (D-293/294 trap-precision complete bar cosmetic; D-330/331
-parked). Stale-doc note: ROADMAP §16.7 D-277 ref ("zwasm.h empty") is stale (header filled) — DONE historical row, left.
+## Active bundle — D-459 local definite-assignment validator gap
+
+- **Bundle-ID**: D-459 (Wasm 3.0 §3.3.1 local definite-assignment) — surfaced by the D-458 local_init corpus add.
+- **Cycles-remaining**: ~2
+- **Continuity-memo**: validator ACCEPTS modules that read a non-defaultable `(ref $t)`/`(ref extern)` local before
+  it's definitely set on all paths → local_init.2 (read-before-set) + local_init.4 (set in `then`, read in `else`)
+  pass validation (should be assert_invalid; emitted SKIP-VALIDATOR-GAP ×2, ratchet-exempt ADR-0192 @baseline 24).
+  Fix = definite-assignment dataflow in validator.zig: per-local "initialized" bitset in frame state; local.set/tee
+  mark init; block/if-else/loop-end/br joins INTERSECT merging paths' init-sets (unreachable paths don't constrain);
+  local.get of a non-defaultable local checks init. Defaultable locals (i32/.../nullable ref) keep implicit default —
+  no tracking. Correctness-first: the 4 assert_invalid + 3 valid local_init.wast cases are the characterization net.
+- **Exit-condition**: local_init.2 + .4 reject (SKIP-VALIDATOR-GAP ×2 → 0) + the 3 valid cases stay green + GC/2.0
+  suites unaffected; ratchet baseline drops back to 22.
+
+**Other NEXT options if bundle stalls**: Zig-API/CLI surface audits; debt long-tail (D-456 host-import-wiring larger;
+partials parked/zero-gain). Stale-doc note: ROADMAP §16.7 D-277 ("zwasm.h empty") stale — DONE historical row, left.
 
 ## Planned future phase (USER-requested 2026-06-16)
 

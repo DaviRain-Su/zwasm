@@ -157,3 +157,23 @@ entries:
       direct remedy for the hard-coded-allowlist blind spot (lesson
       `hardcoded-corpus-subset-hides-whole-op-families`).
     exempt: ADR-0192
+
+  - commit: "D-458 local_init add — 2 SKIP-VALIDATOR-GAP surfaced (D-459)"
+    timestamp: "2026-06-16T01:00:00Z"
+    non_simd_skip_impl: 0
+    simd_skip_impl: 271
+    total: 271
+    runtime_debt_trackable: 24
+    runtime_adr_required: 0
+    runtime_internal: 0
+    note: |
+      +2 runtime_debt_trackable (22→24) from the D-458 local_init corpus add:
+      local_init.2.wasm (read non-defaultable `(ref extern)` local before set) +
+      local_init.4.wasm (set in `then`, read in `else`) are assert_invalid modules
+      the validator does NOT yet reject — Wasm 3.0 §3.3.1 local definite-assignment
+      is unimplemented. Emitted as SKIP-VALIDATOR-GAP (debt-trackable) rather than a
+      false PASS-as-valid. Tracked as D-459 (focused validator-dataflow bundle next
+      cycle); discharge flips these 2 back to assert_invalid PASS (skip → 0). The
+      rise is the corpus-completeness campaign (ADR-0192) surfacing a real gap — the
+      same transparent-skip-over-silent-omission posture as the SIMD/2.0 corpus adds.
+    exempt: ADR-0192
