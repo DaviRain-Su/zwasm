@@ -366,6 +366,9 @@ pub const vregClassByDef = vreg_class_mod.vregClassByDef;
 // ============================================================
 
 const testing = std.testing;
+// D-461 rework: skip helper for the adversarial Phase-IV fix-verifier below
+// (test-exempt region per zone_check D-017 — after the `testing` decl).
+const skip = @import("../../../test_support/skip.zig");
 
 fn freshFunc() ZirFunc {
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{} };
@@ -536,6 +539,83 @@ test "Allocation.slot: spill offset is class-agnostic (shared frame origin = max
     const alloc: Allocation = .{ .slots = &slots, .n_slots = 15 };
     try testing.expectEqual(Slot{ .spill = 0 }, alloc.slot(0, .gpr));
     try testing.expectEqual(Slot{ .spill = (14 - 8) * 16 }, alloc.slot(1, .fpr));
+}
+
+// ============================================================
+// D-461 rework Phase II (ADR-0153) — characterization of the
+// `slot()`-THROUGH-`spill_offsets` resolve path. Before this, every
+// slot()/spillBytes test used the NULL-spill_offsets fallback formula;
+// the populated-array branch (regalloc.zig:221 `offsets[id - gpr]`, the
+// exact site of the x86_64 FP-spill OOB) had ZERO direct unit coverage.
+// These pin the WORKING contract (sizing origin == resolve field) so the
+// arch-parameterization rework cannot silently regress it. The DIVERGENT
+// origin case (x86_64 field=4 vs sized origin=8) is the bug — its red→green
+// lands in Phase IV once the design fixes the origin accounting.
+// ============================================================
+
+test "D-461 char: slot() through populated spill_offsets returns the array entry (GPR, consistent origin)" {
+    // spill_offsets covers spill ids [8..13] (origin = max_reg_slots_gpr = 8);
+    // a v128-aware compute would emit these 16-byte-strided byte offsets.
+    const offsets = [_]u32{ 0, 16, 32, 48, 64, 80 };
+    const slots = [_]u16{ 8, 10, 13 };
+    const alloc: Allocation = .{
+        .slots = &slots,
+        .n_slots = 14,
+        .spill_offsets = &offsets,
+    };
+    // id 8 → offsets[8-8]=offsets[0]; id 10 → offsets[2]; id 13 → offsets[5].
+    try testing.expectEqual(Slot{ .spill = 0 }, alloc.slot(0, .gpr));
+    try testing.expectEqual(Slot{ .spill = 32 }, alloc.slot(1, .gpr));
+    try testing.expectEqual(Slot{ .spill = 80 }, alloc.slot(2, .gpr));
+}
+
+test "D-461 char: slot() through spill_offsets for FPR spill past the FP boundary (consistent origin)" {
+    // Default fp boundary = 13; ids < 13 are FP registers, id >= 13 spills.
+    // The spill_offsets index is still GPR-origin (id - 8), so the FP spill
+    // at id 13 lands at offsets[5]. This is the class-agnostic shared frame.
+    const offsets = [_]u32{ 0, 16, 32, 48, 64, 80 };
+    const slots = [_]u16{ 12, 13 };
+    const alloc: Allocation = .{
+        .slots = &slots,
+        .n_slots = 14,
+        .spill_offsets = &offsets,
+    };
+    try testing.expectEqual(Slot{ .reg = 12 }, alloc.slot(0, .fpr)); // 12 < 13 → register
+    try testing.expectEqual(Slot{ .spill = 80 }, alloc.slot(1, .fpr)); // 13 → offsets[13-8]=offsets[5]
+}
+
+test "D-461 char: spillBytes through spill_offsets = align_up(last + 16, 16)" {
+    const offsets = [_]u32{ 0, 16, 32 };
+    const slots = [_]u16{ 8, 9, 10 };
+    const alloc: Allocation = .{
+        .slots = &slots,
+        .n_slots = 11,
+        .spill_offsets = &offsets,
+    };
+    // last offset 32 + 16 = 48, already 16-aligned.
+    try testing.expectEqual(@as(u32, 48), alloc.spillBytes());
+}
+
+test "D-461 ADVERSARIAL (Phase IV fix-verifier): x86_64 divergent-origin FP spill must NOT OOB" {
+    // The bug: x86_64 sets max_reg_slots_gpr=4 (its GPR pool) but `spill_offsets`
+    // is SIZED with the hardcoded origin 8 (max_reg_slots_gpr_default). So an FP
+    // spill at slot id 9 currently resolves `offsets[9 - 4] = offsets[5]` → OOB on
+    // a len-5 array (the exact ground-truth repro: gpr=4 fp=6 n_slots=13 len=5).
+    // The array was sized for origin 8, so the correct index is `id - 8 = 1`.
+    // CURRENT code OOBs here → gated until the arch-parameterization rework makes
+    // sizing-origin and resolve-origin agree. Un-gate in Phase IV.
+    if (true) return skip.blocker(.@"D-461");
+    const offsets = [_]u32{ 0, 16, 32, 48, 64 }; // sized n_slots(13) - origin(8) = 5
+    const slots = [_]u16{9};
+    const alloc: Allocation = .{
+        .slots = &slots,
+        .n_slots = 13,
+        .max_reg_slots_gpr = 4, // x86_64 GPR pool (the divergence)
+        .max_reg_slots_fp = 6, // x86_64 XMM pool
+        .spill_offsets = &offsets,
+    };
+    // Post-fix: index by the SIZING origin (8), so id 9 → offsets[1] = 16, in-bounds.
+    try testing.expectEqual(Slot{ .spill = 16 }, alloc.slot(0, .fpr));
 }
 
 // ============================================================
