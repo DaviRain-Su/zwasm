@@ -1,0 +1,28 @@
+module simd_store.0.wasm
+assert_return v128.store_i8x16 () -> v128:000102030405060708090a0b0c0d0e0f
+assert_return v128.store_i16x8 () -> v128:00000100020003000400050006000700
+assert_return v128.store_i16x8_2 () -> v128:39303930393039303930393039303930
+assert_return v128.store_i16x8_3 () -> v128:34123412341234123412341234123412
+assert_return v128.store_i32x4 () -> v128:00000000010000000200000003000000
+assert_return v128.store_i32x4_2 () -> v128:15cd5b0715cd5b0715cd5b0715cd5b07
+assert_return v128.store_i32x4_3 () -> v128:78563412785634127856341278563412
+assert_return v128.store_f32x4 () -> v128:000000000000803f0000004000004040
+module simd_store.1.wasm
+assert_return as-block-value () -> ()
+assert_return as-loop-value () -> ()
+assert_return as-br-value () -> ()
+assert_return as-br_if-value () -> ()
+assert_return as-br_if-value-cond () -> ()
+assert_return as-br_table-value () -> ()
+assert_return as-return-value () -> ()
+assert_return as-if-then () -> ()
+assert_return as-if-else () -> ()
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+assert_invalid simd_store.5.wasm
+assert_invalid simd_store.6.wasm
+assert_invalid simd_store.7.wasm
+assert_invalid simd_store.8.wasm
+assert_invalid simd_store.9.wasm
+assert_invalid simd_store.10.wasm

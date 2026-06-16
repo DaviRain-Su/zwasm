@@ -1,0 +1,185 @@
+module simd_splat.0.wasm
+assert_return i8x16.splat i32:0 -> v128:00000000000000000000000000000000
+assert_return i8x16.splat i32:5 -> v128:05050505050505050505050505050505
+assert_return i8x16.splat i32:4294967291 -> v128:fbfbfbfbfbfbfbfbfbfbfbfbfbfbfbfb
+assert_return i8x16.splat i32:257 -> v128:01010101010101010101010101010101
+assert_return i8x16.splat i32:255 -> v128:ffffffffffffffffffffffffffffffff
+assert_return i8x16.splat i32:4294967168 -> v128:80808080808080808080808080808080
+assert_return i8x16.splat i32:127 -> v128:7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f
+assert_return i8x16.splat i32:4294967167 -> v128:7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f
+assert_return i8x16.splat i32:128 -> v128:80808080808080808080808080808080
+assert_return i8x16.splat i32:65407 -> v128:7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f7f
+assert_return i8x16.splat i32:128 -> v128:80808080808080808080808080808080
+assert_return i8x16.splat i32:171 -> v128:abababababababababababababababab
+assert_return i16x8.splat i32:0 -> v128:00000000000000000000000000000000
+assert_return i16x8.splat i32:5 -> v128:05000500050005000500050005000500
+assert_return i16x8.splat i32:4294967291 -> v128:fbfffbfffbfffbfffbfffbfffbfffbff
+assert_return i16x8.splat i32:65537 -> v128:01000100010001000100010001000100
+assert_return i16x8.splat i32:65535 -> v128:ffffffffffffffffffffffffffffffff
+assert_return i16x8.splat i32:4294934528 -> v128:00800080008000800080008000800080
+assert_return i16x8.splat i32:32767 -> v128:ff7fff7fff7fff7fff7fff7fff7fff7f
+assert_return i16x8.splat i32:4294934527 -> v128:ff7fff7fff7fff7fff7fff7fff7fff7f
+assert_return i16x8.splat i32:32768 -> v128:00800080008000800080008000800080
+assert_return i16x8.splat i32:4294934527 -> v128:ff7fff7fff7fff7fff7fff7fff7fff7f
+assert_return i16x8.splat i32:32768 -> v128:00800080008000800080008000800080
+assert_return i16x8.splat i32:43981 -> v128:cdabcdabcdabcdabcdabcdabcdabcdab
+assert_return i16x8.splat i32:12345 -> v128:39303930393039303930393039303930
+assert_return i16x8.splat i32:4660 -> v128:34123412341234123412341234123412
+assert_return i32x4.splat i32:0 -> v128:00000000000000000000000000000000
+assert_return i32x4.splat i32:5 -> v128:05000000050000000500000005000000
+assert_return i32x4.splat i32:4294967291 -> v128:fbfffffffbfffffffbfffffffbffffff
+assert_return i32x4.splat i32:4294967295 -> v128:ffffffffffffffffffffffffffffffff
+assert_return i32x4.splat i32:4294967295 -> v128:ffffffffffffffffffffffffffffffff
+assert_return i32x4.splat i32:2147483648 -> v128:00000080000000800000008000000080
+assert_return i32x4.splat i32:2147483647 -> v128:ffffff7fffffff7fffffff7fffffff7f
+assert_return i32x4.splat i32:2147483648 -> v128:00000080000000800000008000000080
+assert_return i32x4.splat i32:1234567890 -> v128:d2029649d2029649d2029649d2029649
+assert_return i32x4.splat i32:305419896 -> v128:78563412785634127856341278563412
+skip-impl unsupported-shape ('f32',)->('v128',) f32x4.splat
+skip-impl unsupported-shape ('f32',)->('v128',) f32x4.splat
+skip-impl unsupported-shape ('f32',)->('v128',) f32x4.splat
+skip-impl unsupported-shape ('f32',)->('v128',) f32x4.splat
+skip-impl unsupported-shape ('f32',)->('v128',) f32x4.splat
+skip-impl unsupported-shape ('f32',)->('v128',) f32x4.splat
+skip-impl unsupported-shape ('f32',)->('v128',) f32x4.splat
+skip-impl unsupported-shape ('f32',)->('v128',) f32x4.splat
+skip-impl unsupported-shape ('f32',)->('v128',) f32x4.splat
+skip-impl unsupported-shape ('f32',)->('v128',) f32x4.splat
+skip-impl unsupported-shape ('f32',)->('v128',) f32x4.splat
+skip-impl unsupported-shape ('f32',)->('v128',) f32x4.splat
+skip-impl unsupported-shape ('f32',)->('v128',) f32x4.splat
+skip-impl unsupported-shape ('f32',)->('v128',) f32x4.splat
+skip-impl unsupported-shape ('f32',)->('v128',) f32x4.splat
+skip-impl unsupported-shape ('f32',)->('v128',) f32x4.splat
+skip-impl unsupported-shape ('f32',)->('v128',) f32x4.splat
+skip-impl unsupported-shape ('f32',)->('v128',) f32x4.splat
+skip-impl unsupported-shape ('f32',)->('v128',) f32x4.splat
+skip-impl unsupported-shape ('f32',)->('v128',) f32x4.splat
+skip-impl unsupported-shape ('f32',)->('v128',) f32x4.splat
+skip-impl unsupported-shape ('f32',)->('v128',) f32x4.splat
+skip-impl unsupported-shape ('i64',)->('v128',) i64x2.splat
+skip-impl unsupported-shape ('i64',)->('v128',) i64x2.splat
+skip-impl unsupported-shape ('i64',)->('v128',) i64x2.splat
+skip-impl unsupported-shape ('i64',)->('v128',) i64x2.splat
+skip-impl unsupported-shape ('i64',)->('v128',) i64x2.splat
+skip-impl unsupported-shape ('i64',)->('v128',) i64x2.splat
+skip-impl unsupported-shape ('i64',)->('v128',) i64x2.splat
+skip-impl unsupported-shape ('i64',)->('v128',) i64x2.splat
+skip-impl unsupported-shape ('i64',)->('v128',) i64x2.splat
+skip-impl unsupported-shape ('i64',)->('v128',) i64x2.splat
+skip-impl unsupported-shape ('i64',)->('v128',) i64x2.splat
+skip-impl unsupported-shape ('i64',)->('v128',) i64x2.splat
+skip-impl unsupported-shape ('i64',)->('v128',) i64x2.splat
+skip-impl unsupported-shape ('i64',)->('v128',) i64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-impl unsupported-shape ('f64',)->('v128',) f64x2.splat
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+assert_invalid simd_splat.2.wasm
+assert_invalid simd_splat.3.wasm
+assert_invalid simd_splat.4.wasm
+assert_invalid simd_splat.5.wasm
+assert_invalid simd_splat.6.wasm
+assert_invalid simd_splat.7.wasm
+assert_invalid simd_splat.8.wasm
+assert_invalid simd_splat.9.wasm
+assert_invalid simd_splat.10.wasm
+assert_invalid simd_splat.11.wasm
+assert_invalid simd_splat.12.wasm
+assert_invalid simd_splat.13.wasm
+assert_invalid simd_splat.14.wasm
+assert_invalid simd_splat.15.wasm
+assert_invalid simd_splat.16.wasm
+assert_invalid simd_splat.17.wasm
+module simd_splat.18.wasm
+assert_return as-v128_store-operand-1 i32:1 -> v128:01010101010101010101010101010101
+assert_return as-v128_store-operand-2 i32:256 -> v128:00010001000100010001000100010001
+assert_return as-v128_store-operand-3 i32:4294967295 -> v128:ffffffffffffffffffffffffffffffff
+skip-impl unsupported-shape ('i64',)->('v128',) as-v128_store-operand-4
+skip-impl unsupported-shape ('f64',)->('v128',) as-v128_store-operand-5
+module simd_splat.19.wasm
+assert_return as-i8x16_extract_lane_s-operand-first i32:42 -> i32:42
+assert_return as-i8x16_extract_lane_s-operand-last i32:4294967254 -> i32:4294967254
+assert_return as-i16x8_extract_lane_s-operand-first i32:4294934527 -> i32:32767
+assert_return as-i16x8_extract_lane_s-operand-last i32:32768 -> i32:4294934528
+assert_return as-i32x4_extract_lane_s-operand-first i32:2147483647 -> i32:2147483647
+assert_return as-i32x4_extract_lane_s-operand-last i32:2147483648 -> i32:2147483648
+skip-impl unsupported-shape ('f32',)->('f32',) as-f32x4_extract_lane_s-operand-first
+skip-impl unsupported-shape ('f32',)->('f32',) as-f32x4_extract_lane_s-operand-last
+skip-impl unsupported-shape ('i32', 'i32')->('v128',) as-v8x16_swizzle-operands
+skip-impl unsupported-shape ('i64',)->('i64',) as-i64x2_extract_lane-operand-last
+skip-impl unsupported-shape ('i64',)->('i64',) as-i64x2_extract_lane-operand-first
+skip-impl unsupported-shape ('f64',)->('f64',) as-f64x2_extract_lane-operand-first
+skip-impl unsupported-shape ('f64',)->('f64',) as-f64x2_extract_lane-operand-last
+skip-impl unsupported-shape ('i32', 'i32', 'i32')->('v128',) as-i8x16_add_sub-operands
+skip-impl unsupported-shape ('i32', 'i32', 'i32', 'i32')->('v128',) as-i16x8_add_sub_mul-operands
+skip-impl unsupported-shape ('i32', 'i32', 'i32', 'i32')->('v128',) as-i32x4_add_sub_mul-operands
+skip-impl unsupported-shape ('i64', 'i64', 'i64', 'i64')->('v128',) as-i64x2_add_sub_mul-operands
+skip-impl unsupported-shape ('f64', 'f64', 'f64', 'f64')->('v128',) as-f64x2_add_sub_mul-operands
+skip-impl unsupported-shape ('i32', 'i32')->('v128',) as-i8x16_add_sat_s-operands
+skip-impl unsupported-shape ('i32', 'i32')->('v128',) as-i16x8_add_sat_s-operands
+skip-impl unsupported-shape ('i32', 'i32')->('v128',) as-i8x16_sub_sat_u-operands
+skip-impl unsupported-shape ('i32', 'i32')->('v128',) as-i16x8_sub_sat_u-operands
+skip-impl unsupported-shape ('i32', 'i32')->('v128',) as-i8x16_shr_s-operand
+skip-impl unsupported-shape ('i32', 'i32')->('v128',) as-i16x8_shr_s-operand
+skip-impl unsupported-shape ('i32', 'i32')->('v128',) as-i32x4_shr_s-operand
+skip-impl unsupported-shape ('i32', 'i32')->('v128',) as-v128_and-operands
+skip-impl unsupported-shape ('i32', 'i32')->('v128',) as-v128_or-operands
+skip-impl unsupported-shape ('i32', 'i32')->('v128',) as-v128_xor-operands
+assert_return as-i8x16_all_true-operand i32:0 -> i32:0
+assert_return as-i16x8_all_true-operand i32:65535 -> i32:1
+assert_return as-i32x4_all_true-operand1 i32:4042322160 -> i32:1
+skip-impl unsupported-shape ('i64',)->('i32',) as-i32x4_all_true-operand2
+skip-impl unsupported-shape ('i32', 'i32')->('v128',) as-i8x16_eq-operands
+skip-impl unsupported-shape ('i32', 'i32')->('v128',) as-i16x8_eq-operands
+skip-impl unsupported-shape ('i32', 'i32')->('v128',) as-i32x4_eq-operands1
+skip-impl unsupported-shape ('f32', 'f32')->('v128',) as-f32x4_eq-operands
+skip-impl unsupported-shape ('i64', 'i64')->('v128',) as-i32x4_eq-operands2
+skip-impl unsupported-shape ('f64', 'f64')->('v128',) as-f64x2_eq-operands
+skip-impl unsupported-shape ('f32',)->('v128',) as-f32x4_abs-operand
+skip-impl unsupported-shape ('f32', 'f32')->('v128',) as-f32x4_min-operands
+skip-impl unsupported-shape ('f32', 'f32')->('v128',) as-f32x4_div-operands
+assert_return as-f32x4_convert_s_i32x4-operand i32:12345 -> v128:00e4404600e4404600e4404600e44046
+skip-impl unsupported-shape ('f32',)->('v128',) as-i32x4_trunc_s_f32x4_sat-operand
+module simd_splat.20.wasm
+assert_return as-br-value1 i32:171 -> v128:abababababababababababababababab
+assert_return as-return-value1 i32:43981 -> v128:cdabcdabcdabcdabcdabcdabcdabcdab
+assert_return as-local_set-value1 i32:65536 -> v128:00000100000001000000010000000100
+skip-impl unsupported-shape ('f32',)->('v128',) as-global_set-value1
+skip-impl unsupported-shape ('i64',)->('v128',) as-br-value2
+skip-impl unsupported-shape ('i64',)->('v128',) as-return-value2
+skip-impl unsupported-shape ('i64',)->('v128',) as-local_set-value2
+skip-impl unsupported-shape ('f64',)->('v128',) as-global_set-value2
+assert_invalid simd_splat.21.wasm
+assert_invalid simd_splat.22.wasm
+assert_invalid simd_splat.23.wasm
+assert_invalid simd_splat.24.wasm
+assert_invalid simd_splat.25.wasm
+assert_invalid simd_splat.26.wasm

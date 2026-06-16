@@ -1,0 +1,52 @@
+module simd_store8_lane.0.wasm
+skip-impl v128-param-pending v128.store8_lane_0
+skip-impl v128-param-pending v128.store8_lane_1
+skip-impl v128-param-pending v128.store8_lane_2
+skip-impl v128-param-pending v128.store8_lane_3
+skip-impl v128-param-pending v128.store8_lane_4
+skip-impl v128-param-pending v128.store8_lane_5
+skip-impl v128-param-pending v128.store8_lane_6
+skip-impl v128-param-pending v128.store8_lane_7
+skip-impl v128-param-pending v128.store8_lane_8
+skip-impl v128-param-pending v128.store8_lane_9
+skip-impl v128-param-pending v128.store8_lane_10
+skip-impl v128-param-pending v128.store8_lane_11
+skip-impl v128-param-pending v128.store8_lane_12
+skip-impl v128-param-pending v128.store8_lane_13
+skip-impl v128-param-pending v128.store8_lane_14
+skip-impl v128-param-pending v128.store8_lane_15
+assert_return v128.store8_lane_0_offset_0 v128:00000000000000000000000000000000 -> i64:0
+assert_return v128.store8_lane_1_offset_1 v128:00010000000000000000000000000000 -> i64:1
+assert_return v128.store8_lane_2_offset_2 v128:00000200000000000000000000000000 -> i64:2
+assert_return v128.store8_lane_3_offset_3 v128:00000003000000000000000000000000 -> i64:3
+assert_return v128.store8_lane_4_offset_4 v128:00000000040000000000000000000000 -> i64:4
+assert_return v128.store8_lane_5_offset_5 v128:00000000000500000000000000000000 -> i64:5
+assert_return v128.store8_lane_6_offset_6 v128:00000000000006000000000000000000 -> i64:6
+assert_return v128.store8_lane_7_offset_7 v128:00000000000000070000000000000000 -> i64:7
+assert_return v128.store8_lane_8_offset_8 v128:00000000000000000800000000000000 -> i64:8
+assert_return v128.store8_lane_9_offset_9 v128:00000000000000000009000000000000 -> i64:9
+assert_return v128.store8_lane_10_offset_10 v128:000000000000000000000a0000000000 -> i64:10
+assert_return v128.store8_lane_11_offset_11 v128:00000000000000000000000b00000000 -> i64:11
+assert_return v128.store8_lane_12_offset_12 v128:0000000000000000000000000c000000 -> i64:12
+assert_return v128.store8_lane_13_offset_13 v128:000000000000000000000000000d0000 -> i64:13
+assert_return v128.store8_lane_14_offset_14 v128:00000000000000000000000000000e00 -> i64:14
+assert_return v128.store8_lane_15_offset_15 v128:0000000000000000000000000000000f -> i64:15
+skip-impl v128-param-pending v128.store8_lane_0_align_1
+skip-impl v128-param-pending v128.store8_lane_1_align_1
+skip-impl v128-param-pending v128.store8_lane_2_align_1
+skip-impl v128-param-pending v128.store8_lane_3_align_1
+skip-impl v128-param-pending v128.store8_lane_4_align_1
+skip-impl v128-param-pending v128.store8_lane_5_align_1
+skip-impl v128-param-pending v128.store8_lane_6_align_1
+skip-impl v128-param-pending v128.store8_lane_7_align_1
+skip-impl v128-param-pending v128.store8_lane_8_align_1
+skip-impl v128-param-pending v128.store8_lane_9_align_1
+skip-impl v128-param-pending v128.store8_lane_10_align_1
+skip-impl v128-param-pending v128.store8_lane_11_align_1
+skip-impl v128-param-pending v128.store8_lane_12_align_1
+skip-impl v128-param-pending v128.store8_lane_13_align_1
+skip-impl v128-param-pending v128.store8_lane_14_align_1
+skip-impl v128-param-pending v128.store8_lane_15_align_1
+assert_invalid simd_store8_lane.1.wasm
+assert_invalid simd_store8_lane.2.wasm
+assert_invalid simd_store8_lane.3.wasm

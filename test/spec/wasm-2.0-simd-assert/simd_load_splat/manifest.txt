@@ -1,0 +1,126 @@
+module simd_load_splat.0.wasm
+assert_return v128.load8_splat i32:0 -> v128:00000000000000000000000000000000
+assert_return v128.load8_splat i32:1 -> v128:01010101010101010101010101010101
+assert_return v128.load8_splat i32:2 -> v128:02020202020202020202020202020202
+assert_return v128.load8_splat i32:3 -> v128:03030303030303030303030303030303
+assert_return v128.load8_splat i32:65535 -> v128:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f
+assert_return v128.load16_splat i32:4 -> v128:04050405040504050405040504050405
+assert_return v128.load16_splat i32:5 -> v128:05060506050605060506050605060506
+assert_return v128.load16_splat i32:6 -> v128:06070607060706070607060706070607
+assert_return v128.load16_splat i32:7 -> v128:07080708070807080708070807080708
+assert_return v128.load16_splat i32:65534 -> v128:1e1f1e1f1e1f1e1f1e1f1e1f1e1f1e1f
+assert_return v128.load32_splat i32:8 -> v128:08090a0b08090a0b08090a0b08090a0b
+assert_return v128.load32_splat i32:9 -> v128:090a0b0c090a0b0c090a0b0c090a0b0c
+assert_return v128.load32_splat i32:10 -> v128:0a0b0c0d0a0b0c0d0a0b0c0d0a0b0c0d
+assert_return v128.load32_splat i32:11 -> v128:0b0c0d0e0b0c0d0e0b0c0d0e0b0c0d0e
+assert_return v128.load32_splat i32:65532 -> v128:1c1d1e1f1c1d1e1f1c1d1e1f1c1d1e1f
+assert_return v128.load64_splat i32:12 -> v128:0c0d0e0f000000000c0d0e0f00000000
+assert_return v128.load64_splat i32:13 -> v128:0d0e0f00000000000d0e0f0000000000
+assert_return v128.load64_splat i32:14 -> v128:0e0f0000000000000e0f000000000000
+assert_return v128.load64_splat i32:15 -> v128:0f000000000000000f00000000000000
+assert_return v128.load64_splat i32:65528 -> v128:18191a1b1c1d1e1f18191a1b1c1d1e1f
+assert_return v8x16.offset0 i32:0 -> v128:00000000000000000000000000000000
+assert_return v8x16.align1 i32:0 -> v128:00000000000000000000000000000000
+assert_return v8x16.offset1_align1 i32:0 -> v128:01010101010101010101010101010101
+assert_return v8x16.offset2_align1 i32:0 -> v128:02020202020202020202020202020202
+assert_return v8x16.offset15_align1 i32:0 -> v128:0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f
+assert_return v8x16.offset0 i32:1 -> v128:01010101010101010101010101010101
+assert_return v8x16.align1 i32:1 -> v128:01010101010101010101010101010101
+assert_return v8x16.offset1_align1 i32:1 -> v128:02020202020202020202020202020202
+assert_return v8x16.offset2_align1 i32:1 -> v128:03030303030303030303030303030303
+assert_return v8x16.offset15_align1 i32:1 -> v128:00000000000000000000000000000000
+assert_return v8x16.offset0 i32:65535 -> v128:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f
+assert_return v8x16.align1 i32:65535 -> v128:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f
+assert_return v16x8.offset0 i32:0 -> v128:00010001000100010001000100010001
+assert_return v16x8.align1 i32:0 -> v128:00010001000100010001000100010001
+assert_return v16x8.offset1_align1 i32:0 -> v128:01020102010201020102010201020102
+assert_return v16x8.offset2_align1 i32:0 -> v128:02030203020302030203020302030203
+assert_return v16x8.offset15_align2 i32:0 -> v128:0f000f000f000f000f000f000f000f00
+assert_return v16x8.offset0 i32:1 -> v128:01020102010201020102010201020102
+assert_return v16x8.align1 i32:1 -> v128:01020102010201020102010201020102
+assert_return v16x8.offset1_align1 i32:1 -> v128:02030203020302030203020302030203
+assert_return v16x8.offset2_align1 i32:1 -> v128:03040304030403040304030403040304
+assert_return v16x8.offset15_align2 i32:1 -> v128:00000000000000000000000000000000
+assert_return v16x8.offset0 i32:65534 -> v128:1e1f1e1f1e1f1e1f1e1f1e1f1e1f1e1f
+assert_return v16x8.align1 i32:65534 -> v128:1e1f1e1f1e1f1e1f1e1f1e1f1e1f1e1f
+assert_return v32x4.offset0 i32:0 -> v128:00010203000102030001020300010203
+assert_return v32x4.align1 i32:0 -> v128:00010203000102030001020300010203
+assert_return v32x4.offset1_align1 i32:0 -> v128:01020304010203040102030401020304
+assert_return v32x4.offset2_align2 i32:0 -> v128:02030405020304050203040502030405
+assert_return v32x4.offset15_align4 i32:0 -> v128:0f0000000f0000000f0000000f000000
+assert_return v32x4.offset0 i32:1 -> v128:01020304010203040102030401020304
+assert_return v32x4.align1 i32:1 -> v128:01020304010203040102030401020304
+assert_return v32x4.offset1_align1 i32:1 -> v128:02030405020304050203040502030405
+assert_return v32x4.offset2_align2 i32:1 -> v128:03040506030405060304050603040506
+assert_return v32x4.offset15_align4 i32:1 -> v128:00000000000000000000000000000000
+assert_return v32x4.offset0 i32:65532 -> v128:1c1d1e1f1c1d1e1f1c1d1e1f1c1d1e1f
+assert_return v32x4.align1 i32:65532 -> v128:1c1d1e1f1c1d1e1f1c1d1e1f1c1d1e1f
+assert_return v64x2.offset0 i32:0 -> v128:00010203040506070001020304050607
+assert_return v64x2.align1 i32:0 -> v128:00010203040506070001020304050607
+assert_return v64x2.offset1_align2 i32:0 -> v128:01020304050607080102030405060708
+assert_return v64x2.offset2_align4 i32:0 -> v128:02030405060708090203040506070809
+assert_return v64x2.offset15_align8 i32:0 -> v128:0f000000000000000f00000000000000
+assert_return v64x2.offset0 i32:1 -> v128:01020304050607080102030405060708
+assert_return v64x2.align1 i32:1 -> v128:01020304050607080102030405060708
+assert_return v64x2.offset1_align2 i32:1 -> v128:02030405060708090203040506070809
+assert_return v64x2.offset2_align4 i32:1 -> v128:030405060708090a030405060708090a
+assert_return v64x2.offset15_align8 i32:1 -> v128:00000000000000000000000000000000
+assert_return v64x2.offset0 i32:65528 -> v128:18191a1b1c1d1e1f18191a1b1c1d1e1f
+assert_return v64x2.align1 i32:65528 -> v128:18191a1b1c1d1e1f18191a1b1c1d1e1f
+assert_trap v128.load8_splat i32:4294967295 -> ()
+assert_trap v128.load16_splat i32:4294967295 -> ()
+assert_trap v128.load32_splat i32:4294967295 -> ()
+assert_trap v128.load64_splat i32:4294967295 -> ()
+assert_trap v128.load8_splat i32:65536 -> ()
+assert_trap v128.load16_splat i32:65535 -> ()
+assert_trap v128.load32_splat i32:65533 -> ()
+assert_trap v128.load64_splat i32:65529 -> ()
+assert_trap v8x16.offset1_align1 i32:65535 -> ()
+assert_trap v8x16.offset2_align1 i32:65535 -> ()
+assert_trap v8x16.offset15_align1 i32:65535 -> ()
+assert_trap v16x8.offset1_align1 i32:65534 -> ()
+assert_trap v16x8.offset2_align1 i32:65534 -> ()
+assert_trap v16x8.offset15_align2 i32:65534 -> ()
+assert_trap v32x4.offset1_align1 i32:65532 -> ()
+assert_trap v32x4.offset2_align2 i32:65532 -> ()
+assert_trap v32x4.offset15_align4 i32:65532 -> ()
+assert_trap v64x2.offset1_align2 i32:65528 -> ()
+assert_trap v64x2.offset2_align4 i32:65528 -> ()
+assert_trap v64x2.offset15_align8 i32:65528 -> ()
+assert_trap v8x16.offset1_align1 i32:4294967295 -> ()
+assert_trap v16x8.offset1_align1 i32:4294967295 -> ()
+assert_trap v32x4.offset1_align1 i32:4294967295 -> ()
+assert_trap v64x2.offset1_align2 i32:4294967295 -> ()
+assert_trap v8x16.offset65536 i32:0 -> ()
+assert_trap v16x8.offset65535 i32:0 -> ()
+assert_trap v32x4.offset65533 i32:0 -> ()
+assert_trap v64x2.offset65529 i32:0 -> ()
+assert_trap v8x16.offset65536 i32:1 -> ()
+assert_trap v16x8.offset65535 i32:1 -> ()
+assert_trap v32x4.offset65533 i32:1 -> ()
+assert_trap v64x2.offset65529 i32:1 -> ()
+module simd_load_splat.1.wasm
+assert_return v128.load8_splat-in-block () -> v128:00000000000000000000000000000000
+assert_return v128.load16_splat-in-block () -> v128:01020102010201020102010201020102
+assert_return v128.load32_splat-in-block () -> v128:02030405020304050203040502030405
+assert_return v128.load64_splat-in-block () -> v128:090a000000000000090a000000000000
+assert_return v128.load8_splat-as-br-value () -> v128:03030303030303030303030303030303
+assert_return v128.load16_splat-as-br-value () -> v128:04050405040504050405040504050405
+assert_return v128.load32_splat-as-br-value () -> v128:05060708050607080506070805060708
+assert_return v128.load64_splat-as-br-value () -> v128:0a000000000000000a00000000000000
+assert_return v128.load8_splat-extract_lane_s-operand () -> i32:6
+assert_return v128.load16_splat-extract_lane_s-operand () -> i32:7
+assert_return v128.load32_splat-extract_lane_s-operand () -> i32:8
+assert_return v128.load64_splat-extract_lane_s-operand () -> i32:0
+assert_invalid simd_load_splat.2.wasm
+assert_invalid simd_load_splat.3.wasm
+assert_invalid simd_load_splat.4.wasm
+assert_invalid simd_load_splat.5.wasm
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+assert_invalid simd_load_splat.10.wasm
+assert_invalid simd_load_splat.11.wasm
+assert_invalid simd_load_splat.12.wasm
+assert_invalid simd_load_splat.13.wasm

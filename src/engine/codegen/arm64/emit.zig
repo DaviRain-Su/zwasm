@@ -2111,6 +2111,31 @@ pub fn compile(
             .@"f64x2.convert_low_i32x4_s" => try op_simd_float.emitF64x2ConvertLowI32x4S(&ctx, &ins),
             .@"i32x4.trunc_sat_f32x4_s" => try op_simd_float.emitI32x4TruncSatF32x4S(&ctx, &ins),
             .@"i32x4.trunc_sat_f32x4_u" => try op_simd_float.emitI32x4TruncSatF32x4U(&ctx, &ins),
+            // Remaining float conversions + rounding + narrow + i64x2.extmul
+            // (D-457 systemic close): handlers complete on both arches, only the
+            // dispatch was unwired — the old corpus never had simd_conversions /
+            // *_rounding / simd_i64x2_extmul_i32x4, so the gap stayed hidden.
+            .@"f32x4.demote_f64x2_zero" => try op_simd_float.emitF32x4DemoteF64x2Zero(&ctx, &ins),
+            .@"f64x2.promote_low_f32x4" => try op_simd_float.emitF64x2PromoteLowF32x4(&ctx, &ins),
+            // §9.6/9.6-g-vi — FP rounding (FRINTP/M/Z/N).
+            .@"f32x4.ceil" => try op_simd_float.emitF32x4Ceil(&ctx, &ins),
+            .@"f32x4.floor" => try op_simd_float.emitF32x4Floor(&ctx, &ins),
+            .@"f32x4.trunc" => try op_simd_float.emitF32x4Trunc(&ctx, &ins),
+            .@"f32x4.nearest" => try op_simd_float.emitF32x4Nearest(&ctx, &ins),
+            .@"f64x2.ceil" => try op_simd_float.emitF64x2Ceil(&ctx, &ins),
+            .@"f64x2.floor" => try op_simd_float.emitF64x2Floor(&ctx, &ins),
+            .@"f64x2.trunc" => try op_simd_float.emitF64x2Trunc(&ctx, &ins),
+            .@"f64x2.nearest" => try op_simd_float.emitF64x2Nearest(&ctx, &ins),
+            // §9.6/9.6-g-ii — saturating narrow (SQXTN/SQXTUN family).
+            .@"i8x16.narrow_i16x8_s" => try op_simd_int_cmp_lane.emitI8x16NarrowI16x8S(&ctx, &ins),
+            .@"i8x16.narrow_i16x8_u" => try op_simd_int_cmp_lane.emitI8x16NarrowI16x8U(&ctx, &ins),
+            .@"i16x8.narrow_i32x4_s" => try op_simd_int_cmp_lane.emitI16x8NarrowI32x4S(&ctx, &ins),
+            .@"i16x8.narrow_i32x4_u" => try op_simd_int_cmp_lane.emitI16x8NarrowI32x4U(&ctx, &ins),
+            // i64x2.extmul (SMULL/UMULL + SMULL2/UMULL2).
+            .@"i64x2.extmul_low_i32x4_s" => try op_simd_int_arith.emitI64x2ExtmulLowI32x4S(&ctx, &ins),
+            .@"i64x2.extmul_high_i32x4_s" => try op_simd_int_arith.emitI64x2ExtmulHighI32x4S(&ctx, &ins),
+            .@"i64x2.extmul_low_i32x4_u" => try op_simd_int_arith.emitI64x2ExtmulLowI32x4U(&ctx, &ins),
+            .@"i64x2.extmul_high_i32x4_u" => try op_simd_int_arith.emitI64x2ExtmulHighI32x4U(&ctx, &ins),
             // §17.4 relaxed-SIMD trunc — NaN/OOB → saturating clamp (v2 choice),
             // behaviourally identical to trunc_sat; reuse those emits.
             .@"i32x4.relaxed_trunc_f32x4_s" => try op_simd_float.emitI32x4TruncSatF32x4S(&ctx, &ins),

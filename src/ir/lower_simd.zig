@@ -416,6 +416,27 @@ pub fn emitPrefixFD(self: *Lowerer) Error!void {
         254 => try self.emit(.@"f64x2.convert_low_i32x4_s", 0, 0),
         255 => try self.emit(.@"f64x2.convert_low_i32x4_u", 0, 0),
 
+        // D-457 systemic close: FP demote/promote (94/95), FP rounding (103..106
+        // f32x4, 116/117/122/148 f64x2), and saturating narrow (101/102 i8x16,
+        // 133/134 i16x8). Per-arch emit handlers existed; only the lower-side
+        // sub-op→ZirOp wiring + validate arity were missing (extmul 220..223
+        // already lowered above). The old corpus lacked simd_conversions /
+        // simd_*_rounding / simd_i64x2_extmul, so the whole chain stayed hidden.
+        94 => try self.emit(.@"f32x4.demote_f64x2_zero", 0, 0),
+        95 => try self.emit(.@"f64x2.promote_low_f32x4", 0, 0),
+        103 => try self.emit(.@"f32x4.ceil", 0, 0),
+        104 => try self.emit(.@"f32x4.floor", 0, 0),
+        105 => try self.emit(.@"f32x4.trunc", 0, 0),
+        106 => try self.emit(.@"f32x4.nearest", 0, 0),
+        116 => try self.emit(.@"f64x2.ceil", 0, 0),
+        117 => try self.emit(.@"f64x2.floor", 0, 0),
+        122 => try self.emit(.@"f64x2.trunc", 0, 0),
+        148 => try self.emit(.@"f64x2.nearest", 0, 0),
+        101 => try self.emit(.@"i8x16.narrow_i16x8_s", 0, 0),
+        102 => try self.emit(.@"i8x16.narrow_i16x8_u", 0, 0),
+        133 => try self.emit(.@"i16x8.narrow_i32x4_s", 0, 0),
+        134 => try self.emit(.@"i16x8.narrow_i32x4_u", 0, 0),
+
         else => return Error.NotImplemented,
     }
 }

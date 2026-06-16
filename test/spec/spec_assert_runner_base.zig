@@ -3171,6 +3171,18 @@ pub fn runCorpus(
                 }
 
                 const compiled = runner_mod.compileWasm(gpa, wasm_bytes) catch |err| {
+                    // multi-memory-on-JIT is a ROADMAP Phase-14 deferral
+                    // (compile.zig:125 rejects >1 memory; ~458 multi-memory/
+                    // corpus skips already forward-ref'd). The simd_assert_runner
+                    // is JIT-only, so simd_memory-multi.wast genuinely cannot run
+                    // here — record the engine-capability boundary specifically
+                    // rather than a generic FAIL.
+                    if (err == error.MultipleMemories) {
+                        try stdout.print("SKIP-JIT-MULTI-MEMORY  {s}/{s}: multi-memory on JIT deferred to Phase 14 (ROADMAP §14)\n", .{ name, file });
+                        tally.runtime_skip += 1;
+                        module_bad = true;
+                        continue;
+                    }
                     try stdout.print("FAIL  {s}/{s} compile: {s}\n", .{ name, file, @errorName(err) });
                     tally.failed += 1;
                     module_bad = true;

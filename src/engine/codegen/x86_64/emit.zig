@@ -1614,6 +1614,31 @@ pub fn compile(
             .@"f64x2.convert_low_i32x4_s" => try op_simd_float.emitF64x2ConvertLowI32x4S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"i32x4.trunc_sat_f32x4_s" => try op_simd_float.emitI32x4TruncSatF32x4S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             .@"i32x4.trunc_sat_f32x4_u" => try op_simd_float.emitI32x4TruncSatF32x4U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            // Remaining float conversions + rounding + narrow + i64x2.extmul
+            // (D-457 systemic close): complete handlers, dispatch was unwired —
+            // the old corpus never had simd_conversions / *_rounding /
+            // simd_i64x2_extmul_i32x4 so the gap stayed hidden.
+            .@"f32x4.demote_f64x2_zero" => try op_simd_float.emitF32x4DemoteF64x2Zero(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f64x2.promote_low_f32x4" => try op_simd_float.emitF64x2PromoteLowF32x4(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            // FP rounding (ROUNDPS/ROUNDPD imm8 mode; SSE4.1).
+            .@"f32x4.ceil" => try op_simd_float.emitF32x4Ceil(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f32x4.floor" => try op_simd_float.emitF32x4Floor(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f32x4.trunc" => try op_simd_float.emitF32x4Trunc(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f32x4.nearest" => try op_simd_float.emitF32x4Nearest(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f64x2.ceil" => try op_simd_float.emitF64x2Ceil(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f64x2.floor" => try op_simd_float.emitF64x2Floor(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f64x2.trunc" => try op_simd_float.emitF64x2Trunc(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f64x2.nearest" => try op_simd_float.emitF64x2Nearest(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            // Saturating narrow (PACKSSWB/PACKUSWB/PACKSSDW/PACKUSDW).
+            .@"i8x16.narrow_i16x8_s" => try op_simd_int_cmp_lane.emitI8x16NarrowI16x8S(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            .@"i8x16.narrow_i16x8_u" => try op_simd_int_cmp_lane.emitI8x16NarrowI16x8U(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            .@"i16x8.narrow_i32x4_s" => try op_simd_int_cmp_lane.emitI16x8NarrowI32x4S(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            .@"i16x8.narrow_i32x4_u" => try op_simd_int_cmp_lane.emitI16x8NarrowI32x4U(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
+            // i64x2.extmul (PMULDQ/PMULUDQ with low/high lane shuffle).
+            .@"i64x2.extmul_low_i32x4_s" => try op_simd_int_cmp_lane.emitI64x2ExtmulLowI32x4S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i64x2.extmul_high_i32x4_s" => try op_simd_int_cmp_lane.emitI64x2ExtmulHighI32x4S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i64x2.extmul_low_i32x4_u" => try op_simd_int_cmp_lane.emitI64x2ExtmulLowI32x4U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i64x2.extmul_high_i32x4_u" => try op_simd_int_cmp_lane.emitI64x2ExtmulHighI32x4U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             // §17.4 relaxed-SIMD trunc — NaN/OOB → saturating clamp (v2 choice),
             // behaviourally identical to trunc_sat; reuse those emits.
             .@"i32x4.relaxed_trunc_f32x4_s" => try op_simd_float.emitI32x4TruncSatF32x4S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),

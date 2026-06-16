@@ -1,0 +1,39 @@
+module simd_load.0.wasm
+assert_return v128.load () -> v128:000102030405060708090a0b0c0d0e0f
+assert_return v128.load () -> v128:000102030405060708090a0b0c0d0e0f
+assert_return v128.load () -> v128:000102030405060708090a0b0c0d0e0f
+module simd_load.1.wasm
+assert_return as-i8x16_extract_lane_s-value/0 () -> i32:0
+module simd_load.2.wasm
+assert_return as-i8x16.eq-operand () -> v128:ffffffff000000000000000000000000
+module simd_load.3.wasm
+assert_return as-v128.not-operand () -> v128:fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0
+assert_return as-i8x16.all_true-operand () -> i32:0
+module simd_load.4.wasm
+assert_return as-v128.bitselect-operand () -> v128:ababababaaaaaaaabbbbbbbbaabbaabb
+module simd_load.5.wasm
+assert_return as-i8x16.shl-operand () -> v128:54545454545454545454545454545454
+module simd_load.6.wasm
+assert_return as-add/sub-operand () -> v128:02000000020000000200000002000000
+module simd_load.7.wasm
+assert_return as-f32x4.mul-operand () -> v128:000080430000004066666640000000c0
+module simd_load.8.wasm
+assert_return as-f32x4.abs-operand () -> v128:ffffff7fffffff7fffffff7fffffff7f
+module simd_load.9.wasm
+assert_return as-f32x4.min-operand () -> v128:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+module simd_load.10.wasm
+assert_return as-i32x4.trunc_sat_f32x4_s-operand () -> v128:800000000100000001000000ffffffff
+module simd_load.11.wasm
+assert_return as-f32x4.convert_i32x4_u-operand () -> v128:00000040000000400000004000000040
+module simd_load.12.wasm
+assert_return as-i8x16.swizzle-operand () -> v128:737271706f6e6d6c6b6a696867666564
+module simd_load.13.wasm
+assert_return as-br-value () -> v128:000102030405060708090a0b0c0d0e0f
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+assert_invalid simd_load.17.wasm
+assert_invalid simd_load.18.wasm
+assert_invalid simd_load.19.wasm
+assert_invalid simd_load.20.wasm
+assert_invalid simd_load.21.wasm

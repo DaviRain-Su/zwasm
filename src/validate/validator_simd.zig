@@ -160,32 +160,42 @@ pub fn dispatchPrefixFD(self: *Validator) Error!void {
         200,
         201,
         202,
+        // D-457 systemic close: FP rounding + demote/promote are UNARY (pop 1
+        // v128, push 1). The 9.4 MVP swept them into the binop fallthrough — the
+        // same miscount that hid the convert ops (248..255) — and the old corpus
+        // had no simd_*_rounding / simd_conversions to surface the StackUnderflow.
+        //   94  f32x4.demote_f64x2_zero / 95 f64x2.promote_low_f32x4
+        //   103..106 f32x4.{ceil, floor, trunc, nearest}
+        //   116/117/122/148 f64x2.{ceil, floor, trunc, nearest}
+        94,
+        95,
+        103,
+        104,
+        105,
+        106,
+        116,
+        117,
+        122,
+        148,
         => try opSimdUnop(self),
         // Everything else in 94..211 stays binop (cmp / arith /
         // shifts / saturated arith / dot / extmul / etc.).
         // bitmask sub-ops 100/132/164/196 routed above to
         // opSimdAllTrueOrAnyTrue (1-pop v128, push i32).
-        94,
-        95,
+        // 94/95 (demote/promote) + 103..106/116/117/122/148 (FP rounding) moved
+        // to the unop arm above (D-457); 101/102/133/134 (narrow) stay binop.
         101,
         102,
-        103,
-        104,
-        105,
-        106,
         110,
         111,
         112,
         113,
         114,
         115,
-        116,
-        117,
         118,
         119,
         120,
         121,
-        122,
         123,
         130,
         133,
@@ -196,7 +206,6 @@ pub fn dispatchPrefixFD(self: *Validator) Error!void {
         145,
         146,
         147,
-        148,
         149,
         150,
         151,
@@ -240,6 +249,14 @@ pub fn dispatchPrefixFD(self: *Validator) Error!void {
         211, // i64x2 add/.../sub etc.
         // 213 i64x2.mul (per §9.9 / 9.9-f-8).
         213, // §9.9 / 9.9-f-8 — i64x2.mul (handler-side multi-instr synthesis on ARM64 since NEON has no MUL.2D).
+        // D-457 systemic close: i64x2.extmul_{low,high}_i32x4_{s,u} (220..223,
+        // 0xDC..0xDF) were absent → NotImplemented at validate. The i16x8/i32x4
+        // extmul siblings (156..159 / 188..191) were present; only the 64-bit
+        // lane shape was missed, and the old corpus had no simd_i64x2_extmul.
+        220,
+        221,
+        222,
+        223,
         => try opSimdBinop(self),
 
         // §9.9 / 9.9-g-2 — i64x2 comparison ops 214..219.

@@ -1,0 +1,36 @@
+module simd_store16_lane.0.wasm
+skip-impl v128-param-pending v128.store16_lane_0
+skip-impl v128-param-pending v128.store16_lane_1
+skip-impl v128-param-pending v128.store16_lane_2
+skip-impl v128-param-pending v128.store16_lane_3
+skip-impl v128-param-pending v128.store16_lane_4
+skip-impl v128-param-pending v128.store16_lane_5
+skip-impl v128-param-pending v128.store16_lane_6
+skip-impl v128-param-pending v128.store16_lane_7
+assert_return v128.store16_lane_0_offset_0 v128:00010000000000000000000000000000 -> i64:256
+assert_return v128.store16_lane_1_offset_1 v128:00000102000000000000000000000000 -> i64:513
+assert_return v128.store16_lane_2_offset_2 v128:00000000020300000000000000000000 -> i64:770
+assert_return v128.store16_lane_3_offset_3 v128:00000000000003040000000000000000 -> i64:1027
+assert_return v128.store16_lane_4_offset_4 v128:00000000000000000405000000000000 -> i64:1284
+assert_return v128.store16_lane_5_offset_5 v128:00000000000000000000050600000000 -> i64:1541
+assert_return v128.store16_lane_6_offset_6 v128:00000000000000000000000006070000 -> i64:1798
+assert_return v128.store16_lane_7_offset_7 v128:00000000000000000000000000000708 -> i64:2055
+skip-impl v128-param-pending v128.store16_lane_0_align_1
+skip-impl v128-param-pending v128.store16_lane_0_align_2
+skip-impl v128-param-pending v128.store16_lane_1_align_1
+skip-impl v128-param-pending v128.store16_lane_1_align_2
+skip-impl v128-param-pending v128.store16_lane_2_align_1
+skip-impl v128-param-pending v128.store16_lane_2_align_2
+skip-impl v128-param-pending v128.store16_lane_3_align_1
+skip-impl v128-param-pending v128.store16_lane_3_align_2
+skip-impl v128-param-pending v128.store16_lane_4_align_1
+skip-impl v128-param-pending v128.store16_lane_4_align_2
+skip-impl v128-param-pending v128.store16_lane_5_align_1
+skip-impl v128-param-pending v128.store16_lane_5_align_2
+skip-impl v128-param-pending v128.store16_lane_6_align_1
+skip-impl v128-param-pending v128.store16_lane_6_align_2
+skip-impl v128-param-pending v128.store16_lane_7_align_1
+skip-impl v128-param-pending v128.store16_lane_7_align_2
+assert_invalid simd_store16_lane.1.wasm
+assert_invalid simd_store16_lane.2.wasm
+assert_invalid simd_store16_lane.3.wasm

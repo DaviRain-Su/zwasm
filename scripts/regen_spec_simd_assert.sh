@@ -112,6 +112,46 @@ NAMES=(
   # + ADDV; expected to fail compile until 9.9-g-N's bitmask chunk
   # lands). Surfaces D-067's exact scope.
   simd_boolean
+  # D-457 systemic close: the float<->int conversion + remaining arith /
+  # memory families were never in the corpus, which is exactly how the 8
+  # convert ops (248-255) shipped with an unwired emit dispatch undetected.
+  # Add the FULL upstream simd_*.wast set so the gap cannot recur and any
+  # other corpus-hidden op surfaces. Unsupported shapes auto-skip in the
+  # distiller; load/store/splat/linking memory shapes may skip-impl until
+  # their entry helpers land.
+  simd_conversions
+  simd_i32x4_trunc_sat_f32x4
+  simd_i32x4_trunc_sat_f64x2
+  simd_f32x4
+  simd_f64x2
+  simd_f32x4_pmin_pmax
+  simd_f64x2_pmin_pmax
+  simd_f32x4_rounding
+  simd_f64x2_rounding
+  simd_i8x16_sat_arith
+  simd_i16x8_sat_arith
+  simd_i16x8_q15mulr_sat_s
+  simd_i16x8_extadd_pairwise_i8x16
+  simd_i32x4_extadd_pairwise_i16x8
+  simd_i16x8_extmul_i8x16
+  simd_i32x4_extmul_i16x8
+  simd_i64x2_extmul_i32x4
+  simd_i32x4_dot_i16x8
+  simd_splat
+  simd_load
+  simd_load_splat
+  simd_load_zero
+  simd_load8_lane
+  simd_load16_lane
+  simd_load32_lane
+  simd_load64_lane
+  simd_store
+  simd_store8_lane
+  simd_store16_lane
+  simd_store32_lane
+  simd_store64_lane
+  simd_linking
+  simd_memory-multi
   # §17.4 relaxed-SIMD (ADR-0169) — official conformance corpus. These use
   # `(either A B)` 2-outcome asserts (impl-defined per-arch latitude); the
   # distiller emits `either:<tokA>|<tokB>` and the runner accepts ANY outcome.
