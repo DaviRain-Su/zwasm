@@ -879,6 +879,32 @@ pub const Validator = struct {
         return self.operand_buf[self.operand_len];
     }
 
+    /// Peek the operand `d` slots from top WITHOUT popping; `.bot` when below
+    /// the frame floor (polymorphic fill, matching `popAny`). For `br_table`
+    /// D-452 (subtype-check branch operands against every label, no consume).
+    fn peekOperandFromTop(self: *Validator, d: usize) TypeOrBot {
+        const avail = self.operand_len - self.topFrame().height;
+        if (d >= avail) return .bot;
+        return self.operand_buf[self.operand_len - 1 - d];
+    }
+
+    /// D-452 (Wasm 3.0 §3.3.8.8) — the top `lt.arity` operands must each be a
+    /// SUBTYPE of label `lt`'s result types (branch operands flow to the
+    /// target). Peek-only; `.bot` matches any. `ts[k]` = operand at depth len-1-k.
+    fn checkOperandsSubtypeOfLabel(self: *Validator, lt: BlockType) Error!void {
+        switch (lt) {
+            .empty => {},
+            .single => |t| switch (self.peekOperandFromTop(0)) {
+                .bot => {},
+                .known => |ot| if (!self.subtypeCtx(ot, t)) return Error.StackTypeMismatch,
+            },
+            .multi => |ts| for (ts, 0..) |t, k| switch (self.peekOperandFromTop(ts.len - 1 - k)) {
+                .bot => {},
+                .known => |ot| if (!self.subtypeCtx(ot, t)) return Error.StackTypeMismatch,
+            },
+        }
+    }
+
     // ----------------------------------------------------------------
     // Control-stack helpers
     // ----------------------------------------------------------------
@@ -2792,7 +2818,6 @@ pub const Validator = struct {
         //     `block (result i32); unreachable; f32.const 0;
         //     i32.const 1; br_table 0; end` where the f32 must
         //     reject against the inner block's i32 result type).
-        const polymorphic = self.topFrame().unreachable_flag;
         const arityOf = struct {
             fn f(bt: BlockType) usize {
                 return switch (bt) {
@@ -2802,16 +2827,23 @@ pub const Validator = struct {
                 };
             }
         }.f;
+        // D-452 (Wasm 3.0 §3.3.8.8): every target + default must have equal
+        // arity, and the branch operands must be a SUBTYPE of EACH label type —
+        // NOT pairwise-equal across labels (the old `labelTypesEq` wrongly
+        // rejected e.g. `(ref func)` vs `funcref` targets with a `(ref func)`
+        // operand). Peek per-label (no consume), then pop once; `.bot` matches any.
         var first: ?BlockType = null;
+        var arity: usize = 0;
         var i: u32 = 0;
         while (i <= n) : (i += 1) {
             const depth = try leb128.readUleb128(u32, self.body, &self.pos);
             const target = self.frameAt(depth) orelse return Error.InvalidBranchDepth;
             const lt = target.labelType();
-            if (first) |prev| {
-                if (arityOf(prev) != arityOf(lt)) return Error.ArityMismatch;
-                if (!polymorphic and !labelTypesEq(prev, lt)) return Error.StackTypeMismatch;
-            } else first = lt;
+            if (first == null) {
+                first = lt;
+                arity = arityOf(lt);
+            } else if (arityOf(lt) != arity) return Error.ArityMismatch;
+            try self.checkOperandsSubtypeOfLabel(lt);
         }
         if (first) |lt| try self.popLabelTypes(lt);
         self.markUnreachable();
