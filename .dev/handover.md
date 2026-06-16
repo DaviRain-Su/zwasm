@@ -7,16 +7,20 @@
 
 ## Active rework campaign
 
-- **Campaign**: wasmtime misc_testsuite full differential coverage (ADR-0192, user-directed 2026-06-16). Phase I (Investigation) DONE.
+- **Campaign**: wasmtime misc_testsuite full differential coverage (ADR-0192, user-directed 2026-06-16). Phase I DONE; Phase II in flight.
 - **Goal**: run wasmtime's full `tests/misc_testsuite/` (312 .wast @897aa00d) through zwasm, fundamentally fix every real gap.
-- **Phase-I result** (`.dev/wasmtime_misc_campaign_findings.md`): raw C-API sweep = 139 PASS / 164 FAIL / 9 EMPTY. KEY: ~122
-  of the 164 are HARNESS artifacts of the C-API runner (gc 55 = C-API has no GC instantiate, native engine is 362/0;
-  component-model 67 = core decoder correctly rejects component binaries). Genuine candidate gaps live in the C-API-runnable
-  subset (~12 core + 11 trap-kind + 10 value-mismatch + scatter).
-- **NEXT (Phase I→II)**: re-route gc/simd/memory64/typed-ref/proposal buckets through the **native** `spec_assert_runner_*`
-  family (GC/v128/typed-ref-capable, `wasm_3_0_manifest.zig`) to get the TRUE gap list; then triage distiller-artifact vs
-  real gap on the C-API-runnable failures (start: canonicalize-nan-scalar reinterpret asserts, embenchen env-import skip).
-- **Harness**: `scripts/wasmtime_misc_sweep.sh` + `scripts/wast_to_manifest.py`; runner now installed (`zig-out/bin/zwasm-wast-runtime-runner`).
+- **2 REAL crashes found+fixed (gc bucket, native sweep)**: (1) `array.copy` self-region `@memcpy` alias panic — interp
+  (array_ops.zig) + JIT (jit_abi.zig) → `copyForwards` (`46c2975e`); (2) huge `array.new*` u32 size-overflow panic →
+  u64 + OutOfMemory trap, interp+JIT-shared (object_alloc.zig) + mapDispatchErr OutOfHeap→OutOfMemory wiring (`7e527dba`).
+  Both classes the synthetic gc spec suite (362/0) never hit. Lesson `gc-bulk-op-memcpy-aliases-on-self-region-copy`.
+- **Native sweep now COMPLETES on gc**: 78 manifests — assert_return 170 pass / 52 fail, assert_trap 33 pass / 3 fail.
+  Many of the 52 are `UnknownImport` (fixtures need host imports the runner doesn't provide = harness-limit, not a gap).
+- **NEXT (Phase II)**: triage the residual gc fails — start with REAL ones: `gc/issue-13152` `ValidateFailed BadValType`
+  (type-section decode — possible real decoder gap, verify wasm-tools accepts); separate UnknownImport (harness) from
+  value-mismatch (real). Then run the other native buckets (memory64/tail-call/function-references/multi-memory) +
+  simd via `simd_assert_runner`. C-API-subset triage (canonicalize-nan reinterpret, embenchen env-skip) still pending.
+- **Harness**: `scripts/wasmtime_misc_sweep.sh` (C-API) + `scripts/wasmtime_misc_native_sweep.sh` (native GC-capable) +
+  distillers `scripts/wast_to_manifest.py` / `scripts/spec_distill/wast_to_native_manifest.py`. Both runners installed.
 
 **The prior user-steered 4-front async-maturity campaign (2026-06-16) is COMPLETE** — all four closed (history below);
 general Phase-17 completion work (debt sweep / surface audits) interleaves when the campaign pauses.

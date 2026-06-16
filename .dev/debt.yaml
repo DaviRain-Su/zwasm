@@ -1773,3 +1773,15 @@ conventions: |-
   behaviour change) is promoted from this file to a `.dev/decisions/
   NNNN_<slug>.md` ADR. The discharge commit removes the row from this
   file. See `.claude/rules/lessons_vs_adr.md` for the decision tree.
+  - id: "D-455"
+    layer: "code"
+    status: "note"
+    front: D-wmt-misc
+    description: |-
+      note (ADR-0192 campaign, 2026-06-16). Array allocation size arithmetic +
+      ArrayHeader stamping is duplicated between interp `array_ops.allocateArray`
+      and JIT-shared `feature/gc/object_alloc.allocArrayObject` — the u64 overflow
+      guard had to be applied to BOTH (commit 7e527dba). They differ only in the
+      maybeCollect caller and zero-init flag. Unify: interp allocateArray should
+      delegate to allocArrayObject (caller does maybeCollect, as the JIT path
+      already does). Discharge: one allocator, one size-arithmetic site.
