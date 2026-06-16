@@ -69,13 +69,9 @@ by threading per-arch `max_reg_slots_gpr` into `computeSpillOffsets` (ADR-0194; 
 
 ## D-461 SIMD v128-spill — high-value DONE (3-host green); result-write remainder = tracked debt (exotic)
 
-**DONE both arches, 3-host green**: regalloc-origin rework (ADR-0194, Win64-verified @8f4f88c5) + all 6
-extract_lane + all 4 bitmask widths. Concrete D-460 blocker CLEARED. **Result-write remainder is now TRACKED DEBT
-(D-461)**, not active: Extend/Extadd/replace_lane/binop-dsts — arm64 unops ALREADY spill-aware (shared
-`emitV128Unop`), so it's **x86_64-only** but needs `spill_base_off` threaded through ~26 sig sites per category +
-per-op scratch-XMM audit (LANDMINE). EXOTIC (high-v128-pressure only). Full per-op scope + the reusable fixture
-recipe (`.wat` → `wasm-tools parse`, build the or-chain programmatically) are in the D-461 debt row. Re-open as a
-focused bundle if a real program needs it.
+DONE both arches 3-host: origin rework + all 6 extract_lane + 4 bitmask widths. Result-write remainder
+(Extend/Extadd/replace_lane/binop-dsts, x86_64-only, ~26-site thread, EXOTIC) = tracked in D-461 debt row; re-open
+as a focused bundle if a real program needs it.
 
 
 ## Closed/paused (detail in git + debt.yaml)
