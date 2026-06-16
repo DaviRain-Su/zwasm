@@ -128,14 +128,12 @@ fn structNew(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
         const field = si.fields[i];
         const v = rt.popOperand();
         const dst_off = ref + header_size + field.offset;
-        // All slots are 8 bytes this cut (ADR-0116 §3a) — write
-        // the low 8 bytes of the Value's u64-equivalent storage.
-        // Value is an extern union so reinterpret as u64 bytes is
-        // safe; the validator-driven valtype tells the field which
-        // arm was active.
-        const dst = heap.bytes[dst_off .. dst_off + 8];
-        const as_u64 = std.mem.asBytes(&v)[0..8];
-        @memcpy(dst, as_u64);
+        // Copy `field.size` bytes (8 for scalar/ref, 16 for v128 — D-460).
+        // Value is a tagless extern union: bytes [0,8) = scalar payload,
+        // [0,16) = full v128; the validator-driven valtype tells the field
+        // which width is live.
+        const dst = heap.bytes[dst_off .. dst_off + field.size];
+        @memcpy(dst, std.mem.asBytes(&v)[0..field.size]);
     }
     try rt.pushOperand(.{ .ref = @as(u64, ref) });
 }
@@ -160,7 +158,8 @@ fn structGet(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const heap = rt.gc_heap orelse return runtime.Trap.NullReference;
     const src_off = ref + header_size + field.offset;
     var v: Value = undefined;
-    @memcpy(std.mem.asBytes(&v)[0..8], heap.bytes[src_off .. src_off + 8]);
+    // Read `field.size` bytes (8 scalar/ref, 16 v128 — D-460).
+    @memcpy(std.mem.asBytes(&v)[0..field.size], heap.bytes[src_off .. src_off + field.size]);
     try rt.pushOperand(v);
 }
 
@@ -181,8 +180,9 @@ fn structSet(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     const ref: u32 = @intCast(ref_val.ref);
     const heap = rt.gc_heap orelse return runtime.Trap.NullReference;
     const dst_off = ref + header_size + field.offset;
-    const dst = heap.bytes[dst_off .. dst_off + 8];
-    @memcpy(dst, std.mem.asBytes(&v)[0..8]);
+    // Write `field.size` bytes (8 scalar/ref, 16 v128 — D-460).
+    const dst = heap.bytes[dst_off .. dst_off + field.size];
+    @memcpy(dst, std.mem.asBytes(&v)[0..field.size]);
 }
 
 fn structNewDefault(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
@@ -300,6 +300,37 @@ test "struct.new: pops 2 fields + writes them at offsets 0, 8 (10.G op_gc cycle 
     var f1_val: Value = undefined;
     @memcpy(std.mem.asBytes(&f1_val)[0..8], heap.bytes[f1_off .. f1_off + 8]);
     try testing.expectEqual(@as(i64, 0xDEAD_BEEF_CAFE), f1_val.i64);
+}
+
+test "struct v128 field: new/get/set round-trip all 16 lanes (D-460 ADR-0192 wasmtime gc/alloc-v128-struct)" {
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    // struct { (mut v128) } — field byte 0x7B (v128), mutable. The 16-byte
+    // field forces a 16-byte slot (NOT the legacy uniform-8); materialise
+    // previously rejected this with UnsupportedFieldSize.
+    const body = [_]u8{ 0x01, 0x5F, 0x01, 0x7B, 0x01 };
+    const env = try buildInstanceForTypes(&arena, &body);
+
+    var t = DispatchTable.init();
+    register(&t);
+    const lanes: [16]u8 = .{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 };
+    try env.rt.pushOperand(.{ .v128 = lanes });
+    try driveOne(env.rt, &t, .@"struct.new", 0);
+    const ref_v = env.rt.popOperand();
+
+    // struct.get reads the full 16-byte lane payload back.
+    try env.rt.pushOperand(ref_v);
+    try driveOne(env.rt, &t, .@"struct.get", 0);
+    try testing.expectEqualSlices(u8, &lanes, &env.rt.popOperand().v128);
+
+    // struct.set overwrites with a distinct 16-byte value; struct.get confirms.
+    const lanes2: [16]u8 = .{ 0xFF, 0xEE, 0xDD, 0xCC, 0xBB, 0xAA, 0x99, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0x00 };
+    try env.rt.pushOperand(ref_v);
+    try env.rt.pushOperand(.{ .v128 = lanes2 });
+    try driveOne(env.rt, &t, .@"struct.set", 0);
+    try env.rt.pushOperand(ref_v);
+    try driveOne(env.rt, &t, .@"struct.get", 0);
+    try testing.expectEqualSlices(u8, &lanes2, &env.rt.popOperand().v128);
 }
 
 test "struct.new_default: payload zero-init (10.G op_gc cycle 22)" {

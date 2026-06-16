@@ -904,6 +904,18 @@ pub fn evalGlobalInitGc(
                 pos += 8;
                 sp += 1;
             },
+            0xFD => { // SIMD prefix — only v128.const (sub 0x0C) is constant
+                // (Wasm 2.0 §3.5.4). Needed for a v128 GC aggregate field/
+                // element initialised in a const-expr (D-460).
+                const sub = try leb128.readUleb128(u32, expr, &pos);
+                if (sub != 0x0C) return error.UnsupportedConstExpr;
+                if (pos + 16 > expr.len) return error.UnsupportedConstExpr;
+                var bytes: [16]u8 = undefined;
+                @memcpy(&bytes, expr[pos..][0..16]);
+                pos += 16;
+                stack[sp] = .{ .v128 = bytes };
+                sp += 1;
+            },
             0x23 => { // global.get N — Wasm §3.5.10 const-expr; read an
                 // already-evaluated prior global (imported or earlier-
                 // defined). i31.wast $i31ref_of_global_global_initializer:
@@ -948,7 +960,8 @@ pub fn evalGlobalInitGc(
                                 if (sp == 0) return error.UnsupportedConstExpr;
                                 sp -= 1;
                                 const off = ref + header_size + si.fields[i].offset;
-                                @memcpy(heap.bytes[off .. off + 8], std.mem.asBytes(&stack[sp])[0..8]);
+                                const fsz = si.fields[i].size; // 8 scalar/ref, 16 v128 (D-460)
+                                @memcpy(heap.bytes[off .. off + fsz], std.mem.asBytes(&stack[sp])[0..fsz]);
                             }
                         }
                         stack[sp] = .{ .ref = @as(u64, ref) };

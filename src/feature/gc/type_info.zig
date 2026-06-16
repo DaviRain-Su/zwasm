@@ -10,10 +10,10 @@
 //! heap ObjectHeader's `info` slot so the GC walker can decode
 //! object kind + field layout.
 //!
-//! This cut: 8-byte-uniform field-slot layout (every field gets
-//! an 8-byte slot regardless of declared size). Per-field
-//! alignment optimisation defers to Phase 11. v128 fields
-//! reject with Error.UnsupportedFieldSize.
+//! Field-slot layout: scalar/ref fields get an 8-byte slot; v128
+//! fields get a 16-byte slot (D-460, ADR-0192). Offsets are a
+//! running sum of per-field sizes. Per-field alignment
+//! optimisation (packing i8/i16 tighter) defers to Phase 11.
 //!
 //! Zone 1 (`src/feature/gc/`).
 
@@ -36,6 +36,11 @@ pub const Error = error{
 /// Preserves the 2-byte alignment invariant (§5) trivially and
 /// keeps offset compute O(1) without per-field alignment math.
 pub const slot_size: u8 = 8;
+
+/// A v128 field occupies a full 16-byte slot (Wasm 3.0 GC×SIMD). Offsets
+/// stay a running sum of per-field sizes, so a v128 field shifts later
+/// fields by 16 instead of 8 (D-460).
+pub const v128_slot_size: u8 = 16;
 
 pub const TypeKind = enum(u8) {
     func,
@@ -168,7 +173,11 @@ fn fieldSlotSize(storage: sections.StorageType) Error!u8 {
     return switch (storage) {
         .packed_ => slot_size,
         .val => |v| switch (v) {
-            .v128 => Error.UnsupportedFieldSize,
+            // v128 needs the full 16-byte SIMD slot (Wasm 3.0 GC×SIMD: an
+            // aggregate field's storagetype may be any valtype). The running
+            // offset sum in materialiseGcTypes already tolerates mixed slot
+            // sizes; struct/array get/set copy `FieldInfo.size` bytes (D-460).
+            .v128 => v128_slot_size,
             .i32, .i64, .f32, .f64, .ref => slot_size,
         },
     };
@@ -415,16 +424,18 @@ test "materialiseGcTypes: mixed func+struct+array preserves kinds" {
     try testing.expect(gti.array_infos[1] == null);
 }
 
-test "materialiseGcTypes: v128 field rejects UnsupportedFieldSize" {
-    // struct { v128 const }
-    const body = [_]u8{ 0x01, 0x5F, 0x01, 0x7B, 0x00 };
-    var t = try sections.decodeTypes(testing.allocator, &body);
-    defer t.deinit();
-    // Arena handles partial-failure cleanup (caller responsibility per
-    // the function's contract — Instance arena is the canonical site).
-    var arena = std.heap.ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    try testing.expectError(Error.UnsupportedFieldSize, materialiseGcTypes(arena.allocator(), t));
+test "materialiseGcTypes: v128 field gets a 16-byte slot; following field shifts to offset 16 (D-460)" {
+    // struct { (v128 const), (i32 const) } — the v128 occupies slot bytes
+    // [0,16); the i32 follows at offset 16 (NOT 8). payload_size = 24.
+    const body = [_]u8{ 0x01, 0x5F, 0x02, 0x7B, 0x00, 0x7F, 0x00 };
+    var r = try decodeAndMaterialise(&body);
+    defer r.arena.deinit();
+    const si = r.gti.struct_infos[0].?;
+    try testing.expectEqual(@as(u32, 0), si.fields[0].offset);
+    try testing.expectEqual(@as(u8, 16), si.fields[0].size);
+    try testing.expectEqual(@as(u32, 16), si.fields[1].offset);
+    try testing.expectEqual(@as(u8, 8), si.fields[1].size);
+    try testing.expectEqual(@as(u32, 24), si.payload_size);
 }
 
 test "ObjectHeader layout: 8 bytes; ArrayHeader: 12 bytes" {
