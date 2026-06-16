@@ -19,21 +19,14 @@ CLI surface audit (@4e5e42fe): code↔`--help` fully consistent. Gate change @b1
 (windows `[run_remote_windows] OK.` wasm-3.0-assert pass=10234 fail=0 / simd 24805/0 / spec 25539/0; ubuntu OK
 @f1a1d503). win-specassert campaign fully closed; the fail-gate is clean.
 
-**Multi-task async campaign OPENED then PARKED** (this turn, ADR-0195 Revision): a Phase-II design check (before
-any scheduler code) found guest↔guest stream completion is **blocked-by D-305** (component linker), one layer
-deeper than Phase I assumed. CM-async creates a subtask ONLY via an async-lowered import to a GUEST callee in
-ANOTHER component instance (cross-component) — but zwasm's async imports are host-only (name-match), `Subtask` is
-built-but-UNWIRED, and there's NO intra-component multi-task path. The scheduler is the layer ABOVE D-305; building
-it now = speculative infra (spike §2, no consumer). **Retained**: Phase II(a) single-task `AsyncDeadlock` char test
-(`80ec1f63`, permanent guard). ADR-0195 design stands for when D-305 lands; lesson
-`2026-06-17-guest-guest-async-is-downstream-of-component-linker`. The ADR-0153 design-gate caught this, saving
-~400 LOC. Prior arcs: fuzz campaign 808 mods 0 crashes; bounded 完成形 vein plateaued (WASI sync surface, C-API
-@b4d75506, decoder, CLI clean); wasi:random COMPLETE; ADR-0193 follow-up + version SSOT; D-335 typed marshalling DONE.
+**ADR-0195 multi-task async scheduler PARKED** (blocked-by D-305): guest↔guest async needs a subtask = cross-component
+async import to a GUEST callee = the component linker. Retained the Phase II(a) `AsyncDeadlock` char test (`80ec1f63`);
+design stands (ADR-0195 Rev + lesson `2026-06-17-guest-guest-async-is-downstream-of-component-linker`).
 
-**Plateau confirmed across ALL 完成形 dimensions** (this turn): clean (C/Zig/CLI surface audits done), full-featured
-(WASI complete bar consumer-gated big async/composition), 100% spec (`test-spec` 25539/0), lightweight-yet-fast
-(v1-JIT parity met/exceeded, D-265 closed — `bench/results/s15p_parity_vs_v1.md`). Robustness re-verified: fuzz 808
-mods 0 crashes on BOTH interp AND **JIT** codegen; README/docs/flags drift-clean.
+**Plateau confirmed across ALL 完成形 dimensions**: clean (C/Zig/CLI audits), full-featured (WASI complete bar
+consumer-gated big async/composition), 100% spec (`test-spec` 25539/0), lightweight-yet-fast (v1-JIT parity per
+`s15p_parity_vs_v1.md`, D-265 closed). Robustness: fuzz 808 mods 0 crashes on interp AND JIT; docs drift-clean.
+Prior: wasi:random COMPLETE; ADR-0193 follow-up + version SSOT; D-335 typed marshalling DONE; C-API @b4d75506.
 
 **D-305 component-composition campaign OPEN — Phase I scoped via RED fixture** (this turn). Authored
 `strlen_graph.wat` (2-component graph, B exports `firstbyte(s:string)->u32=s[0]`, A builds "Z" + calls it → must
