@@ -22,11 +22,13 @@ CLI surface audit (@4e5e42fe): code↔`--help` fully consistent. Gate change @b1
 **NEXT (autonomous)**: tractable quick-wins EXHAUSTED — doc-inventory reader-facing DONE; `D-335` Unit G DONE
 (fixtures+tests ARE the corpus); `D-462` design (ADR-0193) AWAITS USER review. Remaining autonomous work is all
 hard/multi-cycle. **Highest-value next bundle = `D-461`** (SIMD lane ops not spilled-v128-aware): unblocks `D-460`
-v128-GC + is a real correctness gap. Scope (from the D-460 turns): make x86_64 `resolveXmm` + the lane-op
-GPR-scalar paths (both arches) spill-aware — the staging XMMs already exist (`xmm14/15`, `V29/30`); it's per-op
-wiring across the SIMD lane ops. Delicate multi-cycle codegen — START FRESH (this session = marathon). Then `D-209`
-memory64. **windowsmini gating SUSPENDED** (ADR-0174, `518a3b86`; green @4437a552) → 2-host. `--resume` BEFORE the
-v128-GC/SIMD codegen lands on Win64-ABI paths. Version → `2.0.0-alpha.3`.
+v128-GC + real correctness gap. **Phase-I DONE** (`624f3166`): the spill-aware helpers ALREADY EXIST (x86_64
+`xmmLoad/Def/StoreSpilledV128`, arm64 `qLoad/Def/Store`) — fix = MECHANICAL migration of ~14 `resolveXmm` sites in
+`op_simd*.zig` → those helpers (same pattern as the D-460 GC-op migration). Implementation plan (II→IV): (1) build a
+deterministic **≥9-live-v128 force-spill red fixture** FIRST (verification is x86_64-ONLY — no local TDD on
+Mac=arm64; each check = ubuntu round-trip), (2) migrate sites, (3) ubuntu-verify + the D-460 chain returns 16. Then
+`D-209` memory64. **`should_gate_windows.sh --resume` BEFORE this code (Win64-risk)**; gating currently SUSPENDED
+(ADR-0174, `518a3b86`) → 2-host. Version → `2.0.0-alpha.3`.
 
 ## USER-flagged D-462 — feature-separation finished-form — DESIGN DONE (ADR-0193), implementation USER-GATED
 
