@@ -90,14 +90,15 @@ pub fn build(b: *std.Build) void {
     // module-construction code paths.
     const enable_gc = b.option(bool, "gc", "Enable WasmGC heap+collector compile-in (default: false; per ADR-0115 §3)") orelse false;
 
-    // ADR-0182 — Component Model + WASI-P2 support is DEFAULT-ON (the §1.2
-    // floor per ADR-0181; wasmtime-standard out-of-the-box behaviour).
-    // `-Dcomponent=false` is the REAL lean opt-out: the comptime gate in
-    // cli/main.zig strips the whole `src/feature/component/` + P2-host
-    // subsystem (~156 KB of a 1.9 MB ReleaseFast binary, measured at
-    // ADR-0182). The decoder + WIT/canon layers are a Zone-2 layer
-    // consuming the core runtime as a black box (ADR-0170).
-    const enable_component = b.option(bool, "component", "Compile in Component Model + WASI Preview 2 (default: true; -Dcomponent=false = lean build; ADR-0182)") orelse true;
+    // ADR-0193 — the Component Model + WASI-P2 host is gated by the WASI
+    // tier, NOT a separate `-Dcomponent` flag (removed — it duplicated the
+    // gate and admitted contradictory combos like `-Dwasi=p1 -Dcomponent=true`).
+    // `wasi_level >= .p2` IS the component substrate (ADR-0181 §1.2 floor;
+    // wasmtime-standard default). The lean opt-out is now `-Dwasi=p1`, which
+    // strips the whole `src/feature/component/` + P2-host subsystem (~156 KB
+    // of a 1.9 MB ReleaseFast binary, measured at ADR-0182) via the same
+    // comptime fences that read `enable_component`.
+    const enable_component = @intFromEnum(wasi_level) >= @intFromEnum(WasiLevel.p2);
 
     const options = b.addOptions();
     options.addOption(WasmLevel, "wasm_level", wasm_level);
@@ -418,15 +419,17 @@ pub fn build(b: *std.Build) void {
     test_spec_assert_step.dependOn(&run_spec_assert.step);
 
     // E1 (ADR-0170): Component Model spec corpus runner. Unlike the
-    // core-wasm runners it needs the `-Dcomponent` host API, so it is
-    // built against a dedicated component-ENABLED `zwasm` module
-    // (`core_comp`) regardless of the top-level `-Dcomponent` (default
-    // false). `core_comp` is a separate root of `src/zwasm.zig` rooting
-    // its own executable — never co-compiled with `core` in one exe, so
-    // the ADR-0028 dual-`build_options`-root hazard does not apply.
+    // core-wasm runners it needs the component host API, so it is built
+    // against a dedicated `zwasm` module forced to a `.p2` WASI floor
+    // (ADR-0193: component == `wasi_level >= .p2`) regardless of the
+    // top-level `-Dwasi` (which may be `none`/`p1`). `core_comp` is a
+    // separate root of `src/zwasm.zig` rooting its own executable — never
+    // co-compiled with `core` in one exe, so the ADR-0028 dual-
+    // `build_options`-root hazard does not apply.
+    const comp_wasi_level: WasiLevel = if (@intFromEnum(wasi_level) >= @intFromEnum(WasiLevel.p2)) wasi_level else .p2;
     const comp_options = b.addOptions();
     comp_options.addOption(WasmLevel, "wasm_level", wasm_level);
-    comp_options.addOption(WasiLevel, "wasi_level", wasi_level);
+    comp_options.addOption(WasiLevel, "wasi_level", comp_wasi_level);
     comp_options.addOption(EngineMode, "engine_mode", engine_mode);
     comp_options.addOption(bool, "trace_ringbuffer", trace_ringbuffer);
     comp_options.addOption(bool, "trace_stackprobe", trace_stackprobe);

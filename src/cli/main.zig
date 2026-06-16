@@ -294,7 +294,7 @@ pub fn main(init: std.process.Init) !void {
             // (`runWasiP2Main`), not the core-module runner. stdio subset.
             if (bytes.len >= 8 and std.mem.eql(u8, bytes[0..4], "\x00asm") and bytes[6] == 0x01) {
                 if (comptime !@import("build_options").enable_component) {
-                    try printlnErr(io, "zwasm run: component support not compiled in (rebuild with -Dcomponent)");
+                    try printlnErr(io, "zwasm run: component support not compiled in (rebuild with -Dwasi=p2 or higher)");
                     std.process.exit(2);
                 }
                 // ADR-0179 #3a-4 — same loud refusal for the component host.

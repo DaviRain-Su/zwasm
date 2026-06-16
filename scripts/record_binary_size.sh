@@ -38,9 +38,10 @@ if [ ! -f "$out" ]; then
     cat > "$out" <<'HDR'
 # Release binary-size history — D-320 (ADR-0181). Append-only (§A9);
 # one row per (commit, variant) via scripts/record_binary_size.sh.
-# variant: "base" = ReleaseFast default (components ON); "lean" = -Dcomponent=false.
+# variant: "base" = ReleaseFast default (components ON, -Dwasi=p2);
+# "lean" = -Dwasi=p1 (no Component Model / P2 host; ADR-0193 replaced -Dcomponent=false).
 HDR
 fi
 
 measure base
-measure lean -Dcomponent=false
+measure lean -Dwasi=p1
