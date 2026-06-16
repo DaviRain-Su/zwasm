@@ -19,21 +19,30 @@ CLI surface audit (@4e5e42fe): code↔`--help` fully consistent. Gate change @b1
 (windows `[run_remote_windows] OK.` wasm-3.0-assert pass=10234 fail=0 / simd 24805/0 / spec 25539/0; ubuntu OK
 @f1a1d503). win-specassert campaign fully closed; the fail-gate is clean.
 
-**Fuzz campaign + plateau assessment** (this turn): ran a §14.3 campaign (808 `wasm-tools smith` modules →
-decode/compile/instantiate) = **0 crashes** → decoder/compiler robustness verified. The ~40% reject rate is post-3.0
-smith features (correct rejection; `test-spec` 25539/0 is the acceptance oracle) — lesson filed. **Bounded 完成形 vein
-is now plateaued**: WASI sync surface complete (cli/clocks/fs/io/random/sockets), C-API clean (@b4d75506 Windows-export
-fix), decoder hardened (nesting cap 8192 / vec-count / branch-depth), CLI UX clean, debts all genuinely blocked. Prior
-arcs: wasi:random COMPLETE (@6ec83e31/@21b0c574); ADR-0193 follow-up (@c7ee8f49 + version SSOT @a7e61d62); D-335 typed
-marshalling DONE both directions (@630e7141/@f2a002f4).
+**Multi-task async campaign OPENED** (this turn, ADR-0195): Phase I investigation DONE — the guest↔guest stream
+completion gap (D-335; gates `p2→p3`) needs a **cooperative multi-task scheduler**, a clean ~400 LOC ADDITIVE
+extension of `driveCallbackLoop` (a `TaskTable` + per-task event dispatch). Zone-1 machinery (Subtask ζ1 /
+SharedStream rendezvous / WaitableSet delivery) is ALREADY complete; NO ADR-0187 amendment (stackless/no-fibers
+intact). In-process testable (no networking). See `## Active bundle` below. Prior arcs: fuzz campaign 808 mods 0
+crashes (robustness verified); bounded 完成形 vein plateaued (WASI sync surface, C-API @b4d75506, decoder, CLI all
+clean); wasi:random COMPLETE; ADR-0193 follow-up + version SSOT; D-335 typed marshalling DONE both directions.
+ADR-0193 (P1-P4, D-462) + D-461 (ADR-0194) CLOSED (below). **windowsmini gating RESUMED**. Version `2.0.0-alpha.3`.
 
-**NEXT (autonomous)**: the remaining substantial work is the **big async features** (the `p2→p3` gate): guest↔guest
-stream completion (needs a MULTI-TASK scheduler — ADR-0187 stackless single-task can't rendezvous two guests; the
-Subtask machinery ζ1 exists but no scheduler) + sockets/http async (Unit E; http needs the same scheduler). Each is a
-multi-cycle ADR-0153 campaign (Investigation→Correctness→Design→Impl), not urgent (p2 default stays). Open it
-deliberately as a campaign, OR continue light maintenance (periodic fuzz, debt sweeps). ADR-0193 (P1-P4, D-462) +
-D-461 regalloc-origin (ADR-0194) CLOSED (below). **windowsmini gating
-RESUMED**. Version `2.0.0-alpha.3`.
+## Active bundle — WASI-0.3 multi-task async scheduler (ADR-0195)
+
+- **Bundle-ID**: wasi-p3-multitask-scheduler
+- **Cycles-remaining**: ~4-5
+- **Continuity-memo**: ADR-0195 is the design. Correctness-FIRST. Step (a) NEXT = strengthen/confirm the
+  characterization net for the 8+ single-task async e2e fixtures in `component_wasi_p3.zig` (EXIT / YIELD / WAIT /
+  host-peer COMPLETION / single-task `AsyncDeadlock`) so the `driveCallbackLoop` generalisation can't silently
+  regress them. THEN (b) `TaskDescriptor`+`TaskTable` (Zone-1, `async.zig:~397` near Subtask) + refactor the driver
+  to a 1-entry table (single-task byte-identical, corpus green); (c) async-lowered-import→enqueue-task + scheduler
+  dispatch loop in the Zone-3 P3 runner (`component_wasi_p3.zig` `driveAsyncMain`/`P3CallbackCtx`); (d) e2e
+  `async_two_tasks_stream_rendezvous.wat` (main mints `stream<u8>`, spawns subtask, writes; subtask reads → both
+  COMPLETE) = exit-condition; (e) adversarial (both-read→deadlock, drop-mid-rendezvous→DROPPED, cancel-before-start).
+  Key files: `src/feature/component/async.zig` (Zone-1 driver+tables), `src/api/component_wasi_p3.zig` (Zone-3 runner).
+- **Exit-condition**: a guest↔guest `stream<u8>` rendezvous e2e (two guest tasks COMPLETE a copy, count>0) passes,
+  AND all existing single-task async fixtures stay green.
 
 ## D-461 regalloc-origin rework (ADR-0153/ADR-0194) — CLOSED Phase I-V 2026-06-16
 
