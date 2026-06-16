@@ -80,8 +80,14 @@ fn allocateArray(rt: *Runtime, typeidx: u32, length: u32, element_size: u8) anye
         const inst = @as(*const runtime.Instance, @ptrCast(@alignCast(inst_opaque)));
         if (inst.gc_type_infos) |*gti| root_scope.maybeCollect(heap, gti, rt);
     }
-    const payload_bytes: u32 = length * @as(u32, element_size);
-    const total: u32 = array_header_size + payload_bytes;
+    // array.new* of a huge length overflows the u32 size arithmetic before
+    // Heap.allocate's 4 GiB cap check could fire. Compute in u64 and trap
+    // "allocation size too large" (OutOfHeap) instead of panicking on
+    // overflow (Wasm 3.0 GC; wasmtime gc/array-alloc-too-large +
+    // big-array-overflow). Covers all array.new* via this shared helper.
+    const total_u64: u64 = @as(u64, array_header_size) + @as(u64, length) * @as(u64, element_size);
+    if (total_u64 > std.math.maxInt(u32)) return error.OutOfHeap;
+    const total: u32 = @intCast(total_u64);
     const ref = try heap.allocate(total);
     const header: ArrayHeader = .{
         .header = .{ .kind = .array, .info = typeidx },
@@ -698,6 +704,23 @@ test "array.len on null GcRef traps NullReference (10.G op_gc cycle 25)" {
     register(&t);
     try env.rt.pushOperand(.{ .ref = Value.null_ref });
     try testing.expectError(runtime.Trap.NullReference, driveOne(env.rt, &t, .@"array.len", 0, 0));
+}
+
+test "array.new huge length traps OutOfHeap, not integer-overflow panic (ADR-0192; wasmtime gc)" {
+    // Regression: length * element_size overflowed u32 before Heap.allocate's
+    // 4 GiB cap could fire → @panic("integer overflow"). Must trap
+    // "allocation size too large" (OutOfHeap). size = i32-max, element i32 →
+    // 2147483647 * 4 ≈ 8.6 GiB > u32 max.
+    var arena = std.heap.ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const body = [_]u8{ 0x01, 0x5E, 0x7F, 0x01 };
+    const env = try buildInstanceForTypes(&arena, &body);
+
+    var t = DispatchTable.init();
+    register(&t);
+    try env.rt.pushOperand(.{ .i32 = 0 }); // init value
+    try env.rt.pushOperand(.{ .i32 = 2147483647 }); // size
+    try testing.expectError(error.OutOfHeap, driveOne(env.rt, &t, .@"array.new", 0, 0));
 }
 
 test "array.copy self-region with identical src/dst offset is alias-safe (ADR-0192; wasmtime gc corpus)" {

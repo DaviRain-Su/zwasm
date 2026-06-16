@@ -51,8 +51,13 @@ pub fn allocStructObject(heap: *Heap, typeidx: u32, payload_size: u32, zero_init
 /// Wasm spec 3.0 §3.3.13 (array.new_default keeps the zeroed payload;
 /// array.new / array.new_fixed overwrite it, passing `zero_init = false`).
 pub fn allocArrayObject(heap: *Heap, typeidx: u32, length: u32, element_size: u8, zero_init: bool) Heap.Error!u32 {
-    const payload: u32 = length * @as(u32, element_size);
-    const total: u32 = array_header_size + payload;
+    // u64 size arithmetic: a huge array.new* length overflows the u32
+    // product before Heap.allocate's 4 GiB cap fires — trap OutOfHeap
+    // ("allocation size too large") instead of panicking (wasmtime
+    // gc/array-alloc-too-large). Mirrors interp array_ops.allocateArray.
+    const total_u64: u64 = @as(u64, array_header_size) + @as(u64, length) * @as(u64, element_size);
+    if (total_u64 > std.math.maxInt(u32)) return Heap.Error.OutOfHeap;
+    const total: u32 = @intCast(total_u64);
     const ref = try heap.allocate(total);
     const header: ArrayHeader = .{ .header = .{ .kind = .array, .info = typeidx }, .length = length };
     @memcpy(heap.bytes[ref .. ref + array_header_size], std.mem.asBytes(&header)[0..array_header_size]);

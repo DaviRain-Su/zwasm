@@ -346,6 +346,10 @@ fn mapDispatchErr(err: anyerror) Instance.InvokeError {
         error.Interrupted => error.Interrupted, // host timeout/cancel (ADR-0179 #3a)
         error.OutOfFuel => error.OutOfFuel, // host fuel budget exhausted (ADR-0179 #3b)
         error.OutOfMemory => error.OutOfMemory,
+        // GC heap 4 GiB cap exceeded (huge array.new* / struct.new) — surfaces
+        // as the OutOfMemory trap ("allocation size too large"; wasmtime
+        // gc/array-alloc-too-large). The JIT path traps via its 0-sentinel.
+        error.OutOfHeap => error.OutOfMemory,
         // A host func (e.g. wasi:cli/exit) requested process exit — unwind cleanly.
         error.ProcExit => error.ProcExit,
         else => @panic("zwasm.Instance.invoke: dispatch returned non-Trap error variant"),
