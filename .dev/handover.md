@@ -60,29 +60,13 @@ CLOSED (below). **windowsmini RESUMED**. Version `2.0.0-alpha.3`. Windows batch 
   builds + asserts Subtask creation→resolution + waitable-set delivery, e2e green; full async corpus + (e)
   adversarial (deadlock/dropped/cancelled) green; single-task path unchanged.
 
-## D-305 component-composition — first milestone CLOSED 2026-06-17 (@4cceeb1e, ADR-0196)
+## Recently closed arcs (detail in ADRs/git/debt — one-liners)
 
-CLOSED: cross-component STRING marshalling works. New `src/api/component_graph.zig` does two-level instantiation
-(outer `component_instances` × inner `core_instances` loop) + a boundary trampoline copying the string
-caller-mem→callee-mem via `canon.CanonContext`; typed `UnsupportedBoundaryType` for unimpl shapes. `strlen_graph`
-spec PASS (`firstbyte("Z")→0x5A`) + adder flat intact = `component_model_assert` 159/0/0; build+test+test-spec+
-test-component-spec+lint green; **x86_64-VERIFIED @b4e33689 (ubuntu test-all exit 0)**, windows batched. REMAINING
-D-305 (debt, consumer-gated; NOT grinding speculatively): other aggregate shapes
-(list/record/result/tuple) + result-direction string + deeper graphs — reuse `BoundaryCtx`/`CanonContext`, land
-when a fixture demands. (A subagent wrote the impl during an API outage; main loop verified + committed it.)
-
-## D-461 regalloc-origin rework (ADR-0153/ADR-0194) — CLOSED Phase I-V 2026-06-16
-
-CLOSED: x86_64 regalloc v128-spill OOB (`regalloc.zig:222`) fixed — three inconsistent spill-frame origins unified
-by threading per-arch `max_reg_slots_gpr` into `computeSpillOffsets` (ADR-0194; impl `3cd2ede6`). Verified arm64
-2922 green + x86_64-Rosetta rc=0. Full detail: ADR-0194 + lesson `x86_64-regalloc-fp-spill-origin-mismatch`.
-
-## D-461 SIMD v128-spill — high-value DONE (3-host green); result-write remainder = tracked debt (exotic)
-
-DONE both arches 3-host: origin rework + all 6 extract_lane + 4 bitmask widths. Result-write remainder
-(Extend/Extadd/replace_lane/binop-dsts, x86_64-only, ~26-site thread, EXOTIC) = tracked in D-461 debt row; re-open
-as a focused bundle if a real program needs it.
-
+- **D-305 first milestone** (@4cceeb1e, ADR-0196): cross-component STRING marshalling; `component_graph.zig`
+  two-level instantiation + boundary trampoline via `canon.CanonContext`. Common shapes now ALL done (see top).
+- **D-461 regalloc-origin rework** (ADR-0194, @3cd2ede6, CLOSED Phase I-V): x86_64 v128-spill OOB fixed by
+  threading per-arch `max_reg_slots_gpr` into `computeSpillOffsets`; arm64 2922 + x86_64-Rosetta green. Result-write
+  remainder (Extend/Extadd/replace_lane/binop-dsts, x86_64, EXOTIC) = D-461 debt row.
 
 ## Closed/paused (detail in git + debt.yaml)
 
