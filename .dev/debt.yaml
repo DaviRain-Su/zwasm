@@ -1674,6 +1674,33 @@ entries:
       bench/results/all_engine_matrix.md (the measured ratios);
       bench/runners/wasm/shootout/base64.wasm (profile target);
       scripts/run_bench.sh (--bench=shootout/base64); .claude/skills/debug_jit_auto
+  - id: "D-454"
+    layer: "code"
+    status: "blocked-by"
+    front: "future-bucket"
+    description: |-
+      Status: blocked-by (disproportionate effort; deferred from the front-③ GC-corpus
+      bundle close). Running a REAL Guile-Hoot (Scheme→wasm-gc) program to an OBSERVABLE
+      result in zwasm is blocked NOT by host imports (a small fixnum program calls ZERO of
+      its ~36 rt/io/debug imports at runtime → trap-stubs satisfy instantiation + execution;
+      zwasm already validates+lowers the dense module after the 5 front-③ fixes) but by the
+      EXPORT/OBSERVABILITY ABI: Hoot's `#:export-abi? #t` standalone module computes the
+      top-level value inside `start` and DISCARDS it — no plain export returns it. Observing
+      requires Hoot's reflect host ABI: a companion `reflect.wasm` + a port of the ~1078-line
+      `reflect.js` runtime (Scheme.load_main / reflector / proc.call / boxed (ref eq)↔scalar
+      repr) — a multi-cycle host-runtime port, out of proportion to a corpus fixture. dart2wasm
+      is heavier still (JS glue). Discharge predicate: a future cycle wanting a real
+      GC-LANGUAGE execution fixture either (a) ports Hoot's reflect ABI as a Zig host harness,
+      OR (b) finds a wasm-gc toolchain emitting a plain `(export "run") (result i32)` standalone
+      module. Until then the GC backend's RUNTIME execution is covered by the hand-written GC
+      edge fixtures (test/edge_cases/p10/gc/: canonical_eq_call_arg, ref_cast_concrete_idx64,
+      ref_test_null_idx256, br_table_reftype_subtype) + the wasm-3.0 GC spec suite (362/0).
+      Feasibility probe: subagent report 2026-06-16 (RUN side bounded, OBSERVE side dispro).
+    first_raised: "2026-06-16"
+    last_reviewed: "2026-06-16"
+    refs: |-
+      /tmp/hoot-spike (spike artifacts); test/edge_cases/p10/gc/ (GC execution fixtures);
+      lessons validator-exact-eql-where-reftype-subtyping-required + leb-decode-desync-manifests-far-downstream
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.
