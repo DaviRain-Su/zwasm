@@ -36,11 +36,16 @@ x86_64 codegen is locally TDD-able via `zig build test -Dtarget=x86_64-macos` un
   resolves by-name at instantiation, Zone-3 per-run — no global-reg analog; ADR §3 REVISED). P2 (`3a2c2c36`):
   folded `enable_component` into derived `wasi_level>=.p2`, **removed `-Dcomponent`** (lean = `-Dwasi=p1`); comp
   runner forced to p2 floor; unit 2945/2957 + component 158/0/0 green; `-Dcomponent` now rejected.
-  **P3 (NEXT)** = comptime-fence p3/async on `enable_wasi_p3=wasi_level>=.p3`. WRINKLE: `runWasiMain` (unified
-  P2+P3 entry) lives in `component_wasi_p3.zig:70` — RELOCATE it + sync dispatch to a P2 home, leave only async
-  (`driveAsyncMain`/`P3CallbackCtx`/`runWasiP3Main`/`waitOn`) in the p3 file, comptime-gate its import
-  (`component.zig:556`, `zwasm.zig:413`); then `check_build_dce` p3-forbidden assertion + matrix→p3. P4 =
-  structuralise cheap branches + sync `docs/zig_api_design.md` §3.8/§3.9 + CWFS handover (lean now `-Dwasi=p1`).
+  **P3 (NEXT) — settled plan**: add derived `enable_wasi_p3 = wasi_level>=.p3` build_option. (1) RELOCATE
+  `runWasiMain` from `component_wasi_p3.zig:70` → `component_wasi_p2.zig` (its only non-test caller is
+  `cli/run.zig:208`; `runWasiP2MainBuilt` already lives there @:2162); its async branch does `if (comptime
+  enable_wasi_p3) { const cwasi3=@import("component_wasi_p3.zig"); ...driveAsyncMain }`. (2) comptime-gate the p3
+  import in SHIP path (`component.zig:560` re-exports, `zwasm.zig:413`) on `enable_wasi_p3`. (3) the 28 async
+  tests in component_wasi_p3.zig get fenced out at default p2 → add a **`test-wasi-p3` step forcing `-Dwasi=p3`**
+  (mirror `test-component-spec`/`core_comp` p2-floor at build.zig:427) + wire into test-all. (4) `check_build_dce`
+  p3-forbidden assertion (`-Dwasi=p2` has no `wasi_p3_`/async syms) + matrix→p3. P4 = structuralise cheap branches
+  + sync `docs/zig_api_design.md` §3.8/§3.9 + CWFS handover (lean now `-Dwasi=p1`). NOTE: default p2 means async
+  is OPT-IN (`-Dwasi=p3`) — deliberate per the p2-interim decision (p3 not settled).
 - **Exit-condition**: `-Dcomponent` gone ✓(P2); p3 host `wasi_level`-gated (P3); WASI/component corpora green
   throughout. Decisions: (a) hard-remove ✓, (b) single-axis, default p2 interim (p3 flip later).
 
