@@ -1,0 +1,10 @@
+module local_init.0.wasm
+assert_return get-after-set i64:9223372036854775810 -> i64:9223372036854775810
+assert_return get-after-tee i64:9223372036854775811 -> i64:9223372036854775811
+assert_return get-in-block-after-set i64:9223372036854775812 -> i64:9223372036854775812
+assert_invalid local_init.1.wasm
+assert_invalid local_init.2.wasm
+assert_invalid local_init.3.wasm
+assert_invalid local_init.4.wasm
+module local_init.5.wasm
+assert_return tee-init i64:9223372036854775810 -> i64:9223372036854775810

@@ -99,6 +99,15 @@ NAMES=(
   load
   store
   traps
+  # D-458 spec-corpus-completeness: `align` (47 assert_return, memory-alignment
+  # exec §2.3.7) + `local_init` (4 assert_return, definite-init §3.3.1) carry real
+  # execution never JIT-run — the old wabt `wast2json` rejected `align` and
+  # `local_init` was described in this header but silently absent from NAMES. The
+  # D-290 swap to `wasm-tools json-from-wast` + the value-less-ref guard above let
+  # both bake. Closes the hard-coded-allowlist blind spot the SIMD corpus had
+  # (lesson hardcoded-corpus-subset-hides-whole-op-families).
+  align
+  local_init
   # d-20 batch: FP-bitwise + memory_size + structural surfaces.
   # `fac` deferred: `fac-ssa` uses `loop (param i64 i64)
   # (result i64)` — Wasm 2.0 multi-value loop params surface a
@@ -524,6 +533,18 @@ for c in d['commands']:
             continue
         args = a.get('args', [])
         results = c.get('expected', [])
+        # D-458: current wasm-tools emits value-less ref expectations
+        # (`{"type":"funcref"}` / `{"type":"externref"}` / `{"type":"refnull"}`
+        # with NO `value` key) for "any (non-null) ref of this type" / null-ref
+        # results (e.g. select.wast `(ref.func)` checks). The scalar i64-encoding
+        # runner can't verify ref IDENTITY ("any funcref"), so emit a specific
+        # skip rather than crash `fmt()` on the missing `value` (older wabt
+        # wast2json attached a concrete value, so this never tripped pre-D-290).
+        def _valueless_ref(x):
+            return x.get('type') in ('funcref', 'externref', 'refnull') and 'value' not in x
+        if any(_valueless_ref(x) for x in args) or any(_valueless_ref(x) for x in results):
+            lines.append(f'skip-impl ref-identity-result {a.get("field","?")!s}')
+            continue
         # §9.9 / 9.9-l-1b-d093-d63: `externref` / `funcref` accepted
         # as scalar-equivalent (aliased onto i64 GPR-class path per
         # ADR-0061 / d-33). The prior `module_state_diverged` set
