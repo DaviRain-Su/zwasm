@@ -39,49 +39,25 @@ Then `D-209` memory64. **windowsmini gating RESUMED**. Version → `2.0.0-alpha.
 
 ## NEXT — D-461 continuation: x86_64 SIMD v128-source spill-awareness (per-op bundle)
 
-`i32x4.extract_lane` v128 source = spill-aware DONE both arches (`422cd491`, xmmLoadSpilledV128; 12-v128 fixture
-returns 4095 on x86_64, gate removed; regalloc OOB fixed by ADR-0194). REMAINING: ~11 more `resolveXmm(src/vec_v)`
-sites in `x86_64/op_simd_int_cmp_lane.zig` (extract i64x2/i8x16_s_u/i16x8_s_u, the 4 replace_lane + cmp/shift
-binops) reject `.spill` v128 → same source-spill swap (+ replace/binop need a dest-spill
-`xmmDefSpilledV128`/`xmmStoreSpilledV128`). **Do per-op WITH a force-spill fixture each** — the gc-spec corpus does
-NOT exercise v128-spill, so untested mechanical patches risk silent bugs (lesson
-`runi32export-host-arch-arm64-only-emit-x86-gate-red`). Float lane ops (`op_simd_float.zig`) = separate sibling-set.
-TDD via `zig build test -Dtarget=x86_64-macos` (Rosetta), arm64 + ubuntu confirm. Unblocks D-460 v128-GC x86_64.
-Then `D-209` memory64.
+**ALL 6 v128 extract_lane variants = spill-aware DONE both arches** (i32x4 `422cd491`; i64x2 + i8x16/i16x8_s_u via
+shared `emitV128IntExtractLaneNarrow`): swap `resolveXmm→xmmLoadSpilledV128` for the single v128 source,
+backward-compatible (home XMM when not spilled). regalloc OOB fixed by ADR-0194; 12-v128 fixture returns 4095 on
+x86_64, gate removed. REMAINING: replace_lane ×4 (read vec + WRITE dst → source-spill swap **+ dest**
+`xmmDefSpilledV128`/`xmmStoreSpilledV128`, 2-stage alloc) + the cmp/shift binop `resolveXmm` sites. These are
+**multi-operand → each needs a force-spill FIXTURE** (stage alloc non-trivial; gc-spec corpus does NOT exercise
+v128-spill, untested patches risk silent bugs, lesson `runi32export-host-arch-arm64-only-emit-x86-gate-red`).
+NOTE: v128.or-chain already worked spilled in the repro → some binops are already spill-aware; AUDIT which
+cmp/shift sites genuinely reject before swapping. TDD via `zig build test -Dtarget=x86_64-macos` (Rosetta).
+Unblocks D-460 v128-GC x86_64. Then `D-209` memory64.
 
-## Active phase — doc-inventory + freshening (USER-requested 2026-06-16)
+## Closed/paused (detail in git + debt.yaml)
 
-- **Goal**: walk ALL zwasm_from_scratch docs (CLAUDE.md, `.dev/`, `.claude/`, README, `docs/`) and reconcile against
-  CODE TRUTH — find+fix stale claims (e.g. "100% SIMD spec" was once overstated; conversion ops were missing).
-- **Phase I survey DONE** (Explore subagent): main staleness was README version-line anchors. **README FRESHENED**
-  (`42441634`): retired `v0.1.0`/Phase-16 anchors (ADR-0181) → 完成形 framing + `v2.0.0-alpha.*` pre-release. VERIFIED
-  the coverage claims (Wasm 2.0 `skip-impl==0`, 3.0 all-9-proposals) are ACCURATE vs current test output (the
-  survey's "skip-impl 1790" finding was a Phase-9 historical false positive — always re-verify against CURRENT
-  state). Other docs clean of the retired-anchor class (only CLAUDE.md:108 uses `v0.1.0` as intentional design-
-  priority shorthand — left as-is).
-- **Reader-facing count/coverage claims VERIFIED accurate** (vs current runners): C-API **293/293** (gap=0,
-  `capi_surface_gap.sh`), component corpus **158/0/0** (README:45 + migration_v1_to_v2.md, ×2), Wasm 2.0
-  `skip-impl==0` + 3.0 all-9-proposals. No Phase-16 staleness in zwasm claims (the `cw_v1_consumer_contracts.md`
-  "Phase 16" refs are correctly about CW v1's own roadmap, not zwasm). **Reader-facing doc surface = clean.**
-- **NEXT (lower-priority remaining)**: `.dev/ROADMAP.md` widget + working-doc count drift (e.g. handover State
-  "Debt: 56" is now 61) are internal hygiene, not reader-facing — opportunistic. The high-risk surfaces (README,
-  c_api.md, version anchors) are done.
-
-## ADR-0192 wasmtime campaign — substantive work DONE; residuals debt-tracked (paused 2026-06-16)
-
-- **Differential-coverage GOAL MET**: ran wasmtime's `tests/misc_testsuite/` through zwasm; found every gap; **fixed
-  9 real engine bugs** the synthetic suite missed — array.copy self-region alias ×interp+JIT (`46c2975e`), array.new
-  u32 overflow (`7e527dba`), bottom-reftype decode (`d54b789f`), C-API active-data-drop (`c1f727d4`),
-  extern/any.convert in const-expr (`2daaf643`), v128-in-GC-aggregate layout+interp+const-expr (`60c54db5`), + 6 SIMD
-  via D-457. Lessons: `native-sweep-instantiate-fail-not-equal-host-import` + 2 more.
-- **Residuals (all exotic, debt-tracked, NOT premature-locked — discharge predicates clear)**: **`D-460`** (partial)
-  v128-GC: arm64 JIT struct+array get/set EMIT DONE (`f79a3ced`/`41015a9b`, 4 runI32Export tests, arm64-gated via
-  skip.blocker) — array.new_fixed/copy + the x86_64 mirror + array-copy-inline.6 are all blocked on **`D-461`** (a
-  PRE-EXISTING broad SIMD-spill gap: lane ops can't read a spilled v128 — x86_64 `resolveXmm` rejects `.spill`,
-  arm64 lane-op GPR paths SPILL-EXEMPT; staging XMMs xmm14/15 + V29/30 exist, so it's per-op wiring across many SIMD
-  ops × 2 arches). **`D-209`** memory64 >4 GiB memarg offset (10.M-4b multi-arch). **Parked = D-456** host-import
-  fixtures. Harness: `scripts/wasmtime_misc_{sweep,native_sweep}.sh`. Re-open D-461 as its own bundle if a real
-  high-v128-pressure program (not just this fixture) needs it, or to finish v128-GC.
+- **doc-inventory freshening DONE** (`42441634` README + ADR-0193 P4 doc-sync): reader-facing surfaces clean
+  (C-API 293/293, component 158/0/0, Wasm 2.0 skip-impl==0, 3.0 all-9-proposals, version anchors retired).
+- **ADR-0192 wasmtime differential campaign — paused**: goal met (9 real engine bugs fixed via wasmtime
+  misc_testsuite + 6 SIMD via D-457). Residuals: **`D-460`** v128-GC (arm64 struct/array get/set EMIT DONE
+  `f79a3ced`/`41015a9b`; array.new_fixed/copy + x86_64 mirror unblocked NOW by the D-461 spill fixes in progress),
+  **`D-209`** memory64 >4 GiB offset, **D-456** host-import fixtures (parked). Harness `scripts/wasmtime_misc_*.sh`.
 
 **Closed campaigns (detail in git/lessons)**: prior 4-front async-maturity (2026-06-16) — ② wasmtime async .wast
 TIER-1 (`afcf889a`/`05b35c28`; D-446/447 deferred), ① wasip3 conformance (7 real-rust fixtures, `.#gen-wasip3`),
