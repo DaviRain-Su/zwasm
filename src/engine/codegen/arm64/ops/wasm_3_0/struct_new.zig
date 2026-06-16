@@ -28,6 +28,7 @@ const ctx_mod = @import("../../ctx.zig");
 const abi = @import("../../abi.zig");
 const gpr = @import("../../gpr.zig");
 const inst = @import("../../inst.zig");
+const inst_neon = @import("../../inst_neon.zig");
 const jit_abi = @import("../../../shared/jit_abi.zig");
 const heap_mod = @import("../../../../../feature/gc/heap.zig");
 const zir = @import("../../../../../ir/zir.zig");
@@ -74,10 +75,21 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
     while (j > 0) {
         j -= 1;
         const fvreg = ctx.pushed_vregs.pop().?;
-        const vreg_reg = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, fvreg, 0);
-        const field_off: u32 = header_size + j * 8;
+        // D-460: running-sum offset (v128 fields are 16 bytes).
+        const field_off: u32 = header_size + ctx.func.structFieldByteOffset(typeidx, j);
         if (field_off > 32760) return ctx_mod.Error.SlotOverflow;
-        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImm(vreg_reg, fn_scratch, @intCast(field_off)));
+        if (ctx.func.structFieldValType(typeidx, j) == 0x7B) {
+            // v128 field: STR Q (16 bytes). The object base `fn_scratch` is
+            // reused across stores, so compute the field address into X15 (a
+            // GPR stage reg, free here — the value uses the FP stage).
+            if (field_off > 4095) return ctx_mod.Error.SlotOverflow;
+            const vs = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, fvreg, 0);
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12(15, fn_scratch, @intCast(field_off)));
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encStrQImm(vs, 15, 0));
+        } else {
+            const vreg_reg = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, fvreg, 0);
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImm(vreg_reg, fn_scratch, @intCast(field_off)));
+        }
     }
 
     // Push ref (result) — source from W17 (mirror struct_new_default's

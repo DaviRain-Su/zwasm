@@ -19,6 +19,7 @@ const ctx_mod = @import("../../ctx.zig");
 const abi = @import("../../abi.zig");
 const gpr = @import("../../gpr.zig");
 const inst = @import("../../inst.zig");
+const inst_neon = @import("../../inst_neon.zig");
 const jit_abi = @import("../../../shared/jit_abi.zig");
 const heap_mod = @import("../../../../../feature/gc/heap.zig");
 const zir = @import("../../../../../ir/zir.zig");
@@ -36,7 +37,9 @@ const slab: inst.Xn = 16;
 
 pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void {
     const fieldidx: u32 = ins.extra;
-    const field_off: u32 = header_size + fieldidx * 8;
+    // D-460: running-sum offset (v128 fields are 16 bytes); equals
+    // header_size + fieldidx*8 for an all-scalar struct.
+    const field_off: u32 = header_size + ctx.func.structFieldByteOffset(@intCast(ins.payload), fieldidx);
 
     const args = try ctx.popUnary();
     // Load the GcRef into a register (stage reg 0 = X14 if spilled).
@@ -72,6 +75,16 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
             const vd = try gpr.fpDefSpilled(ctx.alloc, args.result, 0);
             try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrDImm(vd, slab, @intCast(field_off)));
             try gpr.fpStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
+        },
+        0x7B => { // v128 (D-460): 16-byte Q-form load. The field is generally
+            // NOT 16-aligned (8-byte header), so ADD the offset into `slab`
+            // and LDR Q [slab,#0] (offset 0 satisfies the scaled-imm; arm64
+            // permits the unaligned actual access). encAddImm12 cap = 4095.
+            if (field_off > 4095) return ctx_mod.Error.SlotOverflow;
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12(slab, slab, @intCast(field_off)));
+            const vd = try gpr.qDefSpilled(ctx.alloc, args.result, 0);
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encLdrQImm(vd, slab, 0));
+            try gpr.qStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
         },
         else => {
             const rd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);

@@ -110,10 +110,12 @@ fn vregClassOfOp(ins: zir.ZirInstr, func: *const ZirFunc) ?VregClass {
         // 0x7D = f32, 0x7C = f64 (ValType.specByte / §5.3).
         .@"struct.get" => switch (func.structFieldValType(@intCast(ins.payload), ins.extra)) {
             0x7D, 0x7C => VregClass.fpr,
+            0x7B => VregClass.v128, // D-460: v128 field → 16-byte Q-class result.
             else => VregClass.gpr,
         },
         .@"array.get" => switch (func.arrayElemValType(@intCast(ins.payload))) {
             0x7D, 0x7C => VregClass.fpr,
+            0x7B => VregClass.v128, // D-460: v128 element → 16-byte Q-class result.
             else => VregClass.gpr,
         },
         // Ops that don't push (advance the vreg counter).

@@ -817,6 +817,32 @@ pub const ZirFunc = struct {
         if (fieldidx >= fields.len) return 0;
         return fields[fieldidx];
     }
+
+    /// D-460 — a GC aggregate field/element slot is 16 bytes for v128
+    /// (0x7B), else the uniform 8 bytes (ADR-0116 §3a). Mirrors
+    /// `feature/gc/type_info.zig fieldSlotSize` so JIT-computed offsets match
+    /// the materialised heap layout.
+    pub fn gcSlotBytes(valtype_byte: u8) u32 {
+        return if (valtype_byte == 0x7B) 16 else 8;
+    }
+
+    /// D-460 — byte offset of struct field `fieldidx` within the heap payload
+    /// (running sum of prior field slot sizes; v128=16, else 8). Equals the
+    /// legacy `fieldidx*8` for an all-scalar struct, and is correct once a
+    /// preceding field is v128.
+    pub fn structFieldByteOffset(self: *const ZirFunc, typeidx: u32, fieldidx: u32) u32 {
+        if (typeidx >= self.gc_struct_field_valtypes.len) return fieldidx * 8;
+        const fields = self.gc_struct_field_valtypes[typeidx];
+        var off: u32 = 0;
+        var i: u32 = 0;
+        while (i < fieldidx and i < fields.len) : (i += 1) off += gcSlotBytes(fields[i]);
+        return off;
+    }
+
+    /// D-460 — array element slot size in bytes (16 v128, else 8).
+    pub fn arrayElemBytes(self: *const ZirFunc, typeidx: u32) u32 {
+        return gcSlotBytes(self.arrayElemValType(typeidx));
+    }
 };
 
 test "ZirFunc.init: required fields populated, slots null" {

@@ -18,6 +18,7 @@ const ctx_mod = @import("../../ctx.zig");
 const abi = @import("../../abi.zig");
 const gpr = @import("../../gpr.zig");
 const inst = @import("../../inst.zig");
+const inst_neon = @import("../../inst_neon.zig");
 const jit_abi = @import("../../../shared/jit_abi.zig");
 const heap_mod = @import("../../../../../feature/gc/heap.zig");
 const zir = @import("../../../../../ir/zir.zig");
@@ -34,7 +35,8 @@ const slab: inst.Xn = 16;
 
 pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void {
     const fieldidx: u32 = ins.extra;
-    const field_off: u32 = header_size + fieldidx * 8;
+    // D-460: running-sum offset (v128 fields are 16 bytes).
+    const field_off: u32 = header_size + ctx.func.structFieldByteOffset(@intCast(ins.payload), fieldidx);
 
     // Operand stack: [.., ref, value] (value on top). Pop value then ref.
     if (ctx.pushed_vregs.items.len < 2) return ctx_mod.Error.AllocationMissing;
@@ -68,6 +70,14 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
         0x7C => {
             const vs = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, value_vreg, 0);
             try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrDImm(vs, slab, @intCast(field_off)));
+        },
+        0x7B => { // v128 (D-460): 16-byte Q-form store. Field not 16-aligned →
+            // ADD offset into `slab`, STR Q [slab,#0] (offset 0 satisfies the
+            // scaled-imm; arm64 permits the unaligned actual access).
+            if (field_off > 4095) return ctx_mod.Error.SlotOverflow;
+            const vs = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, value_vreg, 0);
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12(slab, slab, @intCast(field_off)));
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encStrQImm(vs, slab, 0));
         },
         else => {
             const xval = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, value_vreg, 0);
