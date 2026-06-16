@@ -1733,34 +1733,35 @@ entries:
     refs: ""
   - id: "D-458"
     layer: "test"
-    status: "now"
+    status: "note"
     front: spec-corpus-completeness
     description: |-
-      now (2026-06-16, follow-on to D-457 systemic audit). Spec EXECUTION
-      conformance is validated ONLY on curated JIT-assert corpora
-      (wasm-1.0-assert / wasm-2.0-assert / wasm-2.0-simd-assert / wasm-3.0-assert);
-      the full-upstream runners (wast_runner.zig / runner.zig) are parse+validate
-      ONLY (no runtime asserts). So "100% spec, 0 skip" = a skip-impl gate on the
-      curated execution corpus, NOT full-upstream execution coverage. The SIMD
-      blind-spot (D-457) was the first proof. Core-2.0 execution-corpus omissions
-      confirmed (corrected count, hyphen-aware): genuine 2.0 gaps are `align` (47
-      assert_return, memory-alignment exec) + `local_init` (4 assert_return,
-      definite-init — described in the regen header but silently absent from NAMES);
-      the rest are Phase-10 scope (call_ref/return_call*/br_on_null/type-rec) or
-      parse/validate-only (utf8-*/binary-leb128/annotations). BLOCKER: the 2.0 regen
-      distiller's `fmt()` raises KeyError 'value' on `align` + `select` command
-      shapes with the CURRENT pinned wasm-tools — the committed corpus is
-      non-idempotent (a re-bake EMPTIES select's 148-line manifest = regression).
-      Discharge: (1) make the distiller robust to those shapes (assert_malformed/
-      assert_invalid + value-less commands), (2) add align + local_init, run, fix
-      any surfaced exec bugs (local_init surfaced 2 fails in a churned bake — verify
-      on a clean bake), (3) confirm regen idempotency (re-bake == committed). Feeds
-      the USER-requested doc-inventory phase: reconcile the "100% spec" wording.
+      note (2026-06-16, follow-on to D-457). CORRECTNESS PART DONE (67b3a3ed): the
+      core-2.0 execution-corpus blind spot is closed — `align` (47 assert_return,
+      memory-alignment) + `local_init` (4, definite-init; was silently absent from
+      NAMES) now run e2e via JIT, 0 hidden bugs (spec_assert_runner_non_simd
+      25437→25537, 0 failed; the "2 fails" seen earlier were churned-bake artifacts).
+      Distiller crash fixed (value-less ref result `{"type":"funcref"}` → skip-impl
+      ref-identity-result, not KeyError 'value'). Cross-corpus audit CONCLUSION: the
+      SIMD blind spot (D-457) was UNIQUE (SIMD is JIT-only + the omission was
+      undocumented). The other corpora are NOT hidden blind spots — 1.0-assert (5
+      NAMES) is subsumed by 2.0-assert (84 NAMES re-test all 1.0 ops); 3.0-assert is
+      a documented Phase-10 smoke set (full corpus = ROADMAP 10.T-2b); the remaining
+      omitted core files are correctly-deferred Phase-10 scope (call_ref/return_call*/
+      br_on_null/type-rec/instance) or parse/validate-only (utf8-*/binary-leb128).
+      RESIDUAL (note, lower-value): (a) broad regen NON-IDEMPOTENCY — a full re-bake
+      with current pinned wasm-tools churns ~727 corpus files (byte differences vs
+      the committed corpus baked under older tooling; select's value-less ref asserts
+      now → skip-impl). align/local_init were added surgically (only those 2 dirs
+      baked; rest left untouched) to avoid the churn. Discharge = accept a full
+      re-bake as the new committed baseline + verify all runners stay green. (b) Doc
+      wording: "100% spec, 0 skip" is a skip-impl gate on curated EXECUTION corpora,
+      NOT full-upstream execution — reconcile in the USER-requested doc-inventory phase.
     first_raised: "2026-06-16"
     last_reviewed: "2026-06-16"
     refs: |-
-      scripts/regen_spec_2_0_assert.sh (NAMES + distiller fmt); test/spec/spec_assert_runner_non_simd.zig;
-      lesson hardcoded-corpus-subset-hides-whole-op-families; supersedes stranded-in-conventions D-455/456/457 text
+      scripts/regen_spec_2_0_assert.sh (NAMES + distiller fmt guard); test/spec/wasm-2.0-assert/{align,local_init};
+      lesson hardcoded-corpus-subset-hides-whole-op-families
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.

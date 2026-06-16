@@ -5,27 +5,18 @@
 
 ## Current state — Phase 17 完成形 completion-refinement (release = USER-ONLY, ADR-0156)
 
-D-457 (SIMD systemic close) DONE + **ubuntu-verified @8a6b4c0e** (24805/0). The full-SIMD-op sweep fixed 6
-corpus-hidden bugs (demote/promote/rounding/narrow/i64x2.extmul — same multi-layer-wiring pattern; per-arch emit
-handlers were complete, only validate-arity+lower+emit-dispatch missing). Lesson
-`hardcoded-corpus-subset-hides-whole-op-families`.
+D-457 (SIMD systemic close) DONE + **ubuntu-verified @8a6b4c0e** (24805/0). D-458 spec-corpus-completeness CORRECTNESS
+PART DONE (@67b3a3ed): closed the core-2.0 execution-corpus blind spot — `align` (47 assert_return, alignment) +
+`local_init` (4, was silently absent from NAMES) now run e2e, **0 hidden bugs** (25437→25537, 0 failed); distiller
+crash fixed (value-less ref result → skip-impl, not KeyError). Cross-corpus audit CONCLUSION: the SIMD blind spot was
+UNIQUE (JIT-only + undocumented) — 1.0-assert is subsumed by 2.0-assert, 3.0-assert is a documented Phase-10 smoke set,
+other omitted files are correctly-deferred Phase-10 scope. D-458 RESIDUAL (note, lower-value): broad regen
+non-idempotency (~727-file churn under current wasm-tools) + "100% spec" doc-wording → doc-inventory phase. Lessons
+`hardcoded-corpus-subset-hides-whole-op-families` (+ D-457 multi-layer-wiring).
 
-## Active bundle — spec-corpus-completeness (D-458)
-
-- **Bundle-ID**: spec-corpus-completeness (D-458) — extends the D-457 finding to NON-simd corpora.
-- **Cycles-remaining**: ~2
-- **Continuity-memo**: Investigation (this cycle) found spec EXECUTION is validated ONLY on curated JIT-assert corpora;
-  `wast_runner.zig`/`runner.zig` are **parse+validate only**. So "100% spec, 0 skip" = a skip-impl gate on the curated
-  execution corpus, NOT full-upstream execution. Core-2.0 executable omissions (hyphen-aware diff): genuine 2.0 gaps =
-  **`align`** (47 assert_return) + **`local_init`** (4, described in regen header but silently absent from NAMES); rest
-  are Phase-10 scope (call_ref/return_call*/br_on_null/type-rec) or parse-only (utf8-*/binary-leb128). **BLOCKER**: the
-  2.0 regen distiller `fmt()` raises `KeyError 'value'` on `align`+`select` shapes with the CURRENT pinned wasm-tools —
-  the committed corpus is NON-IDEMPOTENT (re-bake EMPTIES select's 148-line manifest = regression). local_init alone
-  baked + surfaced 2 fails in a churned bake (verify on a clean bake). Reverted this cycle to keep 2.0-assert green.
-- **Exit-condition**: distiller robust to malformed/value-less shapes → re-bake == committed (idempotent) → align +
-  local_init added + green + any surfaced exec bug fixed. Then feed doc-inventory phase (reconcile "100% spec" wording).
-
-## Planned future phase (USER-requested 2026-06-16) — now eligible
+**NEXT (autonomous)**: D-458 correctness done → resume general Phase-17 完成形 work — Step 0.5 debt sweep (59 entries:
+discharge dissolved barriers), surface audits (C/Zig/CLI あるべき論), OR the USER-requested doc-inventory phase (below,
+now eligible — reconcile "100% spec" wording against the execution-corpus truth this audit established).
 
 ## Planned future phase (USER-requested 2026-06-16)
 
