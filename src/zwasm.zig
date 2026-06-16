@@ -32,7 +32,9 @@
 
 const std = @import("std");
 
-pub const version = "0.0.0-pre";
+// Keep in sync with build.zig.zon `.version` and the planned next tag-cut
+// (v2 pre-release line, USER-only per ADR-0156). Bump when the user cuts a tag.
+pub const version = "2.0.0-alpha.3";
 
 // ============================================================
 // Zig facade (ADR-0109 native API) — first-principles Engine +
