@@ -24,31 +24,27 @@ axis (default p2), `-Dcomponent` removed, p3/async comptime-fenced (`test-wasi-p
 component D→B; default `p2→p3` flip tracked under D-335). Now driving the **D-461 rework campaign** (see below).
 Then `D-209` memory64. **windowsmini gating RESUMED**. Version → `2.0.0-alpha.3`.
 
-## Active rework campaign — D-461 x86_64 regalloc FP-spill arch-parameterization (ADR-0153)
+## D-461 regalloc-origin rework (ADR-0153/ADR-0194) — CLOSED Phase I-V 2026-06-16
 
-- **Measured deficiency**: x86_64 JIT PANICS (`index out of bounds`, regalloc.zig:222) under ≥7 live FP/v128
-  vregs — a correctness gap (not bench). Root: the deterministic regalloc is **arm64-tuned** (8 GPR/13 FP slots,
-  spills minted at origin 8); x86_64 (4 GPR/6 XMM) "fakes" extra spills by lowering `slot()` thresholds, and the
-  v128 `spill_offsets` array is sized origin-8 but indexed `id - max_reg_slots_gpr(=4)` → +4 skew → OOB. Blocks
-  D-460 v128-GC x86_64 + array-copy-inline.6.
-- **Phase I (Investigation) DONE 2026-06-16** (`ccf49f4c`): mechanism nailed via instrumented `slot()` dump
-  (class=.fpr id=9 gpr=4 fp=6 n_slots=13 len=5 spill_idx=5); lesson `x86_64-regalloc-fp-spill-origin-mismatch` +
-  D-461 debt updated. Repro: un-gate the 12-live-v128 D-461 test (`runner_gc_test.zig:278`) + `zig build test
-  -Dtarget=x86_64-macos` (Rosetta).
-- **Phase II (Correctness-assurance) DONE** (`c4c1d567`): the buggy resolve path (regalloc.zig:221
-  `offsets[id-gpr]`) had ZERO direct unit coverage (all prior tests used the null-spill_offsets fallback). Added 3
-  characterization tests pinning the WORKING consistent-origin contract (GPR spill / FPR-spill-past-boundary /
-  spillBytes through spill_offsets) + 1 adversarial `skip.blocker(.@"D-461")` fix-verifier reproducing the x86_64
-  divergent-origin OOB (un-gate target for Phase IV). Test 2922/2935 green.
-- **Phase III (Design ADR) — NEXT**: the deep issue (found during II): the regalloc is **class-blind** — one
-  `force_spill_threshold` (8) mints register ids 0..7 for ALL vregs, but x86_64 has 4 GPR / 6 XMM. x86_64 "fakes"
-  the extra spills by lowering `slot()` thresholds; scalar GPR spills survive via the array-less `(id-gpr)*16`
-  fallback, but v128 spills use the BOUNDED `spill_offsets` array (sized origin-8) → faked-spill ids (FP 6,7) have
-  no entry + real spills index `id-4` vs sized `id-8` → OOB/underflow. Design must decide: (a) make the regalloc
-  class-AWARE at mint (separate GPR/FP pools — needs per-vreg gpr-vs-fpr class, only v128 shape_tags exist today)
-  OR (b) keep class-blind mint but store the spill-array origin in `Allocation` + give the array entries for ALL
-  slot()-spilled ids (not just minted-spill ids ≥8). Weigh against P3/P6 single-pass invariant. Then IV impl
-  (un-gate the adversarial test), V retrospective.
+- **CLOSED**: the x86_64 regalloc v128-spill OOB (`regalloc.zig:222`) is FIXED. Root was THREE inconsistent
+  spill-frame origins (mint `max(gpr,fp)` / `spill_offsets` sizing hardcoded-8 / `slot()` resolve patched-pool).
+  **Fix (ADR-0194)**: thread the per-arch `max_reg_slots_gpr` into `computeWith`→`computeSpillOffsets` so the array
+  is sized+indexed from the same origin `slot()` resolves with, set at BUILD time (dropped compile.zig's GPR
+  post-patch). Phases: I (`ccf49f4c` instrumented dump), II (`c4c1d567` characterization + the zero-coverage
+  spill_offsets resolve path), III (`6500a611` ADR-0194 design), IV (`3cd2ede6` impl). **Verified**: arm64
+  byte-identical 2922 green; x86_64-Rosetta rc=0, OOB gone; lesson `x86_64-regalloc-fp-spill-origin-mismatch`.
+- **Phase V retrospective**: hit the 完成形 (one coherent origin, no arch-tuned-default trap); rejected the
+  class-aware-mint over-reach + the array-elimination (scalars still pack 8-byte). New debt = none beyond the
+  pre-existing D-461 continuation below.
+
+## NEXT — D-461 continuation: x86_64 resolveXmm v128 lane-op spill emit (normal bundle)
+
+With the regalloc OOB fixed, the `runner_gc_test` 12-live-v128 fixture now reaches the ORIGINAL D-461 blocker:
+x86_64 `resolveXmm` rejects a `.spill` v128 lane operand (`UnsupportedOp`). The spill-aware XMM helpers EXIST
+(`xmmLoadSpilledV128`/`xmmDefSpilledV128`/`xmmStoreSpilledV128`, gpr.zig); it's per-lane-op wiring across the
+x86_64 SIMD lane ops (extract/replace_lane etc.), mirroring the arm64 slice-1 (`97afa4d4`). Un-gate the
+`runner_gc_test` x86_64 + the D-460 v128-GC x86_64 mirror once done. TDD locally via `zig build test
+-Dtarget=x86_64-macos` (Rosetta). Then `D-209` memory64.
 
 ## Active phase — doc-inventory + freshening (USER-requested 2026-06-16)
 
