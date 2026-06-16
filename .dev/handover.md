@@ -18,15 +18,16 @@ intersection). D-458 RESIDUAL (note): broad regen non-idempotency (~727-file chu
 - **Cycles-remaining**: ~3 (windows-side iterative debug)
 - **Continuity-memo**: Phase-I done. The windows `wasm-3.0-assert` runner enumerates the corpus (75 manifests, 11813
   directives) but reports **pass=0 UNIFORMLY across all 5 buckets** (gc/memory64/tail-call/function-references/
-  multi-memory): `assert_return pass=0 fail=0` (NOT evaluated — neither pass/fail/skip-counted) + `assert_invalid`
-  ALL-fail (modules not rejected). ubuntu runs the SAME runner+corpus fine (pass=10234). So it's windows-specific +
-  uniform → NOT per-op logic; **hypothesis: windows-specific corpus `.wasm` LOAD failure** (the runner finds manifests
-  but the per-module load/compile no-ops → invalids "not rejected" + returns un-invokable). It does NOT gate test-all
-  (`[run_remote_windows] OK`) because the skeleton runner (10.T-2b WIP) doesn't propagate these counts to its exit code
-  — exactly the ADR-0174 "OK-verdict-hides-pass=0" anomaly (build.zig:599). NEXT: windows-side diagnostic — run the
-  wasm-3.0-assert runner on windowsmini with a per-module load/compile error print (add a temp diag or check if it
-  already logs) to confirm the load-failure hypothesis + find the exact failing step (path resolution? Win64
-  decoder/validate? corpus file access?). Then fix root cause until windows pass counts MATCH ubuntu.
+  multi-memory): `assert_return pass=0 fail=0` (NOT evaluated) + `assert_invalid` ALL-fail (modules not rejected).
+  ubuntu runs the SAME runner+corpus fine (pass=10234, confirmed current @3b3f16fa default test-all — NOT engine-env-
+  gated). So windows-specific + uniform → NOT per-op logic; since `assert_invalid` (host-independent validate) all-fail,
+  **modules aren't being LOADED on windows**. Found the swallow site: runner line 718 `sub_dir.readFileAlloc(module)
+  catch { null; continue }` silently dropped read failures (line 789 already prints validate-compile-fails, which the
+  windows log did NOT show → it's upstream at the file READ). **DIAGNOSTIC LANDED @60f3706d**: that catch now prints
+  `MODULE-READ-FAIL: <errno>` (no-op on Mac/ubuntu — read succeeds). **NEXT: read the windowsmini run's MODULE-READ-FAIL
+  lines** (errno = FileNotFound? AccessDenied? → path-resolution vs file-access) to pinpoint + fix the root cause until
+  windows pass counts MATCH ubuntu. Non-gating (`[run_remote_windows] OK`) because the 10.T-2b skeleton doesn't
+  propagate counts to exit code — the ADR-0174 "OK-hides-pass=0" anomaly (build.zig:599).
 - **Exit-condition**: windowsmini wasm-3.0-assert real pass counts MATCH ubuntu (not a MATCH-only/OK-hides-0); the
   runner's exit code gates its fail counts (no silent skeleton pass-through). Then ADR-0174 Phase-2 (gate suspension)
   is eligible.
