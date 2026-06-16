@@ -32,13 +32,16 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 WASM_LEVELS=(v1_0 v2_0 v3_0)
-WASI_LEVELS=(p1 p2)
+WASI_LEVELS=(p1 p2 p3)
 
 # Forbidden-symbol patterns per build axis. Each pattern is fed to
 # `nm | grep -qE`; if matched the build is in violation.
 FORBIDDEN_V1_0=("wasm_2_0" "wasm_3_0" "v128_load" "v128_store" "gc_struct" "i31_new")
 FORBIDDEN_V2_0=("wasm_3_0" "gc_struct" "i31_new")
 FORBIDDEN_P1=("wasi_p2_" "wasi_preview2")
+# ADR-0193 P3: any build below `.p3` must NOT contain the P3/async driver
+# (relocated out of the always-compiled path; comptime-fenced on enable_wasi_p3).
+FORBIDDEN_BELOW_P3=("driveAsyncMain" "driveCallbackLoop" "P3CallbackCtx")
 
 OUT_BASE="/tmp/zwasm-dce-check"
 mkdir -p "$OUT_BASE"
@@ -85,6 +88,9 @@ forbidden_set_for() {
   if [ "$wasi" = "p1" ]; then
     out="$out ${FORBIDDEN_P1[*]}"
   fi
+  if [ "$wasi" != "p3" ]; then
+    out="$out ${FORBIDDEN_BELOW_P3[*]}"
+  fi
   echo "$out"
 }
 
@@ -107,7 +113,7 @@ case "$MODE" in
   --sample)
     n="${2:-2}"
     for i in $(seq 1 "$n"); do
-      MATRIX+=("${WASM_LEVELS[$((RANDOM % 3))]}:${WASI_LEVELS[$((RANDOM % 2))]}")
+      MATRIX+=("${WASM_LEVELS[$((RANDOM % 3))]}:${WASI_LEVELS[$((RANDOM % 3))]}")
     done
     ;;
   --target)
@@ -137,7 +143,11 @@ for entry in "${MATRIX[@]}"; do
     fail=1
     continue
   fi
-  bin=$(find "$OUT_BASE/${wasm}_${wasi}/bin" -type f 2>/dev/null | head -1)
+  # Prefer the `zwasm` CLI binary (the WASI-component path lives there);
+  # `head -1` could grab an unrelated test-runner exe and false-pass the
+  # P3-symbol DCE assertion (ADR-0193 P3).
+  bin="$OUT_BASE/${wasm}_${wasi}/bin/zwasm"
+  [ -f "$bin" ] || bin=$(find "$OUT_BASE/${wasm}_${wasi}/bin" -type f 2>/dev/null | head -1)
   if [ -z "$bin" ]; then
     printf '%-6s %-4s %-10s %-12s %-12s\n' "$wasm" "$wasi" "OK" "no-bin" "?"
     continue
@@ -158,7 +168,8 @@ for entry in "${MATRIX[@]}"; do
     fail=1
     continue
   fi
-  xbin=$(find "$OUT_BASE/x86_${wasm}_${wasi}/bin" -type f 2>/dev/null | head -1)
+  xbin="$OUT_BASE/x86_${wasm}_${wasi}/bin/zwasm"
+  [ -f "$xbin" ] || xbin=$(find "$OUT_BASE/x86_${wasm}_${wasi}/bin" -type f 2>/dev/null | head -1)
   if [ -z "$xbin" ]; then
     printf '%-6s %-4s %-10s %-12s %-12s\n' "$wasm" "$wasi" "x86:OK" "no-bin" "?"
   elif check_forbidden "$xbin" "$wasm" "$wasi"; then
