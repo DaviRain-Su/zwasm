@@ -2,11 +2,12 @@
 
 A from-scratch WebAssembly runtime in Zig 0.16.0.
 
-> **Status: feature-complete (Phase 16 — 完成形), not yet tagged.** Full
-> WebAssembly 3.0 + WASI preview1 & preview2 (Component Model), interpreter + JIT (arm64 / x86_64) +
-> AOT (`.cwasm`), and the C / Zig / CLI surfaces are settled and green on
-> the 3-host gate (Mac aarch64 + Linux x86_64 + Windows x86_64). A
-> `v0.1.0` tag is a deliberate, manual step and has not been cut.
+> **Status: feature-complete (完成形) and green on the 3-host gate**
+> (Mac aarch64 + Linux x86_64 + Windows x86_64). Full WebAssembly 3.0 + WASI
+> preview1 & preview2 (Component Model), interpreter + JIT (arm64 / x86_64) +
+> AOT (`.cwasm`), and the C / Zig / CLI surfaces are settled. Completion is the
+> line, not a release date (ADR-0153 / ADR-0156); tagging and publishing are a
+> deliberate, manual step. The v2 line is pre-release (tagged `v2.0.0-alpha.*`).
 
 v2 is a ground-up redesign of [zwasm v1](https://github.com/clojurewasm/zwasm)
 with day-one design for WebAssembly 3.0, wasm-c-api conformance, and
@@ -24,7 +25,7 @@ v1 ABI compatibility is out of scope — see the
 
 These are the only machines on which CI/dev runs are verified. Windows
 ARM64, Linux aarch64, and 2nd-Windows-machine cross-validation are
-out of scope for v0.1.0.
+out of scope (demand-driven; ADR-0181 — no version-line planning anchors).
 
 ## Coverage
 
@@ -143,7 +144,7 @@ FFI-capable language, not just C.
 
 ```
 -Dwasm=3.0|2.0|1.0          # default 3.0; lower levels omit later proposals
--Dwasi=p1|p2|both|none      # default p1 (v0.1.0)
+-Dwasi=p1|p2|both|none      # default p1
 -Dengine=both|jit|interp    # default both
 -Dcomponent=true|false      # default true; Component Model + WASI-P2 (-Dcomponent=false = lean build, ~-10%; ADR-0182)
 -Dstrip=true|false          # default false
