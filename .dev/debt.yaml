@@ -1744,9 +1744,11 @@ entries:
       Distiller crash fixed (value-less ref result `{"type":"funcref"}` → skip-impl
       ref-identity-result, not KeyError 'value'). Cross-corpus audit CONCLUSION: the
       SIMD blind spot (D-457) was UNIQUE (SIMD is JIT-only + the omission was
-      undocumented). The other corpora are NOT hidden blind spots — 1.0-assert (5
-      NAMES) is subsumed by 2.0-assert (84 NAMES re-test all 1.0 ops); 3.0-assert is
-      a documented Phase-10 smoke set (full corpus = ROADMAP 10.T-2b); the remaining
+      undocumented). The other corpora are NOT hidden blind spots — threads-assert
+      bakes the full atomic.wast (201 return + 45 trap, 0 skip; atomics DONE);
+      1.0-assert (5 NAMES) is subsumed by 2.0-assert (84 NAMES re-test all 1.0 ops);
+      3.0-assert is a documented Phase-10 smoke set (full corpus = ROADMAP 10.T-2b);
+      the remaining
       omitted core files are correctly-deferred Phase-10 scope (call_ref/return_call*/
       br_on_null/type-rec/instance) or parse/validate-only (utf8-*/binary-leb128).
       RESIDUAL (note, lower-value): (a) broad regen NON-IDEMPOTENCY — a full re-bake

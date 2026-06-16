@@ -8,15 +8,17 @@
 D-457 (SIMD systemic close) DONE + **ubuntu-verified @8a6b4c0e** (24805/0). D-458 spec-corpus-completeness CORRECTNESS
 PART DONE (@67b3a3ed): closed the core-2.0 execution-corpus blind spot — `align` (47 assert_return, alignment) +
 `local_init` (4, was silently absent from NAMES) now run e2e, **0 hidden bugs** (25437→25537, 0 failed); distiller
-crash fixed (value-less ref result → skip-impl, not KeyError). Cross-corpus audit CONCLUSION: the SIMD blind spot was
-UNIQUE (JIT-only + undocumented) — 1.0-assert is subsumed by 2.0-assert, 3.0-assert is a documented Phase-10 smoke set,
-other omitted files are correctly-deferred Phase-10 scope. D-458 RESIDUAL (note, lower-value): broad regen
-non-idempotency (~727-file churn under current wasm-tools) + "100% spec" doc-wording → doc-inventory phase. Lessons
+crash fixed (value-less ref result → skip-impl, not KeyError). Cross-corpus blind-spot audit COMPLETE: SIMD was UNIQUE
+(JIT-only + undocumented) — threads-assert (atomic.wast full, 201+45, 0 skip), 1.0-assert (subsumed by 2.0-assert),
+3.0-assert (documented Phase-10 smoke set) have NO hidden executable-op gap; other omissions are validation/parse/
+Phase-10 scope. Doc-inventory first pass DONE (@216bf200): fixed 1 stale claim (CHANGELOG WASI-0.2-sockets-deferred →
+functional); the "100% spec" headline claim is accurate-now (post-D457/458: real gaps closed) so it was left as-is — no
+rewording needed. D-458 RESIDUAL (note): broad regen non-idempotency (~727-file churn under current wasm-tools). Lessons
 `hardcoded-corpus-subset-hides-whole-op-families` (+ D-457 multi-layer-wiring).
 
-**NEXT (autonomous)**: D-458 correctness done → resume general Phase-17 完成形 work — Step 0.5 debt sweep (59 entries:
-discharge dissolved barriers), surface audits (C/Zig/CLI あるべき論), OR the USER-requested doc-inventory phase (below,
-now eligible — reconcile "100% spec" wording against the execution-corpus truth this audit established).
+**NEXT (autonomous)**: corpus-completeness + doc-inventory arcs closed → resume general Phase-17 完成形 work — surface
+audits (C/Zig/CLI あるべき論 + industry-standard, breaking-allowed), debt long-tail repayment (32 note + 4 partial), OR
+deeper doc path/line-ref staleness via audit_scaffolding (periodic).
 
 ## Planned future phase (USER-requested 2026-06-16)
 
