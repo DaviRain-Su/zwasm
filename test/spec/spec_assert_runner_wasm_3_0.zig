@@ -1519,6 +1519,16 @@ pub fn main(init: std.process.Init) !void {
         );
     }
     try stdout.flush();
+    // ADR-0174 — GATE on declarative-assert fails (close the "OK-verdict-hides-
+    // pass=0" anomaly fully: the CRLF fix restored real windows coverage, but the
+    // runner still always-exit-0'd, so a future real wasm-3.0 fail wouldn't turn
+    // test-all red). 0 fails on all 3 hosts today (verified), so this gates clean.
+    // JIT-path fails (jit_return_fail) are NOT gated — that's the opt-in JIT run
+    // stage with known eligibility-skips (handover JIT long-tail), reported only.
+    const grand_assert_fail = grand_total_return_fail + grand_total_trap_fail +
+        grand_total_invalid_fail + grand_total_unlinkable_fail +
+        grand_total_malformed_fail + grand_total_exception_fail;
+    if (grand_assert_fail > 0) std.process.exit(1);
 }
 
 test "wasm-3.0-assert: PROPOSALS list matches design plan §3.1-§3.5 + §4.6 + 10.M extension" {
