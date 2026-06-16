@@ -19,18 +19,20 @@ CLI surface audit (@4e5e42fe): code↔`--help` fully consistent. Gate change @b1
 (windows `[run_remote_windows] OK.` wasm-3.0-assert pass=10234 fail=0 / simd 24805/0 / spec 25539/0; ubuntu OK
 @f1a1d503). win-specassert campaign fully closed; the fail-gate is clean.
 
-**C-API surface audit DONE** (this turn, @b4d75506): one concrete defect found+fixed — `wasi.h`'s 8
-`zwasm_wasi_config_*`/`zwasm_store_set_wasi` decls lacked `WASM_API_EXTERN` (= Windows DLL `__declspec(dllimport)`),
-which every `zwasm.h` decl carries → Windows DLL consumers wouldn't import them. Rest of C API verified finished-form
-(null-guards, naming, Zig↔C symmetry clean; only `static inline` helpers correctly macro-free). test-c-api +
-test-c-api-conformance green. Prior arcs: **wasi:random surface COMPLETE** (random + insecure @6ec83e31 +
-insecure-seed @21b0c574, 3-host green); ADR-0193 follow-up audit (@c7ee8f49 + version SSOT @a7e61d62); D-335 typed
-marshalling DONE both directions (@630e7141 / @f2a002f4).
+**Fuzz campaign + plateau assessment** (this turn): ran a §14.3 campaign (808 `wasm-tools smith` modules →
+decode/compile/instantiate) = **0 crashes** → decoder/compiler robustness verified. The ~40% reject rate is post-3.0
+smith features (correct rejection; `test-spec` 25539/0 is the acceptance oracle) — lesson filed. **Bounded 完成形 vein
+is now plateaued**: WASI sync surface complete (cli/clocks/fs/io/random/sockets), C-API clean (@b4d75506 Windows-export
+fix), decoder hardened (nesting cap 8192 / vec-count / branch-depth), CLI UX clean, debts all genuinely blocked. Prior
+arcs: wasi:random COMPLETE (@6ec83e31/@21b0c574); ADR-0193 follow-up (@c7ee8f49 + version SSOT @a7e61d62); D-335 typed
+marshalling DONE both directions (@630e7141/@f2a002f4).
 
-**NEXT (autonomous)**: the default `p2→p3` flip is gated only on D-335's BIGGER remainders (guest↔guest stream
-byte-buffering = Zone-1 rendezvous redesign, may tension ADR-0187 stackless; sockets/http async = Unit E full — each
-a fresh multi-cycle bundle, open via Step-0). Fronts: D-335 big remainder OR continued WASI/CLI surface
-completeness. ADR-0193 (P1-P4, D-462) + D-461 regalloc-origin (ADR-0194) CLOSED (below). **windowsmini gating
+**NEXT (autonomous)**: the remaining substantial work is the **big async features** (the `p2→p3` gate): guest↔guest
+stream completion (needs a MULTI-TASK scheduler — ADR-0187 stackless single-task can't rendezvous two guests; the
+Subtask machinery ζ1 exists but no scheduler) + sockets/http async (Unit E; http needs the same scheduler). Each is a
+multi-cycle ADR-0153 campaign (Investigation→Correctness→Design→Impl), not urgent (p2 default stays). Open it
+deliberately as a campaign, OR continue light maintenance (periodic fuzz, debt sweeps). ADR-0193 (P1-P4, D-462) +
+D-461 regalloc-origin (ADR-0194) CLOSED (below). **windowsmini gating
 RESUMED**. Version `2.0.0-alpha.3`.
 
 ## D-461 regalloc-origin rework (ADR-0153/ADR-0194) — CLOSED Phase I-V 2026-06-16
