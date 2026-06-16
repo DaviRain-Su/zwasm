@@ -19,20 +19,21 @@ CLI surface audit (@4e5e42fe): code↔`--help` fully consistent. Gate change @b1
 (windows `[run_remote_windows] OK.` wasm-3.0-assert pass=10234 fail=0 / simd 24805/0 / spec 25539/0; ubuntu OK
 @f1a1d503). win-specassert campaign fully closed; the fail-gate is clean.
 
-**NEXT (autonomous)**: two USER-flagged tracks open — (1) **doc-inventory** (below) and (2) **`D-462` feature-
-separation finished-form audit** (below): a careful INVESTIGATION → true-finished-form design + realistic
-Phase-split migration (ADR-grade; do NOT rush code). Version fixed this turn: 0.0.0-pre → `2.0.0-alpha.3`
-(`46e900ce`, matches the planned next tag-cut). Secondary: ADR-0174 Phase-2 windows-suspension; debt sweep.
+**NEXT (autonomous)**: **`D-462` investigation + design DONE → ADR-0193 (Proposed)** awaiting USER review (see
+below). Meanwhile the autonomous track is **doc-inventory** (below). Version fixed: 0.0.0-pre → `2.0.0-alpha.3`
+(`46e900ce`). Secondary: ADR-0174 Phase-2 windows-suspension; debt sweep.
 
-## USER-flagged D-462 — feature-separation finished-form (audit FILED 2026-06-16; needs investigation+design)
+## USER-flagged D-462 — feature-separation finished-form — DESIGN DONE (ADR-0193), implementation USER-GATED
 
-- **What**: WASI (and Wasm-level + component) build/runtime version separation has eroded. North-star = the user's
-  finished-form preference **directory > file > function-cluster > comptime/runtime branch** (lesson
-  `feature-separation-finished-form-preference`). Wasm-level ops are near-finished (dir + file-metadata); WASI-P2/P3
-  component host eroded to an `enable_component` bool + scattered `if`s + runtime import-name resolution; no
-  `-Dwasi=p3`; P2 double-gated; combos unvalidated. Full findings + discharge in debt `D-462`.
-- **Next**: this is an ADR-grade rework (touches build.zig §4.6 flags + WasiLevel/WasmLevel enums) — investigate &
-  design the true finished form vs unavoidable branches + a phased plan BEFORE any code (user-directed).
+- **Design delivered** (`ADR-0193`, Proposed): classified all ~11 scattered-branch sites (~6 unavoidable: parser
+  byte-level / CLI display / diagnostics / interp subtype-arm; ~4 structuralisable). Per-axis grades: Wasm-level B,
+  engine B+, GC B, WASI **D+**, component **D**. Target = single ordered `WasiLevel={none,p1,p2,p3}` (drop `both`),
+  component gated by `wasi_level≥p2` (remove standalone `-Dcomponent`), P2/P3 reified as Zone-1 `register()` (mirror
+  `src/feature/gc/register.zig`). 4-phase migration in the ADR. North-star = `feature-separation-finished-form-
+  preference` lesson (directory > file > function-cluster > branch).
+- **GATED on user review** of ADR-0193's 2 open questions: (a) alias-vs-hard-remove `-Dcomponent`; (b) is a
+  component-model-WITHOUT-WASI build a real target (yes → Option B two-axis; no → Option A single-axis, recommended).
+  **Do NOT start the §4 build-flag/enum code before that nod** (user explicitly directed design-before-code).
 
 ## Active phase — doc-inventory + freshening (USER-requested 2026-06-16)
 

@@ -1859,13 +1859,16 @@ entries:
       5. LAYER GAP: `wasi_level` dispatch-filtering only covers Zone-1 IR ops. Zone-3 component host trampolines
          (component_wasi_p2.zig) + component import resolution (by name string, no version check) are NOT under
          that gate, so build-time `-Dwasi` and runtime reachability disagree.
-      Discharge (per user — careful investigation FIRST, then design): (1) an INVESTIGATION that, per the
-      directory>file>function-cluster>branch hierarchy, classifies every separation site as TRUE-finished-form-
-      reachable vs genuinely-unavoidable-branch; (2) a design of the TRUE finished form (e.g. fold component-P2/P3
-      under a single `-Dwasi` version tier incl. p3 + structuralise host gating, OR explicitly-documented orthogonal
-      axes with a coherence invariant + combo validation + component-import version checks) AND a REALISTIC
-      Phase-split migration toward it (not a force-fit); (3) ADR (touches build.zig §4.6 flags + WasiLevel/WasmLevel
-      enums → ROADMAP §4.6 deviation → ADR first per §18). Multi-step rework; investigate + design before any code.
+      INVESTIGATION + DESIGN DONE 2026-06-16 → **ADR-0193** (Proposed): classified all ~11 scattered-branch sites
+      (~6 genuinely unavoidable: parser byte-level / CLI display / diagnostics / interp subtype-arm; ~4
+      structuralisable: instance.zig feature-imports → registration, memory64 emit → op_memory_i64.zig). Per-axis
+      grades: Wasm-level B, engine B+, GC B (placeholder), WASI **D+**, component **D**. Recommended target = single
+      ordered `WasiLevel={none,p1,p2,p3}` (drop `both`), component gated by `wasi_level≥p2` (remove the standalone
+      `-Dcomponent` axis), P2/P3 reified as Zone-1 `register()` (mirror src/feature/gc/register.zig). 4-phase
+      migration in the ADR (add p3 tier → registration reify → fold -Dcomponent → structuralise cheap branches).
+      Discharge: implement ADR-0193's phases (each keeps WASI/component/spec corpora green). **Implementation GATED
+      on user review** of ADR-0193's two open questions (alias-vs-remove -Dcomponent; is component-without-WASI a
+      real target → Option A single-axis vs Option B two-axis). Do NOT start code before that nod (user-steered).
     first_raised: "2026-06-16"
     last_reviewed: "2026-06-16"
     refs: |-
