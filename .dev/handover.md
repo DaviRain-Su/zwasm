@@ -22,9 +22,9 @@ CLI surface audit (@4e5e42fe): code↔`--help` fully consistent. Gate change @b1
 **NEXT (autonomous)**: doc-inventory reader-facing surface DONE (count claims verified). `D-462` design DONE
 (ADR-0193) awaiting USER review. **Top autonomous candidate = `D-335` Unit G** — consolidate the ~21
 `test/component/async_*.wat` fixtures into a p3 corpus + directory-walking runner (LOW, ~800 LOC; finished-form
-aligned). **Also: ADR-0174 Phase-2 windows-suspension** (`--suspend` → 2-host fast-loop) is eligible — windows
-gate green (10234/0); upcoming work (D-335 G corpus, debt) is non-Win64-risk, so suspend to speed the loop
-(`--resume` before D-462 impl / any Win64-ABI diff). Version → `2.0.0-alpha.3` (`46e900ce`).
+aligned). **windowsmini gating SUSPENDED** (ADR-0174 Phase-2, `518a3b86`; verified green @4437a552) → **2-host fast-loop
+(Mac+ubuntu)**. `should_gate_windows.sh --resume` BEFORE D-462 impl or any Win64-ABI diff. Version →
+`2.0.0-alpha.3` (`46e900ce`).
 
 ## USER-flagged D-462 — feature-separation finished-form — DESIGN DONE (ADR-0193), implementation USER-GATED
 
