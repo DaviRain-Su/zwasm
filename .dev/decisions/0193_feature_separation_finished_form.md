@@ -105,11 +105,17 @@ Per-axis finished-form grade + biggest erosion:
    `build.zig` comp_options (`core_comp` forces `enable_component=true` → forces `wasi_level=.p2` floor instead).
    Behaviour-preserving at default (p2 ⇒ component on, == today). Characterization: WASI/component corpus 158/0/0
    pinned every commit.
-3. **P3 — comptime-fence the p3/async host on `wasi_level >= .p3`**: add the derived `enable_async`/`enable_wasi_p3`
+3. **P3 — comptime-fence the p3/async host on `wasi_level >= .p3`**: add the derived `enable_wasi_p3`
    `build_options` bool; `comptime`-gate `api/component_wasi_p3.zig` + `feature/component/async.zig` imports
    (`component.zig:556`, `zwasm.zig:413`) on it so a p2 build emits **zero** p3 symbols. Then add the
    `check_build_dce` p3-forbidden assertion (a `-Dwasi=p2` build has no `wasi_p3_`/async symbols) + extend its
-   matrix to p3. This is the erosion's true close: build-time `-Dwasi` finally agrees with runtime reachability.
+   matrix to p3. **STRUCTURAL WRINKLE (found 2026-06-16)**: the unified entry `runWasiMain` (the P2+P3 surface the
+   CLI/embedders call) currently LIVES IN `component_wasi_p3.zig:70` — fencing that whole file out under p2 would
+   also remove the P2 *sync* entry. So P3 first RELOCATES `runWasiMain` + the sync dispatch to a P2 home
+   (`component_wasi_p2.zig` / `component.zig`), leaving ONLY genuinely-async code (`driveAsyncMain`,
+   `P3CallbackCtx`, `runWasiP3Main`, `waitOn`) in the p3 file; the relocated `runWasiMain`'s async branch is
+   `comptime enable_wasi_p3`-gated so the p3 file is referenced only when enabled. This is the erosion's true
+   close: build-time `-Dwasi` finally agrees with runtime reachability.
 4. **P4 — structuralise + follow-on sync**: structuralise the cheap branch sites (instance.zig imports,
    `op_memory_i64.zig`) + annotate the unavoidable ones; **sync the Zig API doc** (`docs/zig_api_design.md`
    §3.8/§3.9 still says "`-Dcomponent=false` opts out" — rewrite to the `-Dwasi` axis); **CWFS dogfooding

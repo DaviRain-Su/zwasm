@@ -1904,12 +1904,14 @@ entries:
       ADR-0193 **ACCEPTED** 2026-06-16 (user resolved both open questions + granted full autonomy): (a) HARD-REMOVE
       -Dcomponent (no alias); (b) single-axis Option A (no component-without-WASI target); default = **p2 interim**
       (p3 flip deferred until WASI-0.3 Unit E/F host breadth settles — p3 core green but not settled).
-      MIGRATION PROGRESS: **P1 DONE** — WasiLevel={none,p1,p2,p3} ordered tier, default p1→p2, collector filter
-      `need>cur` (dropped .both); build+test+lint green. KEY FINDING: p3 host (component_wasi_p3/async) is NOT
-      wasi_level-gated — rides on enable_component (component.zig:556); gating + the p3-forbidden DCE assertion are
-      P2/P3 work. NEXT: P2 = src/feature/wasi_p{2,3}/register.zig reification (mirror feature/gc/register.zig,
-      behaviour-preserving, pin WASI corpus 158/0/0). P3 = hard-remove -Dcomponent. P4 = structuralise cheap branches
-      + sync docs/zig_api_design.md §3.8/§3.9 + CWFS handover (lean now = -Dwasi=p1). Active bundle in handover.
+      MIGRATION PROGRESS: **P1 + P2 DONE**. P1 (eb43d8af): WasiLevel={none,p1,p2,p3} tier, default p1→p2, filter
+      `need>cur`. Survey KILLED the register()-mirror (gc installs Zone-1 dispatch handlers; WASI host resolves
+      by-name at instantiation Zone-3 per-run — no global-reg analog; ADR §3 REVISED). P2 (3a2c2c36): folded
+      enable_component into derived wasi_level>=.p2, REMOVED -Dcomponent (lean = -Dwasi=p1); comp runner forced p2
+      floor; unit 2945/2957 + component 158/0/0 green; -Dcomponent rejected. NEXT: P3 = comptime-fence p3/async on
+      enable_wasi_p3 — WRINKLE: runWasiMain (unified entry) lives in component_wasi_p3.zig:70, must RELOCATE to a
+      P2 home + leave only async there + gate its import; then check_build_dce p3-forbidden assertion. P4 =
+      structuralise cheap branches + sync docs/zig_api_design.md §3.8/§3.9 + CWFS handover. Active bundle in handover.
     first_raised: "2026-06-16"
     last_reviewed: "2026-06-16"
     refs: |-

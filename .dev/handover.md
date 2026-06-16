@@ -30,16 +30,19 @@ x86_64 codegen is locally TDD-able via `zig build test -Dtarget=x86_64-macos` un
 ## Active bundle
 
 - **Bundle-ID**: ADR-0193-feature-sep P1..P4 (D-462)
-- **Cycles-remaining**: ~3 (P2/P3/P4)
-- **Continuity-memo**: P1 DONE — `WasiLevel={none,p1,p2,p3}` ordered tier, default `p1→p2`, collector filter
-  `need>cur` (dropped `.both`); build+test+lint green. KEY FINDING: p3 host (`component_wasi_p3.zig`/`async.zig`)
-  is NOT `wasi_level`-gated — rides on `enable_component` (`component.zig:556`); gating it is P2/P3 work. P2 =
-  `src/feature/wasi_p{2,3}/register.zig` reification (mirror `src/feature/gc/register.zig`), behaviour-preserving,
-  pin WASI corpus 158/0/0. P3 = hard-remove `-Dcomponent`, fold into `wasi_level>=p2` (rewrite `record_binary_size.sh`
-  lean=`-Dwasi=p1`, `build.zig` comp_options, `enable_component` sites). P4 = structuralise cheap branches + sync
-  `docs/zig_api_design.md` §3.8/§3.9 + CWFS handover (`docs/consuming_prerelease_zwasm.md`: lean now needs `-Dwasi=p1`).
-- **Exit-condition**: `-Dcomponent` gone; `wasi_level>=p2` gates component; p3 host `wasi_level`-gated; WASI/component
-  corpora green throughout. Decisions: (a) hard-remove, (b) single-axis, default p2 interim (p3 flip later).
+- **Cycles-remaining**: ~2 (P3/P4)
+- **Continuity-memo**: P1 + P2 DONE. P1 (`eb43d8af`): `WasiLevel={none,p1,p2,p3}` tier, default `p1→p2`, filter
+  `need>cur`. **Survey killed the register()-mirror** (gc pattern installs Zone-1 dispatch handlers; WASI host
+  resolves by-name at instantiation, Zone-3 per-run — no global-reg analog; ADR §3 REVISED). P2 (`3a2c2c36`):
+  folded `enable_component` into derived `wasi_level>=.p2`, **removed `-Dcomponent`** (lean = `-Dwasi=p1`); comp
+  runner forced to p2 floor; unit 2945/2957 + component 158/0/0 green; `-Dcomponent` now rejected.
+  **P3 (NEXT)** = comptime-fence p3/async on `enable_wasi_p3=wasi_level>=.p3`. WRINKLE: `runWasiMain` (unified
+  P2+P3 entry) lives in `component_wasi_p3.zig:70` — RELOCATE it + sync dispatch to a P2 home, leave only async
+  (`driveAsyncMain`/`P3CallbackCtx`/`runWasiP3Main`/`waitOn`) in the p3 file, comptime-gate its import
+  (`component.zig:556`, `zwasm.zig:413`); then `check_build_dce` p3-forbidden assertion + matrix→p3. P4 =
+  structuralise cheap branches + sync `docs/zig_api_design.md` §3.8/§3.9 + CWFS handover (lean now `-Dwasi=p1`).
+- **Exit-condition**: `-Dcomponent` gone ✓(P2); p3 host `wasi_level`-gated (P3); WASI/component corpora green
+  throughout. Decisions: (a) hard-remove ✓, (b) single-axis, default p2 interim (p3 flip later).
 
 ## Active phase — doc-inventory + freshening (USER-requested 2026-06-16)
 
