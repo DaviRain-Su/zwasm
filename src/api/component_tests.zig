@@ -547,6 +547,31 @@ test "ADR-0195 d-a: a cross-component async callee's task.return value is captur
     try testing.expectEqual(@as(?u32, 42), graph.taskResult(2));
 }
 
+const two_async_components_consume_result_path = "test/component/two_async_components_consume_result.wasm";
+
+test "ADR-0195 d-b: the caller consumes the callee's async result (B's value lowered into A's retptr)" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, two_async_components_consume_result_path, testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var graph = try instantiateGraph(&eng, testing.allocator, bytes, .{});
+    defer graph.deinit();
+
+    // A's `run` async-calls B's `tick: -> u32` with a retptr; the graph lowers B's
+    // synchronously-resolved result (42) into A's memory at the retptr; A reads it
+    // and task.returns it. So A's OWN task result (task 1) is 42 — proving A
+    // received B's value (vs d-a, where only B's task 2 held 42).
+    try graph.driveAsyncMain("run");
+    const counts = graph.asyncTaskCounts();
+    try testing.expectEqual(@as(usize, 2), counts.total);
+    try testing.expectEqual(@as(usize, 2), counts.done);
+    try testing.expectEqual(@as(?u32, 42), graph.taskResult(1)); // A consumed B's result
+}
+
 test "D-305 (security): an OOB (ptr,len) into a cross-component string import TRAPS, not silently returns 0" {
     var threaded: std.Io.Threaded = .init(testing.allocator, .{});
     defer threaded.deinit();

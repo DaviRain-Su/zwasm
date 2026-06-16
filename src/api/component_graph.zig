@@ -640,7 +640,7 @@ fn installBoundaryTrampoline(
     // async boundary trampoline (mint a subtask for the callee + enqueue it into
     // the shared scheduler `TaskTable`), not the synchronous marshal-and-call.
     if (r.is_async) {
-        return installAsyncBoundary(graph, lk, ns, core_export_name, ft, r, core_inst, provider);
+        return installAsyncBoundary(graph, lk, ns, core_export_name, ft, r, core_inst, importer, provider);
     }
 
     // A `string` RESULT flattens to >1 core value, so per the Canonical ABI it
@@ -752,6 +752,7 @@ fn installAsyncBoundary(
     ft: ctypes.FuncType,
     r: ctypes.TypeInfo.ResolvedLift,
     core_inst: *Instance,
+    importer: *GraphChild,
     provider: Provider,
 ) GraphError!void {
     if (ft.params.len != 0) return GraphError.UnsupportedBoundaryType;
@@ -774,6 +775,7 @@ fn installAsyncBoundary(
         .func_type = ft,
         .async_state = as,
         .async_cb_funcidx = cb_funcidx,
+        .importer = importer, // d-b: the result-bearing trampoline lowers B's result into A's retptr
     };
     try graph.boundaries.append(graph.alloc, bctx);
 
@@ -790,26 +792,39 @@ fn installAsyncBoundary(
 /// scheduler table, and return the async-call status (RETURNED, since the
 /// minimal callee resolves synchronously). A callee trap propagates as a trap.
 fn asyncBoundaryTrampoline(caller: *Caller) BoundaryError!u32 {
-    return enqueueCalleeSubtask(caller.data(BoundaryCtx));
+    _ = try enqueueCalleeSubtask(caller.data(BoundaryCtx));
+    return SUBTASK_RETURNED;
 }
 
-/// Result-bearing async import (`func() -> u32`, ADR-0195 d-a): the lowered core
-/// func carries a leading `retptr` (where the importer would receive the result).
-/// The result travels via the callee's `task.return` (captured graph-side), so
-/// the retptr is unused here — the enqueue path is identical to the void shape.
+/// Result-bearing async import (`func() -> u32`, ADR-0195 d-b): the lowered core
+/// func carries a leading `retptr` where the importer (A) receives the result. The
+/// callee's result is delivered via its `task.return` (captured graph-side into the
+/// subtask's per-task slot); on SYNCHRONOUS resolution (the callee ran to `.done`
+/// in its entry invoke) this trampoline lowers that flat-4 result into A's memory
+/// at `retptr`, so A reads B's value in-guest.
 fn asyncBoundaryRetTrampoline(caller: *Caller, retptr: u32) BoundaryError!u32 {
-    // d-a: the callee's task.return value is captured graph-side (TaskDescriptor.result),
-    // NOT lowered back into the caller's `retptr`. The caller (A) does not consume B's
-    // async result yet; delivering it into `retptr` on synchronous RETURNED is the d-b
-    // slice (cross-component async-result lowering). Until then the result lives in the
-    // subtask's per-task slot, readable via `ComponentGraph.taskResult`.
-    // TODO(p17 d-b): lower the resolved subtask result into `retptr` for a caller that reads it.
-    _ = retptr;
-    return enqueueCalleeSubtask(caller.data(BoundaryCtx));
+    const bctx = caller.data(BoundaryCtx);
+    const task_id = try enqueueCalleeSubtask(bctx);
+
+    // Lower B's task.return result into A's retptr IF the subtask resolved
+    // synchronously (it task.returned during its entry invoke). A callee that
+    // blocked (no result yet) is the async-completion path — the result arrives
+    // via a later subtask event (a further d-slice); the retptr stays unwritten and
+    // A must not read it until the SUBTASK event fires.
+    const as = bctx.async_state orelse return error.OutOfBoundsStore;
+    const task = as.tasks.get(task_id) catch return error.OutOfBoundsLoad;
+    if (task.result) |v| {
+        const importer = bctx.importer orelse return error.OutOfBoundsStore;
+        const cx = importer.canonContext();
+        if (@as(usize, retptr) + 4 > cx.mem().len) return error.OutOfBoundsStore;
+        std.mem.writeInt(u32, cx.mem()[retptr..][0..4], v, .little);
+    }
+    return SUBTASK_RETURNED;
 }
 
 /// Shared enqueue body: invoke the callee's async entry once, mint its subtask,
-/// fold the packed result into the subtask state, return the async-call status.
+/// fold the packed result into the subtask state, and return the new task's id
+/// (so the caller can read its `.result` for the d-b retptr lowering).
 fn enqueueCalleeSubtask(bctx: *BoundaryCtx) BoundaryError!u32 {
     const as = bctx.async_state orelse return error.OutOfBoundsLoad; // wired only for async boundaries
 
@@ -830,7 +845,7 @@ fn enqueueCalleeSubtask(bctx: *BoundaryCtx) BoundaryError!u32 {
     const task = as.tasks.get(task_id) catch return error.OutOfBoundsLoad;
     task.state = seed.state;
     task.set_index = seed.set_index;
-    return SUBTASK_RETURNED;
+    return task_id;
 }
 
 /// The graph-level `canon task.return` host func's flattened core signature:
