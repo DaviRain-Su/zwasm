@@ -1824,6 +1824,54 @@ entries:
       src/engine/codegen/x86_64/gpr.zig (resolveXmm — rejects .spill v128);
       src/engine/codegen/{x86_64,arm64}/op_simd_int_cmp_lane.zig (extract/replace_lane SPILL-EXEMPT paths);
       blocks D-460 array-copy-inline.6 + x86_64 v128-GC mirror
+  - id: "D-462"
+    layer: "code"
+    status: "now"
+    front: feature-separation-finished-form
+    description: |-
+      now (USER-flagged 2026-06-16, expanded same day). FEATURE-SEPARATION FINISHED-FORM audit — covers BOTH WASI
+      version separation AND Wasm spec-level separation (and component/engine). The build-time/runtime separation
+      has eroded as P2 (Component Model) then P3 (WASI 0.3 async, D-335) landed.
+      DESIGN NORTH-STAR (user, the finished-form preference, LEFT = more finished): **directory > file >
+      function-cluster > comptime/runtime `if`-branch**. Scattered inline branches (`分岐散り`) are the LEAST
+      finished form; some are genuinely unavoidable ("どうしても仕方がない部分") — the task is to tell the TRUE
+      finished form from the unavoidable, and design a realistic Phase-split migration toward it (don't force-fit).
+      CURRENT STATE (scan 2026-06-16):
+      - Wasm spec ops = MOSTLY finished-form: directory `src/instruction/wasm_{1,2,3}_0/` + per-file `wasm_level`
+        metadata (compile-error-enforced, dispatch_collector.zig:86) + central comptime filter (line 109-111). Good.
+      - BUT ~9 files carry scattered `build_options.{wasm_level,wasi_level,enable_component}` `if`-branches
+        (interp/mvp.zig, parse/sections.zig, cli/main.zig, api/instance.zig, codegen op_memory+emit ×2 arch) — the
+        non-finished-form fallback; audit which are unavoidable vs structuralisable.
+      - WASI/component is the WORST-eroded: IR ops use `wasi_level` file-metadata, but the component/P2/P3 HOST
+        (Zone 3) is gated by a separate `enable_component` bool + scattered `if`s + runtime import-NAME resolution —
+        NOT the directory/file-metadata scheme. WASI audit findings (subagent 2026-06-16; core facts confirmed):
+      1. `WasiLevel = enum { none, p1, p2, both }` (build.zig:1306) has NO `.p3` — P3 is implemented + runtime-
+         reachable (src/api/component_wasi_p3.zig, component/async) but UNSELECTABLE at build time (no `-Dwasi=p3`).
+      2. TWO coupled-but-orthogonal axes pretend to be one: `-Dwasi` (default p1) is an IR-dispatch filter
+         (dispatch_collector.zig:116-122 drops ops whose `wasi_level` > build level unless `.both`), while
+         `-Dcomponent` (default true, build.zig:100) gates "Component Model + WASI Preview 2" host code in Zone 3.
+         So P2 is gated by BOTH flags; `-Dwasi=p1 -Dcomponent=true` compiles AND runtime-instantiates P2 component
+         imports despite claiming P1-only. Contradictory combos (`-Dwasi=p2 -Dcomponent=false`, `-Dwasi=none
+         -Dcomponent=true`) are silently allowed — no coherence validation.
+      3. P3 async is ALWAYS-on under `-Dcomponent` (no `-Dwasi=p3` / `-Dasync`); `runWasiMain` auto-dispatches
+         P2 vs P3 at RUNTIME by export shape — no way to build "P2 only, no async".
+      4. `.both` is a wildcard, not a version — ambiguous once `.p3` is added (p1+p2? or all incl p3?).
+      5. LAYER GAP: `wasi_level` dispatch-filtering only covers Zone-1 IR ops. Zone-3 component host trampolines
+         (component_wasi_p2.zig) + component import resolution (by name string, no version check) are NOT under
+         that gate, so build-time `-Dwasi` and runtime reachability disagree.
+      Discharge (per user — careful investigation FIRST, then design): (1) an INVESTIGATION that, per the
+      directory>file>function-cluster>branch hierarchy, classifies every separation site as TRUE-finished-form-
+      reachable vs genuinely-unavoidable-branch; (2) a design of the TRUE finished form (e.g. fold component-P2/P3
+      under a single `-Dwasi` version tier incl. p3 + structuralise host gating, OR explicitly-documented orthogonal
+      axes with a coherence invariant + combo validation + component-import version checks) AND a REALISTIC
+      Phase-split migration toward it (not a force-fit); (3) ADR (touches build.zig §4.6 flags + WasiLevel/WasmLevel
+      enums → ROADMAP §4.6 deviation → ADR first per §18). Multi-step rework; investigate + design before any code.
+    first_raised: "2026-06-16"
+    last_reviewed: "2026-06-16"
+    refs: |-
+      build.zig:31 (-Dwasi) / :100 (-Dcomponent) / :1306 (WasiLevel enum); src/ir/dispatch_collector.zig:116-122;
+      src/api/component_wasi_p2.zig + component_wasi_p3.zig; src/feature/component/{async,canon}.zig;
+      ADR-0181/0182 (flags) + ADR-0187-0191 (CM-async); ROADMAP §4.6 (feature flags)
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.
