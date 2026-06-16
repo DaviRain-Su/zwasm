@@ -697,6 +697,9 @@ pub fn build(b: *std.Build) void {
         .name = "zwasm-wast-runtime-runner",
         .root_module = wast_runtime_runner_mod,
     });
+    // Installed so the wasmtime-misc differential sweep (ADR-0192)
+    // can invoke it on an arbitrary generated corpus dir.
+    b.installArtifact(wast_runtime_runner_exe);
     const run_wast_runtime_smoke = b.addRunArtifact(wast_runtime_runner_exe);
     run_wast_runtime_smoke.addArg(b.pathFromRoot("test/runners/fixtures"));
     const test_runtime_runner_smoke_step = b.step("test-runtime-runner-smoke", "Run the runtime-asserting WAST runner against the smoke fixture");
