@@ -67,6 +67,16 @@ test "validate: i8x16.relaxed_laneselect (0x109, 3-pop → v128)" {
 test "validate: f32x4.relaxed_min (0x10D, 2-pop → v128)" {
     try validateFunction(v128_from_v128x2, &.{}, &[_]u8{ 0x20, 0x00, 0x20, 0x01, 0xFD, 0x8D, 0x02, 0x0B }, &.{}, &.{}, &.{}, 0, &.{}, 0);
 }
+test "validate: SIMD float<->int lane conversions 248..255 are UNARY (1-pop → v128) (ADR-0192)" {
+    // i32x4.trunc_sat_f32x4_{s,u}=248/249, f32x4.convert_i32x4_{s,u}=250/251,
+    // i32x4.trunc_sat_f64x2_{s,u}_zero=252/253, f64x2.convert_low_i32x4_{s,u}=254/255.
+    // All pop 1 v128, push 1 v128 — the 9.4 MVP wrongly swept 248..255 into the
+    // binop range so any of them failed validation (wasmtime int-to-float-splat).
+    for ([_]u8{ 0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF }) |opcode| {
+        // local.get 0; 0xFD <opcode> 0x01; end  (opcode 248..255 = <byte> 0x01 LEB128)
+        try validateFunction(v128_from_v128, &.{}, &[_]u8{ 0x20, 0x00, 0xFD, opcode, 0x01, 0x0B }, &.{}, &.{}, &.{}, 0, &.{}, 0);
+    }
+}
 test "validate: i32x4.relaxed_dot_i8x16_i7x16_add_s (0x113, 3-pop → v128)" {
     try validateFunction(v128_from_v128x3, &.{}, &[_]u8{ 0x20, 0x00, 0x20, 0x01, 0x20, 0x02, 0xFD, 0x93, 0x02, 0x0B }, &.{}, &.{}, &.{}, 0, &.{}, 0);
 }

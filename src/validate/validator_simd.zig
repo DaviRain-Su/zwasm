@@ -301,7 +301,15 @@ pub fn dispatchPrefixFD(self: *Validator) Error!void {
         //   236 f64x2.abs / 237 f64x2.neg / 239 f64x2.sqrt
         // are unops; 228..235 + 240..247 stay binops.
         224, 225, 227, 236, 237, 239 => try opSimdUnop(self),
-        226, 228...235, 238, 240...255 => try opSimdBinop(self),
+        226, 228...235, 238, 240...247 => try opSimdBinop(self),
+        // 248..255 are the float↔int LANE-CONVERSION ops, all UNARY (pop 1
+        // v128, push 1 v128) — the 9.4 MVP's `240...255` binop range wrongly
+        // swept them in, so a module using any of them failed validation
+        // (i32x4.trunc_sat_f32x4_{s,u}=248/249, f32x4.convert_i32x4_{s,u}=
+        // 250/251, i32x4.trunc_sat_f64x2_{s,u}_zero=252/253,
+        // f64x2.convert_low_i32x4_{s,u}=254/255). The official simd corpus
+        // never exercised them; wasmtime int-to-float-splat caught it (ADR-0192).
+        248...255 => try opSimdUnop(self),
 
         // §17.4 — relaxed-SIMD (proposal Phase-5/W3C-Rec). Sub 0x100..0x113
         // (256..275). Validator only checks the operand-stack shape; the
