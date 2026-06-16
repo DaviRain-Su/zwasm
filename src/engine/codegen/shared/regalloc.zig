@@ -366,9 +366,6 @@ pub const vregClassByDef = vreg_class_mod.vregClassByDef;
 // ============================================================
 
 const testing = std.testing;
-// D-461 rework: skip helper for the adversarial Phase-IV fix-verifier below
-// (test-exempt region per zone_check D-017 — after the `testing` decl).
-const skip = @import("../../../test_support/skip.zig");
 
 fn freshFunc() ZirFunc {
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{} };
@@ -596,26 +593,25 @@ test "D-461 char: spillBytes through spill_offsets = align_up(last + 16, 16)" {
     try testing.expectEqual(@as(u32, 48), alloc.spillBytes());
 }
 
-test "D-461 ADVERSARIAL (Phase IV fix-verifier): x86_64 divergent-origin FP spill must NOT OOB" {
-    // The bug: x86_64 sets max_reg_slots_gpr=4 (its GPR pool) but `spill_offsets`
-    // is SIZED with the hardcoded origin 8 (max_reg_slots_gpr_default). So an FP
-    // spill at slot id 9 currently resolves `offsets[9 - 4] = offsets[5]` → OOB on
-    // a len-5 array (the exact ground-truth repro: gpr=4 fp=6 n_slots=13 len=5).
-    // The array was sized for origin 8, so the correct index is `id - 8 = 1`.
-    // CURRENT code OOBs here → gated until the arch-parameterization rework makes
-    // sizing-origin and resolve-origin agree. Un-gate in Phase IV.
-    if (true) return skip.blocker(.@"D-461");
-    const offsets = [_]u32{ 0, 16, 32, 48, 64 }; // sized n_slots(13) - origin(8) = 5
+test "D-461/ADR-0194: x86_64-origin (max_reg_slots_gpr=4) consistent allocation resolves FP spill in-bounds" {
+    // Post-ADR-0194, `computeWith` sizes `spill_offsets` from the per-arch
+    // `max_reg_slots_gpr` (4 on x86_64), so the array covers ids [4, n_slots)
+    // and `slot()` indexes `id - 4` consistently — the divergent-origin OOB
+    // (was: sized origin-8 vs resolve origin-4) is gone. Pins that resolve is
+    // correct for a non-8 origin (the other characterization tests cover only
+    // the arm64 origin-8 case). End-to-end OOB fix verified by the
+    // `runner_gc_test` 12-live-v128 fixture under x86_64.
+    const offsets = [_]u32{ 0, 16, 32, 48, 64, 80, 96, 112, 128 }; // sized n_slots(13) - origin(4) = 9
     const slots = [_]u16{9};
     const alloc: Allocation = .{
         .slots = &slots,
         .n_slots = 13,
-        .max_reg_slots_gpr = 4, // x86_64 GPR pool (the divergence)
+        .max_reg_slots_gpr = 4, // x86_64 GPR pool (= the spill-frame origin)
         .max_reg_slots_fp = 6, // x86_64 XMM pool
         .spill_offsets = &offsets,
     };
-    // Post-fix: index by the SIZING origin (8), so id 9 → offsets[1] = 16, in-bounds.
-    try testing.expectEqual(Slot{ .spill = 16 }, alloc.slot(0, .fpr));
+    // FP vreg id 9 → 9 >= 6 (fp boundary) → spill → offsets[9 - 4] = offsets[5] = 80, in-bounds.
+    try testing.expectEqual(Slot{ .spill = 80 }, alloc.slot(0, .fpr));
 }
 
 // ============================================================

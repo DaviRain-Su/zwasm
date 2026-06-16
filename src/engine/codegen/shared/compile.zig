@@ -258,24 +258,31 @@ pub fn compileOne(
     // reservation; x86_64 stays null (no current hardcoded
     // op-internal scratch). Wired at B125; comptime-resolved per
     // `scratch_reservations` const above.
-    var alloc = try regalloc.computeWith(allocator, &func, force_spill_threshold, scratch_reservations);
+    // ADR-0194 — the spill-frame origin = the per-arch GPR pool size
+    // (the lowest slot id any class can spill at). Threaded into
+    // `computeWith` so `spill_offsets` is sized+indexed from the SAME origin
+    // `Allocation.slot()` resolves with (was: a hardcoded-8 sizing vs a
+    // patched-pool resolve → the x86_64 v128-spill OOB, D-461).
+    const gpr_pool: u16 = switch (builtin.target.cpu.arch) {
+        .x86_64 => @import("../x86_64/abi.zig").allocatable_gprs.len,
+        .aarch64 => @import("../arm64/abi.zig").allocatable_gprs.len,
+        else => @compileError("unsupported host arch"),
+    };
+    var alloc = try regalloc.computeWith(allocator, &func, force_spill_threshold, scratch_reservations, gpr_pool);
     errdefer regalloc.deinit(allocator, alloc);
-    // D-045 chunk 13b: override per-arch class boundaries so that
-    // slot ids past the host's pool size resolve to `.spill` (not
-    // a null `slotToReg` the way the arm64-tuned defaults would
-    // do at slot 4..7 on x86_64). The defaults in
-    // `Allocation` (max_reg_slots_gpr=8, max_reg_slots_fp=13) match
-    // arm64; x86_64 has 4 GPRs / 6 XMMs in its pool post-13b.
-    // `emit.allocatable_gprs.len` / `emit.allocatable_xmms.len`
-    // is the canonical source.
+    // D-045 chunk 13b: the FP class boundary still needs the per-arch
+    // override so slot ids past the host's XMM pool resolve to `.spill`
+    // (not a null `slotToReg` the way the arm64-tuned default 13 would on
+    // x86_64). The GPR boundary + spill-frame origin are now set at build
+    // time by `computeWith(.., gpr_pool)` above (ADR-0194), so only
+    // `max_reg_slots_fp` is patched here.
     switch (builtin.target.cpu.arch) {
         .x86_64 => {
             const x86_abi = @import("../x86_64/abi.zig");
-            alloc.max_reg_slots_gpr = x86_abi.allocatable_gprs.len;
             alloc.max_reg_slots_fp = x86_abi.allocatable_xmms.len;
         },
         .aarch64 => {
-            // Defaults already match arm64 pool sizes.
+            // Default max_reg_slots_fp (13) already matches arm64.
         },
         else => @compileError("unsupported host arch"),
     }

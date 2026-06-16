@@ -108,7 +108,7 @@ const CallSite = struct { pc: u32, inclusive: bool };
 /// no fence. Callers needing the ADR-0077 fence call
 /// `computeWith` directly.
 pub fn compute(allocator: Allocator, func: *const ZirFunc) Error!Allocation {
-    return computeWith(allocator, func, max_reg_slots_gpr_default, null);
+    return computeWith(allocator, func, max_reg_slots_gpr_default, null, max_reg_slots_gpr_default);
 }
 
 /// Linear-scan allocation with LIFO free-pool reuse on dead
@@ -119,9 +119,19 @@ pub fn computeWith(
     func: *const ZirFunc,
     force_spill_threshold: u16,
     scratch_reservations: ?ScratchReservationFn,
+    // ADR-0194 — the spill-frame origin (= per-arch GPR pool size =
+    // `min(gpr_pool, fp_pool)`, the lowest id any class can spill at). The
+    // `spill_offsets` array is SIZED and INDEXED from this so it agrees with
+    // `Allocation.slot()`'s resolve origin; the value is recorded on the
+    // returned Allocation (no post-compute patch). arm64 passes 8 (= the
+    // historical `max_reg_slots_gpr_default`), so its layout is byte-identical.
+    max_reg_slots_gpr: u16,
 ) Error!Allocation {
     const live = func.liveness orelse return Error.LivenessMissing;
-    if (live.ranges.len == 0) return .{ .slots = &.{}, .n_slots = 0 };
+    // ADR-0194: thread the spill-frame origin even on the empty path so the
+    // Allocation's `max_reg_slots_gpr` is always the caller-supplied value
+    // (consistency; harmless here since an empty alloc never spills).
+    if (live.ranges.len == 0) return .{ .slots = &.{}, .n_slots = 0, .max_reg_slots_gpr = @intCast(max_reg_slots_gpr) };
 
     // ADR-0060 (+ 2026-05-31 amendment): collect callout PCs once.
     // `inclusive` marks alloc ops (struct.new) whose field operands are
@@ -351,12 +361,18 @@ pub fn computeWith(
     }
 
     const spill_offsets = if (shape_tags) |tags|
-        try computeSpillOffsets(allocator, slots, n_slots, max_reg_slots_gpr_default, tags)
+        try computeSpillOffsets(allocator, slots, n_slots, max_reg_slots_gpr, tags)
     else
         null;
     errdefer if (spill_offsets) |so| allocator.free(so);
 
-    return .{ .slots = slots, .n_slots = n_slots, .shape_tags = shape_tags, .spill_offsets = spill_offsets };
+    return .{
+        .slots = slots,
+        .n_slots = n_slots,
+        .shape_tags = shape_tags,
+        .spill_offsets = spill_offsets,
+        .max_reg_slots_gpr = @intCast(max_reg_slots_gpr),
+    };
 }
 
 /// ADR-0053 Part 1 — compute per-slot spill byte offsets.
@@ -433,6 +449,18 @@ test "compute: missing liveness returns LivenessMissing" {
     var f = freshFunc();
     defer f.deinit(testing.allocator);
     try testing.expectError(Error.LivenessMissing, compute(testing.allocator, &f));
+}
+
+test "computeWith: records the caller's max_reg_slots_gpr on the Allocation (ADR-0194)" {
+    // The spill-frame origin is set at BUILD time (was: patched after compute in
+    // compile.zig, leaving spill_offsets sized from a different origin → D-461 OOB).
+    // A non-default origin (4 = x86_64 GPR pool) must round-trip onto the result.
+    var f = freshFunc();
+    defer f.deinit(testing.allocator);
+    f.liveness = .{ .ranges = &.{} };
+    const alloc = try computeWith(testing.allocator, &f, 6, null, 4);
+    defer regalloc.deinit(testing.allocator, alloc);
+    try testing.expectEqual(@as(u8, 4), alloc.max_reg_slots_gpr);
 }
 
 test "compute: two non-overlapping ranges share slot 0" {
@@ -703,7 +731,7 @@ test "fence: null reservation is bit-for-bit identical to pre-fence walker" {
         .{ .def_pc = 0, .last_use_pc = 2 },
     };
     f.liveness = .{ .ranges = &ranges };
-    const alloc = try computeWith(testing.allocator, &f, max_reg_slots_gpr_default, null);
+    const alloc = try computeWith(testing.allocator, &f, max_reg_slots_gpr_default, null, max_reg_slots_gpr_default);
     defer regalloc.deinit(testing.allocator, alloc);
     try testing.expectEqual(@as(u16, 0), alloc.slots[0]);
     try regalloc.verify(&f, alloc);
@@ -720,7 +748,7 @@ test "fence: vreg crossing reserving op is forced past slots 0..4" {
         .{ .def_pc = 0, .last_use_pc = 3 },
     };
     f.liveness = .{ .ranges = &ranges };
-    const alloc = try computeWith(testing.allocator, &f, max_reg_slots_gpr_default, testFenceTableFill);
+    const alloc = try computeWith(testing.allocator, &f, max_reg_slots_gpr_default, testFenceTableFill, max_reg_slots_gpr_default);
     defer regalloc.deinit(testing.allocator, alloc);
     try testing.expect(alloc.slots[0] >= 5);
     try regalloc.verify(&f, alloc);
@@ -739,7 +767,7 @@ test "fence is PC-local: non-crossing vreg keeps slot 0 even with fence active" 
         .{ .def_pc = 3, .last_use_pc = 4 },
     };
     f.liveness = .{ .ranges = &ranges };
-    const alloc = try computeWith(testing.allocator, &f, max_reg_slots_gpr_default, testFenceTableFill);
+    const alloc = try computeWith(testing.allocator, &f, max_reg_slots_gpr_default, testFenceTableFill, max_reg_slots_gpr_default);
     defer regalloc.deinit(testing.allocator, alloc);
     try testing.expectEqual(@as(u16, 0), alloc.slots[0]);
     try testing.expectEqual(@as(u16, 0), alloc.slots[1]);
@@ -756,7 +784,7 @@ test "fence: boundary PC (vreg ending AT reserving op) is safe on slot 0" {
         .{ .def_pc = 0, .last_use_pc = 2 },
     };
     f.liveness = .{ .ranges = &ranges };
-    const alloc = try computeWith(testing.allocator, &f, max_reg_slots_gpr_default, testFenceTableFill);
+    const alloc = try computeWith(testing.allocator, &f, max_reg_slots_gpr_default, testFenceTableFill, max_reg_slots_gpr_default);
     defer regalloc.deinit(testing.allocator, alloc);
     try testing.expectEqual(@as(u16, 0), alloc.slots[0]);
     try regalloc.verify(&f, alloc);
