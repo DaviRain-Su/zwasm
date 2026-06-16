@@ -19,12 +19,14 @@ CLI surface audit (@4e5e42fe): code↔`--help` fully consistent. Gate change @b1
 (windows `[run_remote_windows] OK.` wasm-3.0-assert pass=10234 fail=0 / simd 24805/0 / spec 25539/0; ubuntu OK
 @f1a1d503). win-specassert campaign fully closed; the fail-gate is clean.
 
-**NEXT (autonomous)**: doc-inventory reader-facing surface DONE (count claims verified). `D-462` design DONE
-(ADR-0193) awaiting USER review. **Top autonomous candidate = `D-335` Unit G** — consolidate the ~21
-`test/component/async_*.wat` fixtures into a p3 corpus + directory-walking runner (LOW, ~800 LOC; finished-form
-aligned). **windowsmini gating SUSPENDED** (ADR-0174 Phase-2, `518a3b86`; verified green @4437a552) → **2-host fast-loop
-(Mac+ubuntu)**. `should_gate_windows.sh --resume` BEFORE D-462 impl or any Win64-ABI diff. Version →
-`2.0.0-alpha.3` (`46e900ce`).
+**NEXT (autonomous)**: tractable quick-wins EXHAUSTED — doc-inventory reader-facing DONE; `D-335` Unit G DONE
+(fixtures+tests ARE the corpus); `D-462` design (ADR-0193) AWAITS USER review. Remaining autonomous work is all
+hard/multi-cycle. **Highest-value next bundle = `D-461`** (SIMD lane ops not spilled-v128-aware): unblocks `D-460`
+v128-GC + is a real correctness gap. Scope (from the D-460 turns): make x86_64 `resolveXmm` + the lane-op
+GPR-scalar paths (both arches) spill-aware — the staging XMMs already exist (`xmm14/15`, `V29/30`); it's per-op
+wiring across the SIMD lane ops. Delicate multi-cycle codegen — START FRESH (this session = marathon). Then `D-209`
+memory64. **windowsmini gating SUSPENDED** (ADR-0174, `518a3b86`; green @4437a552) → 2-host. `--resume` BEFORE the
+v128-GC/SIMD codegen lands on Win64-ABI paths. Version → `2.0.0-alpha.3`.
 
 ## USER-flagged D-462 — feature-separation finished-form — DESIGN DONE (ADR-0193), implementation USER-GATED
 
