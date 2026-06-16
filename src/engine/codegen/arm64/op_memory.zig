@@ -336,6 +336,11 @@ pub fn emitMemOp(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 ///
 /// This function is NOT exposed via `pub` — only `emitMemOp`'s
 /// gate calls into it.
+///
+/// ADR-0193 P4: kept inline (not extracted to an `op_memory_i64.zig`
+/// file-cluster) — it is ~130 LOC sharing this file's private arm64 emit
+/// helpers, so extraction fails `file_size_smell` (N2 forced pub-leak, no P1
+/// at sub-300 LOC, host file 1219/2000 LOC = no size pressure).
 fn emitMemOpI64(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const is_store = switch (ins.op) {
         .@"i32.store",

@@ -38,6 +38,12 @@ const interp_mvp = @import("../interp/mvp.zig");
 const build_options = @import("build_options");
 const wasm_2_0_enabled = @intFromEnum(build_options.wasm_level) >= @intFromEnum(@as(@TypeOf(build_options.wasm_level), .v2_0));
 const wasm_3_0_enabled = @intFromEnum(build_options.wasm_level) >= @intFromEnum(@as(@TypeOf(build_options.wasm_level), .v3_0));
+// ADR-0193 P4: this `ext_* = if (wasm_N_enabled) @import(...) else struct{}`
+// block is the deliberate finished-form for Wasm-level feature gating — a
+// file-tier feature manifest (two central comptime predicates above + the
+// feature modules resident in their `instruction/wasm_{2,3}_0/` directories),
+// NOT scattered branches. Kept as-is, not pushed into the op dispatch_collector
+// (these modules expose functions instance.zig calls directly, not just op handlers).
 const ext_sign_ext = if (wasm_2_0_enabled) @import("../instruction/wasm_2_0/sign_extension.zig") else struct {};
 const ext_sat_trunc = if (wasm_2_0_enabled) @import("../instruction/wasm_2_0/nontrap_conversion.zig") else struct {};
 const ext_bulk_memory = if (wasm_2_0_enabled) @import("../instruction/wasm_2_0/bulk_memory.zig") else struct {};

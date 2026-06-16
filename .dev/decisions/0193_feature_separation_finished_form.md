@@ -116,12 +116,21 @@ Per-axis finished-form grade + biggest erosion:
    `P3CallbackCtx`, `runWasiP3Main`, `waitOn`) in the p3 file; the relocated `runWasiMain`'s async branch is
    `comptime enable_wasi_p3`-gated so the p3 file is referenced only when enabled. This is the erosion's true
    close: build-time `-Dwasi` finally agrees with runtime reachability.
-4. **P4 — structuralise + follow-on sync**: structuralise the cheap branch sites (instance.zig imports,
-   `op_memory_i64.zig`) + annotate the unavoidable ones; **sync the Zig API doc** (`docs/zig_api_design.md`
-   §3.8/§3.9 still says "`-Dcomponent=false` opts out" — rewrite to the `-Dwasi` axis); **CWFS dogfooding
-   handover** — CWFS passes neither flag (`build.zig:63`, defaults only), so the default `p1 → p2` change flows
-   in on its next SHA-pin bump; document in `docs/consuming_prerelease_zwasm.md` that consumers needing lean
-   builds must now pass `-Dwasi=p1` explicitly (was implicit via `-Dcomponent=false`).
+4. **P4 — structuralise judgment + doc sync** (bundle close): **(b) doc sync DONE** — every user-facing /
+   CWFS-handoff `-Dcomponent` reference rewritten to the `-Dwasi` axis (`README`, `docs/zig_api_design.md`
+   §3.8/§3.9, `migration_v1_to_v2`, `handoff_cw_v{1,2}`, `ROADMAP`, `record_binary_size`/`size_history`); also
+   fixed pre-existing post-0182 "opt-in/default off" staleness. **(c) CWFS handover DONE** — the handoff_cw docs
+   carry the new default; CWFS passes neither flag (defaults only) so the `p1 → p2` change flows in on its next
+   SHA-pin bump (no CWFS edit needed; lean = `-Dwasi=p1`). **(a) structuralise — RECONSIDERED & SCOPED DOWN**: the
+   original "extract `op_memory_i64.zig`, discover instance.zig imports" was over-reach. Per the `file_size_smell`
+   discipline, `emitMemOpI64` (~130 LOC, shares arm64/x86_64 emit helpers, host file 1219/2000 LOC) extraction
+   would force an **N2 helper pub-leak** with no P1 (sub-300-LOC) and no file-size pressure → **kept inline**. The
+   `instance.zig` `ext_* = if (wasm_N_enabled) @import(...)` block is **already a clean file-tier feature manifest**
+   (one central comptime predicate + directory-resident modules), NOT `分岐散り` → annotated, not refactored. The
+   ~6 genuinely-unavoidable sites (parser byte-level version gates, CLI `--version` display, JIT-trace diagnostics,
+   interp subtype-arm) are accepted as-is with a one-line "why" so future audits don't re-flag them. **Finished-form
+   verdict**: the WASI/component axis (the eroded D+/D) is the substantive fix (P1-P3); the Wasm-level sites were
+   already B/B+ and forcing extractions on them fails the project's own smell test.
 
 Correctness-first (ADR-0153): each phase keeps the full WASI/component/spec corpora green; P2's behaviour-
 preservation is pinned by characterization before the move.
