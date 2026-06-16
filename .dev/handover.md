@@ -19,10 +19,10 @@ CLI surface audit (@4e5e42fe): code↔`--help` fully consistent. Gate change @b1
 (windows `[run_remote_windows] OK.` wasm-3.0-assert pass=10234 fail=0 / simd 24805/0 / spec 25539/0; ubuntu OK
 @f1a1d503). win-specassert campaign fully closed; the fail-gate is clean.
 
-**NEXT (autonomous)**: the **ADR-0192 wasmtime campaign is the active frame (Phase III REOPENED — see below)**; pick
-gap **A `D-460`** (v128-in-GC-aggregate) next. Secondary: ADR-0174 Phase-2 windows-suspension still eligible
-(`should_gate_windows.sh --suspend` → 2-host fast-loop; resume before main-merge / Win64-risk); Phase-17 surface
-audits; doc-inventory phase (USER-requested).
+**NEXT (autonomous)**: the **ADR-0192 wasmtime campaign is the active frame (Phase III — see below)**. Gap B fixed
+(`2daaf643`); gap A core fixed (`60c54db5`). Next candidate = JIT GC-v128 emit (D-460 residual) OR gap C (D-209
+memory64) — both multi-arch codegen bundles — OR campaign V retrospective. Secondary: ADR-0174 Phase-2
+windows-suspension (`--suspend` → 2-host fast-loop; resume before main-merge / Win64-risk); doc-inventory phase.
 
 ## Planned future phase (USER-requested 2026-06-16)
 
@@ -42,15 +42,16 @@ audits; doc-inventory phase (USER-requested).
   any.convert_extern identity in const-expr (`2daaf643`, this cycle — gap B; fixture const-expr-gc returns 55)**, + 6
   SIMD via D-457. Lessons: `gc-bulk-op-memcpy-aliases-on-self-region-copy`, `wasmtime-fixtures-over-assert-exact-canonical-nan`,
   `native-sweep-instantiate-fail-not-equal-host-import`.
-- **Real-gap triage (Phase III)**: **A `D-460` (now)** v128 in a GC aggregate field rejected by
-  `type_info.fieldSlotSize` (uniform-8-byte slot vs 16-byte v128) — 4 fixtures; multi-step (slot model). **B FIXED**
-  this cycle (`2daaf643`). **C `D-209`** memory64 >4 GiB memarg offset `BadMemarg` at lowering — wasmtime
-  `memory64/offsets.wast` uses it in an `assert_trap` (executed), falsifying D-209's "never executed" premise; fix =
-  the multi-arch 10.M-4b chunk. **Parked = D-456** host-import fixtures (UnknownImport: binary-tree/gc-pressure/
-  issue-13066/13480/struct-set-gc-ref/array-copy-gc-refs/function-references-instance/multi-memory-simple) — genuine
-  host funcs the native runner doesn't define; runner-extension, not engine gap.
-- **NEXT (Phase III→V)**: pick A (`D-460` v128-aggregate) next — TDD struct/array v128 field. Then C (`D-209`) if
-  pursuing. Then V retrospective + promote legit fixtures. Harness: `scripts/wasmtime_misc_{sweep,native_sweep}.sh`.
+- **Real-gap triage (Phase III)**: **A `D-460` CORE DONE** (`60c54db5`) v128 in a GC aggregate — 16-byte slot +
+  interp struct/array get/set + const-expr v128.const; alloc-v128-struct instantiates, const-expr-gc-simd
+  v128-array-len→2. RESIDUAL: JIT GC-v128 emit (SIMD is JIT-only D-244, so observing a v128 field via extract_lane
+  needs the JIT path — array-copy-inline.6→16 still `UnsupportedOp`); array.new_data+v128 exotic. **B FIXED**
+  (`2daaf643`). **C `D-209`** memory64 >4 GiB memarg offset `BadMemarg` at lowering (assert_trap-executed; multi-arch
+  10.M-4b chunk). **Parked = D-456** host-import fixtures (UnknownImport; runner-extension, not engine gap;
+  v128-with-gc-ref is here too — `import "wasmtime" "gc"`).
+- **NEXT (Phase III→V)**: candidates — (a) JIT GC-v128 emit (closes D-460 residual + array-copy-inline.6, both
+  arches, larger); (b) C `D-209` memory64 multi-arch; (c) V retrospective + promote legit fixtures. Both (a)/(b) are
+  multi-arch codegen bundles. Harness: `scripts/wasmtime_misc_{sweep,native_sweep}.sh`.
 
 **The prior user-steered 4-front async-maturity campaign (2026-06-16) is COMPLETE** — all four closed (history below);
 general Phase-17 completion work (debt sweep / surface audits) interleaves when the campaign pauses.

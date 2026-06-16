@@ -1759,25 +1759,26 @@ entries:
       lesson hardcoded-corpus-subset-hides-whole-op-families
   - id: "D-460"
     layer: "code"
-    status: "now"
+    status: "partial"
     front: D-wmt-misc
     description: |-
-      now (ADR-0192 wasmtime differential, 2026-06-16). zwasm REJECTS a v128 field inside a GC aggregate
-      (struct/array): `(type $s (struct (field v128)))` → `feature/gc/type_info.zig:171 fieldSlotSize` returns
-      `Error.UnsupportedFieldSize` → the module fails to instantiate (`materialiseGcTypes`). wasmtime accepts it
-      (the Wasm 3.0 GC×SIMD intersection: a field's storagetype may be any valtype incl. v128). Real engine gap,
-      surfaced by the native sweep's instantiate-FAILs (NOT host-import; see lesson
-      native-sweep-instantiate-fail-not-equal-host-import). Affected wasmtime fixtures: gc/alloc-v128-struct,
-      gc/const-expr-gc-simd, gc/v128-with-gc-ref, gc/array-copy-inline.
-      ROOT BARRIER: the GC heap slot model is uniform 8 bytes (ADR-0116 §3a) — `fieldSlotSize` returns
-      `slot_size` (8) for every valtype; a v128 needs 16. Fix = make v128 fields occupy 2 slots (16B), adjust
-      per-field offset computation in materialiseGcTypes, and handle 16-byte struct.get/set + struct.new[_default]
-      writes in BOTH interp (struct_ops.zig/array_ops.zig) and JIT (struct/array op emit both arches) + the
-      const-expr evaluator (evalGlobalInitGc field-write memcpy is hardcoded `[0..8]`). GC mark/sweep already
-      skips non-heap-reftype fields (isHeapReftype), so v128 (non-ref) needs no tracing change.
-      Discharge: a `(struct (field v128))` + a `(array (mut v128))` instantiate + struct.get/array.get round-trip
-      the lane bits on both engines; the 4 fixtures above instantiate; an edge fixture under
-      test/edge_cases/p10/gc/v128_field/.
+      partial (ADR-0192 wasmtime differential, 2026-06-16). v128 field inside a GC aggregate (struct/array).
+      CORE DONE (`60c54db5`): `fieldSlotSize` gives v128 a 16-byte slot (offsets were already a running sum);
+      struct.new/get/set copy `field.size` bytes (8 scalar/ref, 16 v128) into the tagless Value union; the
+      const-expr `evalGlobalInitGc` gained a `v128.const` case + `field.size` field-write. Unit tests:
+      struct_ops v128 new/get/set round-trip + type_info offset/size layout. VERIFIED end-to-end via interp:
+      gc/alloc-v128-struct instantiates+runs, gc/const-expr-gc-simd `v128-array-len` returns 2,
+      `v128-struct-default` instantiates.
+      RESIDUAL (the still-open part): SIMD is JIT-only by design (D-244), so OBSERVING a v128 GC field via
+      i32x4.extract_lane (gc/array-copy-inline.6 → expects 16) needs **JIT GC-v128 struct/array op emit** on
+      BOTH arches — currently `compileWasm … UnsupportedOp`. That is a multi-arch codegen chunk (struct.get/set/
+      new + array.get/set/new/copy emitting 16-byte SIMD loads/stores), the larger follow-on. ALSO exotic:
+      array.new_data/init_data with a v128 element traps (dataElemNaturalSize→null; the `u64 raw` accumulator
+      can't hold 16 bytes) — spec-valid but unexercised by the campaign fixtures; widen to a [16]u8 path when
+      a consumer appears. gc/v128-with-gc-ref is host-import-blocked (`import "wasmtime" "gc"` → D-456), not a
+      v128-layout gap; its v128+ref struct layout already materialises.
+      Discharge: array-copy-inline.6 returns 16 under `--engine jit`; add an end-to-end edge fixture under
+      test/edge_cases/p10/gc/ once JIT GC-v128 emits.
     first_raised: "2026-06-16"
     last_reviewed: "2026-06-16"
     refs: |-
