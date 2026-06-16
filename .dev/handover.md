@@ -47,17 +47,21 @@ See `## Active bundle`. ADR-0193 (P1-P4, D-462) + D-461 (ADR-0194) CLOSED (below
 
 - **Bundle-ID**: d305-component-linker
 - **Cycles-remaining**: ~5-8 (genuinely multi-cycle; disproportionate-effort per debt)
-- **Continuity-memo**: RED fixture `test/component/strlen_graph.{wat,wasm}` ready (asserts `run()==0x5A`; its test
-  is UNWIRED — can't commit a failing test, wire it WITH the green impl). Incremental TDD plan: **(1) FIRST**
-  multi-core-module / multi-core-instance graph linking — `instantiateGraph` (`component.zig:437-496`) currently
-  compiles only `firstCoreModule` + name-matches flat func imports; rework to iterate the child's core instances,
-  resolve each `(with ...)` arg (incl. canon-lowered import instances + the libc memory export). Author a FLAT
-  2-module-per-component fixture (libc + main, flat-u32 args) as the RED for THIS step → green (lifts the
-  "one-core-module-per-child" limit, no marshalling yet). **(2) THEN** canon lower→core→lift cross-component STRING
-  marshalling at the boundary (A-mem→B-mem copy; reuse the host-boundary canon machinery WASI already has) → wire
-  strlen_graph test → green. File an ADR (§10-area component-boundary canon lift/lower) at step (2) design. Key
-  files: `src/api/component.zig` (`instantiateGraph`/`ComponentGraph`/`invokeFlat`), `feature/component/canon.zig`
-  (lift/lower), `feature/component/ctypes.zig` (component_instances / canons). D-305 debt has the pinned scope.
+- **Continuity-memo**: Phase I COMPLETE — concrete impl path found. RED fixture `strlen_graph.{wat,wasm}` ready
+  (asserts `run()==0x5A`; test UNWIRED — wire WITH the green impl). **KEY REUSE**: the multi-core-module machinery
+  ALREADY exists in `buildWasiP2Component` (`component_wasi_p2.zig:2112-2159`): it iterates `info.core_instances`,
+  and per `.instantiate` ci compiles the core module, makes a Linker, pours each `with` arg's prior instance
+  (`self.built[arg.instance]`) into it, instantiates; `.inline_exports` → synthetic host instances. The graph linker
+  needs **TWO-LEVEL instantiation**: process the OUTER component's `component_instances` (each child = a sub-component
+  run through that SAME core-instance loop), then resolve the component-level `with` args (A's `firstbyte` import ←
+  B's lifted `firstbyte` export) + canon lift/lower at the cross-component boundary. **Impl TDD plan**: (1) extract
+  the `component_wasi_p2.zig:2112-2159` core-instance loop into a reusable helper (behavior-preserving, existing
+  tests green); rework `instantiateGraph` (`component.zig:437-496`, today only `firstCoreModule`) to run it per
+  child + wire flat cross-component funcs — RED = a FLAT 2-module-per-component fixture → green. (2) THEN canon
+  boundary STRING marshalling (A-mem→B-mem copy; reuse `canon.zig` lift/lower) → wire `strlen_graph` → green; ADR at
+  (2) design (§10-area). **Genuinely multi-cycle refactor of load-bearing instantiation code — best driven on FRESH
+  context (full machinery in view), NOT mid-deep-context.** Key files: `component.zig`, `component_wasi_p2.zig:2112`,
+  `feature/component/canon.zig`, `feature/component/types.zig` (TypeInfo: core_instances/component_instances/canons).
 - **Exit-condition**: `strlen_graph` test green (a STRING marshals across the component boundary, `run()==0x5A`),
   AND `adder_graph` (flat) + the full component corpus stay green.
 
