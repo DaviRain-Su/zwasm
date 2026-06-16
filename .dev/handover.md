@@ -42,11 +42,20 @@ CLOSED (below). **windowsmini RESUMED**. Version `2.0.0-alpha.3`. Windows batch 
   (`P3CallbackCtx.invokeTaskCallback`/`pollSet` seam added); all 24 async fixtures + component corpus 163/0 green.
   UNIFIED on one driver — retired the superseded `driveCallbackLoop`/`stepTask`/`ScriptedLoopCtx`, char net ported
   to `driveScheduler` 1-entry tests (multi-iter WAIT ordering, ready-vs-waiting dispatch, immediate-EXIT).
-- **NEXT (c-2b, cross-component routing — needs Step 0 survey)**: (1) `component_graph.zig` boundary trampoline
-  detects `is_async` → mints a `Subtask` (async.zig:397) + enqueues a `TaskDescriptor` for the guest callee; (2)
-  the graph runner's `invokeTaskCallback` dispatches by `(instance, funcidx)` across components (today single-
-  instance ignores funcidx); (3) the guest↔guest fixture (exit-condition below). The cross-component-coupled half
-  — survey component_graph.zig boundary install + Subtask wiring + whether a 2-component async .wat is buildable.
+- **c-2b SURVEY DONE** (design locked): (a) async-detect hook = `resolveLiftedFunc` (component_graph.zig:~442)
+  returns `ResolvedLift` (types.zig:~634) which must expose `is_async` (from `lift.opts.is_async`); the async
+  branch forks in `installBoundaryTrampoline`. (b) `Subtask` (async.zig:~494): `init`→.starting; `.resolve(handle,
+  state)` queues a SUBTASK event; NO subtask table yet. (c) graph runner NOT built — needs a graph-level ctx whose
+  `invokeTaskCallback(funcidx,…)` maps funcidx→(child instance, callback name); each child's callback stored in
+  `GraphChild` during `buildChild` (component_graph.zig:~275, field absent). (d) FIXTURE **SPIKE DONE — BUILDABLE**
+  (`wasm-tools 1.251 parse+validate` rc=0; lesson `2026-06-17-cross-component-async-wat-spelling` + spike
+  `private/spikes/async-graph/two_async_components.wat`): import declared `(func $x async)` + `canon lower … async`
+  needs a `(memory …)`; async import = core func returning i32 status. Ref `OSS/…/component-model/test/async/cross-abi-calls.wast`.
+- **NEXT (c-2b build, TDD red→green toward the confirmed fixture)**: (1) expose `ResolvedLift.is_async`, (2) store
+  each child's async-callback in `GraphChild`, (3) graph-runner ctx mapping `invokeTaskCallback(funcidx)`→(child
+  instance, callback) over ONE `TaskTable`+`driveScheduler`, (4) async boundary trampoline (fork `is_async` →
+  `Subtask` mint + `TaskDescriptor` enqueue). Green = promote spike .wat to test/component + assert A async-calls B
+  → both EXIT (NOT full stream rendezvous = (d)/(e)). Big coupled chunk — consider delegating w/ this brief + verify.
 - **Exit-condition**: `async_two_tasks_stream_rendezvous.wat` (2-component: A async-imports B's async export)
   builds + asserts Subtask creation→resolution + waitable-set delivery, e2e green; full async corpus + (e)
   adversarial (deadlock/dropped/cancelled) green; single-task path unchanged.
