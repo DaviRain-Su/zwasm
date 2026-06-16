@@ -22,11 +22,11 @@ CLOSED (below). **windowsmini RESUMED**. Version `2.0.0-alpha.3`. Windows batch 
 ## Active bundle — ADR-0195 multi-task async scheduler (UNBLOCKED 2026-06-17 PM)
 
 - **Bundle-ID**: adr0195-scheduler-IIa..b (guest↔guest async = D-335 last functional gap)
-- **Cycles-remaining**: ~2 (✓II(a) → ✓(b) → ✓(c-1) → ✓(c-2a) → ✓(c-2b routing) → ✓(d-a task.return capture) →
-  (d-b A-consumes + future rendezvous) → (d-c stream) → (e) adversarial)
-- **Continuity-memo**: the cross-component async substrate works (routing + task.return capture). d-b adds A
-  CONSUMING B's result: lower the resolved subtask result into the caller's `retptr` (TODO in
-  `asyncBoundaryRetTrampoline`), then move `SharedTable` to `GraphAsync` + wire `pollSet` to harvest peer events.
+- **Cycles-remaining**: ~2 (✓II(a)→✓b→✓c-1→✓c-2a→✓c-2b routing→✓d-a task.return→✓d-b-1 A-consumes-result →
+  (d-b-2 future rendezvous) → (d-c stream) → (e) adversarial)
+- **Continuity-memo**: cross-component async substrate works incl. result round-trip (A async-calls B, B
+  task.returns a value, A reads it). d-b-2 = the FUTURE rendezvous: `SharedTable` must move to `GraphAsync`
+  (graph-level) + `GraphAsyncCtx.pollSet` (today null) must harvest the peer end's `pending_event`.
 - **II(a) DONE** (@529cfcba) + **(b) DONE** (@b90cbecb TaskTable, @61c4a20d driver refactor): `driveCallbackLoop`
   now drives a `TaskDescriptor` via the `stepTask` primitive (seed→loop stepTask until done), byte-identical
   (char net + component corpus 163/0 green, ubuntu+win verified through @8352ef9c). Zone-1 `TaskTable`/
@@ -39,18 +39,18 @@ CLOSED (below). **windowsmini RESUMED**. Version `2.0.0-alpha.3`. Windows batch 
   **(c-2b core)** cross-component async ROUTING works @a0e2d4c7a — `ComponentGraph.driveAsyncMain` owns ONE
   `TaskTable`; `GraphAsync.callbacks` registry routes `invokeTaskCallback(funcidx)`→(instance, callback);
   `installAsyncBoundary`(forks on `ResolvedLift.is_async`) mints a `Subtask`+enqueues a `TaskDescriptor`.
-- **(d-a) DONE** (@cc63edd9 subagent + main-loop-verified; TODO-clarified @e7a3d8d9): cross-component async
-  `task.return(42)` captured graph-side. `TaskDescriptor.result: ?u32` (per-task, no collision); `GraphAsync.
-  current_task_id` set before each callee invoke; a graph-wired `graphTaskReturn` host func (per child's `canon
-  task.return`) stores into the current task's slot; `taskResult(id)` accessor. Fixture
-  `two_async_components_task_return.wat` (B `tick()->u32` task.return(42)); test asserts `taskResult(2)==42` + both
-  done. build+test+comp-spec 163/0+lint+fallback green; x86_64 verify pending. **Known partial (explicit TODO,
-  not silent)**: A does NOT yet consume B's result — `asyncBoundaryRetTrampoline` leaves `retptr` unwritten
-  (lowering the resolved result into A = d-b).
-- **NEXT (d-b — A consumes B's async result + future rendezvous)**: (1) lower the resolved subtask result into the
-  caller's `retptr` (the TODO in asyncBoundaryRetTrampoline) so A reads B's value in-guest; (2) single-shot FUTURE
-  rendezvous needs `SharedTable` moved to `GraphAsync` (graph-level) + `pollSet` harvesting the peer's
-  `pending_event` (today null). Then (d-c) full stream + (e) adversarial.
+- **(d-a) DONE** (@cc63edd9 + @e7a3d8d9): cross-component async `task.return(42)` captured graph-side into a
+  per-task `TaskDescriptor.result: ?u32` (no collision); `GraphAsync.current_task_id` set before each callee
+  invoke; graph-wired `graphTaskReturn` host func + `taskResult(id)` accessor. Fixture asserts B's task 2 == 42.
+- **(d-b-1) DONE** (@7cf62e3a, inline TDD red→green, full gate verified): **A now CONSUMES B's result**.
+  `enqueueCalleeSubtask` returns the task id; `asyncBoundaryRetTrampoline` reads B's synchronously-resolved
+  `.result` + writes it (flat-4 i32) into the IMPORTER's memory at `retptr` (`bctx.importer` threaded through
+  `installAsyncBoundary`). Fixture `two_async_components_consume_result.wat` (A reads mem[0]→42, task.returns it);
+  test asserts A's own task 1 == 42. A blocked-callee (no result yet) stays unwritten = async-completion path (later).
+- **NEXT (d-b-2 — single-shot FUTURE rendezvous)**: the bigger architectural piece — move `SharedTable` from
+  per-`WasiP2Ctx` to `GraphAsync` (graph-level, both instances share one arena) + wire `GraphAsyncCtx.pollSet`
+  (today null) to harvest the peer end's `pending_event` after a write/resolve. Then (d-c) full stream + (e)
+  adversarial. Likely Step-0-survey the SharedTable/SharedFuture rendezvous + a graph-level future fixture.
 - **Exit-condition**: `async_two_tasks_stream_rendezvous.wat` (2-component: A async-imports B's async export)
   builds + asserts Subtask creation→resolution + waitable-set delivery, e2e green; full async corpus + (e)
   adversarial (deadlock/dropped/cancelled) green; single-task path unchanged.
