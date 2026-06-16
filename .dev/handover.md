@@ -37,14 +37,17 @@ Then `D-209` memory64. **windowsmini gating RESUMED**. Version → `2.0.0-alpha.
   class-aware-mint over-reach + the array-elimination (scalars still pack 8-byte). New debt = none beyond the
   pre-existing D-461 continuation below.
 
-## NEXT — D-461 continuation: x86_64 resolveXmm v128 lane-op spill emit (normal bundle)
+## NEXT — D-461 continuation: x86_64 SIMD v128-source spill-awareness (per-op bundle)
 
-With the regalloc OOB fixed, the `runner_gc_test` 12-live-v128 fixture now reaches the ORIGINAL D-461 blocker:
-x86_64 `resolveXmm` rejects a `.spill` v128 lane operand (`UnsupportedOp`). The spill-aware XMM helpers EXIST
-(`xmmLoadSpilledV128`/`xmmDefSpilledV128`/`xmmStoreSpilledV128`, gpr.zig); it's per-lane-op wiring across the
-x86_64 SIMD lane ops (extract/replace_lane etc.), mirroring the arm64 slice-1 (`97afa4d4`). Un-gate the
-`runner_gc_test` x86_64 + the D-460 v128-GC x86_64 mirror once done. TDD locally via `zig build test
--Dtarget=x86_64-macos` (Rosetta). Then `D-209` memory64.
+`i32x4.extract_lane` v128 source = spill-aware DONE both arches (`422cd491`, xmmLoadSpilledV128; 12-v128 fixture
+returns 4095 on x86_64, gate removed; regalloc OOB fixed by ADR-0194). REMAINING: ~11 more `resolveXmm(src/vec_v)`
+sites in `x86_64/op_simd_int_cmp_lane.zig` (extract i64x2/i8x16_s_u/i16x8_s_u, the 4 replace_lane + cmp/shift
+binops) reject `.spill` v128 → same source-spill swap (+ replace/binop need a dest-spill
+`xmmDefSpilledV128`/`xmmStoreSpilledV128`). **Do per-op WITH a force-spill fixture each** — the gc-spec corpus does
+NOT exercise v128-spill, so untested mechanical patches risk silent bugs (lesson
+`runi32export-host-arch-arm64-only-emit-x86-gate-red`). Float lane ops (`op_simd_float.zig`) = separate sibling-set.
+TDD via `zig build test -Dtarget=x86_64-macos` (Rosetta), arm64 + ubuntu confirm. Unblocks D-460 v128-GC x86_64.
+Then `D-209` memory64.
 
 ## Active phase — doc-inventory + freshening (USER-requested 2026-06-16)
 

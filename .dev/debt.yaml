@@ -1833,9 +1833,14 @@ entries:
       x86_64-Rosetta rc=0, OOB gone. Lesson `x86_64-regalloc-fp-spill-origin-mismatch`; characterization +
       build-time tests in regalloc.zig/regalloc_compute.zig. **REMAINING blocker (the ORIGINAL D-461)**: x86_64
       `resolveXmm` rejects a `.spill` v128 lane operand → `UnsupportedOp` (the runner_gc_test 12-v128 fixture now
-      reaches THIS, not the crash). Spill-aware XMM helpers exist (xmmLoadSpilledV128 etc.); per-lane-op wiring
-      across the x86_64 SIMD lane ops remains (mirror arm64 slice-1 `97afa4d4`). Test arm64-gated via
-      skip.blocker(.@"D-461") until that lands.
+      reaches THIS, not the crash). **i32x4.extract_lane v128 source = spill-aware DONE both arches** (xmmLoadSpilledV128;
+      the 12-v128 fixture returns 4095 on x86_64, gate removed). REMAINING (continued bundle): ~11 more
+      `resolveXmm(src/vec_v)` sites in `x86_64/op_simd_int_cmp_lane.zig` (extract i64x2/i8x16_s_u/i16x8_s_u, the 4
+      replace_lane, + cmp/shift binops) reject `.spill` v128 — each needs the same source-spill swap (+ replace/binop
+      also a dest-spill `xmmDefSpilledV128`/`xmmStoreSpilledV128`). Do per-op WITH a force-spill fixture each (the
+      gc-spec corpus does NOT exercise v128-spill — untested mechanical patches risk silent bugs, lesson
+      `runi32export-host-arch-arm64-only-emit-x86-gate-red`). Float lane ops (op_simd_float.zig) are a separate
+      sibling-set. Mirror arm64 slice-1 `97afa4d4`.
       EVIDENCE: (1) x86_64 `codegen/x86_64/gpr.zig resolveXmm` EXPLICITLY rejects a `.spill` v128 vreg ("handler not
       XMM-spill-aware") → e.g. `emitV128IntReplaceLane` UnsupportedOp (this is the root cause of the x86_64 ubuntu
       red on the D-460 runI32Export tests). (2) arm64 `op_simd_int_cmp_lane.zig` extract/replace_lane are partially
