@@ -120,6 +120,9 @@ const BoundaryCtx = struct {
     core_inst: *Instance,
     /// Imported func type (drives the per-arg lower: string vs flat scalar).
     func_type: ctypes.FuncType,
+    /// For a single `list<primitive>` param: the element byte size (1/2/4/8),
+    /// so the boundary copies `count * elem_size` bytes. 0 = not a list param.
+    list_elem_size: u32 = 0,
 };
 
 /// A linked multi-component graph (D-305). Heap-allocated children +
@@ -439,14 +442,28 @@ fn installBoundaryTrampoline(
     if (r.string_encoding != .utf8) return GraphError.UnsupportedBoundaryType;
     if (r.realloc) |rr| provider.child.realloc_name = rr.name;
 
-    // The flattened core signature must be `(i32,i32) -> i32` — the boundary
-    // trampoline the linker installs has that fixed Zig signature (the host-fn
-    // marshaller is comptime-typed). Both supported shapes flatten to it: one
-    // `string` param (ptr,len) OR two flat 4-byte scalars, returning one flat
-    // 4-byte scalar. Broader arities / wide scalars / aggregate results are a
-    // typed deferral (no silent mis-marshal). D-305 follow-up: arity-general
-    // trampolines.
-    if (!flattensTo2i32Result(ft)) return GraphError.UnsupportedBoundaryType;
+    // For a single `list<primitive>` param, resolve the element byte size now so
+    // the call-time copy moves `count * elem_size` bytes. A `list<u32>` param is a
+    // `type_index` into the provider's type space, so resolve via `canon`.
+    var list_elem_size: u32 = 0;
+    if (ft.params.len == 1) {
+        var tmp = std.heap.ArenaAllocator.init(graph.alloc);
+        defer tmp.deinit();
+        if (canon.canonTypeFromDecoded(tmp.allocator(), &provider.child.info, ft.params[0].ty)) |ct| {
+            if (ct == .list and ct.list.* == .prim and isFlatPrim(ct.list.*.prim))
+                list_elem_size = @intCast(canon.sizeOf(ct.list.*));
+        } else |_| {
+            // Type resolution failed → not a flat-primitive list; the shape
+            // check below rejects it (string/flat path or typed deferral).
+        }
+    }
+
+    // The fixed boundary trampoline marshals shapes flattening to `(i32,i32)->i32`:
+    // a `string` / `list<primitive>` param (ptr,len) OR two flat 4-byte scalars,
+    // returning one flat 4-byte scalar. Broader arities / wide scalars / aggregate
+    // results are a typed deferral (no silent mis-marshal). D-305 follow-up:
+    // arity-general trampolines + record/result marshalling.
+    if (!boundaryShapeOk(ft, list_elem_size > 0)) return GraphError.UnsupportedBoundaryType;
 
     const bctx = try graph.alloc.create(BoundaryCtx);
     errdefer graph.alloc.destroy(bctx);
@@ -455,6 +472,7 @@ fn installBoundaryTrampoline(
         .core_func_name = r.core_func.name,
         .core_inst = core_inst,
         .func_type = ft,
+        .list_elem_size = list_elem_size,
     };
     try graph.boundaries.append(graph.alloc, bctx);
     _ = import_name;
@@ -462,14 +480,15 @@ fn installBoundaryTrampoline(
     try lk.defineFuncCtx(ns, core_export_name, @ptrCast(bctx), BoundarySig, boundaryTrampoline);
 }
 
-/// Does the WIT func type flatten to the core signature `(i32,i32) -> i32`?
-/// True for `(string) -> scalar4` and `(scalar4, scalar4) -> scalar4`, the two
-/// shapes the fixed-signature boundary trampoline marshals.
-fn flattensTo2i32Result(ft: ctypes.FuncType) bool {
+/// Does the WIT func type flatten to the core signature `(i32,i32) -> i32`, the
+/// fixed shape the boundary trampoline marshals? True for `(string)`,
+/// `(list<primitive>)` (when `param0_is_list`), or `(scalar4, scalar4)`,
+/// returning one flat 4-byte scalar.
+fn boundaryShapeOk(ft: ctypes.FuncType, param0_is_list: bool) bool {
     const result_ok = if (ft.result) |rt| isFlat4Scalar(rt) else false;
     if (!result_ok) return false;
     if (ft.params.len == 1) {
-        return isString(ft.params[0].ty);
+        return isString(ft.params[0].ty) or param0_is_list;
     }
     if (ft.params.len == 2) {
         return isFlat4Scalar(ft.params[0].ty) and isFlat4Scalar(ft.params[1].ty);
@@ -481,6 +500,16 @@ fn isString(vt: ctypes.ValType) bool {
     return switch (vt) {
         .primitive => |p| p == .string,
         else => false,
+    };
+}
+
+/// A fixed-size scalar primitive (numeric/bool/char) — a `list<this>` is a flat
+/// `count * size`-byte run with no internal pointers, so the boundary can copy
+/// it by bytes. `string` / `error_context` need their own marshalling.
+fn isFlatPrim(p: ctypes.PrimValType) bool {
+    return switch (p) {
+        .bool, .s8, .u8, .s16, .u16, .s32, .u32, .s64, .u64, .f32, .f64, .char => true,
+        .string, .error_context => false,
     };
 }
 
@@ -514,7 +543,22 @@ fn boundaryMarshal(caller: *Caller, bctx: *BoundaryCtx, w0: u32, w1: u32) !Bound
     const params = bctx.func_type.params;
     var args = [_]Value{ .{ .i32 = @bitCast(w0) }, .{ .i32 = @bitCast(w1) } };
 
-    if (params.len == 1 and isString(params[0].ty)) {
+    if (bctx.list_elem_size > 0) {
+        // list<primitive>: w0=ptr, w1=COUNT in the IMPORTER's memory. Copy
+        // count*elem_size bytes into the CALLEE's memory via its realloc
+        // (aligned to the element size), since the callee reads its OWN memory.
+        const caller_mem: Memory = caller.memory() orelse return GraphError.ImportUnsatisfied;
+        const byte_count: u32 = w1 * bctx.list_elem_size;
+        const src = caller_mem.sliceAt(w0, byte_count) catch return GraphError.UnsupportedBoundaryType;
+        const tmp = try caller.allocator().dupe(u8, src);
+        defer caller.allocator().free(tmp);
+        const cx = bctx.callee.canonContext();
+        const ptr = cx.realloc(0, 0, bctx.list_elem_size, byte_count) catch return GraphError.UnsupportedBoundaryType;
+        if (@as(usize, ptr) + byte_count > cx.mem().len) return GraphError.UnsupportedBoundaryType;
+        @memcpy(cx.mem()[ptr..][0..byte_count], tmp);
+        args[0] = .{ .i32 = @bitCast(ptr) };
+        args[1] = .{ .i32 = @bitCast(w1) }; // count unchanged
+    } else if (params.len == 1 and isString(params[0].ty)) {
         // Single string: w0=ptr, w1=len in the IMPORTER's memory. Snapshot the
         // bytes, then lower them into the CALLEE's memory via its realloc — the
         // callee reads its OWN memory, so the string must physically move.
