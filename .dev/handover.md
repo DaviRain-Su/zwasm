@@ -5,6 +5,23 @@
 
 ## Current state — Phase 17 完成形 completion-refinement (release = USER-ONLY, ADR-0156)
 
+## Active bundle
+
+- **Bundle-ID**: simd-convert-ops-e2e (D-457)
+- **Cycles-remaining**: ~2-3
+- **Continuity-memo**: 8 SIMD float↔int conversions (opcodes 248-255) never worked e2e (validate FIXED 79fd589e;
+  lower_simd.zig else=>NotImplemented:407, interp anchors NotMigrated, f64x2_convert_low_i32x4_u unregistered in
+  dispatch_collector_ops, JIT emit exists but unreachable). NOT a C-API constraint — a real completeness gap the
+  vendored official simd corpus never tested.
+- **Exit-condition**: all 8 ops validate+lower+interp+JIT e2e (extract-to-scalar runtime fixtures pass on both engines)
+  + promoted to committed simd corpus + audit for other untested-op families.
+
+## Planned future phase (USER-requested 2026-06-16, AFTER this campaign)
+
+- **Doc inventory + freshening**: walk ALL zwasm_from_scratch docs (CLAUDE.md, .dev/, .claude/, README, docs/) and
+  reconcile against CODE TRUTH — find+fix stale claims (e.g. "100% SIMD spec" was overstated; conversion ops were
+  missing). Not started; queued post-campaign per user.
+
 ## Active rework campaign
 
 - **Campaign**: wasmtime misc_testsuite full differential coverage (ADR-0192, user-directed 2026-06-16). Phase I DONE; Phase II in flight.

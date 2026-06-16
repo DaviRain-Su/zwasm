@@ -1801,3 +1801,21 @@ conventions: |-
       mismatches across all native buckets. REMAINING (downgraded to note): the
       FAILsetup/UnknownImport fails are fixtures importing host functions the runner
       doesn't define — wiring those host imports is the only path to running them.
+  - id: "D-457"
+    layer: "code"
+    status: "now"
+    front: D-wmt-misc
+    description: |-
+      now (ADR-0192, 2026-06-16). The 8 SIMD float<->int LANE-CONVERSION ops have
+      NEVER worked end-to-end in zwasm (the vendored official simd corpus never
+      tested them, hiding the gap): i32x4.trunc_sat_f32x4_{s,u} (248/249),
+      f32x4.convert_i32x4_{s,u} (250/251), i32x4.trunc_sat_f64x2_{s,u}_zero
+      (252/253), f64x2.convert_low_i32x4_{s,u} (254/255). VALIDATE fixed (79fd589e:
+      were miscategorized as binop). REMAINING: lower_simd.zig has no emit for them
+      (else => NotImplemented:407) so instantiate fails; per-op interp anchors are
+      NotMigrated stubs (no interp); f64x2_convert_low_i32x4_u missing from
+      dispatch_collector_ops registration; JIT emit handlers EXIST but are
+      unreachable (dead) until lower produces the ZirOps. Discharge: wire
+      lower_simd + interp + registration for all 8, JIT becomes reachable, add
+      runtime fixtures (extract-to-scalar) + promote to committed simd corpus.
+      Also AUDIT for other untested-op families (the corpus gap is systemic).
