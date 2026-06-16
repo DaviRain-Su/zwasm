@@ -1021,6 +1021,39 @@ test "D-335 unit D-ηB: driveCallbackLoop re-enters callback per delivered event
     }
 }
 
+test "ADR-0195 II(a) char: driveCallbackLoop drives a MULTI-iteration WAIT sequence in order" {
+    // Pins the loop-repeat + per-WAIT set routing BEFORE the step-(b) TaskTable
+    // refactor (drive-THE-task → drive-the-TABLE) so the 1-entry case can't
+    // silently regress. WAIT(5) → event → callback re-issues WAIT(7) → event →
+    // callback EXITs: the loop must waitOn 5 THEN 7, re-entering the guest twice.
+    var ctx = ScriptedLoopCtx{
+        .cb_returns = &.{ (7 << 4) | 2, 0 }, // 1st cb → WAIT set 7; 2nd cb → EXIT
+        .wait_event = .{ .code = .stream_read, .index = 1, .payload = 0 },
+        .alloc = testing.allocator,
+    };
+    defer ctx.deinit();
+    try driveCallbackLoop(&ctx, (5 << 4) | 2); // initial = WAIT set 5
+    try testing.expectEqualSlices(u32, &.{ 5, 7 }, ctx.wait_calls.items); // waited 5 then 7, in order
+    try testing.expectEqual(@as(usize, 2), ctx.cb_calls.items.len); // re-entered the guest twice
+}
+
+test "ADR-0195 II(a) char: driveCallbackLoop distinguishes YIELD (no waitOn) from WAIT across iterations" {
+    // YIELD re-enters with EventCode.none and DOES NOT call waitOn; WAIT does.
+    // Pins that the table-driver refactor keeps the per-code dispatch: a mixed
+    // YIELD → WAIT → EXIT sequence calls waitOn exactly once (for the WAIT).
+    var ctx = ScriptedLoopCtx{
+        .cb_returns = &.{ (3 << 4) | 2, 0 }, // 1st cb (after YIELD) → WAIT set 3; 2nd cb → EXIT
+        .wait_event = .{ .code = .stream_read, .index = 9, .payload = 0 },
+        .alloc = testing.allocator,
+    };
+    defer ctx.deinit();
+    try driveCallbackLoop(&ctx, 1); // initial = YIELD
+    try testing.expectEqualSlices(u32, &.{3}, ctx.wait_calls.items); // ONLY the WAIT hit waitOn
+    try testing.expectEqual(@as(usize, 2), ctx.cb_calls.items.len);
+    try testing.expectEqual(EventCode.none, ctx.cb_calls.items[0].code); // YIELD → none
+    try testing.expectEqual(EventCode.stream_read, ctx.cb_calls.items[1].code); // WAIT → delivered event
+}
+
 test "D-335 unit D-ζ2: newStreamPair mints linked readable+writable ends; shared freed on 2nd drop" {
     var ends = try StreamFutureTable.init(testing.allocator);
     defer ends.deinit();
