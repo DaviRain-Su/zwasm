@@ -1797,6 +1797,33 @@ entries:
       src/feature/gc/type_info.zig:167-175 (fieldSlotSize); src/feature/gc/type_info.zig (materialiseGcTypes offsets);
       src/instruction/wasm_3_0/{struct_ops,array_ops}.zig; src/runtime/instance/instantiate.zig (evalGlobalInitGc);
       wasmtime tests/misc_testsuite/gc/{alloc-v128-struct,const-expr-gc-simd,v128-with-gc-ref,array-copy-inline}.wast
+  - id: "D-461"
+    layer: "code"
+    status: "blocked-by"
+    front: D-wmt-misc
+    description: |-
+      blocked-by: SIMD lane ops are NOT fully spilled-v128-operand-aware (pre-existing, NOT GC-specific). Surfaced
+      2026-06-16 while finishing the D-460 v128-GC bundle: a v128 value that spills (NEON/XMM register pressure)
+      cannot be read by a SIMD lane op → `UnsupportedOp` at compile.
+      EVIDENCE: (1) x86_64 `codegen/x86_64/gpr.zig resolveXmm` EXPLICITLY rejects a `.spill` v128 vreg ("handler not
+      XMM-spill-aware") → e.g. `emitV128IntReplaceLane` UnsupportedOp (this is the root cause of the x86_64 ubuntu
+      red on the D-460 runI32Export tests). (2) arm64 `op_simd_int_cmp_lane.zig` extract/replace_lane are partially
+      spill-aware (qLoadSpilled the v128 source) but carry `SPILL-EXEMPT` GPR-scalar paths; a v128-GC chain
+      (array.new_fixed force-spills the v128 element across its alloc CALL → array.get's v128 result spills →
+      extract_lane) UnsupportedOps at extract_lane.
+      WHY IT MATTERS NOW: it is the BLOCKER for (a) wasmtime gc/array-copy-inline.6 → 16 (the D-460 bundle
+      exit-condition), (b) the x86_64 v128-GC emit mirror, (c) testing array.new_fixed v128 (whose emit IS correct —
+      new_fixed + array.len returns 1 — but its stored values can only be read back via a SIMD lane op).
+      SCOPE: make resolveXmm (x86_64) + the lane-op GPR-scalar paths (both arches) spill-aware (XMM/Q load+store
+      from the spill slot). Broad SIMD-codegen change touching many lane ops; pre-existing — any high-v128-pressure
+      program (not just GC) hits it. Discharge: a v128 forced to spill flows through extract/replace_lane on BOTH
+      arches; the D-460 array.new_fixed+get+extract chain returns the stored lane.
+    first_raised: "2026-06-16"
+    last_reviewed: "2026-06-16"
+    refs: |-
+      src/engine/codegen/x86_64/gpr.zig (resolveXmm — rejects .spill v128);
+      src/engine/codegen/{x86_64,arm64}/op_simd_int_cmp_lane.zig (extract/replace_lane SPILL-EXEMPT paths);
+      blocks D-460 array-copy-inline.6 + x86_64 v128-GC mirror
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.

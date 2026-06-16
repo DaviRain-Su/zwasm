@@ -55,20 +55,21 @@ windows-suspension (`--suspend` → 2-host fast-loop; resume before main-merge /
 ## Active bundle
 
 - **Bundle-ID**: D-460-jit-v128-gc-emit (campaign Phase IV continuity)
-- **Cycles-remaining**: ~2 (arm64 struct + array get/set done; array.new_fixed + array.copy + x86_64 remain)
+- **Cycles-remaining**: ~1 — BLOCKED on D-461 (see below); decide next turn: open the D-461 SIMD-spill bundle, or
+  accept arm64 struct+array get/set v128 as the deliverable and debt-row the rest.
 - **Continuity-memo**: **arm64 DONE: struct.new/get/set** (`f79a3ced`) **+ array.get/set** (`41015a9b`) v128, 4
-  runI32Export tests green. Infra: vreg_class 0x7B→v128; `ZirFunc.structFieldByteOffset`/`arrayElemBytes`/
-  `gcSlotBytes`; struct uses ADD-offset + `encLdrQImm`/`encStrQImm` #0; array uses new `inst.encLslImmX` (LSL via
-  UBFM, `idx<<4`) + `encLdrQReg`/`encStrQReg`. qDef/qLoad/qStoreSpilled pre-existed.
-- **NEXT**: (1) **arm64 array.new_fixed v128** — BLOCKED: a v128 element operand → `UnsupportedOp` raised UPSTREAM
-  of the op emit (my emit code is fine + reverted for now; struct.new v128 with the SAME inclusive force-spill
-  works, so root-cause the difference — likely a v128-operand guard hit only by array.new_fixed's
-  variadic-store path or its W2=N marshal; instrument `compile.zig:1153` print to get the PC/op). (2) **arm64
-  array.copy v128** — NOT codegen: the `jitGcArrayCopy` trampoline assumes an 8-byte stride (array_copy.zig drops
-  the typeidx); it must read the element size from the ArrayHeader's typeidx (or be passed it). (3) **x86_64
-  mirror** (struct + array): Lsl3→×16, movdqu, v128/XMM arm. (4) verify gc/array-copy-inline.6 → 16.
+  runI32Export tests green (low v128-pressure cases). Infra: vreg_class 0x7B→v128;
+  `ZirFunc.structFieldByteOffset`/`arrayElemBytes`/`gcSlotBytes`; struct = ADD-offset + `encLdrQImm`/`encStrQImm`
+  #0; array = new `inst.encLslImmX` (LSL via UBFM `idx<<4`) + `encLdrQReg`/`encStrQReg`.
+- **ROOT-CAUSE FOUND (the real blocker = `D-461`)**: full v128-GC under register pressure is blocked by a
+  PRE-EXISTING SIMD-spill limitation, NOT GC-specific. x86_64 `resolveXmm` explicitly rejects a `.spill` v128 (→
+  the ubuntu red on the runI32Export tests); arm64 lane ops are only partly spill-aware. The
+  array.new_fixed→array.get→extract_lane chain force-spills a v128 → extract_lane UnsupportedOp. array.new_fixed
+  v128 EMIT IS CORRECT (new_fixed+array.len → 1; reverted because its values can only be read via a lane op).
+  array.copy v128 also remains (its `jitGcArrayCopy` trampoline assumes 8-byte stride). The x86_64 v128-GC mirror
+  is also blocked on D-461 (resolveXmm).
 - **Gotcha**: `v128.const` FEEDING a GC op gives `UnsupportedOp` (separate pre-existing constant-pool/spill issue;
-  `i32x4.splat`/`replace_lane` work — array-copy-inline.6 uses splat). Don't chase inside this bundle.
+  `i32x4.splat`/`replace_lane` work). Likely the SAME D-461 spill class.
 - **Test vehicle**: `runI32Export(alloc,&bytes,"f")` (Mac=arm64). Build modules via `wasm-tools parse`, strip the
   name section. `zwasm run --engine jit` does NOT print export results — use runI32Export / native runner.
 - **Exit-condition**: struct + array v128 round-trip via runI32Export green on BOTH arches AND wasmtime
