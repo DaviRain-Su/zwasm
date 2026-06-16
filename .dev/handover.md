@@ -5,9 +5,21 @@
 
 ## Current state — Phase 17 完成形 completion-refinement (release = USER-ONLY, ADR-0156)
 
-**The user-steered 4-front async-maturity campaign (2026-06-16) is COMPLETE** — all four closed; the loop is back to
-autonomous Phase-17 completion (debt repayment / surface audits / dogfooding per the 完成形 endgame). No front is
-user-gated; pick next work from the debt sweep + the 完成形 dimensions.
+## Active rework campaign
+
+- **Campaign**: wasmtime misc_testsuite full differential coverage (ADR-0192, user-directed 2026-06-16). Phase I (Investigation) DONE.
+- **Goal**: run wasmtime's full `tests/misc_testsuite/` (312 .wast @897aa00d) through zwasm, fundamentally fix every real gap.
+- **Phase-I result** (`.dev/wasmtime_misc_campaign_findings.md`): raw C-API sweep = 139 PASS / 164 FAIL / 9 EMPTY. KEY: ~122
+  of the 164 are HARNESS artifacts of the C-API runner (gc 55 = C-API has no GC instantiate, native engine is 362/0;
+  component-model 67 = core decoder correctly rejects component binaries). Genuine candidate gaps live in the C-API-runnable
+  subset (~12 core + 11 trap-kind + 10 value-mismatch + scatter).
+- **NEXT (Phase I→II)**: re-route gc/simd/memory64/typed-ref/proposal buckets through the **native** `spec_assert_runner_*`
+  family (GC/v128/typed-ref-capable, `wasm_3_0_manifest.zig`) to get the TRUE gap list; then triage distiller-artifact vs
+  real gap on the C-API-runnable failures (start: canonicalize-nan-scalar reinterpret asserts, embenchen env-import skip).
+- **Harness**: `scripts/wasmtime_misc_sweep.sh` + `scripts/wast_to_manifest.py`; runner now installed (`zig-out/bin/zwasm-wast-runtime-runner`).
+
+**The prior user-steered 4-front async-maturity campaign (2026-06-16) is COMPLETE** — all four closed (history below);
+general Phase-17 completion work (debt sweep / surface audits) interleaves when the campaign pauses.
 
 - **② wasmtime async .wast gaps — DONE (TIER-1)**: Gap A `afcf889a` (async export w/ result must `task.return` before
   EXIT), copy-IDLE `05b35c28`. Deferred design-grade: **D-446** Gap B, **D-447** TIER-2/3.
