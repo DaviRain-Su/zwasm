@@ -27,7 +27,11 @@ intersection). D-458 RESIDUAL (note): broad regen non-idempotency (~727-file chu
   `MODULE-READ-FAIL: <errno>` (no-op on Mac/ubuntu — read succeeds). **NEXT: read the windowsmini run's MODULE-READ-FAIL
   lines** (errno = FileNotFound? AccessDenied? → path-resolution vs file-access) to pinpoint + fix the root cause until
   windows pass counts MATCH ubuntu. Non-gating (`[run_remote_windows] OK`) because the 10.T-2b skeleton doesn't
-  propagate counts to exit code — the ADR-0174 "OK-hides-pass=0" anomaly (build.zig:599).
+  propagate counts to exit code — the ADR-0174 "OK-hides-pass=0" anomaly (build.zig:599). RULED OUT: git CRLF/binary
+  mangling — no `.gitattributes` wasm rule but realworld `.wasm` (same unspecified attrs) passes on windows, so it's
+  NOT blanket-corruption. BRANCH: if the windows run shows `MODULE-READ-FAIL` → read-path (path/access); if it does
+  NOT (pass=0 persists, no read-fail) → read-OK-but-compile/parse-fail (add a 2nd diagnostic on the parse/compile
+  swallow). Windows diagnostic run was kicked @ab8dd44b — IN FLIGHT; read its output at next Step 0.7.
 - **Exit-condition**: windowsmini wasm-3.0-assert real pass counts MATCH ubuntu (not a MATCH-only/OK-hides-0); the
   runner's exit code gates its fail counts (no silent skeleton pass-through). Then ADR-0174 Phase-2 (gate suspension)
   is eligible.
