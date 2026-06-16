@@ -6,30 +6,20 @@
 ## Current state — Phase 17 完成形 completion-refinement (release = USER-ONLY, ADR-0156)
 
 Recent closed arcs (3-host or ubuntu-verified; full detail in git/lessons): **D-457** SIMD systemic close (24805/0) ·
-**D-458** core-2.0 corpus completeness + cross-corpus audit (SIMD was the unique blind spot) · doc-inventory pass
-(CHANGELOG fix) · **C-ABI trap-kind drift guard** (`check_trap_abi_sync.sh`) · **D-455** array-alloc dedup · **D-459**
-Wasm 3.0 §3.3.1 local definite-assignment (@33658bdb, ubuntu-verified @3b3f16fa 25539/0; lesson: restore-at-end NOT
-intersection). D-458 RESIDUAL (note): broad regen non-idempotency (~727-file churn). Ratchet baseline 24 loose (real
-22 post-D459) — harmless. Stale-doc: ROADMAP §16.7 D-277 ("zwasm.h empty") stale (header filled), DONE historical row.
+**D-458** core-2.0 corpus completeness + cross-corpus audit · doc-inventory pass · **C-ABI trap-kind drift guard** ·
+**D-455** array-alloc dedup · **D-459** Wasm 3.0 §3.3.1 local definite-assignment (restore-at-end NOT intersection) ·
+**win-specassert-pass0 (ADR-0174 Phase-1) CLOSED**: windowsmini wasm-3.0-assert pass=0 root-caused to CRLF — the
+runner was the lone one not trimming `\r`, so windows-CRLF manifests gave `module_path` ending `\r` →
+`error.BadPathName` → all modules silently un-loaded. Fixed @02592aa8 (trim, mirrors 4 other runners) → **windows
+now pass=10234 = ubuntu, 0 MODULE-READ-FAIL, VERIFIED**; + @b1606384 gates the runner on fails (closes the
+"OK-hides-pass=0" masking; lesson `windows-crlf-manifest-badpathname-hidden-by-nongating-skeleton`). D-458 RESIDUAL
+(note): broad regen non-idempotency. Ratchet baseline 24 loose (real 22) — harmless. Stale-doc: ROADMAP §16.7 D-277.
 
-## Active bundle — windowsmini spec-assert pass=0 root-cause (ADR-0174 Phase-1, immediate priority)
-
-- **Bundle-ID**: win-specassert-pass0 (ADR-0174 windowsmini-hardening Phase-1) — windows NOT suspended (3-host active).
-- **Cycles-remaining**: ~1 (windows verification of the fix)
-- **Continuity-memo**: **ROOT CAUSE FOUND + FIXED @02592aa8.** The @60f3706d diagnostic showed `MODULE-READ-FAIL:
-  BadPathName ×364` on windowsmini. Cause: LF-committed manifests → CRLF on windows checkout (git autocrlf); the
-  wasm-3.0 runner split on `\n` WITHOUT trimming the trailing `\r` (the other 4 runners base/spec/wast/component all
-  `std.mem.trim(raw," \r\t")` — this was the lone miss) → `module_path` ended in `\r` → readFileAlloc →
-  `error.BadPathName` on Win64 → every module silently un-loaded → pass=0 (uniform; Mac/ubuntu LF immune). Fix: trim
-  `" \r\t"` per line (mirrors the 4 runners). No-op on Mac (pass=10234 unchanged, verified). Lesson
-  `windows-crlf-manifest-badpathname-hidden-by-nongating-skeleton`. **NEXT: windows run verifies pass counts MATCH
-  ubuntu** (the read diagnostic stays as permanent no-silent-skip hardening; it'll be silent once green).
-- **Exit-condition**: windowsmini wasm-3.0-assert real pass counts MATCH ubuntu (~pass=10234, not pass=0/OK-hides).
-  Then close the bundle; ADR-0174 Phase-2 (gate suspension) eligible. NOTE: the skeleton still doesn't gate its
-  exit code (separate ADR-0174 concern — the runner reporting counts-without-gating); the CRLF fix restores real
-  coverage but a follow-on could make the runner's exit propagate its fail counts.
-
-**Other NEXT if bundle stalls**: Phase-17 surface audits (Zig-API/CLI あるべき論); debt long-tail (D-456 larger).
+**NEXT (autonomous)**: ADR-0174 Phase-1 done → windowsmini fully green; **Phase-2 (gate suspension) now eligible** —
+`should_gate_windows.sh --suspend` would drop to a 2-host fast-loop (memory `feedback_windowsmini_campaign_then_suspend`:
+CWFS uses tag refs, no conflict; resume before main-merge / Win64-risk). Else: Phase-17 完成形 surface audits
+(Zig-API/CLI あるべき論); debt long-tail (D-456 host-import-wiring larger; partials parked/zero-gain). Verify the
+b1606384 gate stays green on windows+ubuntu at next Step 0.7 (0 fails → gate clean).
 
 ## Planned future phase (USER-requested 2026-06-16)
 
