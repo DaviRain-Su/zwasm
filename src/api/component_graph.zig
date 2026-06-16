@@ -566,22 +566,36 @@ fn isFlat4Scalar(vt: ctypes.ValType) bool {
     };
 }
 
-/// The fixed flattened core signature the boundary trampoline binds to:
-/// `(w0:i32, w1:i32) -> i32`. The two words are interpreted per the WIT param
-/// list at call time — a string's (ptr,len) or two flat scalars.
-const BoundarySig = fn (*Caller, u32, u32) callconv(.c) BoundaryResult;
-const BoundaryResult = u32;
+/// The error set a boundary trampoline returns: the callee-invoke's full
+/// `InvokeError` (every guest `Trap` + `ProcExit`) plus the host-side
+/// out-of-memory of the snapshot copy. Every variant is one `mapDispatchErr`
+/// already narrows back to a `Trap` (or `ProcExit`), so a returned error becomes
+/// a guest trap — NOT a silent fallback. The marshalling-failure cases map onto
+/// the memory trap they are (`OutOfBoundsLoad`/`Store`), per the Canonical ABI +
+/// untrusted-component sandboxing: a bad `(ptr,len)` must trap.
+const BoundaryError = Instance.InvokeError || error{OutOfMemory};
+
+/// The flattened core signature the boundary trampoline binds to:
+/// `(w0:i32, w1:i32) -> i32`, returning `BoundaryError!u32` so a marshalling
+/// failure PROPAGATES as a guest trap. `defineFuncCtx`'s thunk handles the
+/// error-union form natively (a returned error becomes `anyerror!void` out of
+/// the thunk), exactly like the WASI-P2 host trampolines. The two words are
+/// interpreted per the WIT param list at call time — a string's (ptr,len) or two
+/// flat scalars.
+const BoundarySig = fn (*Caller, u32, u32) BoundaryError!u32;
 
 /// Host trampoline: marshal the two flat words across the boundary per the
 /// importer's WIT signature, invoke the callee's core func, return its flat
 /// result. A `string` param is copied importer-memory → callee-memory via the
-/// callee's realloc (canon lower → core → lift); flat scalars pass through.
-fn boundaryTrampoline(caller: *Caller, w0: u32, w1: u32) callconv(.c) BoundaryResult {
+/// callee's realloc (canon lower → core → lift); flat scalars pass through. A
+/// marshalling failure (out-of-bounds (ptr,len), invalid UTF-8, realloc
+/// overflow) propagates as a trap — never a silent fallback.
+fn boundaryTrampoline(caller: *Caller, w0: u32, w1: u32) BoundaryError!u32 {
     const bctx = caller.data(BoundaryCtx);
-    return boundaryMarshal(caller, bctx, w0, w1) catch 0;
+    return boundaryMarshal(caller, bctx, w0, w1);
 }
 
-fn boundaryMarshal(caller: *Caller, bctx: *BoundaryCtx, w0: u32, w1: u32) !BoundaryResult {
+fn boundaryMarshal(caller: *Caller, bctx: *BoundaryCtx, w0: u32, w1: u32) BoundaryError!u32 {
     const params = bctx.func_type.params;
     var args = [_]Value{ .{ .i32 = @bitCast(w0) }, .{ .i32 = @bitCast(w1) } };
 
@@ -589,14 +603,14 @@ fn boundaryMarshal(caller: *Caller, bctx: *BoundaryCtx, w0: u32, w1: u32) !Bound
         // list<primitive>: w0=ptr, w1=COUNT in the IMPORTER's memory. Copy
         // count*elem_size bytes into the CALLEE's memory via its realloc
         // (aligned to the element size), since the callee reads its OWN memory.
-        const caller_mem: Memory = caller.memory() orelse return GraphError.ImportUnsatisfied;
+        const caller_mem: Memory = caller.memory() orelse return error.OutOfBoundsLoad;
         const byte_count: u32 = w1 * bctx.list_elem_size;
-        const src = caller_mem.sliceAt(w0, byte_count) catch return GraphError.UnsupportedBoundaryType;
+        const src = try caller_mem.sliceAt(w0, byte_count); // OOB read → OutOfBoundsLoad trap
         const tmp = try caller.allocator().dupe(u8, src);
         defer caller.allocator().free(tmp);
         const cx = bctx.callee.canonContext();
-        const ptr = cx.realloc(0, 0, bctx.list_elem_size, byte_count) catch return GraphError.UnsupportedBoundaryType;
-        if (@as(usize, ptr) + byte_count > cx.mem().len) return GraphError.UnsupportedBoundaryType;
+        const ptr = cx.realloc(0, 0, bctx.list_elem_size, byte_count) catch return error.OutOfBoundsStore;
+        if (@as(usize, ptr) + byte_count > cx.mem().len) return error.OutOfBoundsStore;
         @memcpy(cx.mem()[ptr..][0..byte_count], tmp);
         args[0] = .{ .i32 = @bitCast(ptr) };
         args[1] = .{ .i32 = @bitCast(w1) }; // count unchanged
@@ -604,68 +618,73 @@ fn boundaryMarshal(caller: *Caller, bctx: *BoundaryCtx, w0: u32, w1: u32) !Bound
         // Single string: w0=ptr, w1=len in the IMPORTER's memory. Snapshot the
         // bytes, then lower them into the CALLEE's memory via its realloc — the
         // callee reads its OWN memory, so the string must physically move.
-        const caller_mem: Memory = caller.memory() orelse return GraphError.ImportUnsatisfied;
-        const src = caller_mem.sliceAt(w0, w1) catch return GraphError.UnsupportedBoundaryType;
+        const caller_mem: Memory = caller.memory() orelse return error.OutOfBoundsLoad;
+        const src = try caller_mem.sliceAt(w0, w1); // OOB read → OutOfBoundsLoad trap
         const tmp = try caller.allocator().dupe(u8, src);
         defer caller.allocator().free(tmp);
         const cx = bctx.callee.canonContext();
-        const lowered = canon.lowerString(cx, tmp) catch return GraphError.UnsupportedBoundaryType;
+        const lowered = canon.lowerString(cx, tmp) catch |e| return stringErrToTrap(e);
         args[0] = .{ .i32 = @bitCast(lowered.ptr) };
         args[1] = .{ .i32 = @bitCast(lowered.packed_length) };
     }
     // else: two flat scalars pass straight through (no memory marshalling).
 
     var res = [_]Value{.{ .i32 = 0 }};
-    bctx.core_inst.invoke(bctx.core_func_name, &args, &res) catch return GraphError.ImportUnsatisfied;
+    try bctx.core_inst.invoke(bctx.core_func_name, &args, &res);
     return @bitCast(res[0].i32);
 }
 
+/// Map a Canonical-ABI string marshalling failure onto the memory trap it is:
+/// an out-of-bounds (ptr,len) or invalid/over-long string crossing the boundary
+/// is a guest fault → a memory trap (Canonical ABI traps, never silently coerces).
+fn stringErrToTrap(e: canon.StringError) BoundaryError {
+    return switch (e) {
+        error.OutOfBounds, error.AllocFailed => error.OutOfBoundsStore,
+        error.InvalidUtf8, error.StringTooLong, error.UnsupportedEncoding => error.OutOfBoundsLoad,
+    };
+}
+
 /// The retptr-result trampoline's flattened core signature: `(retptr:i32) ->
-/// ()`. A `string` RESULT can't be a flat return word, so the importer passes a
-/// return-area pointer (into its OWN memory) where the boundary writes the
-/// A-side `(ptr, len)` pair.
-const RetPtrSig = fn (*Caller, u32) callconv(.c) void;
+/// ()`, returning `BoundaryError!void` so a marshalling failure PROPAGATES as a
+/// guest trap (NOT a silent untouched-return-area fallback). A `string` RESULT
+/// can't be a flat return word, so the importer passes a return-area pointer
+/// (into its OWN memory) where the boundary writes the A-side `(ptr, len)` pair.
+const RetPtrSig = fn (*Caller, u32) BoundaryError!void;
 
 /// Host trampoline for `() -> string`: invoke the callee's core func (writing
 /// the result string into the CALLEE's memory via a callee-side return area),
 /// lift that string, then lower it into the IMPORTER's memory and write the
-/// A-side `(ptr, len)` at the importer's retptr.
-fn retPtrTrampoline(caller: *Caller, retptr: u32) callconv(.c) void {
+/// A-side `(ptr, len)` at the importer's retptr. A marshalling failure (out-of-
+/// bounds return area, invalid UTF-8) propagates as a trap.
+fn retPtrTrampoline(caller: *Caller, retptr: u32) BoundaryError!void {
     const bctx = caller.data(BoundaryCtx);
-    retPtrMarshal(caller, bctx, retptr) catch {
-        // EXEMPT-FALLBACK: a void-returning core trampoline can't surface a
-        // host error to the guest; a marshalling failure leaves the importer's
-        // return area untouched so the guest reads its zero-initialised default
-        // (a deterministic wrong value the assert catches, never a silent
-        // mis-marshal of a partial write). D-305: aggregate-result error
-        // propagation across the void boundary is a follow-up.
-    };
+    return retPtrMarshal(caller, bctx, retptr);
 }
 
-fn retPtrMarshal(caller: *Caller, bctx: *BoundaryCtx, retptr: u32) !void {
+fn retPtrMarshal(caller: *Caller, bctx: *BoundaryCtx, retptr: u32) BoundaryError!void {
     // 1. Allocate a return area in the CALLEE's memory and invoke its core func,
     //    which writes the result string (ptr,len) there (B writes B's memory).
     const callee_cx = bctx.callee.canonContext();
-    const callee_ret = callee_cx.realloc(0, 0, 4, 8) catch return GraphError.UnsupportedBoundaryType;
+    const callee_ret = callee_cx.realloc(0, 0, 4, 8) catch return error.OutOfBoundsStore;
     var args = [_]Value{.{ .i32 = @bitCast(callee_ret) }};
     var res = [_]Value{};
-    bctx.core_inst.invoke(bctx.core_func_name, &args, &res) catch return GraphError.ImportUnsatisfied;
+    try bctx.core_inst.invoke(bctx.core_func_name, &args, &res);
 
     // 2. Lift the result string from the CALLEE's memory at its return area.
-    if (@as(usize, callee_ret) + 8 > callee_cx.mem().len) return GraphError.UnsupportedBoundaryType;
+    if (@as(usize, callee_ret) + 8 > callee_cx.mem().len) return error.OutOfBoundsLoad;
     const b_ptr = std.mem.readInt(u32, callee_cx.mem()[callee_ret..][0..4], .little);
     const b_len = std.mem.readInt(u32, callee_cx.mem()[callee_ret + 4 ..][0..4], .little);
-    const lifted = canon.liftString(callee_cx, b_ptr, b_len) catch return GraphError.UnsupportedBoundaryType;
+    const lifted = canon.liftString(callee_cx, b_ptr, b_len) catch |e| return stringErrToTrap(e);
 
     // 3. Lower the string into the IMPORTER's memory (snapshot first: the lift
     //    borrows callee memory, the lower realloc may move it). Then write the
     //    A-side (ptr,len) at the importer's retptr in the importer's memory.
-    const importer = bctx.importer orelse return GraphError.ImportUnsatisfied;
+    const importer = bctx.importer orelse return error.OutOfBoundsStore;
     const tmp = try caller.allocator().dupe(u8, lifted);
     defer caller.allocator().free(tmp);
     const importer_cx = importer.canonContext();
-    const lowered = canon.lowerString(importer_cx, tmp) catch return GraphError.UnsupportedBoundaryType;
-    if (@as(usize, retptr) + 8 > importer_cx.mem().len) return GraphError.UnsupportedBoundaryType;
+    const lowered = canon.lowerString(importer_cx, tmp) catch |e| return stringErrToTrap(e);
+    if (@as(usize, retptr) + 8 > importer_cx.mem().len) return error.OutOfBoundsStore;
     std.mem.writeInt(u32, importer_cx.mem()[retptr..][0..4], lowered.ptr, .little);
     std.mem.writeInt(u32, importer_cx.mem()[retptr + 4 ..][0..4], lowered.packed_length, .little);
 }

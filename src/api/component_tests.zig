@@ -361,6 +361,12 @@ const greet_component_path = "test/component/greet_component.wasm";
 /// instantiates B, instantiates A `with "adder"=B.adder`, re-exports add-five.
 const adder_graph_path = "test/component/adder_graph.wasm";
 
+/// D-305 security fixture: a 2-component graph (cf. strlen_graph) where A calls
+/// B's `firstbyte(s: string)->u32` with an OUT-OF-BOUNDS (ptr,len) far past A's
+/// 1-page memory. The boundary trampoline's source-side `sliceAt` MUST fail →
+/// the cross-component call MUST trap (never a silent wrong/empty marshal).
+const oob_param_graph_path = "test/component/oob_param_graph.wasm";
+
 test "C2-3b-1: a real 2-component graph decodes (nested components + instances + wiring)" {
     var threaded: std.Io.Threaded = .init(testing.allocator, .{});
     defer threaded.deinit();
@@ -488,6 +494,26 @@ test "C2-3b-2 (EXIT): a 2-component graph links + runs (A calls B across compone
     var results = [_]Value{.{ .i32 = 0 }};
     try graph.invokeFlat("add-five", &.{.{ .i32 = 10 }}, &results);
     try testing.expectEqual(@as(i32, 15), results[0].i32);
+}
+
+test "D-305 (security): an OOB (ptr,len) into a cross-component string import TRAPS, not silently returns 0" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, oob_param_graph_path, testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var graph = try instantiateGraph(&eng, testing.allocator, bytes, .{});
+    defer graph.deinit();
+
+    // A passes (ptr=0x10000000, len=0x10000000) — both far past A's 1-page (64
+    // KiB) memory. The boundary marshaller's `caller_mem.sliceAt` over A's
+    // memory fails → the call must TRAP (canonical-ABI / untrusted-component
+    // sandboxing). The pre-fix behaviour silently returned 0.
+    var results = [_]Value{.{ .i32 = 0 }};
+    try testing.expectError(error.OutOfBoundsLoad, graph.invokeFlat("run", &.{}, &results));
 }
 
 test "IT-3b-2: a real wasm-tools string→string component decodes through the pipeline" {
