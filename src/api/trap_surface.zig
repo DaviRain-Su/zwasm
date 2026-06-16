@@ -493,3 +493,8 @@ test "wasm_trap_*: null-arg discipline" {
     try testing.expectEqual(@as(usize, 0), out.size);
     wasm_c_api.wasm_byte_vec_delete(null);
 }
+
+// C-ABI drift guard for `include/zwasm.h` ZWASM_TRAP_* vs this `TrapKind` enum
+// is mechanized cross-artifact by `scripts/check_trap_abi_sync.sh` (gate_commit):
+// @embedFile can't reach include/ (outside the src package), so the C header ↔
+// Zig enum value match is checked at the build-gate, not in a unit test.

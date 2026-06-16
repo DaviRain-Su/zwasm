@@ -258,6 +258,13 @@ if [ "$DOCS_ONLY" -eq 0 ]; then
         echo "[gate_commit] check_sibling_pub --gate ..."
         bash scripts/check_sibling_pub.sh --gate > /dev/null
     fi
+    # C-ABI drift guard: include/zwasm.h ZWASM_TRAP_* constants MUST match the
+    # TrapKind enum values (zwasm_trap_kind's return). Cross-artifact (C header ↔
+    # Zig enum), so it can't be a @embedFile unit test — runs here.
+    if [ -x scripts/check_trap_abi_sync.sh ]; then
+        echo "[gate_commit] check_trap_abi_sync --gate ..."
+        bash scripts/check_trap_abi_sync.sh --gate > /dev/null
+    fi
     # D-180 (lesson 2026-05-28-x86_64-uses-runtime-ptr-eh-gap):
     # x86_64 `usesRuntimePtr` whitelist drift detector. Any op
     # whose emit produces R15-dependent bytes MUST be listed; drift
