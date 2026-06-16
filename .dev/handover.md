@@ -9,16 +9,21 @@
 
 - **Campaign**: wasmtime misc_testsuite full differential coverage (ADR-0192, user-directed 2026-06-16). Phase I DONE; Phase II in flight.
 - **Goal**: run wasmtime's full `tests/misc_testsuite/` (312 .wast @897aa00d) through zwasm, fundamentally fix every real gap.
-- **2 REAL crashes found+fixed (gc bucket, native sweep)**: (1) `array.copy` self-region `@memcpy` alias panic — interp
-  (array_ops.zig) + JIT (jit_abi.zig) → `copyForwards` (`46c2975e`); (2) huge `array.new*` u32 size-overflow panic →
-  u64 + OutOfMemory trap, interp+JIT-shared (object_alloc.zig) + mapDispatchErr OutOfHeap→OutOfMemory wiring (`7e527dba`).
-  Both classes the synthetic gc spec suite (362/0) never hit. Lesson `gc-bulk-op-memcpy-aliases-on-self-region-copy`.
-- **Native sweep now COMPLETES on gc**: 78 manifests — assert_return 170 pass / 52 fail, assert_trap 33 pass / 3 fail.
-  Many of the 52 are `UnknownImport` (fixtures need host imports the runner doesn't provide = harness-limit, not a gap).
-- **NEXT (Phase II)**: triage the residual gc fails — start with REAL ones: `gc/issue-13152` `ValidateFailed BadValType`
-  (type-section decode — possible real decoder gap, verify wasm-tools accepts); separate UnknownImport (harness) from
-  value-mismatch (real). Then run the other native buckets (memory64/tail-call/function-references/multi-memory) +
-  simd via `simd_assert_runner`. C-API-subset triage (canonicalize-nan reinterpret, embenchen env-skip) still pending.
+- **3 REAL zwasm bugs found+fixed (gc bucket, native sweep)**: (1) `array.copy` self-region `@memcpy` alias panic —
+  interp+JIT → `copyForwards` (`46c2975e`); (2) huge `array.new*` u32 size-overflow panic → u64 + OutOfMemory trap +
+  mapDispatchErr OutOfHeap wiring (`7e527dba`); (3) `readValType` rejected abbreviated bottom reftypes 0x71-0x74
+  (nullref/nullexternref/nullfuncref/nullexnref) → BadValType on valid GC modules (`d54b789f`, wasmtime gc/issue-13152).
+  All three the synthetic spec suite (362/0) never hit. Lesson `gc-bulk-op-memcpy-aliases-on-self-region-copy`.
+- **Native sweep COMPLETES on ALL 5 proposal buckets** (after a runner fail-detail print fix `9e5122f0`): gc
+  return 174/45 trap 36/0; memory64 2/8, 13/3; tail-call 0/1; function-references 39/35, trap 33/0, invalid 30/0;
+  multi-memory 15/2. My fixes moved gc trap-fails 3→0, return-pass 170→174.
+- **KEY remaining-signal caveat (D-456)**: the native runner does NOT compare ref-typed assert_return results (D-222)
+  → every ref-returning assert counts as a fail. This inflates return-fails (function-references 35, gc ~45) with
+  false-fails, NOT zwasm bugs. The genuine numeric value-mismatches (memory64 8, tail-call 1, multi-memory 2) + any
+  decode/instantiate fails are the real residue.
+- **NEXT (Phase II)**: implement ref-result comparison in the runner (D-456) to get the TRUE signal, then triage the
+  numeric value-mismatches (memory64/tail-call/multi-memory first — smallest, no ref noise). simd via `simd_assert_runner`
+  + C-API-subset triage (canonicalize-nan reinterpret, embenchen env-skip) still pending.
 - **Harness**: `scripts/wasmtime_misc_sweep.sh` (C-API) + `scripts/wasmtime_misc_native_sweep.sh` (native GC-capable) +
   distillers `scripts/wast_to_manifest.py` / `scripts/spec_distill/wast_to_native_manifest.py`. Both runners installed.
 

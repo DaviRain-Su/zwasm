@@ -1785,3 +1785,18 @@ conventions: |-
       maybeCollect caller and zero-init flag. Unify: interp allocateArray should
       delegate to allocArrayObject (caller does maybeCollect, as the JIT path
       already does). Discharge: one allocator, one size-arithmetic site.
+  - id: "D-456"
+    layer: "test"
+    status: "note"
+    front: D-wmt-misc
+    description: |-
+      note (ADR-0192 campaign, 2026-06-16). The native wasm-3.0 assert runner
+      (spec_assert_runner_wasm_3_0.zig) does NOT compare ref-typed assert_return
+      results (D-222) — match() returns false for any non-i32/i64/f32/f64 type, so
+      EVERY ref-returning assert counts as a fail. This inflates the wasmtime-misc
+      native-sweep return-fail counts (esp. function-references 35, gc ~45) with
+      false-fails that are NOT zwasm bugs. To get a TRUE differential signal, the
+      runner needs ref-result comparison (structref/anyref/i31ref/funcref/extern +
+      null vs concrete). Also many remaining fails are UnknownImport (fixtures need
+      host imports the runner doesn't define). Discharge: ref-result compare wired
+      → re-sweep → residual fails are real value/behaviour gaps to fix.
