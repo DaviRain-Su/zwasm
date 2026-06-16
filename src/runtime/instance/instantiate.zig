@@ -987,6 +987,10 @@ pub fn evalGlobalInitGc(
                         stack[sp] = .{ .ref = @as(u64, ref) };
                         sp += 1;
                     },
+                    26, 27 => {}, // any.convert_extern / extern.convert_any:
+                    // Wasm 3.0 §3.5.10 constant ops; externref≡anyref in zwasm's
+                    // tagged repr so the conversion is pure identity (mirrors
+                    // codegen emit.zig). Value on the const-stack is unchanged.
                     8 => { // array.new_fixed $t N
                         const typeidx = try leb128.readUleb128(u32, expr, &pos);
                         const nlen = try leb128.readUleb128(u32, expr, &pos);
@@ -1851,4 +1855,20 @@ test "evalConstExprValue: i32.const N; ref.i31; end produces an i31 ref (10.G cy
     try testing.expectEqual(@as(i32, 42), Value.refAsI31Signed(v));
     // A non-i31 GC const op in this position is unsupported (struct.new = 0x00).
     try testing.expectError(error.UnsupportedConstExpr, evalConstExprValue(&[_]u8{ 0x41, 0x00, 0xFB, 0x00, 0x00, 0x0B }));
+}
+
+test "evalGlobalInitGc: extern.convert_any / any.convert_extern are identity in const-expr (ADR-0192 wasmtime gc/const-expr-gc)" {
+    // Wasm 3.0 §3.5.10 — `any.convert_extern` (0xFB 0x1A) and `extern.convert_any`
+    // (0xFB 0x1B) are constant instructions. zwasm represents externref≡anyref as a
+    // tagged `.ref`, so the conversion is pure identity (matches codegen emit.zig
+    // `=> {}`). Regression for wasmtime's `(global externref (extern.convert_any …))`
+    // const-expr, which `evalGlobalInitGc` previously rejected as UnsupportedConstExpr.
+    // i32.const 5; ref.i31; extern.convert_any; end
+    const v = try evalGlobalInitGc(&[_]u8{ 0x41, 0x05, 0xFB, 0x1C, 0xFB, 0x1B, 0x0B }, null, null, &.{}, &.{});
+    try testing.expect(Value.isI31Ref(v));
+    try testing.expectEqual(@as(i32, 5), Value.refAsI31Signed(v));
+    // Round-trip: i32.const 7; ref.i31; extern.convert_any; any.convert_extern; end
+    const v2 = try evalGlobalInitGc(&[_]u8{ 0x41, 0x07, 0xFB, 0x1C, 0xFB, 0x1B, 0xFB, 0x1A, 0x0B }, null, null, &.{}, &.{});
+    try testing.expect(Value.isI31Ref(v2));
+    try testing.expectEqual(@as(i32, 7), Value.refAsI31Signed(v2));
 }
