@@ -5,25 +5,33 @@
 
 ## Current state — Phase 17 完成形 completion-refinement (release = USER-ONLY, ADR-0156)
 
-Recent closed arcs (all 3-host or ubuntu-verified): **D-457** SIMD systemic close (@8a6b4c0e, 24805/0; 6
-corpus-hidden ops fixed) · **D-458** core-2.0 corpus completeness (@67b3a3ed: align+local_init e2e, 0 bugs;
-distiller value-less-ref crash fixed) + cross-corpus audit COMPLETE (SIMD was the unique blind spot; threads/1.0/3.0
-clean) · doc-inventory pass (@216bf200: CHANGELOG WASI-0.2-sockets stale claim fixed) · **C-ABI trap-kind drift
-guard** (@dc39fb8c, `scripts/check_trap_abi_sync.sh` gate-wired) · **D-455** interp allocateArray → shared
-allocArrayObject (@83c90264: one allocator/one size-arith site; behavior-preserving, GC 365+126/0) · **D-459** Wasm
-3.0 §3.3.1 local definite-assignment (@33658bdb): non-defaultable `(ref)` locals now follow the spec restore-at-end
-rule (sets inside block/loop/if don't escape) — all 4 local_init assert_invalid reject (was 2 SKIP-VALIDATOR-GAP),
-25539/0, GC unaffected. Key lesson: the rule is restore-at-end NOT dataflow-intersection (`$uninit-from-if` sets in
-BOTH branches yet invalid; survey's intersection model was spec-wrong). D-458 RESIDUAL (note): broad regen
-non-idempotency (~727-file churn). Lessons `local-definite-assignment-is-restore-at-end-not-intersection`,
-`hardcoded-corpus-subset-hides-whole-op-families`.
+Recent closed arcs (3-host or ubuntu-verified; full detail in git/lessons): **D-457** SIMD systemic close (24805/0) ·
+**D-458** core-2.0 corpus completeness + cross-corpus audit (SIMD was the unique blind spot) · doc-inventory pass
+(CHANGELOG fix) · **C-ABI trap-kind drift guard** (`check_trap_abi_sync.sh`) · **D-455** array-alloc dedup · **D-459**
+Wasm 3.0 §3.3.1 local definite-assignment (@33658bdb, ubuntu-verified @3b3f16fa 25539/0; lesson: restore-at-end NOT
+intersection). D-458 RESIDUAL (note): broad regen non-idempotency (~727-file churn). Ratchet baseline 24 loose (real
+22 post-D459) — harmless. Stale-doc: ROADMAP §16.7 D-277 ("zwasm.h empty") stale (header filled), DONE historical row.
 
-**NEXT (autonomous)**: continue Phase-17 完成形 surface audits / corpus-completeness — Zig-API + CLI あるべき論; debt
-long-tail (31 note: D-456 host-import-wiring larger; partials parked/zero-gain). Ratchet baseline 24 is now loose
-(real 22 post-D459 once logs refresh) — harmless, tighten opportunistically. Stale-doc: ROADMAP §16.7 D-277
-("zwasm.h empty") stale (header filled), DONE historical row. **WATCH**: windows wasm-3.0-assert summary shows
-pass=0/fail=595 yet `[run_remote_windows] OK` — a non-gating windows-runner-tally quirk worth a look (NOT D-459;
-present at 7289eda5; D-459 is host-independent validator logic verified on Mac+ubuntu).
+## Active bundle — windowsmini spec-assert pass=0 root-cause (ADR-0174 Phase-1, immediate priority)
+
+- **Bundle-ID**: win-specassert-pass0 (ADR-0174 windowsmini-hardening Phase-1) — windows NOT suspended (3-host active).
+- **Cycles-remaining**: ~3 (windows-side iterative debug)
+- **Continuity-memo**: Phase-I done. The windows `wasm-3.0-assert` runner enumerates the corpus (75 manifests, 11813
+  directives) but reports **pass=0 UNIFORMLY across all 5 buckets** (gc/memory64/tail-call/function-references/
+  multi-memory): `assert_return pass=0 fail=0` (NOT evaluated — neither pass/fail/skip-counted) + `assert_invalid`
+  ALL-fail (modules not rejected). ubuntu runs the SAME runner+corpus fine (pass=10234). So it's windows-specific +
+  uniform → NOT per-op logic; **hypothesis: windows-specific corpus `.wasm` LOAD failure** (the runner finds manifests
+  but the per-module load/compile no-ops → invalids "not rejected" + returns un-invokable). It does NOT gate test-all
+  (`[run_remote_windows] OK`) because the skeleton runner (10.T-2b WIP) doesn't propagate these counts to its exit code
+  — exactly the ADR-0174 "OK-verdict-hides-pass=0" anomaly (build.zig:599). NEXT: windows-side diagnostic — run the
+  wasm-3.0-assert runner on windowsmini with a per-module load/compile error print (add a temp diag or check if it
+  already logs) to confirm the load-failure hypothesis + find the exact failing step (path resolution? Win64
+  decoder/validate? corpus file access?). Then fix root cause until windows pass counts MATCH ubuntu.
+- **Exit-condition**: windowsmini wasm-3.0-assert real pass counts MATCH ubuntu (not a MATCH-only/OK-hides-0); the
+  runner's exit code gates its fail counts (no silent skeleton pass-through). Then ADR-0174 Phase-2 (gate suspension)
+  is eligible.
+
+**Other NEXT if bundle stalls**: Phase-17 surface audits (Zig-API/CLI あるべき論); debt long-tail (D-456 larger).
 
 ## Planned future phase (USER-requested 2026-06-16)
 
