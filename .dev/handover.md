@@ -19,13 +19,17 @@ CLI surface audit (@4e5e42fe): code↔`--help` fully consistent. Gate change @b1
 (windows `[run_remote_windows] OK.` wasm-3.0-assert pass=10234 fail=0 / simd 24805/0 / spec 25539/0; ubuntu OK
 @f1a1d503). win-specassert campaign fully closed; the fail-gate is clean.
 
-**NEXT (autonomous)**: **D-335 typed multi-byte stream/future marshalling DONE — BOTH directions** (write @630e7141
-stream<u32> 8-byte; read @f2a002f4 stdin stream<u32> → COMPLETED(2); `streamElemByteSize` resolves the element's
-lowered size; u8 corpus regression-free; `test-wasi-p3` + default `zig build test` exit 0). The default `p2→p3`
-flip is now gated only on D-335's BIGGER remainders (guest↔guest stream byte-buffering = Zone-1 rendezvous redesign;
-sockets/http async = Unit E full — each a fresh multi-cycle bundle). ADR-0193 feature-separation (P1-P4, D-462) +
-D-461 regalloc-origin rework (ADR-0194) both CLOSED (see below). Fronts after: D-335 big remainder OR `D-209`
-memory64. **windowsmini gating RESUMED**. Version → `2.0.0-alpha.3`.
+**ADR-0193 feature-separation follow-up audit DONE** (this turn): the user's flagged drift swept — stale
+`-Dcomponent` flag refs in source comments fixed (@c7ee8f49, code already used the derived `enable_component`); the
+version string single-sourced from `build.zig.zon` via build_options (@a7e61d62, killed the zwasm.zig hardcode →
+`zwasm --version` can't drift from the tag). CWFS handoff (`docs/handoff_cw_v1.md`) confirmed CURRENT re: `-Dwasi>=p2`
+gating (relay scratch is gitignored, regenerated per-handoff). D-335 typed marshalling DONE both directions
+(write @630e7141 / read @f2a002f4).
+
+**NEXT (autonomous)**: the default `p2→p3` flip is gated only on D-335's BIGGER remainders (guest↔guest stream
+byte-buffering = Zone-1 rendezvous redesign, may tension ADR-0187 stackless; sockets/http async = Unit E full — each
+a fresh multi-cycle bundle, open via Step-0). Fronts: D-335 big remainder OR `D-209` memory64. ADR-0193 (P1-P4,
+D-462) + D-461 regalloc-origin (ADR-0194) CLOSED (below). **windowsmini gating RESUMED**. Version `2.0.0-alpha.3`.
 
 ## D-461 regalloc-origin rework (ADR-0153/ADR-0194) — CLOSED Phase I-V 2026-06-16
 
