@@ -22,11 +22,13 @@ CLOSED (below). **windowsmini RESUMED**. Version `2.0.0-alpha.3`. Windows batch 
 ## Active bundle — ADR-0195 multi-task async scheduler (UNBLOCKED 2026-06-17 PM)
 
 - **Bundle-ID**: adr0195-scheduler-IIa..b (guest↔guest async = D-335 last functional gap)
-- **Cycles-remaining**: ~3 (✓II(a) char net → (b) TaskTable → (c) async trampoline + (d) e2e → (e) adversarial)
-- **II(a) DONE** (@529cfcba): single-task `driveCallbackLoop` pinned at unit level — immediate-EXIT / YIELD /
-  single-WAIT / multi-iteration WAIT→WAIT→EXIT / mixed YIELD→WAIT (per-code dispatch + waitOn-set ordering +
-  re-entry count); real-runner AsyncDeadlock char test (`component_wasi_p3.zig:259`) pins error propagation. This
-  is the regression net the step-(b) refactor must keep byte-identical.
+- **Cycles-remaining**: ~2 (✓II(a) char net → ✓(b) TaskTable+driver-refactor → (c) scheduler loop + async
+  trampoline + (d) e2e → (e) adversarial)
+- **II(a) DONE** (@529cfcba) + **(b) DONE** (@b90cbecb TaskTable, @61c4a20d driver refactor): `driveCallbackLoop`
+  now drives a `TaskDescriptor` via the `stepTask` primitive (seed→loop stepTask until done), byte-identical
+  (char net + component corpus 163/0 green, ubuntu+win verified through @8352ef9c). Zone-1 `TaskTable`/
+  `TaskDescriptor`/`TaskState{ready,waiting,done}` exist + lifecycle-tested; `stepTask`/`seedTask` are the
+  per-step primitive step (c) reuses over `TaskTable` slots.
 - **Why now**: the D-305 SYNC linker landed → ADR-0195's parking precondition ("route async-import→guest-callee
   first") is OBSOLETE (ADR-0195 Rev 2026-06-17 PM). The async routing trampoline is a ~100 LOC mirror of the
   sync `boundaryTrampoline` (folds into step c); the TRUE remaining bottleneck is scheduler-internal: step (b)
@@ -34,10 +36,13 @@ CLOSED (below). **windowsmini RESUMED**. Version `2.0.0-alpha.3`. Windows batch 
 - **Continuity-memo**: Phase II(a) correctness-FIRST — pin the single-task driver (EXIT/YIELD/WAIT/host-peer/
   `AsyncDeadlock`) with char tests BEFORE the TaskTable generalisation (the single-task path must stay
   byte-identical). `Subtask` (`async.zig:397`) is built-but-unwired ζ1 machinery to revive.
-- **NEXT**: step (b) — `TaskDescriptor` + `TaskTable` (Zone-1) + refactor `driveCallbackLoop` (async.zig:124) to
-  drive a 1-entry table (single-task path byte-identical, guarded by the @529cfcba char net). ADR-0195 Decision
-  holds the design (cooperative round-robin). Re-read it + the existing `Subtask` (async.zig:397) inline; it's an
-  architectural chunk (own cycle). ROI ~200 LOC for (b), MEDIUM risk.
+- **NEXT**: step (c) — (1) the scheduler dispatch loop: round-robin `stepTask` over the `TaskTable`'s ready
+  tasks, poll a `waiting` task's set, terminate when all `done`, trap `AsyncDeadlock` when ALL `waiting` with no
+  pending event (generalises the single-task check). Needs the **ctx seam to evolve**: `invokeCallback` must
+  target a task's `callback_funcidx` (today single-callback) + a multi-task test harness. (2) async-lowered-
+  import → enqueue: the `component_graph.zig` boundary trampoline detects `is_async`, mints a `Subtask`
+  (async.zig:397) + enqueues a `TaskDescriptor`. (3) the guest↔guest fixture (exit-condition below). Meaty —
+  likely 2 cycles; start with the Zone-1 scheduler loop + its multi-task harness, then the async routing.
 - **Exit-condition**: `async_two_tasks_stream_rendezvous.wat` (2-component: A async-imports B's async export)
   builds + asserts Subtask creation→resolution + waitable-set delivery, e2e green; full async corpus + (e)
   adversarial (deadlock/dropped/cancelled) green; single-task path unchanged.
