@@ -1041,15 +1041,14 @@ entries:
       + boundary trampoline via `canon.CanonContext` copying the string caller-mem→callee-mem; typed
       `UnsupportedBoundaryType` for unimpl shapes). `component_model_assert` 159/0/0 (strlen `firstbyte("Z")→0x5A`
       PASS + adder flat intact); x86_64-verified @b4e33689 (ubuntu test-all exit 0); windows batched. **REMAINING (keeps this row)**: other aggregate shapes
-      (list/record/result/tuple) + result-direction string + >2-component/deeper graphs. PROBED 2026-06-17: a
-      `list<u32>` cross-component fixture correctly hits the typed `UnsupportedBoundaryType` deferral (NOT a silent
-      mis-marshal — the design's safety verified). NEXT-INCREMENT SCOPE (component_graph.zig): the marshaller is
-      string-only — `flattensTo2i32Result` (`:468`) accepts a 1-param `isString`, and `boundaryMarshal` (`:513`)
-      uses `canon.lowerString`. To add `list<T>`: accept a 1-param `isList(primitive)` in `flattensTo2i32Result`,
-      and add a list branch in `boundaryMarshal` that copies `len*sizeOf(elem)` bytes (canon has `sizeOf` `:187`
-      but NO generic `lowerList` — write the alloc-in-callee-via-realloc + copy). Records (multi-flat-param) +
-      aggregate results + arity-general trampolines (fixed `(i32,i32)->i32` BoundarySig) are further. Each lands
-      when demanded. Async cross-component routing (the ADR-0195 scheduler prerequisite) is a further axis.
+      string + `list<primitive>` DONE. **`list<primitive>` DONE 2026-06-17 (@689040e6)**: the boundary marshals a
+      `list<u32>` (`listu32_graph` PASS, 160/0/0) — element size resolved at install via
+      `canon.canonTypeFromDecoded`→`sizeOf` (a list param is a `type_index`, NOT a raw `.list` ValType; restricted
+      to flat-scalar elements via `isFlatPrim`), `boundaryMarshal` copies `count*elem_size` bytes aligned to the
+      element. **REMAINING (keeps this row)**: record/result/tuple params + aggregate (string/list) RESULTS +
+      >2-component/deeper graphs + arity-general trampolines (the fixed `(i32,i32)->i32` `BoundarySig` caps params
+      to 2 / one aggregate). All correctly hit the typed `UnsupportedBoundaryType` deferral today; each lands when a
+      fixture/consumer demands it. Async cross-component routing (the ADR-0195 scheduler prerequisite) is a further axis.
     first_raised: "2026-06-07"
     last_reviewed: "2026-06-07"
     refs: src/api/component.zig (instantiateGraph); test/component/adder_graph.wasm; .dev/component_model_plan.md (Phase C/D)
