@@ -47,14 +47,28 @@ per-op scratch-XMM audit (LANDMINE). EXOTIC (high-v128-pressure only). Full per-
 recipe (`.wat` → `wasm-tools parse`, build the or-chain programmatically) are in the D-461 debt row. Re-open as a
 focused bundle if a real program needs it.
 
-## NEXT — D-335 WASI 0.3 / Preview-3 breadth (Unit E: broader host interfaces) — the higher-value front
+## Active bundle — D-335 typed stream/future element marshalling (Unit E first slice)
 
-After 9 cycles closing the D-461 regalloc/lane-spill correctness work, pivot to the other `now`-class front:
-**D-335 Unit E** (broader P3 host interfaces — sockets/http async; the WASI-0.3 host-breadth that also GATES the
-ADR-0193 default `p2→p3` flip). It's ADR-grade / multi-cycle (no quick win). **Step 0 NEXT**: survey the current
-P3 host surface (`src/api/component_wasi_p3.zig` + `src/feature/component/async.zig`; what host interfaces exist vs
-the WASI-0.3 sockets/http async spec) → scope the smallest tractable Unit-E slice → likely an ADR (per the D-335
-debt row "all HARDER + ADR-needed"). `D-209` memory64 is a parallel front.
+- **Bundle-ID**: D-335-typed-marshalling
+- **Cycles-remaining**: ~2-3
+- **Continuity-memo**: (Step-0 survey DONE this cycle) stream<T>/future<T> copy currently assumes **u8 / count==bytes**.
+  The byte-copy sites are `component_wasi_p2.zig:1795` (host sink write), `:1814` (host source read), `:1809`
+  (pending-read park), `:231` (deliverParkedReads) — all `mem.sliceAt(ptr, count)` = count BYTES. The Zone-1
+  rendezvous (`async.zig:517 SharedStream.read/write`) is element-agnostic (count only; host moves bytes) → NO change
+  there. **elem_type IS threaded** (`StreamFutureEnd.elem_type`, `SharedStream.elem_type` — async.zig:147/483/552)
+  from mint (`p2StreamNew` :1677 passes `abc.type_index`) but NEVER read at copy. `canon.sizeOf(CanonType)→{1,2,4,8}`
+  exists (canon.zig:186). **PLAN**: resolve `elem_size = canon.sizeOf(T)` where `stream<T>` is canon-decoded (find
+  the StreamFutureOp.type_index decode site — the type table is available there) → store `elem_size: u32` (default 1)
+  on StreamFutureOp → thread through AsyncBuiltinCtx → StreamFutureEnd/SharedStream → the 4 copy sites multiply
+  `count * elem_size`. **RISK**: confirm the type table is reachable at the decode site (if only the index survives to
+  the copy, store the resolved size at mint instead). **TEST**: author `test/component/async_*stream_u32*.wat` (mirror
+  the u8 stdout-via-stream fixture; write N u32s → host sees N*4 bytes); `wasm-tools parse` + a bespoke
+  `component_wasi_p3.zig` test (the existing async-fixture test pattern).
+- **Exit-condition**: a `stream<u32>` (or `future<u32>`) e2e test passes with N*4-byte host transfer; u8 streams
+  unchanged (existing 158/0/0 component + async corpora green).
+
+Other D-335 remainders (guest↔guest stream byte-buffering, sockets/http async = big Unit E) + `D-209` memory64 are
+the fronts after this bundle. D-461 result-write = tracked debt (above).
 
 ## Closed/paused (detail in git + debt.yaml)
 
