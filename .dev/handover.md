@@ -21,15 +21,14 @@ cross-component STRING + `list<primitive>` marshalling works (strlen + listu32 +
 The fully-general linker now exists; remaining
 aggregate shapes are consumer-gated D-305 debt.
 
-**NEXT (autonomous)**: D-305 milestone 3-HOST-VERIFIED (`component_model_assert` 161/0 on ubuntu x86_64 AND windows
-Win64; string + list<primitive> boundary marshalling). **DRIVING the next D-305 piece** (per
-`feedback_no_premature_deferral_lock` — drive future-bucket/hard): the **aggregate-RESULT path** (a function
-returning a `string` across the boundary), which needs the arity-general trampoline (the fixed `(i32,i32)->i32`
-`BoundarySig` in `component_graph.zig` caps it — a string result returns via retptr `(...,retptr)->void`). Delegated
-to a subagent (self-contained, comparable to the original string-impl), green target = a `dup(s:string)->string`
-2-component fixture. If it lands green + verified → commit; else revert to `a467de3f` + keep as scoped debt. Records /
->2-params follow. ADR-0193 (D-462) + D-461 (ADR-0194) CLOSED (below). **windowsmini RESUMED** (record `8895176d` when
-its full OK lands). Version `2.0.0-alpha.3`.
+**D-305 string RESULT path DONE** (this turn, @184b5e05, subagent + main-loop-verified): a `() -> string`
+cross-component func marshals its result via a retptr trampoline (`strret_graph` PASS, component_model 162/0; build+
+test+comp-spec+lint green). D-305 now does string/list PARAMS + string RESULT across the component boundary.
+Milestone (string+list params) 3-HOST-VERIFIED (win @8895176d OK, recorded). **NEXT (autonomous)**: `184b5e05`
+x86_64-verify pending (ubuntu kicked) + windows next batch. Remaining D-305: `(params..)->string`, list/record
+results, record params, >2-param arities, + the trampoline error-trap follow-up (error paths silently fall back —
+should trap per Canonical ABI; D-305 debt). Each consumer-gated future-bucket — drive next or maintenance.
+ADR-0193 (D-462) + D-461 (ADR-0194) CLOSED (below). **windowsmini RESUMED**. Version `2.0.0-alpha.3`.
 
 ## D-305 component-composition — first milestone CLOSED 2026-06-17 (@4cceeb1e, ADR-0196)
 
