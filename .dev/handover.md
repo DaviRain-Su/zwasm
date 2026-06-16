@@ -27,13 +27,14 @@ test+comp-spec+lint green). D-305 now does string/list PARAMS + string RESULT ac
 Milestone (string+list params) 3-HOST-VERIFIED (win @8895176d OK, recorded). **NEXT (autonomous)**: `184b5e05`
 x86_64-verify pending (ubuntu kicked) + windows next batch. Remaining D-305: `(params..)->string`, list/record
 results, record params, >2-param arities, + the trampoline error-trap follow-up (error paths silently fall back —
-should trap per Canonical ABI; D-305 debt). **DRIVING the error-trap follow-up** (this turn, subagent): a
-SECURITY-relevant correctness fix — the graph trampolines (`component_graph.zig`) use `callconv(.c)` fixed sigs +
-silently `catch 0` / leave-untouched on marshalling failure, so a malicious component passing an OOB `(ptr,len)`
-gets a silent wrong result instead of a TRAP. Fix = error-union sigs (like the WASI host fns) that propagate → trap;
-remove the EXEMPT-FALLBACK; adversarial fixture (OOB ptr/len → trap). Green target keeps strlen/listu32/listu64/strret
-green. If green+verified → commit; else revert. Other aggregate permutations stay scoped consumer-gated debt.
-Periodic fuzz / debt sweeps remain the maintenance baseline. Windows verifies @184b5e05 next batch.
+should trap per Canonical ABI; D-305 debt). **error-trap follow-up DONE** (this turn, @30bd1881, subagent +
+main-loop-verified, SECURITY): the graph boundary trampolines now use error-union sigs (like the WASI host fns) that
+TRAP on a marshalling failure instead of `catch 0`/untouched — a malicious component passing an OOB `(ptr,len)` now
+traps (`oob_param_graph` test asserts `error.OutOfBoundsLoad`) instead of a silent-wrong result; EXEMPT-FALLBACK
+removed. build+test+comp-spec(162/0)+lint+fallback-check green. **Posture = plateau maintenance**: D-305 common
+aggregates (string/list params + string result) + boundary error-trapping all DONE+verified; remaining permutations
+(record/result aggregates, >2-param arities) are scoped consumer-gated debt — land when a consumer demands. Periodic
+fuzz / debt sweeps baseline. Windows verifies @184b5e05+@30bd1881 next batch.
 ADR-0193 (D-462) + D-461 (ADR-0194) CLOSED (below). **windowsmini RESUMED**. Version `2.0.0-alpha.3`.
 
 ## D-305 component-composition — first milestone CLOSED 2026-06-17 (@4cceeb1e, ADR-0196)

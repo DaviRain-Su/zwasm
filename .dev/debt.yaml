@@ -1044,10 +1044,13 @@ entries:
       string + `list<primitive>` params + `string` RESULT DONE. **`string` RESULT DONE 2026-06-17 (@184b5e05)**: a
       no-param `() -> string` marshals its result across the boundary via a retptr trampoline (`RetPtrSig
       (*Caller,retptr)->void`; lift from callee → lower into importer via its CanonContext → write A-side (ptr,len)
-      at retptr); `strret_graph` PASS (162/0). **FOLLOW-UP (D-305)**: the graph trampolines' error paths SILENTLY
-      fall back (param-side `catch 0`, result-side leaves retptr untouched → empty) — a void/(i32,i32) host fn can't
-      return an error; a marshalling failure SHOULD trap per Canonical ABI. Make the boundary trap on error (needs a
-      trampoline error-propagation path) — happy paths correct + tested, error paths degraded. **`list<primitive>`
+      at retptr); `strret_graph` PASS (162/0). **error-trap FOLLOW-UP DONE 2026-06-17 (@30bd1881, SECURITY)**: the
+      graph trampolines now use error-union sigs (`BoundaryError = Instance.InvokeError||OutOfMemory`, mirroring the
+      WASI host fns — `defineFuncCtx`'s thunk surfaces a returned Zig error as a guest TRAP) instead of `callconv(.c)`
+      + `catch 0`/untouched. A marshalling failure (OOB ptr/len, callee realloc/bounds, bad utf8) now TRAPS instead
+      of silently returning 0/empty — a malicious component can't get a silent-wrong cross-component result.
+      `oob_param_graph` adversarial test asserts `error.OutOfBoundsLoad`; EXEMPT-FALLBACK removed (no_workaround
+      clean). **`list<primitive>`
       DONE 2026-06-17 (@689040e6)**: the boundary marshals a
       `list<u32>` (`listu32_graph` PASS, 160/0/0) — element size resolved at install via
       `canon.canonTypeFromDecoded`→`sizeOf` (a list param is a `type_index`, NOT a raw `.list` ValType; restricted
