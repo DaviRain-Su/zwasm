@@ -115,9 +115,13 @@ pub fn enabledByBuild(comptime mod: type) bool {
         }
         if (@hasDecl(mod, "wasi_level")) {
             if (mod.wasi_level) |lvl| {
+                // ADR-0193: WasiLevel is an ordered tier (none<p1<p2<p3);
+                // an op needing a higher level than the build provides is
+                // filtered out. The `both` wildcard was dropped — the tier
+                // ordering subsumes it.
                 const cur = @intFromEnum(build_options.wasi_level);
                 const need = @intFromEnum(lvl);
-                if (need > cur and build_options.wasi_level != .both) {
+                if (need > cur) {
                     return false;
                 }
             }
@@ -437,12 +441,12 @@ test "dispatcherOver returns UnsupportedOpForBuildLevel for build-filtered op ta
     // switch" today; future Phase 10 paths can surface the disabled-
     // op case explicitly as an error.
     //
-    // Synthetic op_mod with wasi_level: .p2 is filtered under the
-    // default -Dwasi=p1 build (p2 > p1 and current != .both).
+    // Synthetic op_mod with wasi_level: .p3 is filtered under the
+    // default -Dwasi=p2 build (p3 > p2 in the ordered tier; ADR-0193).
     const synthetic = struct {
         pub const op_tag: ZirOp = .@"unreachable";
         pub const wasm_level: ?WasmLevel = null;
-        pub const wasi_level: ?WasiLevel = .p2;
+        pub const wasi_level: ?WasiLevel = .p3;
         pub const handlers = .{
             .validate = unreachable_axis_stub,
             .lower = unreachable_axis_stub,

@@ -28,7 +28,7 @@ pub fn build(b: *std.Build) void {
     // registration (ROADMAP §4.5 / A12), not pervasive build-time
     // `if` branches.
     const wasm_level = b.option(WasmLevel, "wasm", "Wasm spec level (default 3.0)") orelse .v3_0;
-    const wasi_level = b.option(WasiLevel, "wasi", "WASI version inclusion (default p1)") orelse .p1;
+    const wasi_level = b.option(WasiLevel, "wasi", "WASI version inclusion: none/p1/p2/p3 ordered tier (default p2; p3=Preview-3 async, ADR-0193)") orelse .p2;
     const engine_mode = b.option(EngineMode, "engine", "Engine selection (default both)") orelse .both;
     const enable_strip = b.option(bool, "strip", "Strip debug info from the CLI binary") orelse false;
     const strip_opt: ?bool = if (enable_strip) true else null;
@@ -1303,7 +1303,7 @@ pub fn build(b: *std.Build) void {
 }
 
 pub const WasmLevel = enum { v1_0, v2_0, v3_0 };
-pub const WasiLevel = enum { none, p1, p2, both };
+pub const WasiLevel = enum { none, p1, p2, p3 };
 pub const EngineMode = enum { interp, jit, both };
 pub const SanitizeMode = enum { off, address, thread };
 
