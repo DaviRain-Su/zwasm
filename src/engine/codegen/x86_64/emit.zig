@@ -1605,6 +1605,15 @@ pub fn compile(
                 const simd_consts_base: u32 = if (func.simd_consts) |sc| @intCast(sc.len) else 0;
                 try op_simd_float.emitI32x4TruncSatF64x2UZero(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &simd_const_fixups, &extra_consts, simd_consts_base);
             },
+            // STRICT (non-relaxed) f32↔i32 + f64.convert_low_s conversions (D-457).
+            // Complete handlers, shared with the relaxed-simd trunc variants below;
+            // only the dispatch wiring was missing (validate also rejected them
+            // pre-79fd589e).
+            .@"f32x4.convert_i32x4_s" => try op_simd_float.emitF32x4ConvertI32x4S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f32x4.convert_i32x4_u" => try op_simd_float.emitF32x4ConvertI32x4U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"f64x2.convert_low_i32x4_s" => try op_simd_float.emitF64x2ConvertLowI32x4S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i32x4.trunc_sat_f32x4_s" => try op_simd_float.emitI32x4TruncSatF32x4S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i32x4.trunc_sat_f32x4_u" => try op_simd_float.emitI32x4TruncSatF32x4U(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
             // §17.4 relaxed-SIMD trunc — NaN/OOB → saturating clamp (v2 choice),
             // behaviourally identical to trunc_sat; reuse those emits.
             .@"i32x4.relaxed_trunc_f32x4_s" => try op_simd_float.emitI32x4TruncSatF32x4S(allocator, &buf, alloc, &pushed_vregs, &next_vreg),

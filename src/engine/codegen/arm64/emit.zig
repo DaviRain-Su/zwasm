@@ -2101,6 +2101,16 @@ pub fn compile(
             // §9.6/9.6-g-v — trunc_sat (FCVTZS/U + SQXTN/UQXTN family).
             .@"i32x4.trunc_sat_f64x2_s_zero" => try op_simd_float.emitI32x4TruncSatF64x2SZero(&ctx, &ins),
             .@"i32x4.trunc_sat_f64x2_u_zero" => try op_simd_float.emitI32x4TruncSatF64x2UZero(&ctx, &ins),
+            // STRICT (non-relaxed) f32↔i32 + f64.convert_low_s conversions (D-457).
+            // Handlers are complete + shared with the relaxed-simd variants below
+            // (NEON SCVTF/UCVTF/FCVTZS/FCVTZU saturate per Wasm spec §4.3.2); only
+            // the dispatch wiring was missing, so they never ran (validate also
+            // rejected them pre-79fd589e).
+            .@"f32x4.convert_i32x4_s" => try op_simd_float.emitF32x4ConvertI32x4S(&ctx, &ins),
+            .@"f32x4.convert_i32x4_u" => try op_simd_float.emitF32x4ConvertI32x4U(&ctx, &ins),
+            .@"f64x2.convert_low_i32x4_s" => try op_simd_float.emitF64x2ConvertLowI32x4S(&ctx, &ins),
+            .@"i32x4.trunc_sat_f32x4_s" => try op_simd_float.emitI32x4TruncSatF32x4S(&ctx, &ins),
+            .@"i32x4.trunc_sat_f32x4_u" => try op_simd_float.emitI32x4TruncSatF32x4U(&ctx, &ins),
             // §17.4 relaxed-SIMD trunc — NaN/OOB → saturating clamp (v2 choice),
             // behaviourally identical to trunc_sat; reuse those emits.
             .@"i32x4.relaxed_trunc_f32x4_s" => try op_simd_float.emitI32x4TruncSatF32x4S(&ctx, &ins),
