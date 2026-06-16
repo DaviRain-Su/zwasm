@@ -2,9 +2,9 @@
 //! ADR-0188). Drives an async-lifted component export through the stackless
 //! callback ABI: instantiate (reusing the P2 general engine — async is a
 //! property of the *export*, not instantiation), invoke the async task entry
-//! once, then run `async.zig:driveCallbackLoop` re-entering the guest
-//! `callback` per delivered event until EXIT. Coexists with the P2 runner; it
-//! does NOT replace it. Zone 3 (touches `invoke`).
+//! once, then run `async.zig:driveScheduler` over a 1-entry `TaskTable`
+//! (ADR-0195) re-entering the guest `callback` per delivered event until EXIT.
+//! Coexists with the P2 runner; it does NOT replace it. Zone 3 (touches `invoke`).
 //!
 //! The hard loop logic + the async data model live in `feature/component/
 //! async.zig` (Zone 1, ADR-0187); this is the thin engine-wiring layer.
@@ -21,8 +21,8 @@ const Module = @import("../zwasm/module.zig").Module;
 const Instance = @import("../zwasm/instance.zig").Instance;
 const Value = @import("../zwasm.zig").Value;
 
-/// The concrete ctx `driveCallbackLoop` is generic over (ADR-0188): installs the
-/// two engine seams against a live `Instance` + the per-task async tables.
+/// The concrete ctx `driveScheduler` is generic over (ADR-0188/0195): installs
+/// the engine seams against a live `Instance` + the per-task async tables.
 const P3CallbackCtx = struct {
     inst: *Instance,
     callback_name: []const u8,
@@ -610,9 +610,9 @@ test "D-335 unit E2c: the WAIT path — a parked read → WAIT(set) → host del
     host.stdin_bytes = "ok"; // the host source delivers these at waitOn
 
     // Force the host-source read to PARK (ADR-0191 E2c): the guest's read blocks,
-    // it returns WAIT(set), the runner's waitOn delivers "ok" → STREAM_READ →
+    // it returns WAIT(set), the runner's pollSet delivers "ok" → STREAM_READ →
     // re-enters the guest callback (which asserts the bytes) → EXIT. A clean run
-    // proves the real driveCallbackLoop WAIT branch end-to-end.
+    // proves the real driveScheduler WAIT branch end-to-end.
     var built = try wasi_p2.buildWasiP2Component(&eng, testing.allocator, bytes, &host, .{});
     defer built.deinit();
     built.ctx.defer_host_source_reads = true;

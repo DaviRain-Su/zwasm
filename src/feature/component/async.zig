@@ -108,32 +108,12 @@ pub const EventTuple = struct {
     payload: u32,
 };
 
-/// Drive the stackless callback event loop (`CanonicalABI.md` canon_lift, the
-/// `callback`/stackless path). After an async-lifted export's first call returns
-/// `initial` (a packed `CallbackResult`), re-enter the guest's `callback` core
-/// func with each delivered event until it signals EXIT. `ctx` injects the two
-/// engine seams so this stays Zone-1 (the Zone-3 P3 runner installs them):
-///   - `invokeCallback(event_code: u32, p1: u32, p2: u32) Error!u32` — call the
-///     guest `callback`, returning its packed result;
-///   - `waitOn(set_index: u32) Error!EventTuple` — block until the named
-///     waitable set delivers an event (the WAIT seam).
-/// YIELD re-enters with `EventCode.none` (no scheduler yet — the guest must make
-/// its own progress); EXIT ends the loop (the task has called `task.return`).
-/// The error set is inferred so a Zone-3 ctx can surface its own engine errors
-/// (`Instance.invoke` traps, an empty-poll deadlock) through the loop.
-pub fn driveCallbackLoop(ctx: anytype, initial: u32) !void {
-    // Single-task = a local TaskDescriptor stepped to completion (ADR-0195 step b);
-    // byte-identical to the prior inline loop (pinned by the II(a) char net). The
-    // step-c scheduler calls the same `stepTask` over `TaskTable` slots instead.
-    var task = try seedTask(initial);
-    while (task.state != .done) try stepTask(ctx, &task);
-}
-
-/// ADR-0195 step (b) — map an initial packed callback-result (the export's first
-/// return) to a fresh task's state: EXIT→done (never entered), YIELD→ready
-/// (re-enter with `none`), WAIT→waiting on the named set. `callback_funcidx` is 0
-/// for the single-task driver (the ctx re-enters its own bound callback); step c
-/// populates it when enqueuing a guest subtask.
+/// ADR-0195 — map an async-lifted export's first packed `CallbackResult` (the
+/// `initial` the entry returns) to a fresh task's state: EXIT→done (never
+/// entered), YIELD→ready (re-enter with `none`), WAIT→waiting on the named set.
+/// The driver is `driveScheduler` (a single-task export is a 1-entry `TaskTable`).
+/// `callback_funcidx` is filled in by the caller (the P3 runner sets the export's
+/// callback; the graph runner sets each enqueued guest subtask's).
 pub fn seedTask(initial: u32) Error!TaskDescriptor {
     const r = try unpackCallbackResult(initial);
     return switch (r.code) {
@@ -143,25 +123,8 @@ pub fn seedTask(initial: u32) Error!TaskDescriptor {
     };
 }
 
-/// ADR-0195 step (b) — drive ONE cooperative step of a task: deliver its pending
-/// event (`none` while `ready`/just-yielded, else the `waitOn(set)` result while
-/// `waiting`), invoke its callback once, and fold the return into its state
-/// (exit→done, yield→ready, wait→waiting+set). A `done` task is a no-op. The
-/// step-c scheduler loop calls this on the next runnable task each turn; the
-/// single-task driver calls it repeatedly on one task — the byte-identical path.
-pub fn stepTask(ctx: anytype, task: *TaskDescriptor) !void {
-    const ev: EventTuple = switch (task.state) {
-        .done => return,
-        .ready => .{ .code = .none, .index = 0, .payload = 0 },
-        .waiting => try ctx.waitOn(task.set_index),
-    };
-    const next_bits = try ctx.invokeCallback(@intFromEnum(ev.code), ev.index, ev.payload);
-    foldResult(task, try unpackCallbackResult(next_bits));
-}
-
 /// ADR-0195 — fold a callback's packed return into the task's next state:
 /// EXIT→done, YIELD→ready (re-enter with `none`), WAIT→waiting on the named set.
-/// Shared by the single-task `stepTask` and the multi-task `driveScheduler`.
 fn foldResult(task: *TaskDescriptor, result: CallbackResult) void {
     switch (result.code) {
         .exit => task.state = .done,
@@ -1140,142 +1103,15 @@ test "D-335 unit D-ηB: waitable-set table add/get/remove + index-0 reserved" {
 /// Records what the callback loop asked of the engine + scripts the guest's
 /// packed callback returns, so the pure loop driver can be tested with no real
 /// component instance.
-const ScriptedLoopCtx = struct {
-    cb_returns: []const u32, // the guest's packed result per callback call, in order
-    wait_event: EventTuple, // the event waitOn delivers for a WAIT
-    cb_calls: std.ArrayList(EventTuple) = .empty,
-    wait_calls: std.ArrayList(u32) = .empty,
-    next: usize = 0,
-    alloc: Allocator,
-
-    fn deinit(self: *ScriptedLoopCtx) void {
-        self.cb_calls.deinit(self.alloc);
-        self.wait_calls.deinit(self.alloc);
-    }
-
-    fn waitOn(self: *ScriptedLoopCtx, set_index: u32) Error!EventTuple {
-        try self.wait_calls.append(self.alloc, set_index);
-        return self.wait_event;
-    }
-
-    fn invokeCallback(self: *ScriptedLoopCtx, event_code: u32, p1: u32, p2: u32) Error!u32 {
-        try self.cb_calls.append(self.alloc, .{ .code = @enumFromInt(event_code), .index = p1, .payload = p2 });
-        const r = self.cb_returns[self.next];
-        self.next += 1;
-        return r;
-    }
-};
-
-test "D-335 unit D-ηB: driveCallbackLoop re-enters callback per delivered event until EXIT" {
-    // WAIT(set=5) → engine delivers a STREAM_READ event → callback returns EXIT.
-    {
-        var ctx = ScriptedLoopCtx{
-            .cb_returns = &.{0}, // first (only) callback returns EXIT
-            .wait_event = .{ .code = .stream_read, .index = 3, .payload = 0 },
-            .alloc = testing.allocator,
-        };
-        defer ctx.deinit();
-        try driveCallbackLoop(&ctx, (5 << 4) | 2); // initial = WAIT on set 5
-        // the loop waited on set 5 once, then re-entered the callback once with
-        // the delivered event (STREAM_READ=2, index 3, payload 0).
-        try testing.expectEqualSlices(u32, &.{5}, ctx.wait_calls.items);
-        try testing.expectEqual(@as(usize, 1), ctx.cb_calls.items.len);
-        try testing.expectEqual(EventCode.stream_read, ctx.cb_calls.items[0].code);
-        try testing.expectEqual(@as(u32, 3), ctx.cb_calls.items[0].index);
-    }
-
-    // YIELD → re-enter with EventCode.none (no scheduler), then EXIT. No wait.
-    {
-        var ctx = ScriptedLoopCtx{ .cb_returns = &.{0}, .wait_event = undefined, .alloc = testing.allocator };
-        defer ctx.deinit();
-        try driveCallbackLoop(&ctx, 1); // initial = YIELD
-        try testing.expectEqual(@as(usize, 0), ctx.wait_calls.items.len);
-        try testing.expectEqual(@as(usize, 1), ctx.cb_calls.items.len);
-        try testing.expectEqual(EventCode.none, ctx.cb_calls.items[0].code);
-    }
-
-    // initial = EXIT immediately → the callback is never entered.
-    {
-        var ctx = ScriptedLoopCtx{ .cb_returns = &.{}, .wait_event = undefined, .alloc = testing.allocator };
-        defer ctx.deinit();
-        try driveCallbackLoop(&ctx, 0);
-        try testing.expectEqual(@as(usize, 0), ctx.cb_calls.items.len);
-    }
-}
-
-test "ADR-0195 II(a) char: driveCallbackLoop drives a MULTI-iteration WAIT sequence in order" {
-    // Pins the loop-repeat + per-WAIT set routing BEFORE the step-(b) TaskTable
-    // refactor (drive-THE-task → drive-the-TABLE) so the 1-entry case can't
-    // silently regress. WAIT(5) → event → callback re-issues WAIT(7) → event →
-    // callback EXITs: the loop must waitOn 5 THEN 7, re-entering the guest twice.
-    var ctx = ScriptedLoopCtx{
-        .cb_returns = &.{ (7 << 4) | 2, 0 }, // 1st cb → WAIT set 7; 2nd cb → EXIT
-        .wait_event = .{ .code = .stream_read, .index = 1, .payload = 0 },
-        .alloc = testing.allocator,
-    };
-    defer ctx.deinit();
-    try driveCallbackLoop(&ctx, (5 << 4) | 2); // initial = WAIT set 5
-    try testing.expectEqualSlices(u32, &.{ 5, 7 }, ctx.wait_calls.items); // waited 5 then 7, in order
-    try testing.expectEqual(@as(usize, 2), ctx.cb_calls.items.len); // re-entered the guest twice
-}
-
-test "ADR-0195 II(a) char: driveCallbackLoop distinguishes YIELD (no waitOn) from WAIT across iterations" {
-    // YIELD re-enters with EventCode.none and DOES NOT call waitOn; WAIT does.
-    // Pins that the table-driver refactor keeps the per-code dispatch: a mixed
-    // YIELD → WAIT → EXIT sequence calls waitOn exactly once (for the WAIT).
-    var ctx = ScriptedLoopCtx{
-        .cb_returns = &.{ (3 << 4) | 2, 0 }, // 1st cb (after YIELD) → WAIT set 3; 2nd cb → EXIT
-        .wait_event = .{ .code = .stream_read, .index = 9, .payload = 0 },
-        .alloc = testing.allocator,
-    };
-    defer ctx.deinit();
-    try driveCallbackLoop(&ctx, 1); // initial = YIELD
-    try testing.expectEqualSlices(u32, &.{3}, ctx.wait_calls.items); // ONLY the WAIT hit waitOn
-    try testing.expectEqual(@as(usize, 2), ctx.cb_calls.items.len);
-    try testing.expectEqual(EventCode.none, ctx.cb_calls.items[0].code); // YIELD → none
-    try testing.expectEqual(EventCode.stream_read, ctx.cb_calls.items[1].code); // WAIT → delivered event
-}
-
-test "ADR-0195 step (b): seedTask + stepTask fold one callback return into task state (the step-c primitive)" {
-    var ctx = ScriptedLoopCtx{
-        .cb_returns = &.{ (6 << 4) | 2, 0 }, // 1st step → WAIT set 6; 2nd step → EXIT
-        .wait_event = .{ .code = .stream_read, .index = 2, .payload = 0 },
-        .alloc = testing.allocator,
-    };
-    defer ctx.deinit();
-
-    var task = try seedTask(1); // initial = YIELD → ready
-    try testing.expectEqual(TaskState.ready, task.state);
-
-    try stepTask(&ctx, &task); // ready: deliver none → callback returns WAIT(6)
-    try testing.expectEqual(TaskState.waiting, task.state);
-    try testing.expectEqual(@as(u32, 6), task.set_index);
-    try testing.expectEqual(EventCode.none, ctx.cb_calls.items[0].code); // a ready task delivers none
-
-    try stepTask(&ctx, &task); // waiting: waitOn(6) → callback returns EXIT
-    try testing.expectEqual(TaskState.done, task.state);
-    try testing.expectEqualSlices(u32, &.{6}, ctx.wait_calls.items); // waited on the task's own set
-
-    // a done task is an idempotent no-op (the scheduler skips it, never re-enters).
-    try stepTask(&ctx, &task);
-    try testing.expectEqual(@as(usize, 2), ctx.cb_calls.items.len);
-
-    // seedTask maps the other initial codes: EXIT → done (never entered), WAIT → waiting.
-    try testing.expectEqual(TaskState.done, (try seedTask(0)).state);
-    const w = try seedTask((9 << 4) | 2);
-    try testing.expectEqual(TaskState.waiting, w.state);
-    try testing.expectEqual(@as(u32, 9), w.set_index);
-}
-
-/// Scripted multi-task ctx for `driveScheduler` (the step-c seam): records the
-/// funcidxs re-entered + sets polled; `invokeTaskCallback` returns `cb_return`;
-/// `pollSet` delivers `poll_result` once then `null` (drives a task to wait then
-/// be released, or deadlock).
+/// Scripted multi-task ctx for `driveScheduler` (the step-c seam). Records, per
+/// `invokeTaskCallback`, the delivered event code + the task's funcidx; returns
+/// the next scripted packed callback result. `pollSet` returns `poll_event` for
+/// every poll (null = nothing deliverable → the scheduler deadlocks).
 const SchedCtx = struct {
-    cb_return: u32 = 0, // EXIT by default
-    poll_result: ?EventTuple = null,
-    poll_consumed: bool = false,
-    invoked: std.ArrayList(u32) = .empty,
+    cb_returns: []const u32, // packed callback results, consumed in order
+    poll_event: ?EventTuple = null,
+    next: usize = 0,
+    invoked: std.ArrayList(EventTuple) = .empty, // {code = delivered event, index = funcidx}
     polls: std.ArrayList(u32) = .empty,
     alloc: Allocator,
 
@@ -1283,18 +1119,16 @@ const SchedCtx = struct {
         self.invoked.deinit(self.alloc);
         self.polls.deinit(self.alloc);
     }
-    fn invokeTaskCallback(self: *SchedCtx, funcidx: u32, ec: u32, p1: u32, p2: u32) !u32 {
-        _ = ec;
-        _ = p1;
+    fn invokeTaskCallback(self: *SchedCtx, funcidx: u32, event_code: u32, p1: u32, p2: u32) !u32 {
         _ = p2;
-        try self.invoked.append(self.alloc, funcidx);
-        return self.cb_return;
+        try self.invoked.append(self.alloc, .{ .code = @enumFromInt(event_code), .index = funcidx, .payload = p1 });
+        const r = self.cb_returns[self.next];
+        self.next += 1;
+        return r;
     }
     fn pollSet(self: *SchedCtx, set_index: u32) !?EventTuple {
         try self.polls.append(self.alloc, set_index);
-        if (self.poll_consumed) return null;
-        self.poll_consumed = true;
-        return self.poll_result;
+        return self.poll_event;
     }
 };
 
@@ -1303,7 +1137,7 @@ test "ADR-0195 step (c): driveScheduler runs every ready task once + terminates 
     defer table.deinit();
     const a = try table.add(.{ .callback_funcidx = 10 }); // .ready
     const b = try table.add(.{ .callback_funcidx = 20 }); // .ready
-    var ctx = SchedCtx{ .cb_return = 0, .alloc = testing.allocator }; // both EXIT on first step
+    var ctx = SchedCtx{ .cb_returns = &.{ 0, 0 }, .alloc = testing.allocator }; // both EXIT
     defer ctx.deinit();
 
     try driveScheduler(&ctx, &table);
@@ -1316,7 +1150,7 @@ test "ADR-0195 step (c): driveScheduler traps AsyncDeadlock when all tasks wait 
     var table = try TaskTable.init(testing.allocator);
     defer table.deinit();
     _ = try table.add(.{ .callback_funcidx = 10, .state = .waiting, .set_index = 5 });
-    var ctx = SchedCtx{ .poll_result = null, .alloc = testing.allocator }; // poll yields nothing
+    var ctx = SchedCtx{ .cb_returns = &.{}, .poll_event = null, .alloc = testing.allocator }; // poll yields nothing
     defer ctx.deinit();
 
     try testing.expectError(error.AsyncDeadlock, driveScheduler(&ctx, &table));
@@ -1329,15 +1163,75 @@ test "ADR-0195 step (c): driveScheduler delivers a polled event to a waiting tas
     defer table.deinit();
     const a = try table.add(.{ .callback_funcidx = 7, .state = .waiting, .set_index = 3 });
     var ctx = SchedCtx{
-        .cb_return = 0, // after the delivered event the callback EXITs
-        .poll_result = .{ .code = .stream_read, .index = 1, .payload = 0 },
+        .cb_returns = &.{0}, // after the delivered event the callback EXITs
+        .poll_event = .{ .code = .stream_read, .index = 1, .payload = 0 },
         .alloc = testing.allocator,
     };
     defer ctx.deinit();
 
     try driveScheduler(&ctx, &table);
-    try testing.expectEqualSlices(u32, &.{7}, ctx.invoked.items); // delivered to task 7's callback
+    try testing.expectEqual(@as(usize, 1), ctx.invoked.items.len);
+    try testing.expectEqual(@as(u32, 7), ctx.invoked.items[0].index); // delivered to task 7's callback
+    try testing.expectEqual(EventCode.stream_read, ctx.invoked.items[0].code);
     try testing.expectEqual(TaskState.done, (try table.get(a)).state);
+}
+
+test "ADR-0195 step (c) [single-task char]: a 1-entry table drives a MULTI-iteration WAIT sequence in order" {
+    // Ports the retired driveCallbackLoop II(a) net to the unified driver: WAIT(5)
+    // → event → callback re-issues WAIT(7) → event → EXIT. The scheduler must poll
+    // set 5 THEN 7 and re-enter the one task twice.
+    var table = try TaskTable.init(testing.allocator);
+    defer table.deinit();
+    _ = try table.add(.{ .callback_funcidx = 99, .state = .waiting, .set_index = 5 });
+    var ctx = SchedCtx{
+        .cb_returns = &.{ (7 << 4) | 2, 0 }, // 1st → WAIT set 7; 2nd → EXIT
+        .poll_event = .{ .code = .stream_read, .index = 1, .payload = 0 },
+        .alloc = testing.allocator,
+    };
+    defer ctx.deinit();
+
+    try driveScheduler(&ctx, &table);
+    try testing.expectEqualSlices(u32, &.{ 5, 7 }, ctx.polls.items); // polled 5 then 7, in order
+    try testing.expectEqual(@as(usize, 2), ctx.invoked.items.len); // re-entered the one task twice
+}
+
+test "ADR-0195 step (c) [single-task char]: a ready task delivers `none` without polling; a waiting task polls" {
+    // Ports the retired YIELD-vs-WAIT dispatch net: a `ready` (yielded) task is
+    // re-entered with EventCode.none and does NOT poll; only a `waiting` task polls.
+    var table = try TaskTable.init(testing.allocator);
+    defer table.deinit();
+    _ = try table.add(.{ .callback_funcidx = 8 }); // .ready (the YIELD-equivalent state)
+    var ctx = SchedCtx{
+        .cb_returns = &.{ (3 << 4) | 2, 0 }, // ready → WAIT set 3; then EXIT
+        .poll_event = .{ .code = .stream_read, .index = 9, .payload = 0 },
+        .alloc = testing.allocator,
+    };
+    defer ctx.deinit();
+
+    try driveScheduler(&ctx, &table);
+    try testing.expectEqualSlices(u32, &.{3}, ctx.polls.items); // ONLY the waiting step polled (set 3)
+    try testing.expectEqual(@as(usize, 2), ctx.invoked.items.len);
+    try testing.expectEqual(EventCode.none, ctx.invoked.items[0].code); // ready → none
+    try testing.expectEqual(EventCode.stream_read, ctx.invoked.items[1].code); // waiting → delivered event
+}
+
+test "ADR-0195 step (c) [single-task char]: a table seeded with a done task drives nothing (immediate EXIT)" {
+    var table = try TaskTable.init(testing.allocator);
+    defer table.deinit();
+    _ = try table.add(try seedTask(0)); // initial = EXIT → .done
+    var ctx = SchedCtx{ .cb_returns = &.{}, .alloc = testing.allocator };
+    defer ctx.deinit();
+
+    try driveScheduler(&ctx, &table);
+    try testing.expectEqual(@as(usize, 0), ctx.invoked.items.len); // never re-entered
+}
+
+test "ADR-0195: seedTask maps the initial packed callback-result to a task state" {
+    try testing.expectEqual(TaskState.done, (try seedTask(0)).state); // EXIT → done (never entered)
+    try testing.expectEqual(TaskState.ready, (try seedTask(1)).state); // YIELD → ready
+    const w = try seedTask((9 << 4) | 2); // WAIT(9) → waiting on set 9
+    try testing.expectEqual(TaskState.waiting, w.state);
+    try testing.expectEqual(@as(u32, 9), w.set_index);
 }
 
 test "D-335 unit D-ζ2: newStreamPair mints linked readable+writable ends; shared freed on 2nd drop" {
