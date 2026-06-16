@@ -16,9 +16,15 @@ functional); the "100% spec" headline claim is accurate-now (post-D457/458: real
 rewording needed. D-458 RESIDUAL (note): broad regen non-idempotency (~727-file churn under current wasm-tools). Lessons
 `hardcoded-corpus-subset-hides-whole-op-families` (+ D-457 multi-layer-wiring).
 
-**NEXT (autonomous)**: corpus-completeness + doc-inventory arcs closed → resume general Phase-17 完成形 work — surface
-audits (C/Zig/CLI あるべき論 + industry-standard, breaking-allowed), debt long-tail repayment (32 note + 4 partial), OR
-deeper doc path/line-ref staleness via audit_scaffolding (periodic).
+C-API surface audit (this cycle): the public `ZWASM_TRAP_*` constants (zwasm.h) were correctly in sync with the
+`TrapKind` enum but guarded by PROSE only → added `scripts/check_trap_abi_sync.sh` (gate_commit-wired, @74) as a
+cross-artifact drift guard (@dc39fb8c; verified pos+neg). Only numeric C-ABI contract — wasm.h/wasi.h have none.
+Doc-inventory residual: ROADMAP §16.7's D-277 ref ("zwasm.h empty placeholder") is STALE — the header is filled
+(Phase-16 C-surface audit completed it) + D-277 isn't in debt.yaml; §16.7 is a DONE historical row so left as-is.
+
+**NEXT (autonomous)**: continue Phase-17 完成形 surface audits — Zig-API + CLI あるべき論 (industry-standard,
+breaking-allowed), memory-safety spot-checks, OR debt long-tail repayment (32 note: pick genuinely-dischargeable).
+Partials all parked/zero-gain-deferred (D-293/294 trap-precision complete bar cosmetic; D-330/331 parked).
 
 ## Planned future phase (USER-requested 2026-06-16)
 
