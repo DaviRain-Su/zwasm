@@ -122,15 +122,48 @@ pub const EventTuple = struct {
 /// The error set is inferred so a Zone-3 ctx can surface its own engine errors
 /// (`Instance.invoke` traps, an empty-poll deadlock) through the loop.
 pub fn driveCallbackLoop(ctx: anytype, initial: u32) !void {
-    var result = try unpackCallbackResult(initial);
-    while (result.code != .exit) {
-        const ev: EventTuple = switch (result.code) {
-            .exit => unreachable, // excluded by the loop guard
-            .yield => .{ .code = .none, .index = 0, .payload = 0 },
-            .wait => try ctx.waitOn(result.waitable_set_index),
-        };
-        const next_bits = try ctx.invokeCallback(@intFromEnum(ev.code), ev.index, ev.payload);
-        result = try unpackCallbackResult(next_bits);
+    // Single-task = a local TaskDescriptor stepped to completion (ADR-0195 step b);
+    // byte-identical to the prior inline loop (pinned by the II(a) char net). The
+    // step-c scheduler calls the same `stepTask` over `TaskTable` slots instead.
+    var task = try seedTask(initial);
+    while (task.state != .done) try stepTask(ctx, &task);
+}
+
+/// ADR-0195 step (b) — map an initial packed callback-result (the export's first
+/// return) to a fresh task's state: EXIT→done (never entered), YIELD→ready
+/// (re-enter with `none`), WAIT→waiting on the named set. `callback_funcidx` is 0
+/// for the single-task driver (the ctx re-enters its own bound callback); step c
+/// populates it when enqueuing a guest subtask.
+pub fn seedTask(initial: u32) Error!TaskDescriptor {
+    const r = try unpackCallbackResult(initial);
+    return switch (r.code) {
+        .exit => .{ .callback_funcidx = 0, .state = .done },
+        .yield => .{ .callback_funcidx = 0, .state = .ready },
+        .wait => .{ .callback_funcidx = 0, .state = .waiting, .set_index = r.waitable_set_index },
+    };
+}
+
+/// ADR-0195 step (b) — drive ONE cooperative step of a task: deliver its pending
+/// event (`none` while `ready`/just-yielded, else the `waitOn(set)` result while
+/// `waiting`), invoke its callback once, and fold the return into its state
+/// (exit→done, yield→ready, wait→waiting+set). A `done` task is a no-op. The
+/// step-c scheduler loop calls this on the next runnable task each turn; the
+/// single-task driver calls it repeatedly on one task — the byte-identical path.
+pub fn stepTask(ctx: anytype, task: *TaskDescriptor) !void {
+    const ev: EventTuple = switch (task.state) {
+        .done => return,
+        .ready => .{ .code = .none, .index = 0, .payload = 0 },
+        .waiting => try ctx.waitOn(task.set_index),
+    };
+    const next_bits = try ctx.invokeCallback(@intFromEnum(ev.code), ev.index, ev.payload);
+    const result = try unpackCallbackResult(next_bits);
+    switch (result.code) {
+        .exit => task.state = .done,
+        .yield => task.state = .ready,
+        .wait => {
+            task.state = .waiting;
+            task.set_index = result.waitable_set_index;
+        },
     }
 }
 
@@ -1154,6 +1187,37 @@ test "ADR-0195 II(a) char: driveCallbackLoop distinguishes YIELD (no waitOn) fro
     try testing.expectEqual(@as(usize, 2), ctx.cb_calls.items.len);
     try testing.expectEqual(EventCode.none, ctx.cb_calls.items[0].code); // YIELD → none
     try testing.expectEqual(EventCode.stream_read, ctx.cb_calls.items[1].code); // WAIT → delivered event
+}
+
+test "ADR-0195 step (b): seedTask + stepTask fold one callback return into task state (the step-c primitive)" {
+    var ctx = ScriptedLoopCtx{
+        .cb_returns = &.{ (6 << 4) | 2, 0 }, // 1st step → WAIT set 6; 2nd step → EXIT
+        .wait_event = .{ .code = .stream_read, .index = 2, .payload = 0 },
+        .alloc = testing.allocator,
+    };
+    defer ctx.deinit();
+
+    var task = try seedTask(1); // initial = YIELD → ready
+    try testing.expectEqual(TaskState.ready, task.state);
+
+    try stepTask(&ctx, &task); // ready: deliver none → callback returns WAIT(6)
+    try testing.expectEqual(TaskState.waiting, task.state);
+    try testing.expectEqual(@as(u32, 6), task.set_index);
+    try testing.expectEqual(EventCode.none, ctx.cb_calls.items[0].code); // a ready task delivers none
+
+    try stepTask(&ctx, &task); // waiting: waitOn(6) → callback returns EXIT
+    try testing.expectEqual(TaskState.done, task.state);
+    try testing.expectEqualSlices(u32, &.{6}, ctx.wait_calls.items); // waited on the task's own set
+
+    // a done task is an idempotent no-op (the scheduler skips it, never re-enters).
+    try stepTask(&ctx, &task);
+    try testing.expectEqual(@as(usize, 2), ctx.cb_calls.items.len);
+
+    // seedTask maps the other initial codes: EXIT → done (never entered), WAIT → waiting.
+    try testing.expectEqual(TaskState.done, (try seedTask(0)).state);
+    const w = try seedTask((9 << 4) | 2);
+    try testing.expectEqual(TaskState.waiting, w.state);
+    try testing.expectEqual(@as(u32, 9), w.set_index);
 }
 
 test "D-335 unit D-ζ2: newStreamPair mints linked readable+writable ends; shared freed on 2nd drop" {
