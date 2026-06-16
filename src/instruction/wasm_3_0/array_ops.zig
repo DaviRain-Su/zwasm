@@ -26,6 +26,7 @@ const zir = @import("../../ir/zir.zig");
 const runtime = @import("../../runtime/runtime.zig");
 const type_info_mod = @import("../../feature/gc/type_info.zig");
 const root_scope = @import("../../feature/gc/root_scope.zig");
+const object_alloc = @import("../../feature/gc/object_alloc.zig");
 
 const ZirOp = zir.ZirOp;
 const ZirInstr = zir.ZirInstr;
@@ -80,21 +81,14 @@ fn allocateArray(rt: *Runtime, typeidx: u32, length: u32, element_size: u8) anye
         const inst = @as(*const runtime.Instance, @ptrCast(@alignCast(inst_opaque)));
         if (inst.gc_type_infos) |*gti| root_scope.maybeCollect(heap, gti, rt);
     }
-    // array.new* of a huge length overflows the u32 size arithmetic before
-    // Heap.allocate's 4 GiB cap check could fire. Compute in u64 and trap
-    // "allocation size too large" (OutOfHeap) instead of panicking on
-    // overflow (Wasm 3.0 GC; wasmtime gc/array-alloc-too-large +
-    // big-array-overflow). Covers all array.new* via this shared helper.
-    const total_u64: u64 = @as(u64, array_header_size) + @as(u64, length) * @as(u64, element_size);
-    if (total_u64 > std.math.maxInt(u32)) return error.OutOfHeap;
-    const total: u32 = @intCast(total_u64);
-    const ref = try heap.allocate(total);
-    const header: ArrayHeader = .{
-        .header = .{ .kind = .array, .info = typeidx },
-        .length = length,
-    };
-    @memcpy(heap.bytes[ref .. ref + array_header_size], std.mem.asBytes(&header)[0..array_header_size]);
-    return ref;
+    // D-455: delegate the size arithmetic (u64 overflow guard → OutOfHeap),
+    // slab allocation, and ArrayHeader stamp to the shared `object_alloc`
+    // helper — one allocator, one size-arithmetic site (mirrors struct_ops
+    // delegating to allocStructObject). `zero_init = false`: every interp
+    // caller overwrites the payload (new_default @memsets; new/new_fixed/
+    // new_data/new_elem copy values). Interp-only maybeCollect stays above
+    // (the JIT trampoline drives its own collection).
+    return object_alloc.allocArrayObject(heap, typeidx, length, element_size, false);
 }
 
 fn arrayNew(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
