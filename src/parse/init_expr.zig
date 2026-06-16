@@ -127,6 +127,14 @@ pub fn readValType(body: []const u8, pos: *usize) Error!ValType {
         // The Type section of EH modules (e.g. try_table.1's
         // catch_ref result tuples `(i32, exnref)`) uses this byte.
         0x69 => ValType.exnref,
+        // Wasm 3.0 §5.3.4 abbreviated bottom reftypes — `(ref null <bottom>)`.
+        // The 0x63/0x64-prefixed path (readTypedRef) already handles these
+        // heads; the abbreviated single-byte forms appear as struct/array
+        // field + value types in real GC modules (wasmtime gc/issue-13152).
+        0x71 => ValType.nullref,
+        0x72 => ValType.nullexternref,
+        0x73 => ValType.nullfuncref,
+        0x74 => ValType.nullexnref,
         // ADR-0123 Cycle 3 (10.R-valtype-widen) — Wasm 3.0
         // function-references §5.3.4: `(ref null ht)` = 0x63 + ht;
         // `(ref ht)` = 0x64 + ht. The ht-byte is either:
@@ -356,5 +364,25 @@ test "readValType: anyref/eqref/structref/arrayref (Wasm 3.0 GC; 10.G op_gc cycl
         var pos: usize = 0;
         const body = [_]u8{0x6A};
         try testing.expectEqual(ValType.arrayref, try readValType(&body, &pos));
+    }
+}
+
+test "readValType: bottom reftypes nullref/nullexternref/nullfuncref/nullexnref (Wasm 3.0 §5.3.4; wasmtime gc/issue-13152)" {
+    // The abbreviated single-byte `(ref null <bottom-head>)` forms. These
+    // appear as struct/array field + value types in real GC modules
+    // (issue-13152 has `(field (mut nullfuncref))`, `(field nullexternref)`);
+    // readValType rejected them BadValType pre-fix (only readTypedRef's
+    // 0x63/0x64 path handled the bottom heads).
+    const cases = [_]struct { b: u8, want: ValType }{
+        .{ .b = 0x71, .want = ValType.nullref },
+        .{ .b = 0x72, .want = ValType.nullexternref },
+        .{ .b = 0x73, .want = ValType.nullfuncref },
+        .{ .b = 0x74, .want = ValType.nullexnref },
+    };
+    for (cases) |c| {
+        var pos: usize = 0;
+        const body = [_]u8{c.b};
+        try testing.expectEqual(c.want, try readValType(&body, &pos));
+        try testing.expectEqual(@as(usize, 1), pos);
     }
 }

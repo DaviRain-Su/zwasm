@@ -82,6 +82,16 @@ pub const ValType = union(enum) {
     /// a value type (try_table catch_ref result tuples). 10.E.
     pub const exnref: ValType = .{ .ref = RefType.abs(.exn, true) };
 
+    /// Wasm 3.0 §5.3.4 abbreviated bottom reftypes — the single-byte
+    /// `(ref null <bottom-head>)` forms: `nullref` (0x71 none),
+    /// `nullexternref` (0x72 noextern), `nullfuncref` (0x73 nofunc),
+    /// `nullexnref` (0x74 noexn). Valid as struct/array field + value
+    /// types (wasmtime gc/issue-13152; ADR-0192).
+    pub const nullref: ValType = .{ .ref = RefType.abs(.none, true) };
+    pub const nullexternref: ValType = .{ .ref = RefType.abs(.noextern, true) };
+    pub const nullfuncref: ValType = .{ .ref = RefType.abs(.nofunc, true) };
+    pub const nullexnref: ValType = .{ .ref = RefType.abs(.noexn, true) };
+
     /// Reverse-map a RefType to a legacy abstract-ref ValType. Used
     /// by post-migration code paths that still want the byte-pinned
     /// abstract reference (e.g. binary writer). Returns null when
