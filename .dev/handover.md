@@ -19,7 +19,7 @@ consumer-gated big async/composition), 100% spec (`test-spec` 25539/0), lightwei
 Prior: wasi:random COMPLETE; ADR-0193 follow-up + version SSOT; D-335 typed marshalling DONE; C-API @b4d75506.
 
 **D-305 component-composition first milestone DONE** (this turn, @4cceeb1e, ADR-0196 — see closed-arc below):
-cross-component STRING + `list<primitive>` marshalling works (`strlen_graph` + `listu32_graph` PASS, @689040e6).
+cross-component STRING + `list<primitive>` marshalling works (strlen + listu32 + listu64 PASS, 161/0; @689040e6).
 The fully-general linker now exists; remaining
 aggregate shapes are consumer-gated D-305 debt.
 
