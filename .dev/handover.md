@@ -37,18 +37,24 @@ Then `D-209` memory64. **windowsmini gating RESUMED**. Version → `2.0.0-alpha.
   class-aware-mint over-reach + the array-elimination (scalars still pack 8-byte). New debt = none beyond the
   pre-existing D-461 continuation below.
 
-## NEXT — D-461 SIMD v128-spill: single-source ops DONE; REMAINING = v128-RESULT-write ops (exotic)
+## D-461 SIMD v128-spill — high-value DONE (3-host green); result-write remainder = tracked debt (exotic)
 
-**DONE both arches, 3-host green** (regalloc rework ADR-0194 Win64-verified @8f4f88c5): all 6 extract_lane + ALL 4
-bitmask widths. Single-source ops use the backward-compatible source swap `resolveXmm→xmmLoadSpilledV128`; i16x8
-bitmask needed STAGE-1 (XMM14 is its scratch) + an arm64 i32-result gprDefSpilled (opposite per-arch gaps). The
-concrete D-460 blocker is CLEARED. **FIXTURE WORKFLOW**: author .wat → `wasm-tools parse` → embed bytes in
-runner_gc_test (`zwasm run --engine jit --invoke f` repros UnsupportedOp; interp traps SIMD by design). **REMAINING
-(exotic, high-v128-pressure; per-op fixture each)**: v128-RESULT-write ops — Extend Low/High, ExtaddPairwise,
-replace_lane ×4, op_simd.zig binop dsts (:249/282/313/343/373/402) — these WRITE a v128 result via resolveXmm/
-resolveFp (reject spilled dst) → need source-swap + dest `xmmDefSpilledV128`/`xmmStoreSpilledV128` (x86_64) /
-qDefSpilled (arm64) + per-op scratch-XMM audit (LANDMINE: stage 14/15 collide). NEXT chunk = Extend Low/High WITH a
-force-spill fixture. `D-209` memory64 is the front after this bundle closes.
+**DONE both arches, 3-host green**: regalloc-origin rework (ADR-0194, Win64-verified @8f4f88c5) + all 6
+extract_lane + all 4 bitmask widths. Concrete D-460 blocker CLEARED. **Result-write remainder is now TRACKED DEBT
+(D-461)**, not active: Extend/Extadd/replace_lane/binop-dsts — arm64 unops ALREADY spill-aware (shared
+`emitV128Unop`), so it's **x86_64-only** but needs `spill_base_off` threaded through ~26 sig sites per category +
+per-op scratch-XMM audit (LANDMINE). EXOTIC (high-v128-pressure only). Full per-op scope + the reusable fixture
+recipe (`.wat` → `wasm-tools parse`, build the or-chain programmatically) are in the D-461 debt row. Re-open as a
+focused bundle if a real program needs it.
+
+## NEXT — D-335 WASI 0.3 / Preview-3 breadth (Unit E: broader host interfaces) — the higher-value front
+
+After 9 cycles closing the D-461 regalloc/lane-spill correctness work, pivot to the other `now`-class front:
+**D-335 Unit E** (broader P3 host interfaces — sockets/http async; the WASI-0.3 host-breadth that also GATES the
+ADR-0193 default `p2→p3` flip). It's ADR-grade / multi-cycle (no quick win). **Step 0 NEXT**: survey the current
+P3 host surface (`src/api/component_wasi_p3.zig` + `src/feature/component/async.zig`; what host interfaces exist vs
+the WASI-0.3 sockets/http async spec) → scope the smallest tractable Unit-E slice → likely an ADR (per the D-335
+debt row "all HARDER + ADR-needed"). `D-209` memory64 is a parallel front.
 
 ## Closed/paused (detail in git + debt.yaml)
 

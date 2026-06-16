@@ -1853,6 +1853,17 @@ entries:
       dest `xmmDefSpilledV128`/`xmmStoreSpilledV128` + stage allocation + fixtures. op_simd.zig binop SOURCES already
       spill-aware (:95-96, why v128.or worked). EXOTIC (high-v128-pressure only); concrete D-460 blocker already
       cleared by extract_lane. Float lane ops (op_simd_float.zig) = separate sibling-set.
+      RESULT-WRITE AUDIT 2026-06-16: **arm64 unops (Extend/Extadd/etc.) ALREADY spill-aware** via shared
+      `op_simd.emitV128Unop` (qLoadSpilled+qDefSpilled) — so the result-write fix is **x86_64-only** for the unop
+      category. x86_64 has NO shared v128-unop helper; each op has its own emit. **Extend** (x86_64
+      `emitV128ExtendLow`/`High`, op_simd_int_cmp_lane.zig): src+dst both resolveXmm → need
+      xmmLoadSpilledV128(src,stage0)+xmmDefSpilledV128(dst,stage1)+xmmStoreSpilledV128 — BUT the helpers need
+      `spill_base_off` which the extend signature lacks → must thread it through ~26 sites (12 per-width fns + 12
+      *Ctx wrappers [have ctx.spill_base_off] + 2 inner helpers). ExtendHigh uses dst as PSHUFD scratch (distinct
+      stages 0/1 suffice). Reusable fixture (returns **4095** on arm64, x86_64 currently UnsupportedOp): 12
+      i16x8.splat(1<<i) locals OR-chained → i32x4.extend_low_i16x8_s → i32x4.extract_lane 0; build the balanced
+      or-chain programmatically (manual paren-counting fails). Same x86_64-only + spill_base_off-threading pattern
+      for ExtaddPairwise + replace_lane (also reads scalar) + op_simd.zig binop dsts.
       EVIDENCE: (1) x86_64 `codegen/x86_64/gpr.zig resolveXmm` EXPLICITLY rejects a `.spill` v128 vreg ("handler not
       XMM-spill-aware") → e.g. `emitV128IntReplaceLane` UnsupportedOp (this is the root cause of the x86_64 ubuntu
       red on the D-460 runI32Export tests). (2) arm64 `op_simd_int_cmp_lane.zig` extract/replace_lane are partially
