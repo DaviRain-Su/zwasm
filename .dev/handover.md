@@ -19,12 +19,13 @@ CLI surface audit (@4e5e42fe): code↔`--help` fully consistent. Gate change @b1
 (windows `[run_remote_windows] OK.` wasm-3.0-assert pass=10234 fail=0 / simd 24805/0 / spec 25539/0; ubuntu OK
 @f1a1d503). win-specassert campaign fully closed; the fail-gate is clean.
 
-**wasi:random surface COMPLETED** (this turn): the trio now wired — `random` (pre-existing) + `insecure`
-(@6ec83e31) + `insecure-seed` (@21b0c574). insecure variants over-satisfied by the host secure fill (route to the
-same handlers, no separate RNG); insecure-seed `tuple<u64,u64>`→retptr. Each has a classify test + e2e fixture
-(exit 0). Closes the WASI 0.3 random gap (HashMap-seeding Rust guests now resolve). 3-host green (win @21b0c574,
-ubuntu @fab05508). Prior: ADR-0193 follow-up audit (comment drift @c7ee8f49 + version SSOT @a7e61d62; CWFS handoff
-confirmed current); D-335 typed marshalling DONE both directions (@630e7141 / @f2a002f4).
+**C-API surface audit DONE** (this turn, @b4d75506): one concrete defect found+fixed — `wasi.h`'s 8
+`zwasm_wasi_config_*`/`zwasm_store_set_wasi` decls lacked `WASM_API_EXTERN` (= Windows DLL `__declspec(dllimport)`),
+which every `zwasm.h` decl carries → Windows DLL consumers wouldn't import them. Rest of C API verified finished-form
+(null-guards, naming, Zig↔C symmetry clean; only `static inline` helpers correctly macro-free). test-c-api +
+test-c-api-conformance green. Prior arcs: **wasi:random surface COMPLETE** (random + insecure @6ec83e31 +
+insecure-seed @21b0c574, 3-host green); ADR-0193 follow-up audit (@c7ee8f49 + version SSOT @a7e61d62); D-335 typed
+marshalling DONE both directions (@630e7141 / @f2a002f4).
 
 **NEXT (autonomous)**: the default `p2→p3` flip is gated only on D-335's BIGGER remainders (guest↔guest stream
 byte-buffering = Zone-1 rendezvous redesign, may tension ADR-0187 stackless; sockets/http async = Unit E full — each
