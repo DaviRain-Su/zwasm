@@ -69,6 +69,10 @@ pub const Blocker = enum {
     /// arm64 landed first; x86_64 needs the SysV trampoline-call +
     /// slab-base emit. Subsumed by the GC-on-JIT bundle (D-211).
     @"D-211",
+    /// x86_64 v128-in-GC-aggregate JIT emit (struct/array get/set/new of a
+    /// v128 field/element). arm64 landed first (`f79a3ced`/`41015a9b`); the
+    /// x86_64 SSE movdqu mirror is the remaining D-460 bundle work.
+    @"D-460",
     // (D-186 / D-179 / D-194 / D-212 variants removed 2026-06-14 — their
     // debt rows were discharged; check_skip_helpers enforces enum↔debt pairing.)
 };

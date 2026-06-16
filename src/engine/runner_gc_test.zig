@@ -213,6 +213,8 @@ test "runI32Export: struct.set then struct.get round-trip → 55 (10.G struct-on
 }
 
 test "runI32Export: struct.new + struct.get of a v128 field + extract_lane 3 → 44 (D-460 JIT v128-GC)" {
+    // D-460 bundle: v128 GC emit landed on arm64 first; x86_64 mirror pending.
+    if (builtin.cpu.arch != .aarch64) return skip.blocker(.@"D-460");
     // (type $s (struct (field (mut v128))))
     // f: extract_lane 3 (struct.get $s 0 (struct.new $s
     //       (i32x4.replace_lane 3 (i32x4.splat 1) 44))) → 44
@@ -230,6 +232,8 @@ test "runI32Export: struct.new + struct.get of a v128 field + extract_lane 3 →
 }
 
 test "runI32Export: struct.set of a v128 field then struct.get + extract_lane 3 → 44 (D-460 JIT v128-GC)" {
+    // D-460 bundle: arm64-only until the x86_64 v128 GC emit mirror lands.
+    if (builtin.cpu.arch != .aarch64) return skip.blocker(.@"D-460");
     // (type $s (struct (field (mut v128)))); local (ref null 0) holds the ref.
     // struct.new_default; tee; struct.set (replace_lane 3 (splat 1) 44);
     // local.get; struct.get; extract_lane 3 → 44. Pins the 16-byte Q-store
@@ -245,6 +249,8 @@ test "runI32Export: struct.set of a v128 field then struct.get + extract_lane 3 
 }
 
 test "runI32Export: array.new_default + array.set + array.get of a v128 element → 44 (D-460 JIT v128-GC)" {
+    // D-460 bundle: arm64-only until the x86_64 v128 GC emit mirror lands.
+    if (builtin.cpu.arch != .aarch64) return skip.blocker(.@"D-460");
     // (type $a (array (mut v128))); local (ref null 0) holds the array.
     // new_default 2; set element 1 = replace_lane 3 (splat 2) 44; get element
     // 1; extract_lane 3 → 44. Element 1 sits at byte 12 + 1*16 = 28; an index×8
