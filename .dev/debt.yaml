@@ -1901,15 +1901,21 @@ entries:
       ordered `WasiLevel={none,p1,p2,p3}` (drop `both`), component gated by `wasi_level≥p2` (remove the standalone
       `-Dcomponent` axis), P2/P3 reified as Zone-1 `register()` (mirror src/feature/gc/register.zig). 4-phase
       migration in the ADR (add p3 tier → registration reify → fold -Dcomponent → structuralise cheap branches).
-      Discharge: implement ADR-0193's phases (each keeps WASI/component/spec corpora green). **Implementation GATED
-      on user review** of ADR-0193's two open questions (alias-vs-remove -Dcomponent; is component-without-WASI a
-      real target → Option A single-axis vs Option B two-axis). Do NOT start code before that nod (user-steered).
+      ADR-0193 **ACCEPTED** 2026-06-16 (user resolved both open questions + granted full autonomy): (a) HARD-REMOVE
+      -Dcomponent (no alias); (b) single-axis Option A (no component-without-WASI target); default = **p2 interim**
+      (p3 flip deferred until WASI-0.3 Unit E/F host breadth settles — p3 core green but not settled).
+      MIGRATION PROGRESS: **P1 DONE** — WasiLevel={none,p1,p2,p3} ordered tier, default p1→p2, collector filter
+      `need>cur` (dropped .both); build+test+lint green. KEY FINDING: p3 host (component_wasi_p3/async) is NOT
+      wasi_level-gated — rides on enable_component (component.zig:556); gating + the p3-forbidden DCE assertion are
+      P2/P3 work. NEXT: P2 = src/feature/wasi_p{2,3}/register.zig reification (mirror feature/gc/register.zig,
+      behaviour-preserving, pin WASI corpus 158/0/0). P3 = hard-remove -Dcomponent. P4 = structuralise cheap branches
+      + sync docs/zig_api_design.md §3.8/§3.9 + CWFS handover (lean now = -Dwasi=p1). Active bundle in handover.
     first_raised: "2026-06-16"
     last_reviewed: "2026-06-16"
     refs: |-
-      build.zig:31 (-Dwasi) / :100 (-Dcomponent) / :1306 (WasiLevel enum); src/ir/dispatch_collector.zig:116-122;
-      src/api/component_wasi_p2.zig + component_wasi_p3.zig; src/feature/component/{async,canon}.zig;
-      ADR-0181/0182 (flags) + ADR-0187-0191 (CM-async); ROADMAP §4.6 (feature flags)
+      build.zig:31 (-Dwasi default p2) / :100 (-Dcomponent, to remove) / :1306 (WasiLevel enum, now p3);
+      src/ir/dispatch_collector.zig:107-126; src/api/component_wasi_p2.zig + component_wasi_p3.zig;
+      src/feature/component/{async,canon}.zig; component.zig:556 (p3 ungated); ADR-0193 (Accepted) + ADR-0187-0191
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.

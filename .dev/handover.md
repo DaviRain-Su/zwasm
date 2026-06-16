@@ -19,28 +19,27 @@ CLI surface audit (@4e5e42fe): code↔`--help` fully consistent. Gate change @b1
 (windows `[run_remote_windows] OK.` wasm-3.0-assert pass=10234 fail=0 / simd 24805/0 / spec 25539/0; ubuntu OK
 @f1a1d503). win-specassert campaign fully closed; the fail-gate is clean.
 
-**NEXT (autonomous)**: `D-462` design (ADR-0193) AWAITS USER review. **Active bundle = `D-461` IV** (SIMD spill):
-slice 1 DONE (`97afa4d4`) — arm64 i32x4.extract_lane i32-result spill-aware. **ENABLER discovered**: x86_64 codegen
-is locally TDD-able via `zig build test -Dtarget=x86_64-macos` under Rosetta (short unit tests; lesson
-`rosetta-x86_64-local-jit-unit-test`) — NO more ubuntu round-trips for the inner loop. **NEXT D-461 step (x86_64
-blocker found, deeper than resolveXmm)**: fix the regalloc class-boundary OOB at `regalloc.zig:222` —
-`spill_idx = id - max_reg_slots_gpr` uses the GPR boundary to index the **fp** `spill_offsets` (should use the FP
-boundary) → OOB/panic on heavy fp spill, crashing x86_64 codegen before resolveXmm. Then: migrate x86_64
-`resolveXmm` lane-op sites + remaining arm64 lane-op SPILL-EXEMPT scalar paths (replace_lane etc.). Then `D-209`
-memory64. **windowsmini gating RESUMED** (Win64-risk codegen now in flight). Gating was SUSPENDED
-(ADR-0174, `518a3b86`) → 2-host. Version → `2.0.0-alpha.3`.
+**NEXT (autonomous)**: drive the **ADR-0193 feature-separation migration** (Active bundle below). User resolved
+both open questions + granted full autonomy. `D-461` IV (SIMD spill) is PARKED behind it: slice 1 DONE
+(`97afa4d4`, arm64 extract_lane spill-aware); next D-461 step = regalloc class-boundary OOB at `regalloc.zig:222`
+(`spill_idx = id - max_reg_slots_gpr` indexes the **fp** `spill_offsets` with the GPR boundary → x86_64 panic).
+x86_64 codegen is locally TDD-able via `zig build test -Dtarget=x86_64-macos` under Rosetta (lesson
+`rosetta-x86_64-local-jit-unit-test`). Then `D-209` memory64. **windowsmini gating RESUMED**. Version →
+`2.0.0-alpha.3`.
 
-## USER-flagged D-462 — feature-separation finished-form — DESIGN DONE (ADR-0193), implementation USER-GATED
+## Active bundle
 
-- **Design delivered** (`ADR-0193`, Proposed): classified all ~11 scattered-branch sites (~6 unavoidable: parser
-  byte-level / CLI display / diagnostics / interp subtype-arm; ~4 structuralisable). Per-axis grades: Wasm-level B,
-  engine B+, GC B, WASI **D+**, component **D**. Target = single ordered `WasiLevel={none,p1,p2,p3}` (drop `both`),
-  component gated by `wasi_level≥p2` (remove standalone `-Dcomponent`), P2/P3 reified as Zone-1 `register()` (mirror
-  `src/feature/gc/register.zig`). 4-phase migration in the ADR. North-star = `feature-separation-finished-form-
-  preference` lesson (directory > file > function-cluster > branch).
-- **GATED on user review** of ADR-0193's 2 open questions: (a) alias-vs-hard-remove `-Dcomponent`; (b) is a
-  component-model-WITHOUT-WASI build a real target (yes → Option B two-axis; no → Option A single-axis, recommended).
-  **Do NOT start the §4 build-flag/enum code before that nod** (user explicitly directed design-before-code).
+- **Bundle-ID**: ADR-0193-feature-sep P1..P4 (D-462)
+- **Cycles-remaining**: ~3 (P2/P3/P4)
+- **Continuity-memo**: P1 DONE — `WasiLevel={none,p1,p2,p3}` ordered tier, default `p1→p2`, collector filter
+  `need>cur` (dropped `.both`); build+test+lint green. KEY FINDING: p3 host (`component_wasi_p3.zig`/`async.zig`)
+  is NOT `wasi_level`-gated — rides on `enable_component` (`component.zig:556`); gating it is P2/P3 work. P2 =
+  `src/feature/wasi_p{2,3}/register.zig` reification (mirror `src/feature/gc/register.zig`), behaviour-preserving,
+  pin WASI corpus 158/0/0. P3 = hard-remove `-Dcomponent`, fold into `wasi_level>=p2` (rewrite `record_binary_size.sh`
+  lean=`-Dwasi=p1`, `build.zig` comp_options, `enable_component` sites). P4 = structuralise cheap branches + sync
+  `docs/zig_api_design.md` §3.8/§3.9 + CWFS handover (`docs/consuming_prerelease_zwasm.md`: lean now needs `-Dwasi=p1`).
+- **Exit-condition**: `-Dcomponent` gone; `wasi_level>=p2` gates component; p3 host `wasi_level`-gated; WASI/component
+  corpora green throughout. Decisions: (a) hard-remove, (b) single-axis, default p2 interim (p3 flip later).
 
 ## Active phase — doc-inventory + freshening (USER-requested 2026-06-16)
 
