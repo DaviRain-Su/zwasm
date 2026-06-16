@@ -273,11 +273,9 @@ test "runI32Export: 12 live v128 force-spill + v128.or chain + extract_lane → 
     // x86_64 6 XMM). v128.or-chains them; extract_lane 0 of OR(1,2,4,...,2048)
     // =4095. The extract_lane i32 RESULT spills under this pressure → was a
     // resolveGpr reject (D-461 SPILL-EXEMPT), now gprDefSpilled-aware on arm64.
-    // x86_64: the regalloc spill-offset OOB is FIXED (ADR-0194); the test now
-    // reaches the remaining D-461 blocker — x86_64 `resolveXmm` rejects a
-    // `.spill` v128 lane operand (UnsupportedOp). Stays arm64-only until that
-    // x86_64 lane-op spill emit lands. See debt D-461.
-    if (builtin.cpu.arch != .aarch64) return skip.blocker(.@"D-461");
+    // x86_64: the regalloc spill-offset OOB is FIXED (ADR-0194) + the
+    // `i32x4.extract_lane` v128 SOURCE is now spill-aware (xmmLoadSpilledV128) →
+    // runs on BOTH arches (the gate is gone). See debt D-461.
     const bytes = [_]u8{
         0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, 0x03,
         0x02, 0x01, 0x00, 0x07, 0x05, 0x01, 0x01, 0x66, 0x00, 0x00, 0x0a, 0x86, 0x01, 0x01, 0x83, 0x01,

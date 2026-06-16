@@ -506,7 +506,9 @@ pub fn emitI32x4ExtractLane(
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
-    const src_x = try gpr.resolveXmm(alloc, src_v);
+    // D-461: spill-aware v128 source (was resolveXmm-reject) — load a spilled
+    // v128 into the stage XMM, mirroring the arm64 slice-1 (`97afa4d4`).
+    const src_x = try gpr.xmmLoadSpilledV128(allocator, buf, alloc, spill_base_off, src_v, 0);
     const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
 
     const lane: u2 = @intCast(payload & 0b11);
