@@ -35,11 +35,20 @@ Then `D-209` memory64. **windowsmini gating RESUMED**. Version → `2.0.0-alpha.
   (class=.fpr id=9 gpr=4 fp=6 n_slots=13 len=5 spill_idx=5); lesson `x86_64-regalloc-fp-spill-origin-mismatch` +
   D-461 debt updated. Repro: un-gate the 12-live-v128 D-461 test (`runner_gc_test.zig:278`) + `zig build test
   -Dtarget=x86_64-macos` (Rosetta).
-- **Phase II (Correctness-assurance FIRST) — NEXT**: write characterization tests pinning CURRENT x86_64 regalloc
-  behaviour (scalar GPR spill offsets, FP-register-only allocations, the boundary cases that work today) so the
-  arch-parameterization rework cannot silently regress them. THEN Phase III design ADR (parameterize `computeWith`
-  per-arch GPR/FP counts OR store spill-region origin in `Allocation`), IV impl, V retrospective. I+II are hard
-  gates before any redesign code.
+- **Phase II (Correctness-assurance) DONE** (`c4c1d567`): the buggy resolve path (regalloc.zig:221
+  `offsets[id-gpr]`) had ZERO direct unit coverage (all prior tests used the null-spill_offsets fallback). Added 3
+  characterization tests pinning the WORKING consistent-origin contract (GPR spill / FPR-spill-past-boundary /
+  spillBytes through spill_offsets) + 1 adversarial `skip.blocker(.@"D-461")` fix-verifier reproducing the x86_64
+  divergent-origin OOB (un-gate target for Phase IV). Test 2922/2935 green.
+- **Phase III (Design ADR) — NEXT**: the deep issue (found during II): the regalloc is **class-blind** — one
+  `force_spill_threshold` (8) mints register ids 0..7 for ALL vregs, but x86_64 has 4 GPR / 6 XMM. x86_64 "fakes"
+  the extra spills by lowering `slot()` thresholds; scalar GPR spills survive via the array-less `(id-gpr)*16`
+  fallback, but v128 spills use the BOUNDED `spill_offsets` array (sized origin-8) → faked-spill ids (FP 6,7) have
+  no entry + real spills index `id-4` vs sized `id-8` → OOB/underflow. Design must decide: (a) make the regalloc
+  class-AWARE at mint (separate GPR/FP pools — needs per-vreg gpr-vs-fpr class, only v128 shape_tags exist today)
+  OR (b) keep class-blind mint but store the spill-array origin in `Allocation` + give the array entries for ALL
+  slot()-spilled ids (not just minted-spill ids ≥8). Weigh against P3/P6 single-pass invariant. Then IV impl
+  (un-gate the adversarial test), V retrospective.
 
 ## Active phase — doc-inventory + freshening (USER-requested 2026-06-16)
 
