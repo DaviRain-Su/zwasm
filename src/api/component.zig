@@ -361,139 +361,14 @@ fn firstCoreModule(decoded: *const decode.Component) ?[]const u8 {
     return null;
 }
 
-fn nthChildComponent(decoded: *const decode.Component, n: u32) ?[]const u8 {
-    var i: u32 = 0;
-    for (decoded.sections.items) |sec| {
-        if (sec.id != .component) continue;
-        if (i == n) return sec.body;
-        i += 1;
-    }
-    return null;
-}
-
-const Linker = @import("../zwasm/linker.zig").Linker;
-
-/// A linked **multi-component graph** (C2-3b-2). Evaluates the `instance`
-/// section in order: each child component's core module is instantiated, its
-/// core imports satisfied from earlier instances' func exports via the facade
-/// Linker (cross-module). Everything is heap-allocated for stable addresses
-/// (instances reference each other; a Linker must outlive its instance).
-///
-/// SCOPE: leaf children (a child = one embedded core module) + flat func
-/// imports matched BY NAME to a prior instance's export (sufficient for the
-/// canon-lowered flat-u32 cross-component call). General `with`-arg resolution
-/// through each child's canon-lower/instance structure + lifted aggregate args
-/// are the follow-up.
-pub const ComponentGraph = struct {
-    alloc: Allocator,
-    /// Owned copy of the component bytes — `outer`, children, and `info` names
-    /// slice it, so the graph is self-contained vs the caller's buffer
-    /// (REQ-7 / D-326).
-    owned_bytes: []const u8,
-    outer: decode.Component,
-    info: ctypes.TypeInfo,
-    children: std.ArrayList(*decode.Component),
-    modules: std.ArrayList(*Module),
-    linkers: std.ArrayList(*Linker),
-    instances: std.ArrayList(*Instance),
-
-    pub fn deinit(self: *ComponentGraph) void {
-        for (self.instances.items) |inst| {
-            inst.deinit();
-            self.alloc.destroy(inst);
-        }
-        for (self.linkers.items) |lk| {
-            lk.deinit();
-            self.alloc.destroy(lk);
-        }
-        for (self.modules.items) |m| {
-            m.deinit();
-            self.alloc.destroy(m);
-        }
-        for (self.children.items) |c| {
-            c.deinit(self.alloc);
-            self.alloc.destroy(c);
-        }
-        self.instances.deinit(self.alloc);
-        self.linkers.deinit(self.alloc);
-        self.modules.deinit(self.alloc);
-        self.children.deinit(self.alloc);
-        self.info.deinit();
-        self.outer.deinit(self.alloc);
-        self.alloc.free(self.owned_bytes);
-    }
-
-    /// Invoke a flat-scalar export by name on whichever child instance exports
-    /// it (the outer re-export resolves to that instance's core func).
-    pub fn invokeFlat(self: *ComponentGraph, name: []const u8, args: []const Value, results: []Value) !void {
-        for (self.instances.items) |inst| {
-            if (inst.exportFuncSig(name) != null) return inst.invoke(name, args, results);
-        }
-        return error.ExportNotResolved;
-    }
-};
-
-/// Instantiate + link a multi-component graph (see `ComponentGraph`).
-pub fn instantiateGraph(engine: *Engine, alloc: Allocator, bytes: []const u8, opts: InstantiateOpts) anyerror!ComponentGraph {
-    // Own the bytes so the graph is self-contained (REQ-7 / D-326). On a decode
-    // failure `graph` is never assigned (its `errdefer deinit` un-armed), so free
-    // the dupe inline; once built, `graph.deinit` owns it.
-    const owned_bytes = try alloc.dupe(u8, bytes);
-    var graph = ComponentGraph{
-        .alloc = alloc,
-        .owned_bytes = owned_bytes,
-        .outer = decode.decode(alloc, owned_bytes) catch |e| {
-            alloc.free(owned_bytes);
-            return e;
-        },
-        .info = undefined,
-        .children = .empty,
-        .modules = .empty,
-        .linkers = .empty,
-        .instances = .empty,
-    };
-    errdefer graph.deinit();
-    graph.info = try ctypes.decodeTypeInfo(alloc, &graph.outer);
-    try cvalidate.validate(&graph.info); // ADR-0176: reject invalid components pre-instantiate
-
-    for (graph.info.component_instances.items) |ci| {
-        const child_idx = switch (ci) {
-            .instantiate => |it| it.component,
-            .inline_exports => continue, // synthetic re-export instance — nothing to instantiate
-        };
-        const child_bytes = nthChildComponent(&graph.outer, child_idx) orelse return error.NoCoreModule;
-
-        const child = try alloc.create(decode.Component);
-        child.* = try decode.decode(alloc, child_bytes);
-        try graph.children.append(alloc, child);
-
-        const core_bytes = firstCoreModule(child) orelse return error.NoCoreModule;
-        const module = try alloc.create(Module);
-        module.* = try engine.compile(core_bytes);
-        try graph.modules.append(alloc, module);
-
-        var mod_imports = try module.imports(alloc);
-        defer mod_imports.deinit();
-
-        const inst = try alloc.create(Instance);
-        if (mod_imports.items.len == 0) {
-            inst.* = try module.instantiate(opts);
-        } else {
-            const lk = try alloc.create(Linker);
-            lk.* = engine.linker();
-            try graph.linkers.append(alloc, lk);
-            for (mod_imports.items) |imp| {
-                const src = for (graph.instances.items) |prev| {
-                    if (prev.exportFuncSig(imp.name) != null) break prev;
-                } else return error.ImportUnsatisfied;
-                try lk.defineCrossModuleFunc(imp.module, imp.name, src, imp.name);
-            }
-            inst.* = try lk.instantiate(module, opts);
-        }
-        try graph.instances.append(alloc, inst);
-    }
-    return graph;
-}
+// Multi-component graph orchestration (D-305) lives in a sibling module — it
+// is a distinct two-level concern (outer component-instance loop × per-child
+// core-instance loop + cross-component canon marshalling). Re-exported here so
+// the public host surface (`host.instantiateGraph` / `host.ComponentGraph`)
+// stays stable.
+const component_graph = @import("component_graph.zig");
+pub const ComponentGraph = component_graph.ComponentGraph;
+pub const instantiateGraph = component_graph.instantiateGraph;
 
 /// Decode a component and instantiate its (first) embedded core module via the
 /// `Engine` facade. `engine` must outlive the returned `ComponentInstance`.

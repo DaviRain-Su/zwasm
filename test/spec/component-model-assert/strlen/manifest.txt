@@ -1,0 +1,7 @@
+# D-305: a 2-component graph that marshals a STRING across the boundary.
+# Component A builds "Z" (0x5A) in its own memory and calls B's
+# firstbyte(s:string)->u32 = s[0]; the correct 0x5A REQUIRES the string be
+# copied A-memory -> B-memory (canon lower -> core -> lift), not passed through.
+# Provenance: test/component/strlen_graph.wat.
+graph test/component/strlen_graph.wasm
+assert_flat_i32 run -> 90
