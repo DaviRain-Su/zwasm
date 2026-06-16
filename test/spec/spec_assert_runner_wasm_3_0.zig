@@ -687,7 +687,15 @@ pub fn main(init: std.process.Init) !void {
             defer sub_dir.close(io);
 
             var lines = std.mem.splitScalar(u8, manifest, '\n');
-            while (lines.next()) |line| {
+            while (lines.next()) |raw| {
+                // Strip trailing CR (+ surrounding ws): a windowsmini checkout
+                // gets the LF-committed manifests as CRLF (git autocrlf), so the
+                // `\n`-split leaves a trailing `\r` on every line → `module_path`
+                // ended in `\r` → readFileAlloc → error.BadPathName on Win64 →
+                // EVERY wasm-3.0-assert module silently un-loaded (the ADR-0174
+                // pass=0 anomaly). The other 4 runners (base/spec/wast/component)
+                // already trim `" \r\t"`; the wasm-3.0 runner was the lone miss.
+                const line = std.mem.trim(u8, raw, " \r\t");
                 if (line.len == 0) continue;
                 var args_buf: [4]manifest_parser.TypedValue = undefined;
                 var results_buf: [4]manifest_parser.TypedValue = undefined;
