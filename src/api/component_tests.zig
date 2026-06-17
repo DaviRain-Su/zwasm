@@ -675,6 +675,29 @@ test "ADR-0195 d-c-2 (adversarial): a cross-component async read that BLOCKS wit
     try testing.expectError(error.AsyncDeadlock, graph.driveAsyncMain("run"));
 }
 
+const two_async_components_stream_isolation_path = "test/component/two_async_components_stream_isolation.wasm";
+
+test "ADR-0197 (security/D-463): child B writing to child A's UN-GRANTED stream handle must TRAP, not inject into A's private stream" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, two_async_components_stream_isolation_path, testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var graph = try instantiateGraph(&eng, testing.allocator, bytes, .{});
+    defer graph.deinit();
+
+    // A mints TWO streams; grants B only w1 but B writes to bare handle 4 == A's
+    // PRIVATE writable end w2 (a handle B was never given). Under per-component
+    // handle isolation (ADR-0197) B's own table has no index 4 → `stream.write`
+    // traps (InvalidHandle → canonical guest `error.Unreachable`). The pre-fix
+    // shared-table behaviour SILENTLY succeeded — B injected bytes into A's private
+    // stream and A read 42 back (the cross-component handle-isolation leak).
+    try testing.expectError(error.Unreachable, graph.driveAsyncMain("run"));
+}
+
 test "D-305 (security): an OOB (ptr,len) into a cross-component string import TRAPS, not silently returns 0" {
     var threaded: std.Io.Threaded = .init(testing.allocator, .{});
     defer threaded.deinit();

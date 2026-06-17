@@ -1,4 +1,4 @@
-# ADR-0197 — Per-component async handle-table isolation for the cross-component graph runner (D-463)
+# ADR-0197 — Cross-component async handle isolation via an ownership ledger (D-463)
 
 - Status: **Accepted (design) — correctness-first bundle OPEN 2026-06-18**. Phase I investigation done
   (the GraphAsync survey + the `pending_graph_reads` re-key analysis below); Phase II (adversarial isolation
@@ -26,39 +26,46 @@ cross-component-security family as the D-305 boundary error-trap.
 
 Make the async handle tables **per-component**, with **call-time end-transfer** at the async boundary:
 
-1. **`StreamFutureTable` (`streams`) and `WaitableSetTable` (`sets`) move from `GraphAsync` to per-`GraphChild`.**
-   Each child gets its own end/handle index space (mirrors `WasiP2Ctx.{streams,sets}`, which is already
-   per-instance). `GraphFutureCtx` gains `streams: *StreamFutureTable` + `sets: *WaitableSetTable` pointing at
-   the **calling child's** tables (each `future_ctxs` entry is already installed per-child, so the injection
-   point exists).
+> **Revision 2026-06-18 (during Phase IV scoping)** — the original Decision below (relocate `streams`/`sets`
+> to per-`GraphChild` + boundary end-transfer + `pending_graph_reads` re-key) was supplanted by the
+> **ownership-ledger** design after Phase-I deepening showed the relocation forces the *generic* scheduler
+> (`async.zig driveScheduler`/`GraphAsyncCtx.pollSet`) to thread per-child table identity for every WAITING
+> task — a Zone-1 change with no guest-observable benefit. Component-Model handle values are **opaque to
+> conformant guests** (a component never observes another's index space), so a single graph-shared table with a
+> **graph-layer handle→owner ledger**, enforced at the guest-facing builtins, is equally spec-conformant and
+> isolates B from A's handles with a fraction of the blast radius (the scheduler stays untouched). The relocation
+> wording is retained below struck-through as the rejected path.
 
-2. **`SharedTable` (`shared`) STAYS graph-shared.** The `Shared` rendezvous objects (SharedStream/SharedFuture
-   buffers) are the actual shared channel both ends point to via `StreamFutureEnd.shared`. They are NOT
-   guest-addressable by raw index — a guest reaches a rendezvous only THROUGH an end it legitimately owns. So
-   keeping them graph-shared does not breach isolation; it is the correct "shared backing channel, separately
-   owned ends" Component-Model shape.
+1. **Ownership ledger in the graph layer.** `GraphAsync` keeps ONE shared `streams`/`sets`/`shared`, and gains
+   `owners: AutoHashMapUnmanaged(u32 handle → u32 child_idx)`. `GraphFutureCtx` gains `child_idx`. Every
+   guest-facing builtin that operates on an existing end (`graphStream{Write,Read}`, `graphFuture{Write,Read}`,
+   `graphStreamDrop`, `graphWaitableJoin`) asserts `owners.get(handle) == ctx.child_idx` → else the canonical
+   guest trap (`error.Unreachable`). `graphStream/FutureNew` records `owners.put(both_ends, ctx.child_idx)` on
+   mint. The shared backing channel (`SharedTable`) is reached only THROUGH an owned end, so it needs no ledger.
 
-3. **End-transfer at the boundary.** When child A calls B passing a stream/future end handle (`installAsyncBoundary`
-   / `asyncBoundaryParamTrampoline`), the trampoline: looks up the handle in A's `streams` → `StreamFutureEnd`
-   `{..., shared: S}`; **removes it from A's table** (ownership moves); **mints a NEW B-local handle** pointing
-   to the same shared `S`; passes the B-local handle to B. The `.shared` field (the rendezvous id) is stable;
-   only the owning table-index changes.
+2. **Ownership transfer at the boundary.** `asyncBoundaryParamTrampoline(caller, handle)` retags
+   `owners.put(handle, callee.idx)` IFF the handle is a tracked end (`owners.contains` — scalars/resource handles
+   are untracked and untouched). Ownership MOVES per Component-Model lower-of-an-owned-handle semantics; the
+   caller can no longer access it afterward. `GraphChild` gains a stable `idx` (its position in `graph.children`).
 
-4. **`pending_graph_reads` re-keys from raw end-handle → shared-slot id.** It currently keys parked
-   cross-component reads by the reader-end handle (`nt.waitable`). Once tables are per-component, two children's
-   same-valued handles would collide in this graph-level map. The rendezvous (`SharedStream`) is graph-unique,
-   so key the parked-read map by the **shared-slot id** (`end.shared`) instead — graph-unique by construction.
+3. **No scheduler / no Zone-1 / no re-key change.** `driveScheduler` + `pollSet` keep using the graph-shared
+   tables internally (host-side, guest-invisible); `pending_graph_reads` stays keyed by the (graph-unique) end
+   handle. The ledger is consulted ONLY at the guest builtins — the isolation boundary the guest actually sees.
+
+~~Original: relocate `streams`/`sets` to per-`GraphChild`; `GraphFutureCtx` gains `*StreamFutureTable`/
+`*WaitableSetTable`; `SharedTable` stays graph-shared; boundary end-transfer removes-from-caller + mints-callee-local;
+`pending_graph_reads` re-keys raw-handle → shared-slot id.~~ (rejected — scheduler/Zone-1 cost; see Revision.)
 
 ## Alternatives rejected
 
-- **Status quo (graph-shared tables).** The D-463 simplification — functionally correct for trusted graphs but
-  a spec-fidelity + sandboxing miss; the project bar is 100% spec + sandboxing-triad-everywhere, and the
-  design-priority posture reworks deliberate v2 simplifications rather than locking them in.
-- **Shared table + per-end `owner` tag + ownership check on access.** Smaller (one field + one assert +
-  retag-on-transfer) and closes the *security* leak, but keeps ONE global index space: B's first mint would be
-  index "2" because A used "1", not an independent "1". That is a guest-observable divergence from a
-  spec-compliant engine's independent index spaces → a partial measure, not the canonical design. Rejected in
-  favour of true per-component tables (option above).
+- **Status quo (no isolation).** The D-463 simplification — functionally correct for trusted graphs but a
+  spec-fidelity + sandboxing miss; the project bar is 100% spec + sandboxing-triad-everywhere.
+- **Relocate to per-component `StreamFutureTable`/`WaitableSetTable` (the original Decision).** Spec-canonical
+  "separate index spaces," but forces the generic stackless scheduler (`driveScheduler`/`pollSet`, Zone-1) to
+  resolve each WAITING task's set/stream against its owning child's table → child-identity threading through a
+  layer that today is component-agnostic, plus a `pending_graph_reads` re-key. Since handle values are
+  guest-opaque, the only delta over the ledger is independent per-child exhaustion caps (negligible: `MAX_LENGTH`
+  is huge). Not worth the Zone-1 blast radius for a lightweight runtime → rejected in favour of the ledger.
 
 ## Correctness-first plan (II before IV — hard self-gate)
 
@@ -69,18 +76,18 @@ Make the async handle tables **per-component**, with **call-time end-transfer** 
   (global table — the leak); the test asserts it TRAPS (B's per-component table has no such index). Authored as
   a RED test (`expectError`) pinning the post-fix guarantee. This is the 正しさ担保 gate; no Phase IV code lands
   before it is red-then-driving.
-- **Phase IV (implementation).** Per-component tables → `GraphFutureCtx` injection → boundary end-transfer →
-  `pending_graph_reads` re-key. Full async test net green at EVERY commit; per-component table lifetime managed
-  with the child (init/deinit moves from `GraphAsync` to `GraphChild`).
-- **Phase V retro.** Mark D-463 discharged; add a Revision note to ADR-0195 d-b-2 (its simplification is now
-  superseded by this isolation pass).
+- **Phase IV (implementation).** `GraphAsync.owners` ledger + `GraphFutureCtx.child_idx` + `GraphChild.idx` →
+  owner-set on mint → owner-check in the guest-facing builtins → owner-transfer in the boundary trampoline. Full
+  async test net green at EVERY commit.
+- **Phase V retro.** Mark D-463 discharged; add a Revision note to ADR-0195 d-b-2 (its no-isolation simplification
+  is now superseded by this ledger pass).
 
 ## Consequences
 
-- Closes D-463; brings cross-component async to spec-canonical handle isolation (untrusted composition safe).
-- `GraphAsync` shrinks to genuinely graph-level state (`tasks`/`callbacks`/`current_task_id`/`shared`/
-  `pending_graph_reads`); `streams`/`sets` become per-child — the same per-instance shape the single-component
-  WASI-P2/P3 runners already use, so the two paths converge.
-- No public API change; no WIT/fixture-semantics change for the 6 trusted fixtures (only internal handle
-  indices, opaque to conformant guests). New adversarial fixture added.
+- Closes D-463; cross-component async handles are isolated (B cannot read/write/drop/join an end it was not
+  granted) — untrusted composition safe, spec-conformant (handle opacity).
+- `GraphAsync` keeps its graph-shared tables (scheduler untouched) + one small `owners` ledger; the isolation
+  boundary lives entirely in the Zone-3 graph builtins. `async.zig` (Zone-1) is unchanged.
+- No public API change; no WIT/fixture-semantics change for the 6 trusted fixtures (their passed end transfers
+  ownership; the holder keeps its own end). New adversarial fixture `two_async_components_stream_isolation`.
 - P3/P6 single-pass invariants untouched (interp/host driver only; no JIT/codegen surface).

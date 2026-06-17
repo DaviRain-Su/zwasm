@@ -56,6 +56,10 @@ pub const GraphError = error{
 /// resolver from a component-export NAME to the lifted core func.
 const GraphChild = struct {
     alloc: Allocator,
+    /// Position in `graph.children` — the owner id the async handle-isolation
+    /// ledger (`GraphAsync.owners`, ADR-0197 / D-463) tags this child's minted
+    /// stream/future ends with, so a peer child cannot reach them by index.
+    idx: u32 = 0,
     decoded: decode.Component,
     info: ctypes.TypeInfo,
     /// Built core instances in definition order (index = core-instance idx).
@@ -175,6 +179,13 @@ const GraphAsync = struct {
     /// deposited bytes are copied into THIS reader's memory at `ptr` (the guest↔guest
     /// analogue of the host-source `deliverParkedReads`). Cleared on delivery.
     pending_graph_reads: std.AutoHashMapUnmanaged(u32, PendingGraphRead) = .empty,
+    /// ADR-0197 (D-463): stream/future end handle → owning child idx. The graph keeps
+    /// ONE shared `streams`/`shared`/`sets` (the scheduler stays component-agnostic),
+    /// and this ledger gives the guest-facing builtins per-component handle isolation:
+    /// a child may only access an end it owns; the boundary trampoline retags ownership
+    /// on transfer. Handle values are guest-opaque, so this is spec-conformant without
+    /// per-child tables (would force child-identity threading through the scheduler).
+    owners: std.AutoHashMapUnmanaged(u32, u32) = .empty,
 
     const CallbackTarget = struct { inst: *Instance, name: []const u8 };
     /// A parked cross-component read: where (which guest memory + offset) the
@@ -200,6 +211,7 @@ const GraphAsync = struct {
         self.streams.deinit();
         self.sets.deinit();
         self.pending_graph_reads.deinit(self.alloc);
+        self.owners.deinit(self.alloc);
     }
 
     /// Register a callback target and return its funcidx (the dense registry
@@ -511,6 +523,11 @@ fn buildChild(
     errdefer alloc.destroy(child);
     child.* = .{
         .alloc = alloc,
+        // The eventual index in `graph.children` (appended right after buildChild
+        // returns, in definition order). Set HERE — not at the append site — because
+        // this child's synthetic builtins are installed DURING buildChild and capture
+        // `idx` into their `GraphFutureCtx` (ADR-0197 ownership ledger).
+        .idx = @intCast(graph.children.items.len),
         .decoded = try decode.decode(alloc, child_bytes),
         .info = undefined,
         .core_instances = .empty,
@@ -643,9 +660,14 @@ fn pourSyntheticExport(
         // (the scheduler delivers WAIT via the callback ABI, not a guest `wait` call).
         .waitable_set => |ws| {
             const as = try graph.asyncState();
+            // Per-child ctx so `waitable.join` can owner-check the joined end (ADR-0197).
+            // `elem_size` is unused here. Ownership → future_ctxs (freed at graph deinit).
+            const wctx = try graph.alloc.create(GraphFutureCtx);
+            wctx.* = .{ .as = as, .elem_size = 0, .child_idx = child.idx };
+            try graph.future_ctxs.append(graph.alloc, wctx);
             switch (ws.op) {
-                .new => try lk.defineFuncCtx(ns, ex.name, @ptrCast(as), fn (*Caller) BoundaryError!u32, graphWaitableSetNew),
-                .join => try lk.defineFuncCtx(ns, ex.name, @ptrCast(as), fn (*Caller, u32, u32) BoundaryError!void, graphWaitableJoin),
+                .new => try lk.defineFuncCtx(ns, ex.name, @ptrCast(wctx), fn (*Caller) BoundaryError!u32, graphWaitableSetNew),
+                .join => try lk.defineFuncCtx(ns, ex.name, @ptrCast(wctx), fn (*Caller, u32, u32) BoundaryError!void, graphWaitableJoin),
                 .wait, .poll, .drop => return GraphError.UnsupportedBoundaryType,
             }
             return;
@@ -915,7 +937,15 @@ fn asyncBoundaryTrampoline(caller: *Caller) BoundaryError!u32 {
 /// so no rebind is needed. The callee runs synchronously here (writing into / the
 /// future the importer later reads), and the call returns the async status.
 fn asyncBoundaryParamTrampoline(caller: *Caller, handle: u32) BoundaryError!u32 {
-    _ = try enqueueCalleeSubtask(caller.data(BoundaryCtx), handle);
+    const bctx = caller.data(BoundaryCtx);
+    // ADR-0197 (D-463): lowering a stream/future end across the boundary TRANSFERS
+    // ownership to the callee (Component-Model lower-of-an-owned-handle moves it).
+    // Retag the ledger so the callee may access it and the caller can no longer reach
+    // it. A scalar / resource handle is untracked (absent from the ledger) → untouched.
+    if (bctx.async_state) |as| {
+        if (as.owners.getPtr(handle)) |o| o.* = bctx.callee.idx;
+    }
+    _ = try enqueueCalleeSubtask(bctx, handle);
     return SUBTASK_RETURNED;
 }
 
@@ -999,7 +1029,7 @@ fn graphTaskReturn(caller: *Caller, value: i32) BoundaryError!void {
 /// A blocked guest callee builds a set, joins its parked end, and returns WAIT(set);
 /// the graph scheduler's `pollSet` then resolves it across the boundary.
 fn graphWaitableSetNew(caller: *Caller) BoundaryError!u32 {
-    const as = caller.data(GraphAsync);
+    const as = caller.data(GraphFutureCtx).as;
     return as.sets.add(async_mod.WaitableSet.init(as.alloc)) catch |e| return mapGraphAsyncFault(e);
 }
 
@@ -1007,8 +1037,9 @@ fn graphWaitableSetNew(caller: *Caller) BoundaryError!u32 {
 /// (a stream/future end handle in `GraphAsync.streams`) to a graph-shared set. A
 /// bad set handle is a guest fault → trap (mirror of `p2WaitableJoin`).
 fn graphWaitableJoin(caller: *Caller, set_handle: u32, waitable: u32) BoundaryError!void {
-    const as = caller.data(GraphAsync);
-    const set = as.sets.get(set_handle) catch |e| return mapGraphAsyncFault(e);
+    const ctx = caller.data(GraphFutureCtx);
+    try checkOwner(ctx, waitable); // a child may only join an end it owns (ADR-0197)
+    const set = ctx.as.sets.get(set_handle) catch |e| return mapGraphAsyncFault(e);
     set.join(waitable) catch |e| return mapGraphAsyncFault(e);
 }
 
@@ -1016,7 +1047,22 @@ fn graphWaitableJoin(caller: *Caller, set_handle: u32, waitable: u32) BoundaryEr
 /// the GRAPH-shared rendezvous arena + its handle table (so a future minted in
 /// child A is readable by child B), plus the resolved payload byte size for the
 /// `future<T>` this op operates on.
-const GraphFutureCtx = struct { as: *GraphAsync, elem_size: u8 };
+const GraphFutureCtx = struct { as: *GraphAsync, elem_size: u8, child_idx: u32 = 0 };
+
+/// ADR-0197 (D-463): a child may only operate on a stream/future end it OWNS. A
+/// handle with no ledger entry, or one owned by a different child, is a guest fault
+/// → the canonical guest trap (the pre-fix shared-table runner silently allowed a
+/// peer child to reach an un-granted end). Mirrors `Table.get`'s trap-on-stale.
+fn checkOwner(ctx: *GraphFutureCtx, handle: u32) BoundaryError!void {
+    const owner = ctx.as.owners.get(handle) orelse return error.Unreachable;
+    if (owner != ctx.child_idx) return error.Unreachable;
+}
+
+/// Record both freshly-minted ends as owned by the minting child (ADR-0197).
+fn recordOwnerPair(ctx: *GraphFutureCtx, pair: async_mod.EndPair) BoundaryError!void {
+    ctx.as.owners.put(ctx.as.alloc, pair.readable, ctx.child_idx) catch return error.OutOfMemory;
+    ctx.as.owners.put(ctx.as.alloc, pair.writable, ctx.child_idx) catch return error.OutOfMemory;
+}
 
 /// Map a graph async-builtin fault to the host-fn surface: a guest supplies the
 /// handle/ptr, so a bad handle / illegal sequencing / exhausted table is a GUEST
@@ -1036,6 +1082,7 @@ fn mapGraphAsyncFault(e: async_mod.Error) BoundaryError {
 fn graphFutureNew(caller: *Caller) BoundaryError!u64 {
     const ctx = caller.data(GraphFutureCtx);
     const pair = async_mod.newFuturePair(&ctx.as.streams, &ctx.as.shared, null) catch |e| return mapGraphAsyncFault(e);
+    try recordOwnerPair(ctx, pair);
     return @as(u64, pair.readable) | (@as(u64, pair.writable) << 32);
 }
 
@@ -1045,6 +1092,7 @@ fn graphFutureNew(caller: *Caller) BoundaryError!u64 {
 /// (possibly blocked) write until the reader drains them.
 fn graphFutureWrite(caller: *Caller, handle: u32, ptr: u32) BoundaryError!u32 {
     const ctx = caller.data(GraphFutureCtx);
+    try checkOwner(ctx, handle);
     const end = ctx.as.streams.get(handle) catch |e| return mapGraphAsyncFault(e);
     const sh = ctx.as.shared.get(end.shared) catch |e| return mapGraphAsyncFault(e);
     const fut = switch (sh.*) {
@@ -1066,6 +1114,7 @@ fn graphFutureWrite(caller: *Caller, handle: u32, ptr: u32) BoundaryError!u32 {
 /// future into the reader child's memory at `ptr`. The DATA half of the transfer.
 fn graphFutureRead(caller: *Caller, handle: u32, ptr: u32) BoundaryError!u32 {
     const ctx = caller.data(GraphFutureCtx);
+    try checkOwner(ctx, handle);
     const end = ctx.as.streams.get(handle) catch |e| return mapGraphAsyncFault(e);
     const sh = ctx.as.shared.get(end.shared) catch |e| return mapGraphAsyncFault(e);
     const fut = switch (sh.*) {
@@ -1088,7 +1137,9 @@ fn graphFutureRead(caller: *Caller, handle: u32, ptr: u32) BoundaryError!u32 {
 /// share this fn (ADR-0195 d-b-2 / d-c-1).
 fn graphFutureDrop(caller: *Caller, handle: u32) BoundaryError!void {
     const ctx = caller.data(GraphFutureCtx);
+    try checkOwner(ctx, handle);
     async_mod.dropEnd(&ctx.as.streams, &ctx.as.shared, handle) catch |e| return mapGraphAsyncFault(e);
+    _ = ctx.as.owners.remove(handle); // the end no longer exists; free its ledger entry
 }
 
 /// `canon stream.new` at the graph boundary (ADR-0195 d-c-1): mint a readable +
@@ -1097,6 +1148,7 @@ fn graphFutureDrop(caller: *Caller, handle: u32) BoundaryError!void {
 fn graphStreamNew(caller: *Caller) BoundaryError!u64 {
     const ctx = caller.data(GraphFutureCtx);
     const pair = async_mod.newStreamPair(&ctx.as.streams, &ctx.as.shared, null) catch |e| return mapGraphAsyncFault(e);
+    try recordOwnerPair(ctx, pair);
     return @as(u64, pair.readable) | (@as(u64, pair.writable) << 32);
 }
 
@@ -1107,6 +1159,7 @@ fn graphStreamNew(caller: *Caller) BoundaryError!u64 {
 /// them. A `count * elem_size` exceeding the inline buffer is a typed deferral.
 fn graphStreamWrite(caller: *Caller, handle: u32, ptr: u32, count: u32) BoundaryError!u32 {
     const ctx = caller.data(GraphFutureCtx);
+    try checkOwner(ctx, handle);
     const end = ctx.as.streams.get(handle) catch |e| return mapGraphAsyncFault(e);
     const sh = ctx.as.shared.get(end.shared) catch |e| return mapGraphAsyncFault(e);
     const st = switch (sh.*) {
@@ -1150,6 +1203,7 @@ fn graphStreamWrite(caller: *Caller, handle: u32, ptr: u32, count: u32) Boundary
 /// BLOCKED loudly (the pollSet path is d-c-2), never a silent 0.
 fn graphStreamRead(caller: *Caller, handle: u32, ptr: u32, count: u32) BoundaryError!u32 {
     const ctx = caller.data(GraphFutureCtx);
+    try checkOwner(ctx, handle);
     const end = ctx.as.streams.get(handle) catch |e| return mapGraphAsyncFault(e);
     const sh = ctx.as.shared.get(end.shared) catch |e| return mapGraphAsyncFault(e);
     const st = switch (sh.*) {
@@ -1217,7 +1271,7 @@ fn installGraphFutureBuiltin(
     const elem_size = graphStreamFutureElemSize(graph.alloc, &child.info, type_index);
     const fctx = try graph.alloc.create(GraphFutureCtx);
     errdefer graph.alloc.destroy(fctx);
-    fctx.* = .{ .as = as, .elem_size = elem_size };
+    fctx.* = .{ .as = as, .elem_size = elem_size, .child_idx = child.idx };
     try graph.future_ctxs.append(graph.alloc, fctx);
     switch (op) {
         .future_new => try lk.defineFuncCtx(ns, core_export_name, @ptrCast(fctx), fn (*Caller) BoundaryError!u64, graphFutureNew),
