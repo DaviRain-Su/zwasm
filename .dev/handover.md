@@ -63,10 +63,12 @@ Status→Implemented + retrospective section; D-464 item (4) closed).
    D-461 row): **replace_lane** needs the x86_64 v128 fix AND the arm64 GPR-scalar spill (D-034 cohort — a force-spill
    fixture always spills the high-vreg-index new-lane scalar which arm64 `resolveGpr` SPILL-EXEMPTs) → do WITH D-034;
    **Extadd-pairwise** (4 impls) each uses XMM14 as scratch → stage0 collision, needs src→stage1 workaround (mirror
-   bitmask). Next cycle: drive Extadd (collision-workaround, x86_64-only like extend) OR a broad dogfood sweep. Other
-   fronts: D-464(2) cancel-op (consumer-gated), D-460/D-209 (parked), D-305
-   D-461 if electing the exotic-correctness campaign. Do NOT speculatively grind the consumer-gated feature work.
-4. **Remote**: ubuntu green @1ecdd6815 (exit 0); windows batch deferred (3/12 since @0e1fca6e7, non-ABI). D-028 cosmetic.
+   bitmask). **Next cycle**: drive Extadd-pairwise — but FIRST verify arm64 Extadd spill-awareness (the replace_lane
+   surprise showed arm64 can have its own SPILL-EXEMPT gap); if arm64 is clean (shared unop helper like extend),
+   it's x86_64-only + the documented stage1-src collision workaround. If arm64 Extadd is ALSO entangled, pivot to a
+   broad dogfood/realworld sweep instead. Do NOT speculatively grind consumer-gated work (D-464(2), D-305).
+4. **Remote**: D-461 extend @83256d210 GREEN on ALL 3 HOSTS (arm64+Rosetta+ubuntu @b8d6ba461; **windows exit 0**,
+   gate recorded @aaec6db9d). D-028/windows-listen IPC flakes cosmetic.
 
 ## Recently closed arcs (detail in ADRs/git/debt — one-liners)
 
