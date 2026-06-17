@@ -47,10 +47,19 @@ CLOSED (below). **windowsmini RESUMED**. Version `2.0.0-alpha.3`. Windows batch 
   `.result` + writes it (flat-4 i32) into the IMPORTER's memory at `retptr` (`bctx.importer` threaded through
   `installAsyncBoundary`). Fixture `two_async_components_consume_result.wat` (A reads mem[0]→42, task.returns it);
   test asserts A's own task 1 == 42. A blocked-callee (no result yet) stays unwritten = async-completion path (later).
-- **NEXT (d-b-2 — single-shot FUTURE rendezvous)**: the bigger architectural piece — move `SharedTable` from
-  per-`WasiP2Ctx` to `GraphAsync` (graph-level, both instances share one arena) + wire `GraphAsyncCtx.pollSet`
-  (today null) to harvest the peer end's `pending_event` after a write/resolve. Then (d-c) full stream + (e)
-  adversarial. Likely Step-0-survey the SharedTable/SharedFuture rendezvous + a graph-level future fixture.
+- **(d-b-2) DONE** (inline TDD red→green, full local gate verified): single-shot guest↔guest async **future**
+  rendezvous. `GraphAsync` gained ONE graph-level `SharedTable` + ONE `StreamFutureTable` (both children's
+  `future.*` builtins mint/look-up there), so a future handle minted in A is valid in B and resolves to the SAME
+  rendezvous slot — only the i32 crosses (no rebind). `future.new/read/write/drop` graph host funcs
+  (`graphFuture*` + `GraphFutureCtx{as,elem_size}`, wired via `pourSyntheticExport` `.stream_future` arm; stream
+  ops + future-cancel → `UnsupportedBoundaryType`). VALUE channel: `SharedFuture` gained a single-shot
+  `value:[8]u8`/`value_len` cell (the count-only rendezvous moves no bytes) — writer deposits, reader drains via
+  `caller.memory()`. Async boundary widened to ONE flat-i32 handle param (`AsyncBoundaryParamSig` +
+  `asyncBoundaryParamTrampoline`; `enqueueCalleeSubtask(bctx, arg)` threads it). Fixture
+  `two_async_components_future.wat` (B `tick(future<u32>)` writes 42, A `run` reads it, task.returns); test asserts
+  A's task 1 == 42 (mutation-proven). Deferrals: param+retptr together, wider/aggregate param, stream rendezvous (d-c).
+- **NEXT (d-c stream rendezvous + pollSet)**: extend to `stream<T>` (multi-element + blocking/`pollSet` delivery —
+  graph `GraphAsyncCtx.pollSet` is still null) and (e) adversarial (deadlock/dropped/cancelled).
 - **Exit-condition**: `async_two_tasks_stream_rendezvous.wat` (2-component: A async-imports B's async export)
   builds + asserts Subtask creation→resolution + waitable-set delivery, e2e green; full async corpus + (e)
   adversarial (deadlock/dropped/cancelled) green; single-task path unchanged.

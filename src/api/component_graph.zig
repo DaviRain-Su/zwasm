@@ -156,16 +156,32 @@ const GraphAsync = struct {
     /// host func knows which task's `TaskDescriptor.result` to store into. 0 = no
     /// task executing (the reserved table id is never a live task).
     current_task_id: u32 = 0,
+    /// ADR-0195 step (d-b-2): the GRAPH-shared future/stream rendezvous arena +
+    /// its handle table. A `future.new` in ANY child mints both ends into THIS
+    /// one table over THIS one `shared`, so a future handle passed from child A
+    /// to child B (a bare i32) is valid in B's lookup and resolves to the SAME
+    /// rendezvous slot A reads — the cross-component handle crossing. (Mirrors
+    /// `WasiP2Ctx.{streams,shared}`, but graph-level rather than per-component.)
+    shared: async_mod.SharedTable,
+    streams: async_mod.StreamFutureTable,
 
     const CallbackTarget = struct { inst: *Instance, name: []const u8 };
 
     fn init(alloc: Allocator) async_mod.Error!GraphAsync {
-        return .{ .alloc = alloc, .tasks = try async_mod.TaskTable.init(alloc), .callbacks = .empty };
+        return .{
+            .alloc = alloc,
+            .tasks = try async_mod.TaskTable.init(alloc),
+            .callbacks = .empty,
+            .shared = async_mod.SharedTable.init(alloc),
+            .streams = try async_mod.StreamFutureTable.init(alloc),
+        };
     }
 
     fn deinit(self: *GraphAsync) void {
         self.tasks.deinit();
         self.callbacks.deinit(self.alloc);
+        self.shared.deinit();
+        self.streams.deinit();
     }
 
     /// Register a callback target and return its funcidx (the dense registry
@@ -204,6 +220,10 @@ pub const ComponentGraph = struct {
     linkers: std.ArrayList(*Linker),
     instances: std.ArrayList(*Instance),
     boundaries: std.ArrayList(*BoundaryCtx),
+    /// Heap-allocated `canon future.*` host contexts (ADR-0195 d-b-2), one per
+    /// wired future builtin; freed at graph deinit (addresses stay stable while
+    /// bound to the linker).
+    future_ctxs: std.ArrayList(*GraphFutureCtx) = .empty,
     /// Map a child's definition ordinal (in `component_instances`) to the
     /// built `GraphChild` slot — outer `with` args reference children by
     /// instance index.
@@ -227,6 +247,7 @@ pub const ComponentGraph = struct {
             self.alloc.destroy(m);
         }
         for (self.boundaries.items) |b| self.alloc.destroy(b);
+        for (self.future_ctxs.items) |f| self.alloc.destroy(f);
         for (self.children.items) |c| {
             c.deinit();
             self.alloc.destroy(c);
@@ -235,6 +256,7 @@ pub const ComponentGraph = struct {
         self.linkers.deinit(self.alloc);
         self.modules.deinit(self.alloc);
         self.boundaries.deinit(self.alloc);
+        self.future_ctxs.deinit(self.alloc);
         self.children.deinit(self.alloc);
         self.child_of_instance.deinit(self.alloc);
         if (self.async_state) |as| {
@@ -580,6 +602,15 @@ fn pourSyntheticExport(
             try lk.defineFuncCtx(ns, ex.name, @ptrCast(as), TaskReturnSig, graphTaskReturn);
             return;
         },
+        // A child's own `canon future.*` builtin (ADR-0195 d-b-2): wire the
+        // graph-level host func backed by the GRAPH-shared rendezvous, so a
+        // future handle minted in one child is resolvable by the peer child.
+        // Only `future` ops are wired here (the single-shot value channel d-b-2
+        // needs); `stream` ops are a typed deferral (d-c) — fail loudly.
+        .stream_future => |sf| {
+            try installGraphFutureBuiltin(graph, child, lk, ns, ex.name, sf.op, sf.type_index);
+            return;
+        },
         else => return GraphError.UnsupportedBoundaryType,
     };
     // The outer `with` arg whose name matches this import names the provider
@@ -722,6 +753,11 @@ const SUBTASK_RETURNED: u32 = @intFromEnum(async_mod.SubtaskState.returned);
 /// async-call status code. `BoundaryError!u32` so a callee trap propagates.
 const AsyncBoundarySig = fn (*Caller) BoundaryError!u32;
 
+/// The async boundary trampoline's core signature for a SINGLE-FLAT-PARAM async
+/// import (`canon lower … async` of `func(handle)`): `(handle:i32) -> i32`
+/// (ADR-0195 d-b-2). The handle crosses verbatim to the callee entry.
+const AsyncBoundaryParamSig = fn (*Caller, u32) BoundaryError!u32;
+
 /// The async boundary trampoline's core signature for a RESULT-BEARING async
 /// import (`canon lower … async` of `func() -> u32`): the lowered core func gains
 /// a leading `retptr` param naming where the importer would receive the result,
@@ -755,11 +791,21 @@ fn installAsyncBoundary(
     importer: *GraphChild,
     provider: Provider,
 ) GraphError!void {
-    if (ft.params.len != 0) return GraphError.UnsupportedBoundaryType;
+    // A single FLAT param (a `future`/`stream`/scalar handle that flattens to one
+    // i32) crosses verbatim to the callee entry (ADR-0195 d-b-2). A future/stream
+    // handle resolves to the same GRAPH-shared rendezvous slot in the callee, so
+    // no rebind is needed — only the i32 crosses. A wider/aggregate param list
+    // needs cross-memory marshalling (a later slice) → typed deferral.
+    if (ft.params.len > 1) return GraphError.UnsupportedBoundaryType;
+    const has_param = ft.params.len == 1;
+    if (has_param and !isFlatI32Handle(graph.alloc, &provider.child.info, ft.params[0].ty)) return GraphError.UnsupportedBoundaryType;
     const has_result = if (ft.result) |rt| blk: {
         if (!isFlat4Scalar(rt)) return GraphError.UnsupportedBoundaryType;
         break :blk true;
     } else false;
+    // A param + a retptr-result at once is a broader 2-word lowered shape not yet
+    // wired (no fixture exercises it) — defer loudly rather than mis-marshal.
+    if (has_param and has_result) return GraphError.UnsupportedBoundaryType;
     const cb = r.callback orelse return GraphError.UnsupportedBoundaryType; // async lift implies a callback
     const cb_inst = provider.child.core_instances.items[cb.instance] orelse return GraphError.ImportUnsatisfied;
 
@@ -781,9 +827,36 @@ fn installAsyncBoundary(
 
     if (has_result) {
         try lk.defineFuncCtx(ns, core_export_name, @ptrCast(bctx), AsyncBoundaryRetSig, asyncBoundaryRetTrampoline);
+    } else if (has_param) {
+        try lk.defineFuncCtx(ns, core_export_name, @ptrCast(bctx), AsyncBoundaryParamSig, asyncBoundaryParamTrampoline);
     } else {
         try lk.defineFuncCtx(ns, core_export_name, @ptrCast(bctx), AsyncBoundarySig, asyncBoundaryTrampoline);
     }
+}
+
+/// A valtype that flattens to a single i32 core word AND can cross the async
+/// boundary as a bare handle: a `future`/`stream` handle (its i32 indexes the
+/// GRAPH-shared table, valid in the callee) or a 4-byte scalar. A `string` /
+/// aggregate flattens to >1 word → not a single-word handle. The param is a
+/// `type_index` into the provider's type space, so resolve via `canon`.
+fn isFlatI32Handle(alloc: Allocator, info: *const ctypes.TypeInfo, vt: ctypes.ValType) bool {
+    if (isFlat4Scalar(vt)) return true;
+    var tmp = std.heap.ArenaAllocator.init(alloc);
+    defer tmp.deinit();
+    const ct = canon.canonTypeFromDecoded(tmp.allocator(), info, vt) catch return false;
+    return switch (ct) {
+        .future, .stream, .own, .borrow => true,
+        .prim => |p| isFlat4ScalarPrim(p),
+        else => false,
+    };
+}
+
+/// A 4-byte (i32-flat) scalar primitive — the prim-level form of `isFlat4Scalar`.
+fn isFlat4ScalarPrim(p: ctypes.PrimValType) bool {
+    return switch (p) {
+        .bool, .s8, .u8, .s16, .u16, .s32, .u32, .char => true,
+        .s64, .u64, .f32, .f64, .string, .error_context => false,
+    };
 }
 
 /// Host trampoline for an async cross-component import (ADR-0195 c-2b): invoke
@@ -792,7 +865,18 @@ fn installAsyncBoundary(
 /// scheduler table, and return the async-call status (RETURNED, since the
 /// minimal callee resolves synchronously). A callee trap propagates as a trap.
 fn asyncBoundaryTrampoline(caller: *Caller) BoundaryError!u32 {
-    _ = try enqueueCalleeSubtask(caller.data(BoundaryCtx));
+    _ = try enqueueCalleeSubtask(caller.data(BoundaryCtx), null);
+    return SUBTASK_RETURNED;
+}
+
+/// Single-flat-param async import (`canon lower … async` of `func(handle)`,
+/// ADR-0195 d-b-2): the lowered core func is `(handle:i32) -> i32`. The handle
+/// (a `future`/`stream` end into the GRAPH-shared table) crosses verbatim to the
+/// callee's entry — its i32 resolves to the same rendezvous slot in the callee,
+/// so no rebind is needed. The callee runs synchronously here (writing into / the
+/// future the importer later reads), and the call returns the async status.
+fn asyncBoundaryParamTrampoline(caller: *Caller, handle: u32) BoundaryError!u32 {
+    _ = try enqueueCalleeSubtask(caller.data(BoundaryCtx), handle);
     return SUBTASK_RETURNED;
 }
 
@@ -804,7 +888,7 @@ fn asyncBoundaryTrampoline(caller: *Caller) BoundaryError!u32 {
 /// at `retptr`, so A reads B's value in-guest.
 fn asyncBoundaryRetTrampoline(caller: *Caller, retptr: u32) BoundaryError!u32 {
     const bctx = caller.data(BoundaryCtx);
-    const task_id = try enqueueCalleeSubtask(bctx);
+    const task_id = try enqueueCalleeSubtask(bctx, null);
 
     // Lower B's task.return result into A's retptr IF the subtask resolved
     // synchronously (it task.returned during its entry invoke). A callee that
@@ -825,7 +909,7 @@ fn asyncBoundaryRetTrampoline(caller: *Caller, retptr: u32) BoundaryError!u32 {
 /// Shared enqueue body: invoke the callee's async entry once, mint its subtask,
 /// fold the packed result into the subtask state, and return the new task's id
 /// (so the caller can read its `.result` for the d-b retptr lowering).
-fn enqueueCalleeSubtask(bctx: *BoundaryCtx) BoundaryError!u32 {
+fn enqueueCalleeSubtask(bctx: *BoundaryCtx, arg: ?u32) BoundaryError!u32 {
     const as = bctx.async_state orelse return error.OutOfBoundsLoad; // wired only for async boundaries
 
     // Reserve the callee subtask's id BEFORE invoking its entry, so the
@@ -837,8 +921,12 @@ fn enqueueCalleeSubtask(bctx: *BoundaryCtx) BoundaryError!u32 {
     as.current_task_id = task_id;
     defer as.current_task_id = prev;
 
+    // The single flat-i32 handle (d-b-2) crosses verbatim as the callee entry's
+    // sole arg; a no-param callee gets an empty arg list.
+    var arg_buf = [_]Value{.{ .i32 = @bitCast(arg orelse 0) }};
+    const args: []const Value = if (arg != null) arg_buf[0..1] else &.{};
     var res = [_]Value{.{ .i32 = 0 }};
-    try bctx.core_inst.invoke(bctx.core_func_name, &.{}, &res);
+    try bctx.core_inst.invoke(bctx.core_func_name, args, &res);
     const initial: u32 = @bitCast(res[0].i32);
 
     const seed = async_mod.seedTask(initial) catch return error.OutOfBoundsLoad; // bad callback code = guest fault
@@ -865,6 +953,139 @@ fn graphTaskReturn(caller: *Caller, value: i32) BoundaryError!void {
     const as = caller.data(GraphAsync);
     const task = as.tasks.get(as.current_task_id) catch return error.OutOfBoundsStore;
     task.result = @bitCast(value);
+}
+
+/// The host context a graph `canon future.*` builtin binds to (ADR-0195 d-b-2):
+/// the GRAPH-shared rendezvous arena + its handle table (so a future minted in
+/// child A is readable by child B), plus the resolved payload byte size for the
+/// `future<T>` this op operates on.
+const GraphFutureCtx = struct { as: *GraphAsync, elem_size: u8 };
+
+/// Map a graph async-builtin fault to the host-fn surface: a guest supplies the
+/// handle/ptr, so a bad handle / illegal sequencing / exhausted table is a GUEST
+/// fault → the canonical guest trap (`error.Unreachable`), which `mapDispatchErr`
+/// narrows cleanly. Genuine host OOM propagates. (Mirrors `component_wasi_p2.mapAsyncFault`.)
+fn mapGraphAsyncFault(e: async_mod.Error) BoundaryError {
+    return switch (e) {
+        error.OutOfMemory => error.OutOfMemory,
+        else => error.Unreachable,
+    };
+}
+
+/// `canon future.new` at the graph boundary: mint a readable+writable end pair
+/// into the GRAPH-shared table over the GRAPH-shared rendezvous; return the
+/// spec's packed `ri | (wi << 32)`. Both ends (hence the handle that later
+/// crosses to the peer child) live in the one shared table.
+fn graphFutureNew(caller: *Caller) BoundaryError!u64 {
+    const ctx = caller.data(GraphFutureCtx);
+    const pair = async_mod.newFuturePair(&ctx.as.streams, &ctx.as.shared, null) catch |e| return mapGraphAsyncFault(e);
+    return @as(u64, pair.readable) | (@as(u64, pair.writable) << 32);
+}
+
+/// `canon future.write(handle, ptr)` at the graph boundary: deposit the single
+/// value's lowered bytes (read from the writer child's memory at `ptr`) into the
+/// shared future, then drive the rendezvous. Single-shot → the bytes outlive the
+/// (possibly blocked) write until the reader drains them.
+fn graphFutureWrite(caller: *Caller, handle: u32, ptr: u32) BoundaryError!u32 {
+    const ctx = caller.data(GraphFutureCtx);
+    const end = ctx.as.streams.get(handle) catch |e| return mapGraphAsyncFault(e);
+    const sh = ctx.as.shared.get(end.shared) catch |e| return mapGraphAsyncFault(e);
+    const fut = switch (sh.*) {
+        .future => |*f| f,
+        .stream => return error.Unreachable, // future.write on a stream handle = guest fault
+    };
+    // Stash the writer's bytes BEFORE the rendezvous step (so a parked writer's
+    // value is available when the reader later completes the rendezvous).
+    const mem = caller.memory() orelse return error.OutOfBoundsLoad;
+    const src = mem.sliceAt(ptr, ctx.elem_size) catch return error.OutOfBoundsLoad;
+    @memcpy(fut.value[0..ctx.elem_size], src);
+    fut.value_len = ctx.elem_size;
+    const step = end.copy(fut, &ctx.as.streams, handle, 1) catch |e| return mapGraphAsyncFault(e);
+    return step.code().encode();
+}
+
+/// `canon future.read(handle, ptr)` at the graph boundary: drive the rendezvous,
+/// then — on a COMPLETED read — copy the writer's stashed value out of the shared
+/// future into the reader child's memory at `ptr`. The DATA half of the transfer.
+fn graphFutureRead(caller: *Caller, handle: u32, ptr: u32) BoundaryError!u32 {
+    const ctx = caller.data(GraphFutureCtx);
+    const end = ctx.as.streams.get(handle) catch |e| return mapGraphAsyncFault(e);
+    const sh = ctx.as.shared.get(end.shared) catch |e| return mapGraphAsyncFault(e);
+    const fut = switch (sh.*) {
+        .future => |*f| f,
+        .stream => return error.Unreachable,
+    };
+    const step = end.copy(fut, &ctx.as.streams, handle, 1) catch |e| return mapGraphAsyncFault(e);
+    if (step.caller == .completed) {
+        if (fut.value_len < ctx.elem_size) return error.Unreachable; // reader before any writer = guest fault
+        const mem = caller.memory() orelse return error.OutOfBoundsStore;
+        const dst = mem.sliceAt(ptr, ctx.elem_size) catch return error.OutOfBoundsStore;
+        @memcpy(dst, fut.value[0..ctx.elem_size]);
+    }
+    return step.code().encode();
+}
+
+/// `canon future.drop-{readable,writable}(handle)` at the graph boundary: drop one
+/// end (release its share of the rendezvous). A writable-end drop before its value
+/// was written is a guest fault (spec `WritableFutureEnd.drop`).
+fn graphFutureDrop(caller: *Caller, handle: u32) BoundaryError!void {
+    const ctx = caller.data(GraphFutureCtx);
+    async_mod.dropEnd(&ctx.as.streams, &ctx.as.shared, handle) catch |e| return mapGraphAsyncFault(e);
+}
+
+/// The lowered byte size of a `future<T>`'s payload `T` (1 for payload-less /
+/// unresolvable). Mirrors `component_wasi_p2.streamElemByteSize` but graph-side.
+fn graphFutureElemSize(alloc: Allocator, info: *const ctypes.TypeInfo, type_index: u32) u8 {
+    var tmp = std.heap.ArenaAllocator.init(alloc);
+    defer tmp.deinit();
+    const resolved = canon.resolveTypeIndex(tmp.allocator(), info, type_index) catch return 1;
+    const payload: ?ctypes.ValType = switch (resolved.dt) {
+        .future => |f| f.payload,
+        else => return 1,
+    };
+    const p = payload orelse return 1;
+    const ct = canon.canonTypeFromDecoded(tmp.allocator(), info, p) catch return 1;
+    const sz = canon.sizeOf(ct);
+    return if (sz == 0 or sz > async_mod.SharedFuture.VALUE_CAP) 1 else @intCast(sz);
+}
+
+/// Wire a child's `canon future.*` core import to the matching graph-level host
+/// func (ADR-0195 d-b-2). The host context is heap-allocated + tracked for free
+/// at graph deinit; the `elem_size` resolves the `future<T>` payload byte width.
+/// `stream` ops + future cancel land in a later slice → typed deferral.
+fn installGraphFutureBuiltin(
+    graph: *ComponentGraph,
+    child: *GraphChild,
+    lk: *Linker,
+    ns: []const u8,
+    core_export_name: []const u8,
+    op: ctypes.StreamFutureOp,
+    type_index: u32,
+) GraphError!void {
+    const as = try graph.asyncState();
+    const elem_size = graphFutureElemSize(graph.alloc, &child.info, type_index);
+    const fctx = try graph.alloc.create(GraphFutureCtx);
+    errdefer graph.alloc.destroy(fctx);
+    fctx.* = .{ .as = as, .elem_size = elem_size };
+    try graph.future_ctxs.append(graph.alloc, fctx);
+    switch (op) {
+        .future_new => try lk.defineFuncCtx(ns, core_export_name, @ptrCast(fctx), fn (*Caller) BoundaryError!u64, graphFutureNew),
+        .future_write => try lk.defineFuncCtx(ns, core_export_name, @ptrCast(fctx), fn (*Caller, u32, u32) BoundaryError!u32, graphFutureWrite),
+        .future_read => try lk.defineFuncCtx(ns, core_export_name, @ptrCast(fctx), fn (*Caller, u32, u32) BoundaryError!u32, graphFutureRead),
+        .future_drop_readable, .future_drop_writable => try lk.defineFuncCtx(ns, core_export_name, @ptrCast(fctx), fn (*Caller, u32) BoundaryError!void, graphFutureDrop),
+        // stream.* (whole family) + future cancel-{read,write}: a later slice
+        // (d-c streams / cancellation). Typed deferral — fail loudly.
+        .stream_new,
+        .stream_read,
+        .stream_write,
+        .stream_cancel_read,
+        .stream_cancel_write,
+        .stream_drop_readable,
+        .stream_drop_writable,
+        .future_cancel_read,
+        .future_cancel_write,
+        => return GraphError.UnsupportedBoundaryType,
+    }
 }
 
 /// Does this WIT func return a `string`? A string result flattens to >1 core

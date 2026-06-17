@@ -572,6 +572,32 @@ test "ADR-0195 d-b: the caller consumes the callee's async result (B's value low
     try testing.expectEqual(@as(?u32, 42), graph.taskResult(1)); // A consumed B's result
 }
 
+const two_async_components_future_path = "test/component/two_async_components_future.wasm";
+
+test "ADR-0195 d-b-2: a single-shot guest↔guest async future rendezvous (B writes 42, A reads it)" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, two_async_components_future_path, testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var graph = try instantiateGraph(&eng, testing.allocator, bytes, .{});
+    defer graph.deinit();
+
+    // A's `run` mints a `future<u32>` (over the GRAPH-shared rendezvous), async-calls
+    // B's `tick(future<u32>)` passing the writable handle. B runs synchronously during
+    // the async call and `future.write`s 42 into the shared rendezvous; A then
+    // `future.read`s 42 and task.returns it. A's OWN task result (task 1) == 42 proves
+    // the value crossed B→A through the cross-component future (not just both completing).
+    try graph.driveAsyncMain("run");
+    const counts = graph.asyncTaskCounts();
+    try testing.expectEqual(@as(usize, 2), counts.total); // A's run + B's tick
+    try testing.expectEqual(@as(usize, 2), counts.done); // both reached EXIT
+    try testing.expectEqual(@as(?u32, 42), graph.taskResult(1)); // A read B's future value
+}
+
 test "D-305 (security): an OOB (ptr,len) into a cross-component string import TRAPS, not silently returns 0" {
     var threaded: std.Io.Threaded = .init(testing.allocator, .{});
     defer threaded.deinit();

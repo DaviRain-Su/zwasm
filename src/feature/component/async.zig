@@ -581,6 +581,17 @@ pub const Step = struct {
     notify: ?Notify = null,
 
     pub const Notify = struct { waitable: u32, code: EventCode, payload: u32 };
+
+    /// The `ReturnCode` this caller-side step encodes to (the value a `future.*`
+    /// / `stream.*` builtin returns to the guest). `dropped` carries count 0 in
+    /// the rendezvous-count model (no partial-copy progress without a host buffer).
+    pub fn code(self: Step) ReturnCode {
+        return switch (self.caller) {
+            .blocked => .blocked,
+            .completed => |n| .{ .completed = @intCast(n) },
+            .dropped => .{ .dropped = 0 },
+        };
+    }
 };
 
 /// The copy-event code delivered to a resolved end of the given `side`
@@ -669,12 +680,24 @@ fn futureEventFor(side: EndSide) EventCode {
 /// observes a reader-drop (`DROPPED`); the reader never observes a drop.
 /// Reuses `SharedStream.Pending` (the `{side, remain, waitable}` slot).
 pub const SharedFuture = struct {
+    /// Max lowered payload a future's single value can stash in the rendezvous
+    /// (a small flat scalar — `u8`..`u64`/`f64`). A wider/aggregate `future<T>`
+    /// payload is a typed deferral at the cross-component boundary, not stored.
+    pub const VALUE_CAP: u8 = 8;
+
     elem_type: ?u32,
     dropped: bool = false,
     /// Set once the single value has passed writer→reader (either rendezvous
     /// order completes the write). Gates `future.drop-writable` per spec.
     written: bool = false,
     pending: ?SharedStream.Pending = null,
+    /// The single value's lowered bytes, deposited by the writer end and drained
+    /// by the reader end (the future's DATA channel). The rendezvous itself is
+    /// count-only; the actual guest↔guest byte transfer for a future lands here,
+    /// copied in/out of each end's memory by the canon host func (ADR-0195 d-b-2).
+    /// `value_len == 0` until a writer deposits.
+    value: [VALUE_CAP]u8 = undefined,
+    value_len: u8 = 0,
 
     fn mkNotify(p: SharedStream.Pending) Step.Notify {
         return .{ .waitable = p.waitable, .code = futureEventFor(p.side), .payload = (ReturnCode{ .completed = 0 }).encode() };
