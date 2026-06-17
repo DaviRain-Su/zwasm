@@ -611,9 +611,24 @@ fn streamEventFor(side: EndSide) EventCode {
 /// time (one-reader / one-writer invariant). `pending.waitable` records the
 /// blocked end's handle so a later rendezvous can deliver its event.
 pub const SharedStream = struct {
+    /// Max bytes the synchronous cross-component rendezvous can stash between a
+    /// writer's deposit and the reader's drain (ADR-0195 d-c-1). A bounded inline
+    /// buffer keeps the rendezvous Zone-1-pure (no per-stream heap); a larger /
+    /// ring / multi-write stream is a later slice (host-buffer wiring). A write
+    /// whose `count * elem_size` exceeds this is a typed deferral at the graph
+    /// boundary, not a silent truncation.
+    pub const BUF_CAP: u16 = 64;
+
     elem_type: ?u32,
     dropped: bool = false,
     pending: ?Pending = null,
+    /// The deposited element bytes a writer end stashed for the reader end to
+    /// drain (the stream's DATA channel — the rendezvous itself is count-only;
+    /// the actual guest↔guest byte transfer lands here, copied in/out of each
+    /// end's memory by the canon host func, ADR-0195 d-c-1). `buf_len == 0` until
+    /// a writer deposits; a reader drains `buf[0..buf_len]`.
+    buf: [BUF_CAP]u8 = undefined,
+    buf_len: u16 = 0,
 
     pub const Pending = struct { side: EndSide, remain: u32, waitable: u32 };
 

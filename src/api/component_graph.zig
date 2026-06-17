@@ -602,11 +602,11 @@ fn pourSyntheticExport(
             try lk.defineFuncCtx(ns, ex.name, @ptrCast(as), TaskReturnSig, graphTaskReturn);
             return;
         },
-        // A child's own `canon future.*` builtin (ADR-0195 d-b-2): wire the
-        // graph-level host func backed by the GRAPH-shared rendezvous, so a
-        // future handle minted in one child is resolvable by the peer child.
-        // Only `future` ops are wired here (the single-shot value channel d-b-2
-        // needs); `stream` ops are a typed deferral (d-c) — fail loudly.
+        // A child's own `canon {future,stream}.*` builtin (ADR-0195 d-b-2 /
+        // d-c-1): wire the graph-level host func backed by the GRAPH-shared
+        // rendezvous, so an end minted in one child is resolvable by the peer
+        // child. Future (single-shot value) + synchronous multi-element stream
+        // ops are wired; cancel ops are a typed deferral (d-c-2) — fail loudly.
         .stream_future => |sf| {
             try installGraphFutureBuiltin(graph, child, lk, ns, ex.name, sf.op, sf.type_index);
             return;
@@ -1025,34 +1025,101 @@ fn graphFutureRead(caller: *Caller, handle: u32, ptr: u32) BoundaryError!u32 {
     return step.code().encode();
 }
 
-/// `canon future.drop-{readable,writable}(handle)` at the graph boundary: drop one
-/// end (release its share of the rendezvous). A writable-end drop before its value
-/// was written is a guest fault (spec `WritableFutureEnd.drop`).
+/// `canon {future,stream}.drop-{readable,writable}(handle)` at the graph boundary:
+/// drop one end (release its share of the rendezvous). Kind-agnostic — `dropEnd`
+/// resolves the end's shared slot regardless of stream/future, so both families
+/// share this fn (ADR-0195 d-b-2 / d-c-1).
 fn graphFutureDrop(caller: *Caller, handle: u32) BoundaryError!void {
     const ctx = caller.data(GraphFutureCtx);
     async_mod.dropEnd(&ctx.as.streams, &ctx.as.shared, handle) catch |e| return mapGraphAsyncFault(e);
 }
 
-/// The lowered byte size of a `future<T>`'s payload `T` (1 for payload-less /
-/// unresolvable). Mirrors `component_wasi_p2.streamElemByteSize` but graph-side.
-fn graphFutureElemSize(alloc: Allocator, info: *const ctypes.TypeInfo, type_index: u32) u8 {
+/// `canon stream.new` at the graph boundary (ADR-0195 d-c-1): mint a readable +
+/// writable end pair into the GRAPH-shared table over the GRAPH-shared rendezvous;
+/// return the spec's packed `ri | (wi << 32)`. Symmetric to `graphFutureNew`.
+fn graphStreamNew(caller: *Caller) BoundaryError!u64 {
+    const ctx = caller.data(GraphFutureCtx);
+    const pair = async_mod.newStreamPair(&ctx.as.streams, &ctx.as.shared, null) catch |e| return mapGraphAsyncFault(e);
+    return @as(u64, pair.readable) | (@as(u64, pair.writable) << 32);
+}
+
+/// `canon stream.write(handle, ptr, count)` at the graph boundary (ADR-0195
+/// d-c-1): deposit `count` lowered elements (read from the writer child's memory
+/// at `ptr`) into the shared stream, then drive the rendezvous. The synchronous
+/// case (the reader has not yet read) stashes the bytes so the later reader drains
+/// them. A `count * elem_size` exceeding the inline buffer is a typed deferral.
+fn graphStreamWrite(caller: *Caller, handle: u32, ptr: u32, count: u32) BoundaryError!u32 {
+    const ctx = caller.data(GraphFutureCtx);
+    const end = ctx.as.streams.get(handle) catch |e| return mapGraphAsyncFault(e);
+    const sh = ctx.as.shared.get(end.shared) catch |e| return mapGraphAsyncFault(e);
+    const st = switch (sh.*) {
+        .stream => |*s| s,
+        .future => return error.Unreachable, // stream.write on a future handle = guest fault
+    };
+    const nbytes = @as(u64, count) * @as(u64, ctx.elem_size);
+    if (nbytes > async_mod.SharedStream.BUF_CAP) return error.Unreachable; // > inline buf: d-c later slice
+    // Stash the writer's bytes BEFORE the rendezvous step (so a parked reader, or
+    // a not-yet-arrived reader, drains them on completion).
+    const mem = caller.memory() orelse return error.OutOfBoundsLoad;
+    const src = mem.sliceAt(ptr, @intCast(nbytes)) catch return error.OutOfBoundsLoad;
+    @memcpy(st.buf[0..@intCast(nbytes)], src);
+    st.buf_len = @intCast(nbytes);
+    const step = end.copy(st, &ctx.as.streams, handle, count) catch |e| return mapGraphAsyncFault(e);
+    return step.code().encode();
+}
+
+/// `canon stream.read(handle, ptr, count)` at the graph boundary (ADR-0195
+/// d-c-1): drive the rendezvous, then — on a COMPLETED(n) read — copy the first
+/// `n` elements the writer stashed out of the shared stream into the reader
+/// child's memory at `ptr`. A would-block read (writer not yet written) returns
+/// BLOCKED loudly (the pollSet path is d-c-2), never a silent 0.
+fn graphStreamRead(caller: *Caller, handle: u32, ptr: u32, count: u32) BoundaryError!u32 {
+    const ctx = caller.data(GraphFutureCtx);
+    const end = ctx.as.streams.get(handle) catch |e| return mapGraphAsyncFault(e);
+    const sh = ctx.as.shared.get(end.shared) catch |e| return mapGraphAsyncFault(e);
+    const st = switch (sh.*) {
+        .stream => |*s| s,
+        .future => return error.Unreachable,
+    };
+    const step = end.copy(st, &ctx.as.streams, handle, count) catch |e| return mapGraphAsyncFault(e);
+    if (step.caller == .completed) {
+        const n = step.caller.completed;
+        const nbytes = @as(u64, n) * @as(u64, ctx.elem_size);
+        if (nbytes > 0) {
+            if (st.buf_len < nbytes) return error.Unreachable; // reader before any writer deposit = guest fault
+            const mem = caller.memory() orelse return error.OutOfBoundsStore;
+            const dst = mem.sliceAt(ptr, @intCast(nbytes)) catch return error.OutOfBoundsStore;
+            @memcpy(dst, st.buf[0..@intCast(nbytes)]);
+        }
+    }
+    return step.code().encode();
+}
+
+/// The lowered byte size of a `future<T>`'s value `T` / `stream<T>`'s element `T`
+/// (1 for payload-less / unresolvable). Mirrors `component_wasi_p2.streamElemByteSize`
+/// but graph-side; caps to the relevant inline-buffer width (a wider payload is a
+/// typed deferral, see the per-op `> CAP` guards).
+fn graphStreamFutureElemSize(alloc: Allocator, info: *const ctypes.TypeInfo, type_index: u32) u8 {
     var tmp = std.heap.ArenaAllocator.init(alloc);
     defer tmp.deinit();
     const resolved = canon.resolveTypeIndex(tmp.allocator(), info, type_index) catch return 1;
-    const payload: ?ctypes.ValType = switch (resolved.dt) {
-        .future => |f| f.payload,
+    // A future stashes ONE value (cap VALUE_CAP=8); a stream stashes its synchronous
+    // element bytes (cap BUF_CAP). The per-op `> CAP` guards re-check at write time.
+    const payload: ?ctypes.ValType, const cap: u16 = switch (resolved.dt) {
+        .future => |f| .{ f.payload, async_mod.SharedFuture.VALUE_CAP },
+        .stream => |s| .{ s.payload, async_mod.SharedStream.BUF_CAP },
         else => return 1,
     };
     const p = payload orelse return 1;
     const ct = canon.canonTypeFromDecoded(tmp.allocator(), info, p) catch return 1;
     const sz = canon.sizeOf(ct);
-    return if (sz == 0 or sz > async_mod.SharedFuture.VALUE_CAP) 1 else @intCast(sz);
+    return if (sz == 0 or sz > cap) 1 else @intCast(sz);
 }
 
-/// Wire a child's `canon future.*` core import to the matching graph-level host
-/// func (ADR-0195 d-b-2). The host context is heap-allocated + tracked for free
-/// at graph deinit; the `elem_size` resolves the `future<T>` payload byte width.
-/// `stream` ops + future cancel land in a later slice → typed deferral.
+/// Wire a child's `canon {future,stream}.*` core import to the matching graph-level
+/// host func (ADR-0195 d-b-2 / d-c-1). The host context is heap-allocated + tracked
+/// for free at graph deinit; `elem_size` resolves the `future<T>`/`stream<T>`
+/// payload byte width. Cancel ops land in a later slice (d-c-2) → typed deferral.
 fn installGraphFutureBuiltin(
     graph: *ComponentGraph,
     child: *GraphChild,
@@ -1063,7 +1130,7 @@ fn installGraphFutureBuiltin(
     type_index: u32,
 ) GraphError!void {
     const as = try graph.asyncState();
-    const elem_size = graphFutureElemSize(graph.alloc, &child.info, type_index);
+    const elem_size = graphStreamFutureElemSize(graph.alloc, &child.info, type_index);
     const fctx = try graph.alloc.create(GraphFutureCtx);
     errdefer graph.alloc.destroy(fctx);
     fctx.* = .{ .as = as, .elem_size = elem_size };
@@ -1073,15 +1140,16 @@ fn installGraphFutureBuiltin(
         .future_write => try lk.defineFuncCtx(ns, core_export_name, @ptrCast(fctx), fn (*Caller, u32, u32) BoundaryError!u32, graphFutureWrite),
         .future_read => try lk.defineFuncCtx(ns, core_export_name, @ptrCast(fctx), fn (*Caller, u32, u32) BoundaryError!u32, graphFutureRead),
         .future_drop_readable, .future_drop_writable => try lk.defineFuncCtx(ns, core_export_name, @ptrCast(fctx), fn (*Caller, u32) BoundaryError!void, graphFutureDrop),
-        // stream.* (whole family) + future cancel-{read,write}: a later slice
-        // (d-c streams / cancellation). Typed deferral — fail loudly.
-        .stream_new,
-        .stream_read,
-        .stream_write,
+        // stream.{new,read,write,drop-*} (ADR-0195 d-c-1, synchronous multi-element
+        // rendezvous). `dropEnd` is kind-agnostic so the future drop fn is reused.
+        .stream_new => try lk.defineFuncCtx(ns, core_export_name, @ptrCast(fctx), fn (*Caller) BoundaryError!u64, graphStreamNew),
+        .stream_write => try lk.defineFuncCtx(ns, core_export_name, @ptrCast(fctx), fn (*Caller, u32, u32, u32) BoundaryError!u32, graphStreamWrite),
+        .stream_read => try lk.defineFuncCtx(ns, core_export_name, @ptrCast(fctx), fn (*Caller, u32, u32, u32) BoundaryError!u32, graphStreamRead),
+        .stream_drop_readable, .stream_drop_writable => try lk.defineFuncCtx(ns, core_export_name, @ptrCast(fctx), fn (*Caller, u32) BoundaryError!void, graphFutureDrop),
+        // stream/future cancel-{read,write}: the blocking-copy cancellation path
+        // (d-c-2). Typed deferral — fail loudly.
         .stream_cancel_read,
         .stream_cancel_write,
-        .stream_drop_readable,
-        .stream_drop_writable,
         .future_cancel_read,
         .future_cancel_write,
         => return GraphError.UnsupportedBoundaryType,

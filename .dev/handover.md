@@ -61,8 +61,12 @@ CLOSED (below). **windowsmini RESUMED**. Version `2.0.0-alpha.3`. Windows batch 
   A's task 1 == 42 (mutation-proven). Deferrals: param+retptr together, wider/aggregate param, stream rendezvous (d-c).
   **Tracked simplification = D-463**: graph children share ONE `StreamFutureTable` (not per-component-with-transfer);
   functionally correct for a trusted graph but a CM handle-isolation deviation to refine (during d-c or a dedicated pass).
-- **NEXT (d-c stream rendezvous + pollSet)**: extend to `stream<T>` (multi-element + blocking/`pollSet` delivery —
-  graph `GraphAsyncCtx.pollSet` is still null) and (e) adversarial (deadlock/dropped/cancelled).
+- **NEXT (d-c)**: split — **d-c-1** = SYNCHRONOUS multi-element `stream<u8>` rendezvous (B `stream.write`s N bytes
+  during the entry invoke, A `stream.read`s them after → COMPLETED, NO pollSet; extends d-b-2's graph stream/future
+  wiring + a multi-element buffer in `SharedStream`). **d-c-2** = the BLOCKING case (A reads first → BLOCKED →
+  `GraphAsyncCtx.pollSet` (still null) harvests the peer's `pending_event` + the scheduler re-enters A) — needed for
+  the waitable-set delivery in the exit-condition. Then (e) adversarial. **d-c-1 DELEGATED** (continue the d-b-2
+  subagent — it knows the graph wiring); verify on return.
 - **Exit-condition**: `async_two_tasks_stream_rendezvous.wat` (2-component: A async-imports B's async export)
   builds + asserts Subtask creation→resolution + waitable-set delivery, e2e green; full async corpus + (e)
   adversarial (deadlock/dropped/cancelled) green; single-task path unchanged.

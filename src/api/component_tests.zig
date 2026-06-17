@@ -598,6 +598,33 @@ test "ADR-0195 d-b-2: a single-shot guest↔guest async future rendezvous (B wri
     try testing.expectEqual(@as(?u32, 42), graph.taskResult(1)); // A read B's future value
 }
 
+const two_async_components_stream_path = "test/component/two_async_components_stream.wasm";
+
+test "ADR-0195 d-c-1: a synchronous multi-element guest↔guest async stream rendezvous (B writes 3 bytes, A reads + sums them)" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, two_async_components_stream_path, testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var graph = try instantiateGraph(&eng, testing.allocator, bytes, .{});
+    defer graph.deinit();
+
+    // A's `run` mints a `stream<u8>` (over the GRAPH-shared rendezvous), async-calls
+    // B's `tick(stream<u8>)` passing the writable handle. B runs synchronously during
+    // the async call and `stream.write`s 3 bytes {10,20,12} into the shared rendezvous;
+    // A then `stream.read`s the 3 bytes and task.returns their sum. A's OWN task result
+    // (task 1) == 42 proves the multi-byte payload crossed B→A through the cross-component
+    // stream (not just both completing), and that A's read COMPLETED(3) without BLOCKing.
+    try graph.driveAsyncMain("run");
+    const counts = graph.asyncTaskCounts();
+    try testing.expectEqual(@as(usize, 2), counts.total); // A's run + B's tick
+    try testing.expectEqual(@as(usize, 2), counts.done); // both reached EXIT
+    try testing.expectEqual(@as(?u32, 42), graph.taskResult(1)); // A summed B's stream bytes
+}
+
 test "D-305 (security): an OOB (ptr,len) into a cross-component string import TRAPS, not silently returns 0" {
     var threaded: std.Io.Threaded = .init(testing.allocator, .{});
     defer threaded.deinit();
