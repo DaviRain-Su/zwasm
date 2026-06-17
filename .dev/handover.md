@@ -3,6 +3,20 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
+## Active bundle
+
+- **Bundle-ID**: D-463 per-component async handle-isolation (ADR-0197)
+- **Cycles-remaining**: ~3 (Phase II fixture → Phase IV per-component tables + transfer + re-key)
+- **Continuity-memo**: correctness-FIRST. Design locked in ADR-0197: per-`GraphChild` `streams`+`sets`
+  (inject pointers into `GraphFutureCtx`); `SharedTable` STAYS graph-shared; boundary end-transfer
+  (remove from caller table, mint callee-local handle, same `.shared`); `pending_graph_reads` re-keys
+  raw-handle → shared-slot id (else per-component same-valued handles collide).
+- **Exit-condition**: `GraphAsync.streams`/`.sets` gone (per-`GraphChild`); all 6 trusted
+  `two_async_components_*` fixtures + the new `two_async_components_stream_isolation` fixture green.
+  NEXT step (Phase II, do FIRST): author `two_async_components_stream_isolation.wat` (A mints 2 streams,
+  passes only w1 to B; B writes to A's PRIVATE end index) + RED test `expectError` (traps post-fix; SUCCEEDS
+  today = the leak) BEFORE any impl.
+
 ## Current state — Phase 17 完成形 completion-refinement (release = USER-ONLY, ADR-0156)
 
 Project at the **完成形 plateau** (all dims confirmed): clean (C/Zig/CLI audits), full-featured (WASI complete +
@@ -46,16 +60,13 @@ batch ubuntu+win OK); **d-c-2 ubuntu OK @4f95129a** (Mac+ubuntu verified); windo
 @4ed08f57d → verifies @a82b4f84 next fire; non-ABI, non-urgent). **Phase V retro DONE @f799128a** (ADR-0195
 Status→Implemented + retrospective section; D-464 item (4) closed).
 
-## RESUME POINTER (clean-stop 2026-06-17) — for a fresh session
+## RESUME POINTER (2026-06-18) — for a fresh session
 
-1. **Remote state**: d-c-2 Mac+ubuntu-verified; windows batch at 3/12 (fires at 12, verifies @a82b4f84 — non-urgent).
-   Nothing pending blocks resume. (Normal `/continue` Step 0.7 still runs.)
-2. Project is at the **完成形 plateau**; no active bundle. ADR-0195 campaign FULLY closed (Phase V retro @f799128a).
-   Optional next fronts (all debt-tracked, none urgent): **D-463** (shared-handle-table isolation — real
-   spec-fidelity/security refinement, same family as D-305 boundary error-trap), **D-464** items (1)-(3)
-   (adversarial dropped/cancelled + cancel-op graph builtins — consumer-gated, do NOT grind), D-461 (v128
-   result-write spill, EXOTIC/x86_64), D-460/D-209 (parked), D-305 rare aggregate shapes. Drive per `/continue`
-   Step 0.5 debt sweep + the design-priority bar — do NOT grind speculatively.
+1. **Active bundle drives** (above): D-463 per-component async handle-isolation, Phase II next (Step 1b routes here).
+2. **Remote state**: d-c-2 Mac+ubuntu-verified; windows batch at 3/12 (fires at 12, verifies @a82b4f84 — non-urgent).
+   Nothing pending blocks resume. (Normal `/continue` Step 0.7 still runs.) ADR-0195 campaign FULLY closed @f799128a.
+3. Other debt-tracked fronts (none urgent, do NOT grind speculatively): **D-464** (1)-(3) consumer-gated,
+   D-461 (v128 result-write spill, EXOTIC/x86_64), D-460/D-209 (parked), D-305 rare aggregate shapes.
 
 ## Recently closed arcs (detail in ADRs/git/debt — one-liners)
 

@@ -1962,8 +1962,12 @@ entries:
       when the d-c stream work lands OR as a dedicated isolation pass. Same family as the D-305 boundary
       error-trap (cross-component correctness/security). Not urgent (trusted-graph functional behaviour is
       correct); a 完成形 spec-fidelity refinement.
+      ACTIVE 2026-06-18: dedicated isolation-pass bundle OPEN (ADR-0197). Design locked: per-`GraphChild`
+      `streams`+`sets`, `SharedTable` graph-shared, boundary end-transfer, `pending_graph_reads` re-key
+      raw-handle→shared-slot id. Correctness-FIRST: adversarial `two_async_components_stream_isolation.wat`
+      RED test before any impl. See handover `## Active bundle`.
     first_raised: "2026-06-17"
-    last_reviewed: "2026-06-17"
+    last_reviewed: "2026-06-18"
     refs: |-
       src/api/component_graph.zig (GraphAsync shared StreamFutureTable + SharedTable; graphFuture* builtins);
       ADR-0195 d-b-2; survey said "per-component ends + shared .shared slot" — subagent simplified to shared tables
