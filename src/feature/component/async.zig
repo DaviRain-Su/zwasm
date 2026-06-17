@@ -845,6 +845,17 @@ pub fn newFuturePair(ends: *StreamFutureTable, shared: *SharedTable, elem_type: 
 pub fn dropEnd(ends: *StreamFutureTable, shared: *SharedTable, handle: u32) Error!void {
     const end = try ends.get(handle);
     const sh = end.shared;
+    if (sh != 0) {
+        // Mark the rendezvous dropped (via the end's own `drop`, which also traps a
+        // mid-copy drop) so the SURVIVING peer's next read/write observes DROPPED
+        // instead of BLOCKing on a rendezvous that can never complete. Refcount-release
+        // alone (below) left the shared alive but un-dropped → a peer read hung as
+        // BLOCKED (D-464 adversarial: cross-component peer-drop mid-rendezvous).
+        switch ((try shared.get(sh)).*) {
+            .stream => |*s| try end.drop(s),
+            .future => |*f| try end.drop(f),
+        }
+    }
     _ = try ends.remove(handle);
     if (sh != 0) try shared.release(sh);
 }

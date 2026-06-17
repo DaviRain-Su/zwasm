@@ -214,3 +214,29 @@ test "ADR-0197 (security/D-463): child B writing to child A's UN-GRANTED stream 
     // stream and A read 42 back (the cross-component handle-isolation leak).
     try testing.expectError(error.Unreachable, graph.driveAsyncMain("run"));
 }
+
+const two_async_components_stream_dropped_path = "test/component/two_async_components_stream_dropped.wasm";
+
+test "ADR-0195 (e)/D-464: a cross-component stream whose WRITABLE peer is DROPPED mid-rendezvous lets the reader observe DROPPED, not hang" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, two_async_components_stream_dropped_path, testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var graph = try instantiateGraph(&eng, testing.allocator, bytes, .{});
+    defer graph.deinit();
+
+    // A passes the writable end to B; B drops it without writing. A's `stream.read`
+    // folds the dropped peer into the spec DROPPED return code (`(0 << 4) | 1` == 1).
+    // A `task.return`s that raw code, so A's task result == 1 proves the reader saw a
+    // clean DROPPED — not BLOCKED (0xffffffff), COMPLETED (0), an AsyncDeadlock hang,
+    // or a trap. Exercises the graph drop path (B owns w post-transfer, ADR-0197).
+    try graph.driveAsyncMain("run");
+    const counts = graph.asyncTaskCounts();
+    try testing.expectEqual(@as(usize, 2), counts.total); // A's run + B's tick
+    try testing.expectEqual(@as(usize, 2), counts.done); // both reached EXIT
+    try testing.expectEqual(@as(?u32, 1), graph.taskResult(1)); // A saw DROPPED (code 1)
+}
