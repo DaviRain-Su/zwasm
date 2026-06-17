@@ -246,7 +246,8 @@ pub fn emitV128Load8Splat(
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
     const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    // D-461: spill-aware dst on STAGE1 (XMM15) — XMM14 (stage0) is the zero-ctrl scratch.
+    const dst_x = try gpr.xmmDefSpilledV128(alloc, result_v, 1);
     const scratch_x = abi.fp_spill_stage_xmms[0]; // XMM14: zero ctrl mask
 
     try v128MemPrologue(allocator, buf, oob_fixups, idx_r, offset, 1, func_idx);
@@ -254,6 +255,7 @@ pub fn emitV128Load8Splat(
     try buf.appendSlice(allocator, inst.encMovdXmmFromR32(dst_x, .rcx).slice());
     try buf.appendSlice(allocator, inst.encPxor(scratch_x, scratch_x).slice());
     try buf.appendSlice(allocator, inst.encPshufb(dst_x, scratch_x).slice());
+    try gpr.xmmStoreSpilledV128(allocator, buf, alloc, spill_base_off, result_v, 1);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -279,13 +281,14 @@ pub fn emitV128Load16Splat(
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
     const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    const dst_x = try gpr.xmmDefSpilledV128(alloc, result_v, 1); // D-461: spill-aware dst stage1
 
     try v128MemPrologue(allocator, buf, oob_fixups, idx_r, offset, 2, func_idx);
     try buf.appendSlice(allocator, inst.encMovzxR32_16MemBaseIdx(.rcx, .rax, .rdx).slice());
     try buf.appendSlice(allocator, inst.encMovdXmmFromR32(dst_x, .rcx).slice());
     try buf.appendSlice(allocator, inst.encPshuflw(dst_x, dst_x, 0).slice());
     try buf.appendSlice(allocator, inst.encPshufd(dst_x, dst_x, 0).slice());
+    try gpr.xmmStoreSpilledV128(allocator, buf, alloc, spill_base_off, result_v, 1);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -310,11 +313,12 @@ pub fn emitV128Load32Splat(
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
     const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    const dst_x = try gpr.xmmDefSpilledV128(alloc, result_v, 1); // D-461: spill-aware dst stage1
 
     try v128MemPrologue(allocator, buf, oob_fixups, idx_r, offset, 4, func_idx);
     try buf.appendSlice(allocator, inst.encMovssMovsdMemBaseIdx(.f32, false, dst_x, .rax, .rdx).slice());
     try buf.appendSlice(allocator, inst.encPshufd(dst_x, dst_x, 0).slice());
+    try gpr.xmmStoreSpilledV128(allocator, buf, alloc, spill_base_off, result_v, 1);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -340,11 +344,12 @@ pub fn emitV128Load64Splat(
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
     const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    const dst_x = try gpr.xmmDefSpilledV128(alloc, result_v, 1); // D-461: spill-aware dst stage1
 
     try v128MemPrologue(allocator, buf, oob_fixups, idx_r, offset, 8, func_idx);
     try buf.appendSlice(allocator, inst.encMovssMovsdMemBaseIdx(.f64, false, dst_x, .rax, .rdx).slice());
     try buf.appendSlice(allocator, inst.encPshufd(dst_x, dst_x, 0x44).slice());
+    try gpr.xmmStoreSpilledV128(allocator, buf, alloc, spill_base_off, result_v, 1);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -370,10 +375,11 @@ pub fn emitV128Load32Zero(
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
     const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    const dst_x = try gpr.xmmDefSpilledV128(alloc, result_v, 1); // D-461: spill-aware dst stage1
 
     try v128MemPrologue(allocator, buf, oob_fixups, idx_r, offset, 4, func_idx);
     try buf.appendSlice(allocator, inst.encMovssMovsdMemBaseIdx(.f32, false, dst_x, .rax, .rdx).slice());
+    try gpr.xmmStoreSpilledV128(allocator, buf, alloc, spill_base_off, result_v, 1);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -399,10 +405,11 @@ pub fn emitV128Load64Zero(
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
     const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    const dst_x = try gpr.xmmDefSpilledV128(alloc, result_v, 1); // D-461: spill-aware dst stage1
 
     try v128MemPrologue(allocator, buf, oob_fixups, idx_r, offset, 8, func_idx);
     try buf.appendSlice(allocator, inst.encMovssMovsdMemBaseIdx(.f64, false, dst_x, .rax, .rdx).slice());
+    try gpr.xmmStoreSpilledV128(allocator, buf, alloc, spill_base_off, result_v, 1);
     try pushed_vregs.append(allocator, result_v);
 }
 
