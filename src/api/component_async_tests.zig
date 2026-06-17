@@ -301,3 +301,24 @@ test "D-464(1): a PARKED cross-component stream reader is woken with DROPPED whe
     try graph.driveAsyncMain("run");
     try testing.expectEqual(@as(?u32, 99), graph.taskResult(2)); // B woken with DROPPED
 }
+
+const two_async_components_stream_blocking_write_drop_path = "test/component/two_async_components_stream_blocking_write_drop.wasm";
+
+test "D-464(1): a PARKED cross-component stream WRITER is woken with DROPPED when its readable peer drops (writer-side sibling)" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, two_async_components_stream_blocking_write_drop_path, testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var graph = try instantiateGraph(&eng, testing.allocator, bytes, .{});
+    defer graph.deinit();
+
+    // B parks writing; A drops the readable peer. The drop must wake B's parked write
+    // with DROPPED (B re-writes → low bit set → task.return 99) — the writable arm of
+    // the parked-peer wake, sibling to the reader-side blocking_drop fixture.
+    try graph.driveAsyncMain("run");
+    try testing.expectEqual(@as(?u32, 99), graph.taskResult(2)); // B woken with DROPPED
+}
