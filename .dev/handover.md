@@ -57,9 +57,11 @@ Status→Implemented + retrospective section; D-464 item (4) closed).
 2. **Audit DONE 2026-06-18 (CLEAN)** — `audit_scaffolding` after the heavy async churn: 0 block / 0 soon, only
    J.3 chronic (debt count 61, known front-tagged backlog). Report `private/audit-2026-06-18.md`. Fuzz smoke 0
    crashes. The session's async work left clean scaffolding; no fixes needed.
-3. **Next front — plateau is well-maintained; high-value autonomous vein (async robustness) is mined out.** Remaining
-   fronts are all low-value-per-effort: D-461 (v128 result-write spill — REAL but EXOTIC/x86_64, concrete D-460
-   blocker already cleared so no consumer impact), D-464(2) cancel-op (consumer-gated), D-460/D-209 (parked), D-305
+3. **D-461 x86_64 EXTEND result-write spill DONE @83256d210** (barrier dissolved → status now): `emitV128ExtendLow`
+   +`High` spill-aware (src stage0/dst stage1, no collision); fixture extend_low_i16x8_s→4294938623 GREEN on
+   **arm64-native + x86_64-Rosetta**. Remaining D-461 x86_64 result-write ops (same pattern, each needs a force-spill
+   fixture): Extadd-pairwise, replace_lane, op_simd.zig binop dsts — EXOTIC, drivable next cycle. Other fronts:
+   D-464(2) cancel-op (consumer-gated), D-460/D-209 (parked), D-305
    rare shapes. Next cycle: a broad dogfood/realworld-corpus robustness sweep, OR begin a Phase-I assessment of
    D-461 if electing the exotic-correctness campaign. Do NOT speculatively grind the consumer-gated feature work.
 4. **Remote**: ubuntu green @1ecdd6815 (exit 0); windows batch deferred (3/12 since @0e1fca6e7, non-ABI). D-028 cosmetic.

@@ -1864,10 +1864,20 @@ entries:
       wasmtime tests/misc_testsuite/gc/{alloc-v128-struct,const-expr-gc-simd,v128-with-gc-ref,array-copy-inline}.wast
   - id: "D-461"
     layer: "code"
-    status: "blocked-by"
+    status: "now"
     front: D-wmt-misc
     description: |-
-      blocked-by: SIMD lane ops are NOT fully spilled-v128-operand-aware (pre-existing, NOT GC-specific). Surfaced
+      now (barrier DISSOLVED 2026-06-18): the "blocked-by" sub-barrier (x86_64 regalloc v128-spill OOB) was FIXED
+      via ADR-0194; what remained was unimplemented per-op spill-awareness WORK, not a structural barrier → flipped
+      to `now`. **x86_64 EXTEND (low+high) result-write spill DONE @83256d210** (emitV128ExtendLow/High → spill-aware
+      src stage0/dst stage1, no scratch collision; 12 per-width + 12 ctx threaded `spill_base_off`; force-spill
+      fixture `runner_gc_test.zig` extend_low_i16x8_s→4294938623, arm64-native + x86_64-Rosetta GREEN). REMAINING
+      x86_64 result-write ops (each: force-spill fixture + resolveXmm→xmmDef/StoreSpilledV128, audit scratch-XMM):
+      Extadd-pairwise, replace_lane (reads vec + scalar, writes dst), op_simd.zig binop dsts (:249/282/313/343/373/402).
+      EXOTIC (high-v128-pressure only; concrete D-460 array-copy blocker already cleared by extract_lane).
+      Original surfacing context below.
+
+      SIMD lane ops were NOT fully spilled-v128-operand-aware (pre-existing, NOT GC-specific). Surfaced
       2026-06-16 while finishing the D-460 v128-GC bundle: a v128 value that spills (NEON/XMM register pressure)
       cannot be read by a SIMD lane op → `UnsupportedOp` at compile.
       IV PROGRESS 2026-06-16: **arm64 i32x4.extract_lane i32-result spill-aware DONE** (`97afa4d4`,
@@ -1940,7 +1950,7 @@ entries:
       the code. Discharge: a v128 forced to spill flows through extract/replace_lane on BOTH arches; the D-460
       array.new_fixed+get+extract chain returns the stored lane.
     first_raised: "2026-06-16"
-    last_reviewed: "2026-06-16"
+    last_reviewed: "2026-06-18"
     refs: |-
       src/engine/codegen/x86_64/gpr.zig (resolveXmm — rejects .spill v128);
       src/engine/codegen/{x86_64,arm64}/op_simd_int_cmp_lane.zig (extract/replace_lane SPILL-EXEMPT paths);
