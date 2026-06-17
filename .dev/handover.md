@@ -42,12 +42,13 @@ stream rendezvous + `pollSet`/waitable-set delivery + AsyncDeadlock guard @a82b4
 `GraphAsync` (shared `SharedTable`/`StreamFutureTable`/`WaitableSetTable`; `graphFuture*`/`graphStream*`/
 `graphWaitable*` builtins via `pourSyntheticExport`). Fixtures `test/component/two_async_components_*.wat`
 (future/stream/blocking/deadlock; assert taskResult==42). Local gate green; **3-host through @4ed08f57d** (d-c-1
-batch ubuntu+win OK); **d-c-2 (@a82b4f84) ubuntu verify PENDING** (see resume pointer).
+batch ubuntu+win OK); **d-c-2 ubuntu OK @4f95129a** (Mac+ubuntu verified); windows BATCHED (2/12 since baseline
+@4ed08f57d → verifies @a82b4f84 next fire; non-ABI, non-urgent).
 
 ## RESUME POINTER (clean-stop 2026-06-17) — for a fresh session
 
-1. **Step 0.7**: verify d-c-2 — `grep -E "run_remote_ubuntu] OK|FAIL" /tmp/ubuntu.log` (kicked at stop for HEAD;
-   expect OK). If FAIL → investigate the d-c-2 graph code (no auto-revert; it's a fresh-session first-resume).
+1. **Remote state**: d-c-2 Mac+ubuntu-verified; windows batch at 2/12 (fires at 12, verifies @a82b4f84 — non-urgent).
+   Nothing pending blocks resume. (Normal `/continue` Step 0.7 still runs.)
 2. Project is at the **完成形 plateau**; no active bundle. Optional next fronts (all debt-tracked, none urgent):
    **D-464** (ADR-0195 (e) adversarial dropped/cancelled + cancel-op graph builtins + Phase-V retro), **D-463**
    (shared-handle-table isolation), D-460/D-209 (parked), D-305 rare aggregate shapes (consumer-gated). Drive per
