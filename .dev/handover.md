@@ -49,16 +49,17 @@ Status→Implemented + retrospective section; D-464 item (4) closed).
 
 ## RESUME POINTER (2026-06-18) — for a fresh session
 
-1. **No active bundle.** At the **完成形 plateau** (ADR-0156). Cross-component async drop robustness HARDENED this
-   session (adversarial D-464(1)): STREAM peer-drop bug (reader hung BLOCKED, not DROPPED) fixed @27f9464e0;
-   **D-465 future-drop CLOSED @360382c33** — graph future-writable-drop-before-write now TRAPS, drop builtins
-   unified on `dropEndGuarded` (graph + p2 share one contract); gap-1 (SharedFuture.read dropped check) proven
-   dead-code (guard prevents the only setting sequence; comment added). 4 new adversarial fixtures, Mac test+lint green.
-2. **Next front**: no active drop work. Per Step 0.5 debt sweep + design-priority, do NOT grind speculatively.
-   Candidates (all consumer-gated/exotic): D-464(2) cancel-op FEATURE builtins (consumer-gated), D-461 (v128
-   result-write spill, EXOTIC/x86_64), D-460/D-209 (parked), D-305 rare aggregate shapes. Or a surface/dogfood pass.
-3. **Remote**: ubuntu green @2f69c4256 (exit 0); windows batch FIRED @2f69c4256 — verify its verdict at Step 0.7
-   (a CONNECTION_REFUSED appeared mid-run = likely win IPC flake; my batch is non-Win64). D-028 listen-IPC cosmetic.
+1. **No active bundle.** At the **完成形 plateau** (ADR-0156). **Cross-component async drop/park robustness arc
+   COMPLETE** — 4 real bugs found+fixed this session via adversarial tests: D-463 handle-isolation leak (ADR-0197),
+   stream peer-drop hang @27f9464e0, future-drop-before-write missing trap @360382c33 (D-465, `dropEndGuarded`
+   unifies graph+p2), parked-peer-drop deadlock @cc25647df (both reader+writer dirs, @34aad9314). All 3-host green
+   (ubuntu+win @0e1fca6e7 recorded). 9 adversarial fixtures in `component_async_tests.zig`.
+2. **Next front — PIVOT off async** (high-value adversarial cases exhausted; avoid tunnel-vision after 5 turns).
+   Run **`audit_scaffolding`** (periodic coherence audit — heavy churn this session: ADR-0197, dropEndGuarded
+   refactor, 6 fixtures, D-464/465 discharges) + act on findings; then a broad dogfood/surface pass. Remaining
+   debt fronts all consumer-gated/exotic (do NOT grind): D-464(2) cancel-op, D-461 (v128 spill EXOTIC), D-460/D-209
+   parked, D-305 rare shapes.
+3. **Remote**: ubuntu+windows BOTH green through @0e1fca6e7 (windows gate recorded). D-028 listen-IPC flake cosmetic.
 
 ## Recently closed arcs (detail in ADRs/git/debt — one-liners)
 
