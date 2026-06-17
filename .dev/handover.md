@@ -47,7 +47,8 @@ CLOSED (below). **windowsmini RESUMED**. Version `2.0.0-alpha.3`. Windows batch 
   `.result` + writes it (flat-4 i32) into the IMPORTER's memory at `retptr` (`bctx.importer` threaded through
   `installAsyncBoundary`). Fixture `two_async_components_consume_result.wat` (A reads mem[0]→42, task.returns it);
   test asserts A's own task 1 == 42. A blocked-callee (no result yet) stays unwritten = async-completion path (later).
-- **(d-b-2) DONE** (inline TDD red→green, full local gate verified): single-shot guest↔guest async **future**
+- **(d-b-2) DONE** (@4a344503 subagent + main-loop-verified; build+test+comp-spec 163/0+lint+fallback green):
+  single-shot guest↔guest async **future**
   rendezvous. `GraphAsync` gained ONE graph-level `SharedTable` + ONE `StreamFutureTable` (both children's
   `future.*` builtins mint/look-up there), so a future handle minted in A is valid in B and resolves to the SAME
   rendezvous slot — only the i32 crosses (no rebind). `future.new/read/write/drop` graph host funcs
@@ -58,6 +59,8 @@ CLOSED (below). **windowsmini RESUMED**. Version `2.0.0-alpha.3`. Windows batch 
   `asyncBoundaryParamTrampoline`; `enqueueCalleeSubtask(bctx, arg)` threads it). Fixture
   `two_async_components_future.wat` (B `tick(future<u32>)` writes 42, A `run` reads it, task.returns); test asserts
   A's task 1 == 42 (mutation-proven). Deferrals: param+retptr together, wider/aggregate param, stream rendezvous (d-c).
+  **Tracked simplification = D-463**: graph children share ONE `StreamFutureTable` (not per-component-with-transfer);
+  functionally correct for a trusted graph but a CM handle-isolation deviation to refine (during d-c or a dedicated pass).
 - **NEXT (d-c stream rendezvous + pollSet)**: extend to `stream<T>` (multi-element + blocking/`pollSet` delivery —
   graph `GraphAsyncCtx.pollSet` is still null) and (e) adversarial (deadlock/dropped/cancelled).
 - **Exit-condition**: `async_two_tasks_stream_rendezvous.wat` (2-component: A async-imports B's async export)

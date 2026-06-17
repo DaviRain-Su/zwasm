@@ -1945,6 +1945,28 @@ entries:
       src/engine/codegen/x86_64/gpr.zig (resolveXmm — rejects .spill v128);
       src/engine/codegen/{x86_64,arm64}/op_simd_int_cmp_lane.zig (extract/replace_lane SPILL-EXEMPT paths);
       blocks D-460 array-copy-inline.6 + x86_64 v128-GC mirror
+  - id: "D-463"
+    layer: "code"
+    status: "note"
+    description: |-
+      Status: note (structural simplification to refine, NOT silent-wrong). The graph cross-component async
+      runner (ADR-0195 d-b-2, `GraphAsync` in `src/api/component_graph.zig`) gives ALL children ONE SHARED
+      `StreamFutureTable` (+ one `SharedTable`), so a future/stream handle minted in component A is directly
+      valid in component B's `future.*` lookup (the same index). This is the least-change path that made the
+      cross-component future rendezvous work + is functionally correct for a TRUSTED composed graph (the fixture
+      `two_async_components_future.wat` passes, mutation-proven). BUT it deviates from Component-Model handle
+      ISOLATION: each component instance should own its OWN handle table, and a handle passed across a boundary
+      should TRANSFER (ownership moves) rather than be globally index-visible — otherwise component B could reach
+      component A's other handles by guessing indices. Refine to per-component `StreamFutureTable` + a call-time
+      end-transfer (rebind the passed end into the callee's table, keeping the shared `.shared` rendezvous slot)
+      when the d-c stream work lands OR as a dedicated isolation pass. Same family as the D-305 boundary
+      error-trap (cross-component correctness/security). Not urgent (trusted-graph functional behaviour is
+      correct); a 完成形 spec-fidelity refinement.
+    first_raised: "2026-06-17"
+    last_reviewed: "2026-06-17"
+    refs: |-
+      src/api/component_graph.zig (GraphAsync shared StreamFutureTable + SharedTable; graphFuture* builtins);
+      ADR-0195 d-b-2; survey said "per-component ends + shared .shared slot" — subagent simplified to shared tables
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.
