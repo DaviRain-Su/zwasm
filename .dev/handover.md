@@ -54,9 +54,8 @@ Status→Implemented + retrospective section; D-464 item (4) closed).
    stream peer-drop hang @27f9464e0, future-drop-before-write missing trap @360382c33 (D-465, `dropEndGuarded`
    unifies graph+p2), parked-peer-drop deadlock @cc25647df (both reader+writer dirs, @34aad9314). All 3-host green
    (ubuntu+win @0e1fca6e7 recorded). 9 adversarial fixtures in `component_async_tests.zig`.
-2. **Audit DONE 2026-06-18 (CLEAN)** — `audit_scaffolding` after the heavy async churn: 0 block / 0 soon, only
-   J.3 chronic (debt count 61, known front-tagged backlog). Report `private/audit-2026-06-18.md`. Fuzz smoke 0
-   crashes. The session's async work left clean scaffolding; no fixes needed.
+2. **Audit DONE 2026-06-18 (CLEAN)** — `audit_scaffolding` 0 block/0 soon (only J.3 chronic debt=61);
+   `private/audit-2026-06-18.md`. Fuzz smoke 0 crashes.
 3. **D-461 x86_64 EXTEND result-write spill DONE @83256d210** — GREEN arm64-native + x86_64-Rosetta + **ubuntu
    @b8d6ba461 (exit 0)**; windows in-flight (verify next Step 0.7; rides Win64-proven stage-XMM mechanism).
    **Remaining D-461 ops investigated 2026-06-18 — each ENTANGLED/harder than extend, NOT clean chunks** (detail in
