@@ -1872,8 +1872,18 @@ entries:
       to `now`. **x86_64 EXTEND (low+high) result-write spill DONE @83256d210** (emitV128ExtendLow/High → spill-aware
       src stage0/dst stage1, no scratch collision; 12 per-width + 12 ctx threaded `spill_base_off`; force-spill
       fixture `runner_gc_test.zig` extend_low_i16x8_s→4294938623, arm64-native + x86_64-Rosetta GREEN). REMAINING
-      x86_64 result-write ops (each: force-spill fixture + resolveXmm→xmmDef/StoreSpilledV128, audit scratch-XMM):
-      Extadd-pairwise, replace_lane (reads vec + scalar, writes dst), op_simd.zig binop dsts (:249/282/313/343/373/402).
+      x86_64 result-write ops (each: force-spill fixture + resolveXmm→xmmDef/StoreSpilledV128, audit scratch-XMM) —
+      each ENTANGLED/harder than extend (investigated 2026-06-18, NOT clean isolated chunks):
+      (1) **replace_lane** — x86_64 v128 vec/dst migration is straightforward (no scratch), BUT a force-spill
+          fixture ALSO spills the new-lane scalar GPR, which arm64 `emitI32x4ReplaceLane`/`emitV128ReplaceLane`
+          handle via `resolveGpr` SPILL-EXEMPT (a D-034 GPR-spill baseline, deliberately deferred to a GPR cohort).
+          So a green replace_lane fixture needs BOTH the x86_64 v128 fix AND the arm64 GPR-scalar spill (D-034) —
+          cross-debt; do replace_lane WITH the D-034 arm64 GPR cohort, not as an isolated D-461 chunk. (x86_64 scalar
+          already `gprLoadSpilled`; arm64 v128 already `qLoad/qDef`.)
+      (2) **Extadd-pairwise** (4 impls @1925/1957/2088/2138) — each uses XMM14 (stage0) as its const-vector scratch →
+          COLLIDES with `xmmLoadSpilledV128` stage0; the spilled src must load into stage1 (XMM15) + scratch stays
+          stage0 (mirror the i16x8.bitmask workaround @1050). Needs spill_base_off threading + per-op stage care.
+      (3) op_simd.zig binop dsts (:249/282/313/343/373/402).
       EXOTIC (high-v128-pressure only; concrete D-460 array-copy blocker already cleared by extract_lane).
       Original surfacing context below.
 
