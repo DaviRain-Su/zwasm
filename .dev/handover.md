@@ -42,17 +42,20 @@ stream rendezvous + `pollSet`/waitable-set delivery + AsyncDeadlock guard @a82b4
 `GraphAsync` (shared `SharedTable`/`StreamFutureTable`/`WaitableSetTable`; `graphFuture*`/`graphStream*`/
 `graphWaitable*` builtins via `pourSyntheticExport`). Fixtures `test/component/two_async_components_*.wat`
 (future/stream/blocking/deadlock; assert taskResult==42). Local gate green; **3-host through @4ed08f57d** (d-c-1
-batch ubuntu+win OK); **d-c-2 ubuntu OK @4f95129a** (Mac+ubuntu verified); windows BATCHED (2/12 since baseline
-@4ed08f57d → verifies @a82b4f84 next fire; non-ABI, non-urgent).
+batch ubuntu+win OK); **d-c-2 ubuntu OK @4f95129a** (Mac+ubuntu verified); windows BATCHED (3/12 since baseline
+@4ed08f57d → verifies @a82b4f84 next fire; non-ABI, non-urgent). **Phase V retro DONE @f799128a** (ADR-0195
+Status→Implemented + retrospective section; D-464 item (4) closed).
 
 ## RESUME POINTER (clean-stop 2026-06-17) — for a fresh session
 
-1. **Remote state**: d-c-2 Mac+ubuntu-verified; windows batch at 2/12 (fires at 12, verifies @a82b4f84 — non-urgent).
+1. **Remote state**: d-c-2 Mac+ubuntu-verified; windows batch at 3/12 (fires at 12, verifies @a82b4f84 — non-urgent).
    Nothing pending blocks resume. (Normal `/continue` Step 0.7 still runs.)
-2. Project is at the **完成形 plateau**; no active bundle. Optional next fronts (all debt-tracked, none urgent):
-   **D-464** (ADR-0195 (e) adversarial dropped/cancelled + cancel-op graph builtins + Phase-V retro), **D-463**
-   (shared-handle-table isolation), D-460/D-209 (parked), D-305 rare aggregate shapes (consumer-gated). Drive per
-   `/continue` Step 0.5 debt sweep + the design-priority bar — do NOT grind speculatively.
+2. Project is at the **完成形 plateau**; no active bundle. ADR-0195 campaign FULLY closed (Phase V retro @f799128a).
+   Optional next fronts (all debt-tracked, none urgent): **D-463** (shared-handle-table isolation — real
+   spec-fidelity/security refinement, same family as D-305 boundary error-trap), **D-464** items (1)-(3)
+   (adversarial dropped/cancelled + cancel-op graph builtins — consumer-gated, do NOT grind), D-461 (v128
+   result-write spill, EXOTIC/x86_64), D-460/D-209 (parked), D-305 rare aggregate shapes. Drive per `/continue`
+   Step 0.5 debt sweep + the design-priority bar — do NOT grind speculatively.
 
 ## Recently closed arcs (detail in ADRs/git/debt — one-liners)
 
