@@ -1036,7 +1036,17 @@ pub fn jitGcArrayCopy(rt: *JitRuntime, dst_ref: u32, dst_off: u32, src_ref: u32,
     if (de[1] != 0 or de[0] > dst_len) return 0; // dst OOB
     const se = @addWithOverflow(src_off, len);
     if (se[1] != 0 or se[0] > src_len) return 0; // src OOB
-    const esz: u32 = 8; // uniform element slot (ADR-0116 §3a)
+    // D-460: element slot size from the array's type info (v128 = 16, not the
+    // 8-byte scalar/ref slot). The ObjectHeader's `info` field carries the
+    // TypeInfo index (low 31 bits; bit 31 is the GC mark bit). array.copy
+    // validates dst/src share an element type, so dst's slot size governs both.
+    const gti_opaque = rt.gc_type_infos_ptr orelse return 0;
+    const gti: *const gc_type_info.GcTypeInfos = @ptrCast(@alignCast(gti_opaque));
+    const info_off: u32 = @offsetOf(gc_type_info.ObjectHeader, "info");
+    const dst_tyidx = std.mem.readInt(u32, heap.bytes[dst_ref + info_off ..][0..4], .little) & ~mark_sweep.mark_bit_mask;
+    if (dst_tyidx >= gti.array_infos.len) return 0;
+    const ai = gti.array_infos[dst_tyidx] orelse return 0;
+    const esz: u32 = ai.element.size; // 8 scalar/ref, 16 v128 (ADR-0116 §3a)
     const overlap_backward = (dst_ref == src_ref and dst_off > src_off);
     var k: u32 = 0;
     while (k < len) : (k += 1) {
