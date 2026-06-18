@@ -158,11 +158,15 @@ fn emitV128ExtractLane(
     const result_vreg = ctx.next_vreg.*;
     ctx.next_vreg.* += 1;
     if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
-    // SPILL-EXEMPT: scalar lane result (GPR); spill-aware path is its own follow-on alongside other GPR sites.
-    const result_x = try gpr.resolveGpr(ctx.alloc, result_vreg);
+    // D-461: spill-aware GPR lane result (was resolveGpr-reject). Mirrors
+    // emitI32x4ExtractLane: src_v uses qLoadSpilled stage 0 (V-file), the GPR
+    // result uses gprDef/Store stage 0 (X-file) — disjoint reg files, stage 0
+    // safe for both. Covers i8x16/i16x8 (_s/_u) + i64x2 extract_lane.
+    const result_x = try gpr.gprDefSpilled(ctx.alloc, result_vreg, 0);
 
     const lane: u32 = @intCast(ins.payload & lane_mask);
     try gpr.writeU32(ctx.allocator, ctx.buf, encoder(result_x, src_v, lane));
+    try gpr.gprStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, result_vreg, 0);
     try ctx.pushed_vregs.append(ctx.allocator, result_vreg);
 }
 

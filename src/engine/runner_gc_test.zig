@@ -327,6 +327,22 @@ test "runI32Export: array.new_fixed 2 ×(i32x4.splat) + array.get[1] + extract_l
     try testing.expectEqual(@as(u32, 9), runI32Export(testing.allocator, &bytes, "f"));
 }
 
+test "runI32Export: array v128 + i8x16.extract_lane_u of a spilled result → 9 (D-461 narrow-extract result spill)" {
+    // D-461: i8x16/i16x8/i64x2.extract_lane go through the shared
+    // `emitV128ExtractLane`, whose GPR lane RESULT was resolveGpr-EXEMPT (only
+    // i32x4 had its own gprDefSpilled handler). array.new_fixed force-spills the
+    // v128 elements; i8x16.extract_lane_u's narrow lowering then spills the i32
+    // result → UnsupportedOp (arm64). element 1 = i32x4.splat(9) = bytes
+    // 09 00 00 00…; extract_lane_u 0 → byte 0 = 9. Both arches share the helper.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x5e, 0x7b, 0x01, 0x60, 0x00,
+        0x01, 0x7f, 0x03, 0x02, 0x01, 0x01, 0x07, 0x05, 0x01, 0x01, 0x66, 0x00, 0x00, 0x0a, 0x18, 0x01,
+        0x16, 0x00, 0x41, 0x07, 0xfd, 0x11, 0x41, 0x09, 0xfd, 0x11, 0xfb, 0x08, 0x00, 0x02, 0x41, 0x01,
+        0xfb, 0x0b, 0x00, 0xfd, 0x16, 0x00, 0x0b,
+    };
+    try testing.expectEqual(@as(u32, 9), runI32Export(testing.allocator, &bytes, "f"));
+}
+
 test "runI32Export: 12 live v128 force-spill + v128.or chain + extract_lane → 4095 (D-461 SIMD spill)" {
     // 12 v128 locals live simultaneously force a v128 spill (arm64 13 V-regs,
     // x86_64 6 XMM). v128.or-chains them; extract_lane 0 of OR(1,2,4,...,2048)
