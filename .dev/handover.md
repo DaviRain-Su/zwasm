@@ -32,16 +32,16 @@ CLOSED (below). **windowsmini RESUMED**. Version `2.0.0-alpha.3`.
 ## Active bundle
 
 - **Bundle-ID**: D-034 SIMD spill-completeness cohort (scalar-operand sibling of D-461 + the v128-source arith gap)
-- **Cycles-remaining**: ~3 (sub-cats a–g; DONE: (e) GPR-result + (g) all_true-src @e52d5a5f9; (g) FP-round
-  @2c6f0235c; abs/neg @2fa6ce553; FP-compare @21ae06d01; FP-unop+int-abs @2f74db7ed; opened 2026-06-18)
-- **Continuity-memo**: ALL clean-template (g) wins DONE — 0-scratch (round/sqrt/converts-s/int-abs), 1-scratch
-  XMM7-park (abs/neg), 3-operand FMA-shape (FP-compare). add/sub/mul/div + pmin/pmax already spill-aware.
-  REMAINING (g) = genuinely SCRATCH-HEAVY (2 internal scratch + operands): spec NaN-min/max (op_simd_float.zig
-  :519/:568, 2-src+2-scratch=5 regs, hardest) + UNSIGNED/trunc-sat converts (:1210/:1255/:1309/:1470/:1566/:1624,
-  float-magic-const recipes). Need per-op IN-PLACE restructure (1-src converts: load src into a stage, compute
-  there using XMM7 + other stage, store to dst slot — src/dst share a stage). REJECT a global 3rd-stage-XMM pool
-  cut (perf, exotic). Scalar sub-cats remain: (a) GPR new-lane (arm64 :109/:183), (b) GPR splat-src (:43), (c) FP
-  new-lane (:126), (f) shift-amt (:425) — need new GPR/FP-pressure fixtures. 3-host clean through @2f74db7ed.
+- **Cycles-remaining**: ~3 (sub-cats a–g; DONE through @bceeef4cf: (e) GPR-result + (g) all_true-src/FP-round/
+  abs-neg/FP-compare/FP-unop+int-abs/convert_i32x4_u; opened 2026-06-18)
+- **Continuity-memo**: ALL 4 spill templates now exist — 0-scratch (round/sqrt/converts-s/int-abs), 1-scratch
+  XMM7-park (abs/neg), 3-operand FMA (FP-compare), **2-scratch single-source in-place (convert_i32x4_u @bceeef4cf:
+  load src INTO dst home-or-XMM7, recipe reads dst, store XMM7 if spilled)**. add/sub/mul/div + pmin/pmax already
+  spill-aware. REMAINING (g), now MECHANICAL via the in-place template: trunc_sat_f32x4_s/u (:1255/:1309),
+  trunc_sat_f64x2_s/u_zero (:1470/:1566), convert_low_i32x4_u (:1624). Only genuinely-different = the 2-SOURCE spec
+  NaN-min/max (op_simd_float.zig:519/:568, 5 regs — hardest, needs memory-operand scratch). REJECT a global
+  3rd-stage-XMM pool cut. Scalar sub-cats remain: (a) GPR new-lane (arm64 :109/:183), (b) GPR splat-src (:43),
+  (c) FP new-lane (:126), (f) shift-amt (:425) — need new GPR/FP-pressure fixtures. 3-host clean through @2f74db7ed.
 - **Exit-condition**: every a–g sub-category's operand forced to spill flows through its op on BOTH arches; zero
   bare resolveGpr/resolveFp/resolveXmm SPILL-EXEMPT sites remain (except the structural 3-V-reg select/bitselect).
 
@@ -49,9 +49,9 @@ CLOSED (below). **windowsmini RESUMED**. Version `2.0.0-alpha.3`.
 
 0. **ADR-0195 guest↔guest async — CAMPAIGN COMPLETE** (D-335 closed; detail in git + ADR-0195; residuals D-463
    CLOSED / D-464 future-bucket). **D-461 v128-DST-spill arc COMPLETE both arches** (FP replace_lane @4acd24152).
-1. **Active bundle = D-034** (above): SIMD spill-completeness. ALL clean-template (g) wins DONE through
-   @2f74db7ed (round/sqrt/converts-s/int-abs/abs/neg/FP-compare). NEXT = the SCRATCH-HEAVY tail (NaN-min/max +
-   unsigned/trunc-sat converts, per-op in-place restructure) OR scalar sub-cats (a/b/c/f, need pressure fixtures).
+1. **Active bundle = D-034** (above): SIMD spill-completeness. All 4 spill templates exist; through @bceeef4cf
+   (convert_i32x4_u = the 2-scratch in-place template). NEXT = the remaining trunc_sat/convert_low converts
+   (MECHANICAL via that template) then the 2-source NaN-min/max (hardest) OR scalar sub-cats (a/b/c/f).
 2. **Audit DONE 2026-06-18 (CLEAN)** — `audit_scaffolding` 0 block/0 soon (J.3 chronic debt); fuzz 0 crashes.
 3. **D-460 v128-GC JIT emit DONE both arches** (@3d8be3c00/@8137c7268/@5292569e0; 6 runI32Export fixtures = the
    authoritative JIT verification). Only an optional edge fixture remains (low value). Consumer-gated, do NOT grind:
