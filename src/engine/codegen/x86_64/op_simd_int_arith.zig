@@ -466,10 +466,13 @@ fn emitV128IntShift(
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
-    const vec_x = try gpr.resolveXmm(alloc, vec_v);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
     const count_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, count_v, 0);
-    const scratch_x = abi.fp_spill_stage_xmms[0]; // XMM14
+    // D-034 (g/f): spill-aware v128 vec+dst. vec/dst share spill stage0 (XMM14) —
+    // dst is in-place after MOVAPS (vec dies into dst), so one stage suffices; the
+    // count broadcast moves to stage1 (XMM15) to free stage0 for the spilled vec.
+    const vec_x = try gpr.xmmLoadSpilledV128(allocator, buf, alloc, spill_base_off, vec_v, 0);
+    const dst_x = try gpr.xmmDefSpilledV128(alloc, result_v, 0);
+    const scratch_x = abi.fp_spill_stage_xmms[1]; // XMM15
 
     try buf.appendSlice(allocator, inst.encAndRImm8(.d, count_r, mask_imm).slice());
     try buf.appendSlice(allocator, inst.encMovdXmmFromR32(scratch_x, count_r).slice());
@@ -477,6 +480,7 @@ fn emitV128IntShift(
         try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, vec_x).slice());
     }
     try buf.appendSlice(allocator, encoder_shift(dst_x, scratch_x).slice());
+    try gpr.xmmStoreSpilledV128(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }
 

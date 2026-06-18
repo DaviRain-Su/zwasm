@@ -123,8 +123,13 @@ fn emitV128ReplaceLaneFp(
     lane_mask: u32,
 ) Error!void {
     const new_lane_vreg = ctx.pushed_vregs.pop().?;
-    // SPILL-EXEMPT: FP scalar new-lane; fpLoadSpilled is its own follow-on alongside other FP-side sites.
-    const new_lane_v = try gpr.resolveFp(ctx.alloc, new_lane_vreg);
+    // D-034 (c): spill-aware FP new-lane (was resolveFp-EXEMPT). The 2-stage
+    // FP pool {V29,V30} is fully consumed by src (stage0) + result (stage1);
+    // the new-lane outlives both, so a spilled new-lane loads into stage1
+    // (V30) — deliberately the result's stage. The existing D-066
+    // aliasing-stash below (new_lane_v == result_v → MOV V31 ← new_lane)
+    // already preserves it across the result MOV, so no extra scratch needed.
+    const new_lane_v = try gpr.fpLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, new_lane_vreg, 1);
 
     const src_vreg = ctx.pushed_vregs.pop().?;
     const src_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);

@@ -422,8 +422,11 @@ fn emitV128IntShift(
     shift_encoder: *const fn (rd: u5, rn: u5, rm: u5) u32,
 ) Error!void {
     const amt_vreg = ctx.pushed_vregs.pop().?;
-    // SPILL-EXEMPT: i32 amount; consumed via AND/NEG/DUP below.
-    const amt_w = try gpr.resolveGpr(ctx.alloc, amt_vreg);
+    // D-034 (f): spill-aware GPR shift-amount (was resolveGpr-EXEMPT).
+    // gprLoadSpilled stage0/X14 (X-file, disjoint from the X16/X17 mask/amt
+    // scratch and the V-file dup/src/result stages); consumed via AND below
+    // before any further GPR-stage use.
+    const amt_w = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, amt_vreg, 0);
 
     const src_vreg = ctx.pushed_vregs.pop().?;
     const src_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
@@ -433,7 +436,12 @@ fn emitV128IntShift(
     if (result_vreg >= ctx.alloc.slots.len) return Error.SlotOverflow;
     const result_v = try gpr.qDefSpilled(ctx.alloc, result_vreg, 0);
 
-    const dup_v: u5 = 29; // fp_spill_stage[0]
+    // D-034 (f): the DUP scratch MUST avoid the FP spill-stage regs. When src
+    // spills it lands in qLoadSpilled stage0 (V29); a dup_v of V29 would clobber
+    // src before USHL/SSHL reads it (→ shifts the count by itself). simd_scratch_v
+    // (V31) is outside both the stage pool {V29,V30} and the allocatable V-regs,
+    // so it never collides with src/result.
+    const dup_v: u5 = op_simd.simd_scratch_v;
 
     // MOVZ X16, #lane_mask ; AND W17, W<amt>, W16  (masks the amount mod lane_width).
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovzImm16(shift_scratch_mask_x, lane_mask));

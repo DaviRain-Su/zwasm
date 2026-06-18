@@ -1113,11 +1113,12 @@ pub fn emitF64x2ReplaceLane(
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
     // D-461 (i): spill-aware v128 vec-read (stage0/XMM14) + dst-write
-    // (stage1/XMM15), mirroring arm64 emitV128ReplaceLaneFp. The new-lane FP
-    // scalar stays `resolveXmm` (SPILL-EXEMPT = arm64's resolveFp exempt; its
-    // spill is the D-034 GPR/FP-scalar cohort). The XMM7 aliasing stash below
-    // only fires in the all-home case (a stage reg can never equal a home reg).
-    const value_x = try gpr.resolveXmm(alloc, value_v);
+    // (stage1/XMM15), mirroring arm64 emitV128ReplaceLaneFp.
+    // D-034 (c): the new-lane FP scalar is now spill-aware too — loaded into
+    // stage1 (XMM15 = dst's stage) when spilled; the XMM7 aliasing stash below
+    // (dst == value, both XMM15 when both spilled) preserves it across the
+    // MOVAPS-from-vec, exactly as in the all-home alias case.
+    const value_x = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, value_v, 1);
     const vec_x = try gpr.xmmLoadSpilledV128(allocator, buf, alloc, spill_base_off, vec_v, 0);
     const dst_x = try gpr.xmmDefSpilledV128(alloc, result_v, 1);
 
@@ -1239,10 +1240,11 @@ pub fn emitF32x4ReplaceLane(
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
-    // D-461 (i): spill-aware v128 vec-read (stage0) + dst-write (stage1); the
-    // new-lane FP scalar stays `resolveXmm` (SPILL-EXEMPT, D-034 cohort). See
-    // emitF64x2ReplaceLane for the staging rationale.
-    const value_x = try gpr.resolveXmm(alloc, value_v);
+    // D-461 (i): spill-aware v128 vec-read (stage0) + dst-write (stage1).
+    // D-034 (c): the new-lane FP scalar is now spill-aware too — loaded into
+    // stage1 (XMM15 = dst's stage) when spilled; the existing XMM7 aliasing-stash
+    // below (dst == value) already preserves it across the MOVAPS-from-vec.
+    const value_x = try gpr.xmmLoadSpilled(allocator, buf, alloc, spill_base_off, value_v, 1);
     const vec_x = try gpr.xmmLoadSpilledV128(allocator, buf, alloc, spill_base_off, vec_v, 0);
     const dst_x = try gpr.xmmDefSpilledV128(alloc, result_v, 1);
 
