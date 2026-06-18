@@ -1584,7 +1584,7 @@ pub fn compile(
             // into per-emit-pass extra_consts.
             .@"i32x4.trunc_sat_f64x2_s_zero" => {
                 const simd_consts_base: u32 = if (func.simd_consts) |sc| @intCast(sc.len) else 0;
-                try op_simd_float.emitI32x4TruncSatF64x2SZero(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &simd_const_fixups, &extra_consts, simd_consts_base);
+                try op_simd_float.emitI32x4TruncSatF64x2SZero(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, &simd_const_fixups, &extra_consts, simd_consts_base);
             },
             // §9.7/9.7-an — i8x16.popcnt via SSSE3 PSHUFB-LUT
             // (1 op, 2 const-pool entries shared via extra_consts).
@@ -1603,7 +1603,7 @@ pub fn compile(
             // cranelift `lower.isle:5061-5093`.
             .@"i32x4.trunc_sat_f64x2_u_zero" => {
                 const simd_consts_base: u32 = if (func.simd_consts) |sc| @intCast(sc.len) else 0;
-                try op_simd_float.emitI32x4TruncSatF64x2UZero(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &simd_const_fixups, &extra_consts, simd_consts_base);
+                try op_simd_float.emitI32x4TruncSatF64x2UZero(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, &simd_const_fixups, &extra_consts, simd_consts_base);
             },
             // STRICT (non-relaxed) f32↔i32 + f64.convert_low_s conversions (D-457).
             // Complete handlers, shared with the relaxed-simd trunc variants below;
@@ -1645,11 +1645,11 @@ pub fn compile(
             .@"i32x4.relaxed_trunc_f32x4_u" => try op_simd_float.emitI32x4TruncSatF32x4U(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
             .@"i32x4.relaxed_trunc_f64x2_s_zero" => {
                 const simd_consts_base: u32 = if (func.simd_consts) |sc| @intCast(sc.len) else 0;
-                try op_simd_float.emitI32x4TruncSatF64x2SZero(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &simd_const_fixups, &extra_consts, simd_consts_base);
+                try op_simd_float.emitI32x4TruncSatF64x2SZero(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, &simd_const_fixups, &extra_consts, simd_consts_base);
             },
             .@"i32x4.relaxed_trunc_f64x2_u_zero" => {
                 const simd_consts_base: u32 = if (func.simd_consts) |sc| @intCast(sc.len) else 0;
-                try op_simd_float.emitI32x4TruncSatF64x2UZero(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &simd_const_fixups, &extra_consts, simd_consts_base);
+                try op_simd_float.emitI32x4TruncSatF64x2UZero(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, &simd_const_fixups, &extra_consts, simd_consts_base);
             },
             // §17.4 relaxed-SIMD min/max — RAW MINPS/MAXPS/MINPD/MAXPD (single
             // instr), not the strict NaN/±0-propagating recipe (ADR-0169).

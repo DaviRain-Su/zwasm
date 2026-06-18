@@ -1527,6 +1527,7 @@ pub fn emitI32x4TruncSatF64x2SZero(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     simd_const_fixups: *std.ArrayList(@import("types.zig").SimdConstFixup),
     extra_consts: *std.ArrayList([16]u8),
     simd_consts_base: u32,
@@ -1537,10 +1538,15 @@ pub fn emitI32x4TruncSatF64x2SZero(
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
-    const src_x = try gpr.resolveXmm(alloc, src_v);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    // D-034 (g): 2-scratch in-place — both stages are scratch (tmp_const/tmp_mask),
+    // so load src INTO dst (home or XMM7 when spilled); src is read only at step 2.
     const tmp_const = abi.fp_spill_stage_xmms[0]; // XMM14
     const tmp_mask = abi.fp_spill_stage_xmms[1]; // XMM15
+    const result_slot = alloc.slot(result_v, .fpr);
+    const dst_x: inst.Xmm = switch (result_slot) {
+        .reg => |id| abi.fpSlotToReg(id) orelse return Error.SlotOverflow,
+        .spill => .xmm7,
+    };
 
     // Look up or append INT32_MAX_F64_BROADCAST in extra_consts.
     var const_idx: u32 = 0;
@@ -1568,9 +1574,17 @@ pub fn emitI32x4TruncSatF64x2SZero(
         .const_idx = const_idx,
     });
 
-    // 2: MOVAPS dst, src.
-    if (dst_x != src_x) {
-        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, src_x).slice());
+    // 2: load src INTO dst (in-place; MOVAPS reg-home or RBP-disp load when spilled).
+    switch (alloc.slot(src_v, .fpr)) {
+        .reg => |id| {
+            const src_home = abi.fpSlotToReg(id) orelse return Error.SlotOverflow;
+            if (dst_x != src_home) try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, src_home).slice());
+        },
+        .spill => |off| {
+            const abs_off = spill_base_off + off;
+            if (abs_off > 0x7FFF_FFFF) return Error.SlotOverflow;
+            try buf.appendSlice(allocator, inst.encLoadXmmV128MemRBPDisp32(dst_x, -@as(i32, @intCast(abs_off))).slice());
+        },
     }
     // 3: CMPPD tmp_mask, dst, EQ_OQ → mask of (lane==lane), 0 for NaN.
     try buf.appendSlice(allocator, inst.encMovapsXmmXmm(tmp_mask, dst_x).slice());
@@ -1582,6 +1596,11 @@ pub fn emitI32x4TruncSatF64x2SZero(
     // 6: CVTTPD2DQ dst, dst → truncate; high 2 lanes auto-zeroed.
     try buf.appendSlice(allocator, inst.encCvttpd2dq(dst_x, dst_x).slice());
 
+    if (result_slot == .spill) {
+        const abs_off = spill_base_off + result_slot.spill;
+        if (abs_off > 0x7FFF_FFFF) return Error.SlotOverflow;
+        try buf.appendSlice(allocator, inst.encStoreXmmV128MemRBPDisp32(-@as(i32, @intCast(abs_off)), .xmm7).slice());
+    }
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -1623,6 +1642,7 @@ pub fn emitI32x4TruncSatF64x2UZero(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     simd_const_fixups: *std.ArrayList(@import("types.zig").SimdConstFixup),
     extra_consts: *std.ArrayList([16]u8),
     simd_consts_base: u32,
@@ -1633,17 +1653,30 @@ pub fn emitI32x4TruncSatF64x2UZero(
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
-    const src_x = try gpr.resolveXmm(alloc, src_v);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    // D-034 (g): 2-scratch in-place — both stages are scratch (t1/t2), so load
+    // src INTO dst (home or XMM7 when spilled); src is read only at step 1.
     const t1 = abi.fp_spill_stage_xmms[0]; // XMM14 (zeros + final SHUFPS source)
     const t2 = abi.fp_spill_stage_xmms[1]; // XMM15 (const loads)
+    const result_slot = alloc.slot(result_v, .fpr);
+    const dst_x: inst.Xmm = switch (result_slot) {
+        .reg => |id| abi.fpSlotToReg(id) orelse return Error.SlotOverflow,
+        .spill => .xmm7,
+    };
 
     const umax_idx = try op_simd.lookupOrAppendExtraConst(allocator, extra_consts, simd_consts_base, UINT32_MAX_F64_BROADCAST);
     const magic_idx = try op_simd.lookupOrAppendExtraConst(allocator, extra_consts, simd_consts_base, UINT_MASK_HIGH);
 
-    // 1: dst = src.
-    if (dst_x != src_x) {
-        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, src_x).slice());
+    // 1: load src INTO dst (in-place; MOVAPS reg-home or RBP-disp load when spilled).
+    switch (alloc.slot(src_v, .fpr)) {
+        .reg => |id| {
+            const src_home = abi.fpSlotToReg(id) orelse return Error.SlotOverflow;
+            if (dst_x != src_home) try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, src_home).slice());
+        },
+        .spill => |off| {
+            const abs_off = spill_base_off + off;
+            if (abs_off > 0x7FFF_FFFF) return Error.SlotOverflow;
+            try buf.appendSlice(allocator, inst.encLoadXmmV128MemRBPDisp32(dst_x, -@as(i32, @intCast(abs_off))).slice());
+        },
     }
     // 2: t1 = zeros via PXOR.
     try buf.appendSlice(allocator, inst.encPxor(t1, t1).slice());
@@ -1663,6 +1696,11 @@ pub fn emitI32x4TruncSatF64x2UZero(
     // i32x4 lanes 0/1, lanes 2/3 zero (from t1=zeros).
     try buf.appendSlice(allocator, inst.encShufps(dst_x, t1, 0x88).slice());
 
+    if (result_slot == .spill) {
+        const abs_off = spill_base_off + result_slot.spill;
+        if (abs_off > 0x7FFF_FFFF) return Error.SlotOverflow;
+        try buf.appendSlice(allocator, inst.encStoreXmmV128MemRBPDisp32(-@as(i32, @intCast(abs_off)), .xmm7).slice());
+    }
     try pushed_vregs.append(allocator, result_v);
 }
 
