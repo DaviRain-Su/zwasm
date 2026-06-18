@@ -56,18 +56,18 @@ Status→Implemented + retrospective section; D-464 item (4) closed).
    (ubuntu+win @0e1fca6e7 recorded). 9 adversarial fixtures in `component_async_tests.zig`.
 2. **Audit DONE 2026-06-18 (CLEAN)** — `audit_scaffolding` 0 block/0 soon (only J.3 chronic debt=61);
    `private/audit-2026-06-18.md`. Fuzz smoke 0 crashes.
-3. **D-460 v128-GC JIT emit — get/set/new/new_fixed DONE BOTH arches** (@3d8be3c00 x86_64 struct/array mirror +
-   @8137c7268 array_new_fixed both arches). arm64 had struct/array get/set/new (f79a3ced/41015a9b); x86_64 now
-   mirrors via MOVUPS + running-sum struct offset + new `encShlRImm8` index×16 stride; array_new_fixed adds the
-   16-byte stride/STR-Q arm. 4 runI32Export fixtures use a `v128.load` producer (struct.new/array.new_* force-spill
-   the operand [ADR-0060] + x86_64 replace_lane not spilled-dst aware → would mask the GC op). Both arches GREEN
-   (arm64 2954/2966, Rosetta 2960/2972). **REMAINING D-460 = array_copy ONLY** (trampoline `jitGcArrayCopy`
-   per-element byte-copy must use v128 elem size — exotic, gc/array-copy-inline.6). Then D-460 closes.
-4. **D-461 x86_64 v128 spill — 4 op families DONE** (extend @83256d210 3-host, Extadd @4b839f29a, splat/zero
-   @612a1b6b9, **load_lane @5785dffa2 — ubuntu+win BOTH exit-0 this session**). Remaining = **replace_lane ONLY**
-   (entangled with D-034 GPR-scalar; do WITH that cohort). **Remote**: load_lane 3-host GREEN. ubuntunote nix-disk
-   FIXED 2026-06-18 (402GB `.zig-cache` → `rm -rf`; lesson `2026-06-18-remote-zig-cache-fills-disk-*`: "nix dep
-   failed" → check `df -h`). Do NOT grind consumer-gated (D-464(2), D-305).
+3. **D-460 v128-GC JIT emit — FULLY DONE BOTH ARCHES** (struct/array get/set/new @3d8be3c00 x86_64 mirror +
+   array_new_fixed @8137c7268 + **array_copy @5292569e0**). x86_64 mirrors arm64 via MOVUPS + running-sum struct
+   offset + new `encShlRImm8` index×16; array_copy resolves elem size from `ObjectHeader.info` (was hardcoded
+   8-byte) in the arch-independent `jitGcArrayCopy`. 6 runI32Export RED→GREEN fixtures use a `v128.load` producer
+   (struct.new/array.new_* force-spill the operand [ADR-0060] + x86_64 replace_lane not spilled-dst aware → would
+   mask the GC op). arm64 2955/2967, Rosetta 2961/2973. **D-460 status=partial**: only coverage formalities left
+   (run gc/array-copy-inline.6 via `wasmtime_misc_native_sweep.sh` + optional test/edge_cases/p10/gc fixture). NEXT:
+   discharge D-460 via the wasmtime sweep, OR pivot (D-034 GPR-scalar cohort / dogfood). Do NOT grind consumer-gated.
+4. **D-461 x86_64 v128 spill — 4 op families DONE** (extend @83256d210, Extadd @4b839f29a, splat/zero @612a1b6b9,
+   **load_lane @5785dffa2 — 3-host GREEN**). Remaining = **replace_lane ONLY** (entangled with D-034 GPR-scalar; do
+   WITH that cohort). ubuntunote nix-disk FIXED 2026-06-18 (402GB `.zig-cache` → `rm -rf`; lesson
+   `2026-06-18-remote-zig-cache-fills-disk-*`: "nix dep failed" → check `df -h`).
 
 ## Recently closed arcs (detail in ADRs/git/debt — one-liners)
 

@@ -1834,6 +1834,13 @@ entries:
       struct_ops v128 new/get/set round-trip + type_info offset/size layout. VERIFIED end-to-end via interp:
       gc/alloc-v128-struct instantiates+runs, gc/const-expr-gc-simd `v128-array-len` returns 2,
       `v128-struct-default` instantiates.
+      **JIT GC-v128 EMIT BUNDLE — ALL DONE BOTH ARCHES 2026-06-18.** struct/array get/set/new + array_new_fixed +
+      array_copy are v128-aware on arm64 + x86_64 (see the per-op SHAs below). 6 runI32Export RED→GREEN fixtures
+      (struct new/get, struct set, array set/get, array new_fixed, array copy) pass arm64-native + x86_64-Rosetta.
+      **REMAINING (coverage formalities only, NOT implementation)**: (a) confirm gc/array-copy-inline.6 → 16 via
+      `scripts/wasmtime_misc_native_sweep.sh` (JIT run-stage, opt-in; the runI32Export array.copy test verifies the
+      same shape); (b) optional e2e fixture under test/edge_cases/p10/gc/. Discharge the row when (a) is run green.
+      ---- (original surfacing context below) ----
       RESIDUAL (the still-open part = the "JIT GC-v128 emit" bundle): SIMD is JIT-only by design (D-244), so
       OBSERVING a v128 GC field via i32x4.extract_lane (gc/array-copy-inline.6 → expects 16) needs JIT GC-v128
       struct/array op emit on BOTH arches. Phase-I scope (2026-06-16):
@@ -1860,7 +1867,7 @@ entries:
       Discharge: a struct.new/get + array.new_fixed/copy/get v128 round-trip via runI32Export on BOTH arches;
       array-copy-inline.6 returns 16 under the native runner; e2e edge fixture under test/edge_cases/p10/gc/.
     first_raised: "2026-06-16"
-    last_reviewed: "2026-06-16"
+    last_reviewed: "2026-06-18"
     refs: |-
       src/feature/gc/type_info.zig:167-175 (fieldSlotSize); src/feature/gc/type_info.zig (materialiseGcTypes offsets);
       src/instruction/wasm_3_0/{struct_ops,array_ops}.zig; src/runtime/instance/instantiate.zig (evalGlobalInitGc);
