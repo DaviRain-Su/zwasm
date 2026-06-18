@@ -1837,11 +1837,13 @@ entries:
       RESIDUAL (the still-open part = the "JIT GC-v128 emit" bundle): SIMD is JIT-only by design (D-244), so
       OBSERVING a v128 GC field via i32x4.extract_lane (gc/array-copy-inline.6 → expects 16) needs JIT GC-v128
       struct/array op emit on BOTH arches. Phase-I scope (2026-06-16):
-      - Op files to extend (×2 arches): struct_get / struct_set / struct_new + array_get / array_set /
-        array_new_fixed / array_copy (array_new_default already @memsets, size-agnostic). Each currently hardcodes
-        an 8-byte slot: e.g. x86_64 array_get.zig uses `encMovR64FromBaseIdxLsl3` (index×8, Lsl3) + a 2-way
-        result class switch (FP→XMM movd/movq, else→GPR). v128 needs index×16 stride + a 16-byte XMM load/store
-        (movdqu) + a NEW v128 result-register class arm (the def must be an XMM vreg holding 16 bytes, not GPR).
+      - **DONE both arches**: struct_get / struct_set / struct_new + array_get / array_set (arm64 f79a3ced/
+        41015a9b; **x86_64 mirror @3d8be3c00** — MOVUPS + running-sum struct offset + encShlRImm8 index×16 stride;
+        3 runI32Export fixtures rewritten splat+replace_lane→v128.load because struct.new force-spills its field
+        operand [ADR-0060] and x86_64 replace_lane is not yet spilled-dst aware [D-461/D-034 cohort] → masked the
+        GC op). **REMAINING**: array_new_fixed (both arches still 8-byte; needs a NEW fixture) + array_copy
+        (trampoline jitGcArrayCopy element-size logic — exotic, gc/array-copy-inline.6). array_new_default already
+        @memsets (size-agnostic). Recipe for the remaining: v128 index×16 stride + 16-byte XMM (MOVUPS) load/store.
       - The element/field width is `FieldInfo.size` / `arrayElemValType==0x7B`; mirror struct field via the
         StructInfo offset+size already materialised (D-460 core).
       - TEST VEHICLE: `engine/runner_gc_test.zig` `runI32Export(alloc, &wasm_bytes, "f")` compiles a module to

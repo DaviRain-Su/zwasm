@@ -56,18 +56,18 @@ Status→Implemented + retrospective section; D-464 item (4) closed).
    (ubuntu+win @0e1fca6e7 recorded). 9 adversarial fixtures in `component_async_tests.zig`.
 2. **Audit DONE 2026-06-18 (CLEAN)** — `audit_scaffolding` 0 block/0 soon (only J.3 chronic debt=61);
    `private/audit-2026-06-18.md`. Fuzz smoke 0 crashes.
-3. **D-461 x86_64 v128 result-write spill — 4 op families DONE this session** (arm64 was already spill-aware for
-   all; x86_64 migrated src→stage0/XMM14, dst→stage1/XMM15; each with a 12-v128 force-spill fixture, arm64+Rosetta
-   GREEN): **extend** @83256d210 (3-host), **Extadd-pairwise** @4b839f29a, **v128.load splat/zero** (6 ops)
-   @612a1b6b9, **load_lane** @5785dffa2 (vec-read+dst-write, no internal XMM scratch → clean). **Remaining D-461 =
-   replace_lane ONLY** — ENTANGLED with D-034 arm64-GPR-scalar (do it WITH the D-034 cohort, NOT isolated; see row).
-   So D-461 clean work is essentially exhausted → **next: pivot to dogfood OR open the D-034 GPR-scalar cohort.**
-   Do NOT grind consumer-gated (D-464(2), D-305).
-4. **Remote**: extend 3-host GREEN; Extadd+splat/zero ubuntu-green @fc7c2a04e. load_lane pending next remote kick
-   (non-ABI codegen, Win64-proven stage-XMM pattern). **ubuntunote nix failure FIXED 2026-06-18**: was a FULL DISK
-   (100%) — 402GB `.zig-cache`; `rm -rf .zig-cache` freed 405G (→9%), cold test-all GREEN. Lesson
-   `2026-06-18-remote-zig-cache-fills-disk-*` (remote "nix dependency failed" → check `df -h`; non-code re-kick not
-   revert). windows batch (memload+load_lane pending, non-ABI). D-028/windows-listen flakes cosmetic.
+3. **D-460 v128-GC JIT emit — x86_64 struct/array MIRROR DONE @3d8be3c00** (ACTIVE BUNDLE). arm64 had
+   struct/array get/set/new (f79a3ced/41015a9b); x86_64 now mirrors via MOVUPS + running-sum struct offset +
+   new `encShlRImm8` index×16 stride; 3 runI32Export fixtures rewritten splat+replace_lane→`v128.load` (struct.new
+   force-spills field operand [ADR-0060] + x86_64 replace_lane not spilled-dst aware → masked the GC op). Both
+   arches GREEN (arm64 2953/2965, Rosetta 2959/2971). **NEXT (bundle): array_new_fixed v128 BOTH arches** (still
+   8-byte, needs a NEW fixture) + **array_copy** (trampoline `jitGcArrayCopy` elem-size — exotic). Recipe: index×16
+   + 16-byte MOVUPS/LDR-Q. See D-460 row.
+4. **D-461 x86_64 v128 spill — 4 op families DONE** (extend @83256d210 3-host, Extadd @4b839f29a, splat/zero
+   @612a1b6b9, **load_lane @5785dffa2 — ubuntu+win BOTH exit-0 this session**). Remaining = **replace_lane ONLY**
+   (entangled with D-034 GPR-scalar; do WITH that cohort). **Remote**: load_lane 3-host GREEN. ubuntunote nix-disk
+   FIXED 2026-06-18 (402GB `.zig-cache` → `rm -rf`; lesson `2026-06-18-remote-zig-cache-fills-disk-*`: "nix dep
+   failed" → check `df -h`). Do NOT grind consumer-gated (D-464(2), D-305).
 
 ## Recently closed arcs (detail in ADRs/git/debt — one-liners)
 
