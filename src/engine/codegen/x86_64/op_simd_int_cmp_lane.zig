@@ -352,7 +352,7 @@ pub fn emitI16x8NarrowI32x4UCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr)
 
 pub fn emitI16x8ExtmulLowI8x16SCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitI16x8ExtmulLowI8x16S(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitI16x8ExtmulLowI8x16S(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 pub fn emitI16x8ExtmulHighI8x16SCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
@@ -362,7 +362,7 @@ pub fn emitI16x8ExtmulHighI8x16SCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirIn
 
 pub fn emitI16x8ExtmulLowI8x16UCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitI16x8ExtmulLowI8x16U(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitI16x8ExtmulLowI8x16U(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 pub fn emitI16x8ExtmulHighI8x16UCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
@@ -372,7 +372,7 @@ pub fn emitI16x8ExtmulHighI8x16UCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirIn
 
 pub fn emitI32x4ExtmulLowI16x8SCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitI32x4ExtmulLowI16x8S(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitI32x4ExtmulLowI16x8S(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 pub fn emitI32x4ExtmulHighI16x8SCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
@@ -382,7 +382,7 @@ pub fn emitI32x4ExtmulHighI16x8SCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirIn
 
 pub fn emitI32x4ExtmulLowI16x8UCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitI32x4ExtmulLowI16x8U(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitI32x4ExtmulLowI16x8U(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 pub fn emitI32x4ExtmulHighI16x8UCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
@@ -944,6 +944,26 @@ fn resolveOrLoadV128(
             break :blk temp;
         },
     };
+}
+
+/// D-034 (g) file-local: flush XMM7 → the result's spill slot when result spilled
+/// (a no-op when result is in a home reg). Pairs with the `dst → home or XMM7`
+/// idiom used by the spill-aware handlers in this file.
+fn storeV128IfSpilledLocal(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    spill_base_off: u32,
+    result_v: usize,
+) Error!void {
+    switch (alloc.slot(result_v, .fpr)) {
+        .reg => {},
+        .spill => |off| {
+            const abs_off = spill_base_off + off;
+            if (abs_off > 0x7FFF_FFFF) return Error.SlotOverflow;
+            try buf.appendSlice(allocator, inst.encStoreXmmV128MemRBPDisp32(-@as(i32, @intCast(abs_off)), .xmm7).slice());
+        },
+    }
 }
 
 pub fn emitI8x16GtU(
@@ -1916,6 +1936,7 @@ fn emitV128IntExtmulLow(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     encoder_extend: *const fn (dst: inst.Xmm, src: inst.Xmm) inst.EncodedInsn,
     encoder_mul: *const fn (dst: inst.Xmm, src: inst.Xmm) inst.EncodedInsn,
 ) Error!void {
@@ -1926,14 +1947,21 @@ fn emitV128IntExtmulLow(
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
-    const lhs_x = try gpr.resolveXmm(alloc, lhs_v);
-    const rhs_x = try gpr.resolveXmm(alloc, rhs_v);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    // D-034 (g): spill-aware. lhs is extended into tmp=XMM14 (consumed before dst
+    // is touched), rhs is extended into dst — the in-place PMOVSX/ZX make dst==rhs
+    // safe, so no aliasing stash is needed. A spilled lhs/rhs loads into stage1/
+    // XMM15 (reused: lhs is dead once in XMM14 before rhs loads); dst → home/XMM7.
+    const dst_x: inst.Xmm = switch (alloc.slot(result_v, .fpr)) {
+        .reg => |id| abi.fpSlotToReg(id) orelse return Error.SlotOverflow,
+        .spill => .xmm7,
+    };
     const tmp = abi.fp_spill_stage_xmms[0]; // XMM14
-
+    const lhs_x = try resolveOrLoadV128(allocator, buf, alloc, spill_base_off, lhs_v, abi.fp_spill_stage_xmms[1]);
     try buf.appendSlice(allocator, encoder_extend(tmp, lhs_x).slice());
+    const rhs_x = try resolveOrLoadV128(allocator, buf, alloc, spill_base_off, rhs_v, abi.fp_spill_stage_xmms[1]);
     try buf.appendSlice(allocator, encoder_extend(dst_x, rhs_x).slice());
     try buf.appendSlice(allocator, encoder_mul(dst_x, tmp).slice());
+    try storeV128IfSpilledLocal(allocator, buf, alloc, spill_base_off, result_v);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -1971,32 +1999,32 @@ fn emitV128IntExtmulHigh(
     try pushed_vregs.append(allocator, result_v);
 }
 
-pub fn emitI16x8ExtmulLowI8x16S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntExtmulLow(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmovsxbw, inst.encPmullW);
+pub fn emitI16x8ExtmulLowI8x16S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntExtmulLow(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPmovsxbw, inst.encPmullW);
 }
 
 pub fn emitI16x8ExtmulHighI8x16S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
     return emitV128IntExtmulHigh(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmovsxbw, inst.encPmullW);
 }
 
-pub fn emitI16x8ExtmulLowI8x16U(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntExtmulLow(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmovzxbw, inst.encPmullW);
+pub fn emitI16x8ExtmulLowI8x16U(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntExtmulLow(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPmovzxbw, inst.encPmullW);
 }
 
 pub fn emitI16x8ExtmulHighI8x16U(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
     return emitV128IntExtmulHigh(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmovzxbw, inst.encPmullW);
 }
 
-pub fn emitI32x4ExtmulLowI16x8S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntExtmulLow(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmovsxwd, inst.encPmullD);
+pub fn emitI32x4ExtmulLowI16x8S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntExtmulLow(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPmovsxwd, inst.encPmullD);
 }
 
 pub fn emitI32x4ExtmulHighI16x8S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
     return emitV128IntExtmulHigh(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmovsxwd, inst.encPmullD);
 }
 
-pub fn emitI32x4ExtmulLowI16x8U(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntExtmulLow(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmovzxwd, inst.encPmullD);
+pub fn emitI32x4ExtmulLowI16x8U(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntExtmulLow(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPmovzxwd, inst.encPmullD);
 }
 
 pub fn emitI32x4ExtmulHighI16x8U(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
