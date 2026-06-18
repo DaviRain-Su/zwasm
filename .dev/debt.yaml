@@ -2093,16 +2093,18 @@ entries:
           through a spill-aware shared helper; operand = v128 vec/src/lhs/rhs/dst, scalar operands already done):**
             op_simd_int_arith.zig: emitI8x16Shl :572 · emitI8x16ShrU :612 · ~~emitV128IntNeg~~ DONE @22f748d82 ·
               emitI64x2Abs :728 · emitI8x16ShrS :757 · emitI64x2ShrS :794 · emitI64x2Mul :873 · emitI8x16Popcnt :1243
-            op_simd_int_cmp_lane.zig: ~~emitV128IntCmpSigned~~ DONE @ba6ea97fe (16 ops) · emitV128IntCmpUnsigned :828 ·
-              emitI8x16Swizzle :1156 · emitV128IntNe :1394 · emitV128IntExtmulLow :1810 · emitV128IntExtmulHigh :1841 ·
-              emitV128I64x2Extmul :1910 · emitI8x16Shuffle :2042
+            op_simd_int_cmp_lane.zig: ~~emitV128IntCmpSigned~~ DONE @ba6ea97fe (16) · ~~emitV128IntCmpUnsigned~~ DONE
+              @c1beacfab (12) · emitI8x16Swizzle :1156 · ~~emitV128IntNe~~ DONE @ab99e083a · ~~emitV128IntExtmulLow~~
+              DONE @195218eac (4) · emitV128IntExtmulHigh :1841 · emitV128I64x2Extmul :1910 · emitI8x16Shuffle :2042
             op_simd_float.zig: ~~emitV128FpPseudoBinop (Pmin/Pmax)~~ DONE @3a43ef6e4
             op_simd.zig: v128LoadExtend (dst) :446 · v128StoreLane (vec) :571
-          DONE this batch (2026-06-19): Neg (XMM7-park scratch), Pmin/Pmax + signed-cmp (both reuse the emitV128FpCmp
-          3-operand template: cmp→stage1, dst→home/XMM7, base→dst, store-if-spilled). REMAINING 15 sites. NEXT EASY:
-          CmpUnsigned + Ne (same template + extra XMM14 ones/sign-flip scratch), extmul (PSHUFD+tmp), LoadExtend/
-          StoreLane (single operand, need memory fixture). HARD (both stages internal): i8x16 Shl/ShrU/ShrS, swizzle/
-          shuffle (PSHUFB ctrl), popcnt, Mul (XMM14+XMM15+XMM7) — need XMM7-park or in-place restructure.
+          DONE (2026-06-19): Neg, Pmin/Pmax, signed-cmp, Ne, CmpUnsigned, ExtmulLow (6 sites). The cmp/ne/extmul-low
+          all reuse the 3-operand template (operands→stage0/1 or home, dst→home/XMM7, store-if-spilled; XMM7 alias
+          stash only when dst home; byte-identical no-spill). Added file-local resolveOrLoadV128 + storeV128IfSpilledLocal
+          helpers in op_simd_int_cmp_lane.zig. REMAINING 12 sites. NEXT: extmul_high + i64x2_extmul (PSHUFD; high uses
+          BOTH stages internally → PSHUFD-from-memory or dst-as-load-temp), LoadExtend/StoreLane (single operand, need
+          MEMORY fixture). HARD (both stages internal): i8x16 Shl/ShrU/ShrS, swizzle/shuffle (PSHUFB ctrl), popcnt,
+          i64x2 Mul (XMM14+XMM15+XMM7), i64x2 Abs/ShrS — need XMM7-park or in-place restructure.
           STRUCTURAL-EXEMPT (leave): op_simd.zig:961 emitV128Select val2 (3 v128 regs vs 2 stages); emitV128Bitselect
           has NO bare site. FIXTURE GOTCHA: i32x4 cmp opcodes are eq=0x37 ne=0x38 lt_s=0x39 gt_s=0x3b le_s=0x3d
           ge_s=0x3f (NOT 0x37=gt — a mis-typed opcode cost a full miscompile-hunt 2026-06-19; verify via wasmtime
