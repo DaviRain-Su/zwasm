@@ -343,6 +343,21 @@ test "runI32Export: array v128 + i8x16.extract_lane_u of a spilled result → 9 
     try testing.expectEqual(@as(u32, 9), runI32Export(testing.allocator, &bytes, "f"));
 }
 
+test "runI32Export: array.new_fixed 2 ×(i8x16.splat) + extract_lane_u → 9 (D-461 i8x16.splat spilled-dst, PSHUFB landmine)" {
+    // D-461: i8x16.splat uses XMM14 (stage0) as the PSHUFB zero-ctrl scratch, so
+    // its spilled dst lands on stage1/XMM15 (collision-avoidance) on x86_64.
+    // array.new_fixed force-spills the 2 i8x16.splat results; element 1 =
+    // splat(9) = all bytes 9; extract_lane_u 0 = 9. Now testable on both arches
+    // (arm64 emitV128ExtractLane GPR-result spill fix landed @a534d1c45).
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x5e, 0x7b, 0x01, 0x60, 0x00,
+        0x01, 0x7f, 0x03, 0x02, 0x01, 0x01, 0x07, 0x05, 0x01, 0x01, 0x66, 0x00, 0x00, 0x0a, 0x18, 0x01,
+        0x16, 0x00, 0x41, 0x07, 0xfd, 0x0f, 0x41, 0x09, 0xfd, 0x0f, 0xfb, 0x08, 0x00, 0x02, 0x41, 0x01,
+        0xfb, 0x0b, 0x00, 0xfd, 0x16, 0x00, 0x0b,
+    };
+    try testing.expectEqual(@as(u32, 9), runI32Export(testing.allocator, &bytes, "f"));
+}
+
 test "runI32Export: 12 live v128 force-spill + v128.or chain + extract_lane → 4095 (D-461 SIMD spill)" {
     // 12 v128 locals live simultaneously force a v128 spill (arm64 13 V-regs,
     // x86_64 6 XMM). v128.or-chains them; extract_lane 0 of OR(1,2,4,...,2048)
