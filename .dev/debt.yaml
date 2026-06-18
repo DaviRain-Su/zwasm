@@ -1914,10 +1914,12 @@ entries:
       spill_base_off through the 2 handlers + Ctx wrappers; src→xmmLoadSpilled 8-byte, dst→xmmDefSpilledV128, both
       stage0 — PSHUFD read-before-write makes dst==src reuse safe, mirrors arm64 emitV128SplatFromV). **SPLAT FAMILY
       FULLY COMPLETE both arches (all 6).**
-      **NEW sibling gap (found @539e7512a)**: **arm64 f32x4/f64x2.extract_lane FP-RESULT is resolveFp-EXEMPT**
-      (`arm64/gpr.zig:280`) → UnsupportedOp when the f32/f64 lane result spills. Analogous to the narrow-extract GPR
-      fix but FP-class (needs fpDefSpilled/fpStoreSpilled). Self-contained; pair with replace_lane's FP work or do solo.
-      **REMAINING D-461 result-write**: **replace_lane** ×4 — ENTANGLED with D-034 (a green force-spill fixture
+      **f32x4/f64x2.extract_lane FP-RESULT spill — DONE @d7e7f1fbb both arches** (was resolveFp/resolveXmm-EXEMPT on
+      BOTH): arm64 emitV128ExtractLaneFp → fpDefSpilled/Store stage1/V30 (src qLoadSpilled stage0/V29, distinct
+      stages, same V-file); x86_64 emitF32x4/F64x2ExtractLane → threaded spill_base_off, src xmmLoadSpilledV128
+      stage0 + dst xmmDefSpilled stage1. Fixture array.new_fixed 2×f32x4.splat(9.0)→extract_lane→reinterpret=
+      0x41100000. **extract_lane family (GPR narrow + FP) FULLY spill-aware.**
+      **REMAINING D-461 result-write (the ONLY self-contained-but-entangled op left)**: **replace_lane** ×4 — ENTANGLED with D-034 (a green force-spill fixture
       also spills the new-lane scalar GPR which arm64 handles SPILL-EXEMPT); do it WITH the D-034 arm64-GPR cohort,
       not isolated (see (1)). Extend/Extadd/v128-load/load_lane/splat(all)/narrow-extract(GPR) all DONE.
       EXOTIC (high-v128-pressure only; concrete D-460 array-copy blocker already cleared by extract_lane).

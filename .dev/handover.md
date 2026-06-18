@@ -63,13 +63,13 @@ Status→Implemented + retrospective section; D-464 item (4) closed).
    2026-06-18: the wasmtime native sweep does NOT cover SIMD-GC — array-copy-inline.wast is SIMD→simd_runner, not
    the wasm-3.0 corpus; 38 gc-sweep fails are pre-existing ADR-0192 residuals, NOT regressions). Only an optional
    edge fixture remains (low value). Do NOT grind consumer-gated (D-464(2), D-305).
-4. **D-461 v128 spill — SPLAT FAMILY (all 6) + narrow-extract(GPR) COMPLETE both arches**. Closed this arc:
-   i8x16/i16x8/i32x4/i64x2.splat + **f32x4/f64x2.splat @539e7512a** (spill_base_off threaded; src xmmLoadSpilled +
-   dst xmmDefSpilledV128 stage0, PSHUFD read-before-write), arm64 narrow-extract GPR-result @a534d1c45 (root-caused
-   the i8x16 puzzle via bisection), x86_64 i8x16.splat @f543f4672. **REMAINING D-461 (EXOTIC, high-pressure only,
-   NO current consumer)**: (a) **arm64 f32x4/f64x2.extract_lane FP-RESULT resolveFp-EXEMPT** (`arm64/gpr.zig:280`)
-   — self-contained, needs fpDefSpilled/Store; (b) **replace_lane** (D-034 arm64-GPR-scalar cohort). NEXT options:
-   (a) FP-extract / (b) D-034 cohort / **pivot to other 完成形 work (surface audit / dogfood / debt)**.
+4. **D-461 v128 spill — SPLAT (all 6) + EXTRACT_LANE (GPR narrow + FP, all) COMPLETE both arches**. Closed this arc
+   (all RED→GREEN both arches, EXOTIC high-pressure cases): splat i8x16/i16x8/i32x4/i64x2 @60c4f043a + f32x4/f64x2
+   @539e7512a; extract_lane GPR-narrow @a534d1c45 (root-caused the i8x16 puzzle via bisection) + **FP f32x4/f64x2
+   @d7e7f1fbb**; x86_64 i8x16.splat @f543f4672. **REMAINING D-461 = replace_lane ONLY** (×4, ENTANGLED with the
+   D-034 arm64-GPR-scalar SPILL-EXEMPT cohort — needs BOTH the v128 fix AND arm64 GPR-scalar spill; do WITH D-034,
+   NOT isolated). **All self-contained D-461 spill work is now EXHAUSTED.** NEXT: **pivot off SIMD-spill** — D-034
+   cohort (replace_lane) OR other 完成形 work (surface audit / dogfood / debt). EXOTIC, no current consumer.
 
 ## Recently closed arcs (detail in ADRs/git/debt — one-liners)
 
@@ -106,8 +106,9 @@ TIER-1 (`afcf889a`/`05b35c28`; D-446/447 deferred), ① wasip3 conformance (7 re
 - **Surfaces**: C-API 293/293 · Zig-API complete (full WASI parity) · lean CLI · memory-safety sound · dogfooded into
   cw. Runners ReleaseSafe (ADR-0177; `check_releasesafe_runners.sh`).
 - **EH**: cross-instance JIT EH on BOTH arches (arm64 `4f73d9ee` + x86_64 `c534afca`). Interp + JIT EH corpus green.
-- **Debt**: 61 entries; `now`-class = D-462 (feature-separation, ADR-0193, user-gated), D-460 (v128-GC partial),
-  D-461 (SIMD-spill, blocks D-460). D-335 (WASI 0.3 core) DONE. Rest front-tagged (future-bucket/parked).
+- **Debt**: 61 entries; `now`-class = **D-461 ONLY** (SIMD-spill; remaining op = replace_lane, D-034-entangled).
+  D-460 v128-GC emit DONE both arches (`partial` = optional edge fixture). D-335 → `note` (ADR-0195 scheduler DONE).
+  Rest front-tagged (future-bucket/parked); D-462 feature-separation = user-gated.
 - **Realworld corpus**: 56 fixtures (c/cpp/emcc/go/tinygo/rust/zig), interp 56/0; JIT run-stage opt-in.
 - **Tag**: `v2.0.0-alpha.3` tag-only (no Release → Latest stays v1.11.0), USER-ONLY.
 
