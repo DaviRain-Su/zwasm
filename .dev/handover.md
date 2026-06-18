@@ -32,20 +32,18 @@ CLOSED (below). **windowsmini RESUMED**. Version `2.0.0-alpha.3`.
 ## Active bundle
 
 - **Bundle-ID**: D-034 SIMD spill-completeness cohort (scalar-operand sibling of D-461 + the v128-source arith gap)
-- **Cycles-remaining**: ~2 (the SCALAR cohort + the FP (g) arc are now DONE; the REMAINING (g) int-arith
-  synthesized ops are the harder multi-scratch template). DONE through @b56cb514f: (a)(b)(e) + all FP (g) +
-  **(c) FP new-lane + (f) shift-amt BOTH arches** + **shift v128-SOURCE spill** (arm64 dup_v→V31 collision fix;
-  x86_64 generic i16/i32/i64 emitV128IntShift vec/dst→spill-aware). Fixture trick: push ≥pool-size scalars LIVE.
-- **Continuity-memo**: the prior "REMAINING = ONLY (c)+(f), campaign closes after 2" was WRONG — the (g) int-arith
-  sub-arc still has bare-`resolveXmm` x86_64 ops the FP-only progress list skipped. CONFIRMED gap: **x86_64
-  synthesized i8x16 shifts** (emitI8x16Shl :557 / ShrU :597 / ShrS — vec/dst bare resolveXmm AND both stages
-  XMM14/XMM15 consumed internally → the HARD multi-scratch case, use XMM7-park / in-place template like NaN-min/max)
-  + **i8x16.popcnt** + swizzle/shuffle/extmul/cmp/neg/mul/Pmin-Pmax + LoadExtend-dst/StoreLane-vec. arm64 routes all
-  of these through spill-aware shared helpers, so this is an x86_64-only asymmetry. **EXACT 18-site table is now in
-  the D-034 debt row** (op + file:line + HARD-vs-EASIER classification). Drive op-by-op TDD (live-v128-pressure
-  fixture per op via array.new_fixed or the live-stack trick, RED→GREEN both arches; verify each op's internal-scratch
-  count first to pick the template). The 4 spill templates (0-scratch / XMM7-park 1-scratch / FMA 3-operand /
-  2-scratch in-place) all apply. REJECT a global 3rd-stage-XMM pool cut.
+- **Cycles-remaining**: ~3 (15 of 18 x86_64 int-arith (g) sites remain). DONE through @ba6ea97fe: scalar (a)(b)(c)
+  (e)(f) + all FP (g) + shift v128-src; **this batch (2026-06-19): Neg @22f748d82, Pmin/Pmax @3a43ef6e4, signed-cmp
+  gt/lt/le/ge_s (16 ops) @ba6ea97fe** — Neg=XMM7-park scratch; Pmin/Pmax+cmp reuse the emitV128FpCmp 3-operand
+  template (cmp→stage1, dst→home/XMM7, base→dst, store-if-spilled). Fixture: array.new_fixed v128 round-trip.
+- **Continuity-memo**: x86_64-only asymmetry (arm64 routes all via spill-aware shared helpers). **EXACT 15-remaining
+  site table in the D-034 debt row.** NEXT EASY: CmpUnsigned :828 + Ne :1394 (same 3-op template + an extra XMM14
+  ones/sign-flip scratch), extmul (PSHUFD+tmp), LoadExtend-dst/StoreLane-vec (single operand, need a MEMORY fixture).
+  HARD (both stages internal → XMM7-park/in-place): i8x16 Shl/ShrU/ShrS, swizzle/shuffle (PSHUFB ctrl), popcnt, Mul.
+  The 4 spill templates (0-scratch / XMM7-park 1-scratch / FMA 3-operand / 2-scratch in-place) all apply; REJECT a
+  global 3rd-stage-XMM pool cut. **FIXTURE GOTCHA (cost a miscompile-hunt 2026-06-19): verify each fixture's expected
+  value via wasmtime `--invoke f -W gc=y -W function-references=y <f>.wasm` (interp has no SIMD); i32x4 cmp opcodes
+  eq=37 ne=38 lt_s=39 gt_s=3b le_s=3d ge_s=3f — do NOT mistype.**
 - **Exit-condition**: every a–g sub-category's operand forced to spill flows through its op on BOTH arches; zero
   bare resolveGpr/resolveFp/resolveXmm SPILL-EXEMPT sites remain (except the structural 3-V-reg select/bitselect).
 
@@ -53,12 +51,11 @@ CLOSED (below). **windowsmini RESUMED**. Version `2.0.0-alpha.3`.
 
 0. **ADR-0195 guest↔guest async — CAMPAIGN COMPLETE** (D-335 closed; detail in git + ADR-0195; residuals D-463
    CLOSED / D-464 future-bucket). **D-461 v128-DST-spill arc COMPLETE both arches** (FP replace_lane @4acd24152).
-1. **Active bundle = D-034** (above): SIMD spill-completeness; through @b56cb514f — scalar (a)(b)(c)(e)(f) DONE +
-   FP (g) arc DONE + shift v128-source spill (both arches) DONE. **REMAINING = the (g) int-arith x86_64 synthesized
-   ops** the FP-only progress list skipped: i8x16 shifts (Shl/ShrU/ShrS — HARD: both stage XMMs used internally,
-   XMM7-park/in-place template) + popcnt + swizzle/shuffle/extmul/cmp/ne/neg/mul/Pmin-Pmax + LoadExtend-dst/
-   StoreLane-vec. **EXACT 18-site table (op+file:line+HARD/EASIER) in the D-034 debt row.** Drive op-by-op TDD with a
-   live-v128-pressure fixture, RED→GREEN both arches. NOT "2 mechanical swaps" — an 18-site sub-arc.
+1. **Active bundle = D-034** (above): through @ba6ea97fe — scalar (a)(b)(c)(e)(f) + FP (g) + shift-src DONE; this
+   batch Neg + Pmin/Pmax + signed-cmp (16 ops) DONE. **REMAINING = 15 x86_64 int-arith (g) sites** (exact table in
+   the D-034 debt row): CmpUnsigned, Ne, extmul×3, swizzle, shuffle, i8x16 Shl/ShrU/ShrS, i64x2 Abs/ShrS/Mul,
+   popcnt, LoadExtend-dst, StoreLane-vec. Drive op-by-op TDD (array.new_fixed v128 fixture, RED→GREEN both arches);
+   verify expected values via wasmtime (GC flags). NEXT EASY = CmpUnsigned + Ne (cmp template + XMM14 scratch).
 2. **Audit DONE 2026-06-18 (CLEAN)** — `audit_scaffolding` 0 block/0 soon (J.3 chronic debt); fuzz 0 crashes.
 3. **D-460 v128-GC JIT emit DONE both arches** (@3d8be3c00/@8137c7268/@5292569e0; 6 runI32Export fixtures = the
    authoritative JIT verification). Only an optional edge fixture remains (low value). Consumer-gated, do NOT grind:
