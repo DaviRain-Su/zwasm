@@ -417,7 +417,7 @@ test "emitF64x2ReplaceLane: lane 0 → MOVAPS + MOVSD (preserves high qword)" {
     try pushed.append(testing.allocator, 1); // value
     var next_vreg: u32 = 2;
 
-    try op_simd_float.emitF64x2ReplaceLane(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
+    try op_simd_float.emitF64x2ReplaceLane(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
@@ -443,7 +443,7 @@ test "emitF64x2ReplaceLane: lane 1 → MOVAPS + MOVLHPS (writes value to dst's h
     try pushed.append(testing.allocator, 1);
     var next_vreg: u32 = 2;
 
-    try op_simd_float.emitF64x2ReplaceLane(testing.allocator, &buf, alloc, &pushed, &next_vreg, 1);
+    try op_simd_float.emitF64x2ReplaceLane(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0, 1);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
@@ -474,7 +474,7 @@ test "emitF64x2ReplaceLane: dst aliases value — stash value to XMM7 (D-078 (a)
     try pushed.append(testing.allocator, 1); // value
     var next_vreg: u32 = 2;
 
-    try op_simd_float.emitF64x2ReplaceLane(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
+    try op_simd_float.emitF64x2ReplaceLane(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
@@ -503,7 +503,7 @@ test "emitF32x4ReplaceLane: dst aliases value — stash value to XMM7" {
     try pushed.append(testing.allocator, 1); // value
     var next_vreg: u32 = 2;
 
-    try op_simd_float.emitF32x4ReplaceLane(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
+    try op_simd_float.emitF32x4ReplaceLane(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
@@ -575,7 +575,7 @@ test "emitF32x4ReplaceLane: lane 1 → MOVAPS + INSERTPS imm 0x10" {
     try pushed.append(testing.allocator, 1); // value
     var next_vreg: u32 = 2;
 
-    try op_simd_float.emitF32x4ReplaceLane(testing.allocator, &buf, alloc, &pushed, &next_vreg, 1);
+    try op_simd_float.emitF32x4ReplaceLane(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0, 1);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);

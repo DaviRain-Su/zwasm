@@ -996,6 +996,7 @@ pub fn emitF64x2ReplaceLane(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     payload: u32,
 ) Error!void {
     if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
@@ -1005,9 +1006,14 @@ pub fn emitF64x2ReplaceLane(
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
+    // D-461 (i): spill-aware v128 vec-read (stage0/XMM14) + dst-write
+    // (stage1/XMM15), mirroring arm64 emitV128ReplaceLaneFp. The new-lane FP
+    // scalar stays `resolveXmm` (SPILL-EXEMPT = arm64's resolveFp exempt; its
+    // spill is the D-034 GPR/FP-scalar cohort). The XMM7 aliasing stash below
+    // only fires in the all-home case (a stage reg can never equal a home reg).
     const value_x = try gpr.resolveXmm(alloc, value_v);
-    const vec_x = try gpr.resolveXmm(alloc, vec_v);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    const vec_x = try gpr.xmmLoadSpilledV128(allocator, buf, alloc, spill_base_off, vec_v, 0);
+    const dst_x = try gpr.xmmDefSpilledV128(alloc, result_v, 1);
 
     // D-066 mirror class (§9.9 / 9.9-h-5; D-078 (a) discharge):
     // when regalloc's LIFO slot-reuse aliases `dst == value &&
@@ -1032,6 +1038,7 @@ pub fn emitF64x2ReplaceLane(
     } else {
         try buf.appendSlice(allocator, inst.encMovlhps(dst_x, value_for_op).slice());
     }
+    try gpr.xmmStoreSpilledV128(allocator, buf, alloc, spill_base_off, result_v, 1);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -1116,6 +1123,7 @@ pub fn emitF32x4ReplaceLane(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     payload: u32,
 ) Error!void {
     if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
@@ -1125,9 +1133,12 @@ pub fn emitF32x4ReplaceLane(
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
+    // D-461 (i): spill-aware v128 vec-read (stage0) + dst-write (stage1); the
+    // new-lane FP scalar stays `resolveXmm` (SPILL-EXEMPT, D-034 cohort). See
+    // emitF64x2ReplaceLane for the staging rationale.
     const value_x = try gpr.resolveXmm(alloc, value_v);
-    const vec_x = try gpr.resolveXmm(alloc, vec_v);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    const vec_x = try gpr.xmmLoadSpilledV128(allocator, buf, alloc, spill_base_off, vec_v, 0);
+    const dst_x = try gpr.xmmDefSpilledV128(alloc, result_v, 1);
 
     // D-066 mirror class (§9.9 / 9.9-h-5; bug-fix-time grep
     // sibling of `emitF64x2ReplaceLane`): when `dst == value &&
@@ -1144,6 +1155,7 @@ pub fn emitF32x4ReplaceLane(
     const lane: u8 = @intCast(payload & 0b11);
     const imm8: u8 = lane << 4;
     try buf.appendSlice(allocator, inst.encInsertps(dst_x, value_for_op, imm8).slice());
+    try gpr.xmmStoreSpilledV128(allocator, buf, alloc, spill_base_off, result_v, 1);
     try pushed_vregs.append(allocator, result_v);
 }
 
