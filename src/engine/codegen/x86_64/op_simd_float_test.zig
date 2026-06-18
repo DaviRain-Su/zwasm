@@ -836,7 +836,7 @@ test "emitF32x4Pmin: MOVAPS dst,rhs + MINPS dst,lhs (operand swap)" {
     try pushed.append(testing.allocator, 1); // rhs (c2) — slot 1 → xmm9
     var next_vreg: u32 = 2;
 
-    try op_simd_float.emitF32x4Pmin(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_float.emitF32x4Pmin(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
@@ -863,7 +863,7 @@ test "emitF64x2Pmax: MOVAPS dst,rhs + MAXPD dst,lhs (operand swap)" {
     try pushed.append(testing.allocator, 1);
     var next_vreg: u32 = 2;
 
-    try op_simd_float.emitF64x2Pmax(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_float.emitF64x2Pmax(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);

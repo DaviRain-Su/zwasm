@@ -67,12 +67,12 @@ pub fn emitF32x4MaxCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!vo
 
 pub fn emitF32x4PminCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitF32x4Pmin(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitF32x4Pmin(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 pub fn emitF32x4PmaxCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitF32x4Pmax(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitF32x4Pmax(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 // §9.12-B / B101 (ADR-0075) — `(ctx, ins)` adapters for the
@@ -110,12 +110,12 @@ pub fn emitF64x2MaxCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!vo
 
 pub fn emitF64x2PminCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitF64x2Pmin(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitF64x2Pmin(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 pub fn emitF64x2PmaxCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitF64x2Pmax(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitF64x2Pmax(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 // §9.12-B / B102 (ADR-0075) — `(ctx, ins)` adapters for the
@@ -1510,6 +1510,7 @@ fn emitV128FpPseudoBinop(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     encoder: *const fn (dst: inst.Xmm, src: inst.Xmm) inst.EncodedInsn,
 ) Error!void {
     if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
@@ -1519,35 +1520,52 @@ fn emitV128FpPseudoBinop(
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
-    const rhs_x = try gpr.resolveXmm(alloc, rhs_v);
-    const lhs_x = try gpr.resolveXmm(alloc, lhs_v);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    // D-034 (g): spill-aware, mirroring emitV128FpCmp's 3-v128-operand template.
+    // Pseudo-min/max lowers to `MOVAPS dst, rhs; OP dst, lhs` — the operand order
+    // (NaN-propagating c1) must be preserved, so base = rhs (loaded into dst), the
+    // second operand = lhs (stays home, or stage1/XMM15 when spilled). dst → home
+    // or XMM7 when spilled. The only clobber hazard is the D-066 alias dst==lhs
+    // (both home); the XMM7 stash covers exactly that (a stage reg never == home).
+    const lhs_x = try gpr.xmmLoadSpilledV128(allocator, buf, alloc, spill_base_off, lhs_v, 1);
+    const result_slot = alloc.slot(result_v, .fpr);
+    const dst_x: inst.Xmm = switch (result_slot) {
+        .reg => |id| abi.fpSlotToReg(id) orelse return Error.SlotOverflow,
+        .spill => .xmm7,
+    };
+    const base_is_dst = switch (alloc.slot(rhs_v, .fpr)) {
+        .reg => |id| (abi.fpSlotToReg(id) orelse return Error.SlotOverflow) == dst_x,
+        .spill => false,
+    };
 
-    if (dst_x != rhs_x) {
-        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, rhs_x).slice());
+    var lhs_for_op = lhs_x;
+    if (!base_is_dst and dst_x == lhs_x) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(.xmm7, lhs_x).slice());
+        lhs_for_op = .xmm7;
     }
-    try buf.appendSlice(allocator, encoder(dst_x, lhs_x).slice());
+    try loadV128Into(allocator, buf, alloc, spill_base_off, dst_x, rhs_v);
+    try buf.appendSlice(allocator, encoder(dst_x, lhs_for_op).slice());
+    try storeV128IfSpilled(allocator, buf, spill_base_off, result_slot);
     try pushed_vregs.append(allocator, result_v);
 }
 
 /// Wasm spec §4.4.4 (f32x4.pmin) — pseudo-min, NaN-propagating c1.
-pub fn emitF32x4Pmin(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128FpPseudoBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encMinps);
+pub fn emitF32x4Pmin(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128FpPseudoBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encMinps);
 }
 
 /// Wasm spec §4.4.4 (f32x4.pmax) — pseudo-max, NaN-propagating c1.
-pub fn emitF32x4Pmax(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128FpPseudoBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encMaxps);
+pub fn emitF32x4Pmax(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128FpPseudoBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encMaxps);
 }
 
 /// Wasm spec §4.4.4 (f64x2.pmin) — pseudo-min, NaN-propagating c1.
-pub fn emitF64x2Pmin(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128FpPseudoBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encMinpd);
+pub fn emitF64x2Pmin(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128FpPseudoBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encMinpd);
 }
 
 /// Wasm spec §4.4.4 (f64x2.pmax) — pseudo-max, NaN-propagating c1.
-pub fn emitF64x2Pmax(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128FpPseudoBinop(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encMaxpd);
+pub fn emitF64x2Pmax(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128FpPseudoBinop(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encMaxpd);
 }
 
 // =============================================================
