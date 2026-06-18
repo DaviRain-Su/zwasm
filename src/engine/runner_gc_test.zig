@@ -312,6 +312,21 @@ test "runI32Export: array.copy of v128 elements + array.get + extract_lane 3 →
     try testing.expectEqual(@as(u32, 44), runI32Export(testing.allocator, &bytes, "f"));
 }
 
+test "runI32Export: array.new_fixed 2 ×(i32x4.splat) + array.get[1] + extract_lane → 9 (D-461 splat spilled-dst)" {
+    // D-461 (x86_64 splat spilled-dst): array.new_fixed force-spills its 2
+    // element operands (ADR-0060), so each i32x4.splat must WRITE a spilled
+    // v128 dst — x86_64 splat used resolveXmm → UnsupportedOp. Mirrors the
+    // wasmtime gc/array-copy-inline v128 case's producer (splat 7, splat 9);
+    // element 1 = splat(9) → extract_lane 0 = 9. arm64 already spill-aware.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x5e, 0x7b, 0x01, 0x60, 0x00,
+        0x01, 0x7f, 0x03, 0x02, 0x01, 0x01, 0x07, 0x05, 0x01, 0x01, 0x66, 0x00, 0x00, 0x0a, 0x18, 0x01,
+        0x16, 0x00, 0x41, 0x07, 0xfd, 0x11, 0x41, 0x09, 0xfd, 0x11, 0xfb, 0x08, 0x00, 0x02, 0x41, 0x01,
+        0xfb, 0x0b, 0x00, 0xfd, 0x1b, 0x00, 0x0b,
+    };
+    try testing.expectEqual(@as(u32, 9), runI32Export(testing.allocator, &bytes, "f"));
+}
+
 test "runI32Export: 12 live v128 force-spill + v128.or chain + extract_lane → 4095 (D-461 SIMD spill)" {
     // 12 v128 locals live simultaneously force a v128 spill (arm64 13 V-regs,
     // x86_64 6 XMM). v128.or-chains them; extract_lane 0 of OR(1,2,4,...,2048)

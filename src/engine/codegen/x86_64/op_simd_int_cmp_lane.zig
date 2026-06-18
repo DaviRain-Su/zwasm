@@ -479,10 +479,14 @@ pub fn emitI32x4Splat(
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
     const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    // D-461: spill-aware v128 dst (was resolveXmm-reject when the splat result
+    // force-spills, e.g. feeding array.new_fixed). No internal XMM scratch
+    // (movd+pshufd), so the dst safely uses stage0/XMM14.
+    const dst_x = try gpr.xmmDefSpilledV128(alloc, result_v, 0);
 
     try buf.appendSlice(allocator, inst.encMovdXmmFromR32(dst_x, src_r).slice());
     try buf.appendSlice(allocator, inst.encPshufd(dst_x, dst_x, 0x00).slice());
+    try gpr.xmmStoreSpilledV128(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -1474,6 +1478,10 @@ pub fn emitI8x16Splat(
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
     const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
+    // D-461: i8x16.splat spilled-dst is DEFERRED — its dst would need stage1/
+    // XMM15 (PSHUFB zero-ctrl on stage0/XMM14, LANDMINE), but arm64 i8x16 also
+    // UnsupportedOps a spilled operand, so there is no GREEN reference to TDD
+    // against. Fix the arm64 i8x16 spill gap first, then mirror here (D-461 row).
     const dst_x = try gpr.resolveXmm(alloc, result_v);
     const ctrl = abi.fp_spill_stage_xmms[0]; // XMM14 — zero ctrl mask scratch
 
@@ -1505,11 +1513,14 @@ pub fn emitI16x8Splat(
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
     const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    // D-461: spill-aware v128 dst. No internal XMM scratch (movd+pshuflw+
+    // pshufd), so the dst safely uses stage0/XMM14.
+    const dst_x = try gpr.xmmDefSpilledV128(alloc, result_v, 0);
 
     try buf.appendSlice(allocator, inst.encMovdXmmFromR32(dst_x, src_r).slice());
     try buf.appendSlice(allocator, inst.encPshuflw(dst_x, dst_x, 0x00).slice());
     try buf.appendSlice(allocator, inst.encPshufd(dst_x, dst_x, 0x00).slice());
+    try gpr.xmmStoreSpilledV128(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -1534,10 +1545,13 @@ pub fn emitI64x2Splat(
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
     const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    // D-461: spill-aware v128 dst. No internal XMM scratch (movq+punpcklqdq),
+    // so the dst safely uses stage0/XMM14.
+    const dst_x = try gpr.xmmDefSpilledV128(alloc, result_v, 0);
 
     try buf.appendSlice(allocator, inst.encMovqXmmFromR64(dst_x, src_r).slice());
     try buf.appendSlice(allocator, inst.encPunpcklqdq(dst_x, dst_x).slice());
+    try gpr.xmmStoreSpilledV128(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }
 
