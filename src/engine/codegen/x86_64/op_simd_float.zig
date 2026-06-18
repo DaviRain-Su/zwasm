@@ -1662,6 +1662,7 @@ pub fn emitF64x2ConvertLowI32x4U(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     simd_const_fixups: *std.ArrayList(@import("types.zig").SimdConstFixup),
     extra_consts: *std.ArrayList([16]u8),
     simd_consts_base: u32,
@@ -1672,9 +1673,12 @@ pub fn emitF64x2ConvertLowI32x4U(
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
-    const src_x = try gpr.resolveXmm(alloc, src_v);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
-    const tmp = abi.fp_spill_stage_xmms[0]; // XMM14
+    // D-034 (g): 1-scratch XMM7-park — park the const-load tmp on XMM7, freeing
+    // both stages for src(0)+dst(1). src is read only at step 1 (MOVAPS dst,src);
+    // dst then carries the value, tmp on XMM7. store dst→slot if spilled.
+    const src_x = try gpr.xmmLoadSpilledV128(allocator, buf, alloc, spill_base_off, src_v, 0);
+    const dst_x = try gpr.xmmDefSpilledV128(alloc, result_v, 1);
+    const tmp: inst.Xmm = .xmm7;
 
     const low_idx = try op_simd.lookupOrAppendExtraConst(allocator, extra_consts, simd_consts_base, UINT_MASK_LOW);
     const high_idx = try op_simd.lookupOrAppendExtraConst(allocator, extra_consts, simd_consts_base, UINT_MASK_HIGH);
@@ -1695,6 +1699,7 @@ pub fn emitF64x2ConvertLowI32x4U(
     // 5: SUBPD dst, tmp — dst = (2^52 + u32) - 2^52 = u32 as f64.
     try buf.appendSlice(allocator, inst.encSubpd(dst_x, tmp).slice());
 
+    try gpr.xmmStoreSpilledV128(allocator, buf, alloc, spill_base_off, result_v, 1);
     try pushed_vregs.append(allocator, result_v);
 }
 

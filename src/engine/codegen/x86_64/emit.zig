@@ -1596,7 +1596,7 @@ pub fn compile(
             // mantissa-overlay trick (5 instr + 2 const-pool entries).
             .@"f64x2.convert_low_i32x4_u" => {
                 const simd_consts_base: u32 = if (func.simd_consts) |sc| @intCast(sc.len) else 0;
-                try op_simd_float.emitF64x2ConvertLowI32x4U(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &simd_const_fixups, &extra_consts, simd_consts_base);
+                try op_simd_float.emitF64x2ConvertLowI32x4U(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, &simd_const_fixups, &extra_consts, simd_consts_base);
             },
             // §9.7/9.7-ap — i32x4.trunc_sat_f64x2_u_zero via the
             // ROUNDPD + ADDPD-magic + SHUFPS-extract recipe per
