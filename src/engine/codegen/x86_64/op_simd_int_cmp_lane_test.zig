@@ -36,7 +36,7 @@ test "emitI32x4GtS: direct PCMPGT (no NOT, no swap) — MOVAPS + PCMPGTD" {
     try pushed.append(testing.allocator, 1);
     var next_vreg: u32 = 2;
 
-    try op_simd_int_cmp_lane.emitI32x4GtS(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_int_cmp_lane.emitI32x4GtS(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
@@ -62,7 +62,7 @@ test "emitI16x8LtS: operand-swap path — MOVAPS dst, rhs + PCMPGTW dst, lhs" {
     try pushed.append(testing.allocator, 1); // rhs
     var next_vreg: u32 = 2;
 
-    try op_simd_int_cmp_lane.emitI16x8LtS(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_int_cmp_lane.emitI16x8LtS(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
@@ -89,7 +89,7 @@ test "emitI8x16LeS: gt + NOT (PCMPEQB scratch + PXOR)" {
     try pushed.append(testing.allocator, 1);
     var next_vreg: u32 = 2;
 
-    try op_simd_int_cmp_lane.emitI8x16LeS(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_int_cmp_lane.emitI8x16LeS(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
@@ -118,7 +118,7 @@ test "emitI32x4GeS: lt + NOT (operand swap then NOT)" {
     try pushed.append(testing.allocator, 1);
     var next_vreg: u32 = 2;
 
-    try op_simd_int_cmp_lane.emitI32x4GeS(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_int_cmp_lane.emitI32x4GeS(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
@@ -148,7 +148,7 @@ test "emitI64x2GtS: direct PCMPGTQ (SSE4.2) — MOVAPS + PCMPGTQ" {
     try pushed.append(testing.allocator, 1);
     var next_vreg: u32 = 2;
 
-    try op_simd_int_cmp_lane.emitI64x2GtS(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_int_cmp_lane.emitI64x2GtS(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
@@ -174,7 +174,7 @@ test "emitI64x2LtS: operand-swap path — MOVAPS dst, rhs + PCMPGTQ dst, lhs" {
     try pushed.append(testing.allocator, 1); // rhs
     var next_vreg: u32 = 2;
 
-    try op_simd_int_cmp_lane.emitI64x2LtS(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_int_cmp_lane.emitI64x2LtS(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
@@ -201,7 +201,7 @@ test "emitI64x2LeS: gt + NOT (PCMPGTQ + PCMPEQB ones + PXOR)" {
     try pushed.append(testing.allocator, 1);
     var next_vreg: u32 = 2;
 
-    try op_simd_int_cmp_lane.emitI64x2LeS(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_int_cmp_lane.emitI64x2LeS(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
@@ -469,7 +469,7 @@ test "emitI64x2GeS: lt + NOT (operand swap then NOT)" {
     try pushed.append(testing.allocator, 1);
     var next_vreg: u32 = 2;
 
-    try op_simd_int_cmp_lane.emitI64x2GeS(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_int_cmp_lane.emitI64x2GeS(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
