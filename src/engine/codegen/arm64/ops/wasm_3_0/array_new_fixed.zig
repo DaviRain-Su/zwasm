@@ -33,6 +33,7 @@ const ctx_mod = @import("../../ctx.zig");
 const abi = @import("../../abi.zig");
 const gpr = @import("../../gpr.zig");
 const inst = @import("../../inst.zig");
+const inst_neon = @import("../../inst_neon.zig");
 const jit_abi = @import("../../../shared/jit_abi.zig");
 const heap_mod = @import("../../../../../feature/gc/heap.zig");
 const zir = @import("../../../../../ir/zir.zig");
@@ -80,14 +81,28 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
     // Store elements. Operand stack top = last element (N-1); pop in
     // reverse so the bottom-most operand lands in element 0 (offset 0,
     // i.e. base+12). Offset i*8 is 8-byte aligned → scaled STR is valid.
+    // D-460: a v128 element is a 16-byte slot (STR Q); stride is 16 not 8.
+    const elem_vt = ctx.func.arrayElemValType(typeidx);
     var i: u32 = n;
     while (i > 0) {
         i -= 1;
         const evreg = ctx.pushed_vregs.pop().?;
-        const vreg_reg = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, evreg, 0);
-        const elem_off: u32 = i * 8;
-        if (elem_off > 32760) return ctx_mod.Error.SlotOverflow;
-        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImm(vreg_reg, fn_scratch, @intCast(elem_off)));
+        if (elem_vt == 0x7B) {
+            // v128: STR Q. fn_scratch (element base) is reused across stores,
+            // so compute the element address into X15 (a GPR stage reg, free
+            // here — the value uses the FP stage) then STR Q [X15, #0]. Mirror
+            // struct.new's v128 store.
+            const elem_off: u32 = i * 16;
+            if (elem_off > 4095) return ctx_mod.Error.SlotOverflow;
+            const vs = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, evreg, 0);
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12(15, fn_scratch, @intCast(elem_off)));
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encStrQImm(vs, 15, 0));
+        } else {
+            const vreg_reg = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, evreg, 0);
+            const elem_off: u32 = i * 8;
+            if (elem_off > 32760) return ctx_mod.Error.SlotOverflow;
+            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImm(vreg_reg, fn_scratch, @intCast(elem_off)));
+        }
     }
 
     // Push ref (result) — source from W17 (mirror struct.new).

@@ -73,13 +73,21 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
 
     // Store elements. Operand stack top = last element (N-1); pop in
     // reverse so the bottom-most operand lands in element 0 ([base+12]).
+    // D-460: a v128 element is a 16-byte slot (MOVUPS); stride is 16 not 8.
+    const elem_vt = ctx.func.arrayElemValType(typeidx);
+    const elem_size: i32 = if (elem_vt == 0x7B) 16 else 8;
     var i: u32 = n;
     while (i > 0) {
         i -= 1;
         const evreg = ctx.pushed_vregs.pop().?;
-        const valreg = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, evreg, 0);
-        const elem_off: i32 = header_size + @as(i32, @intCast(i)) * 8;
-        try ctx.buf.appendSlice(ctx.allocator, inst.encStoreR64MemDisp32(valreg, base_reg, elem_off).slice());
+        const elem_off: i32 = header_size + @as(i32, @intCast(i)) * elem_size;
+        if (elem_vt == 0x7B) {
+            const xv = try gpr.xmmLoadSpilledV128(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, evreg, 0);
+            try ctx.buf.appendSlice(ctx.allocator, inst.encMovupsXmmMemBaseDisp32(true, xv, base_reg, elem_off).slice());
+        } else {
+            const valreg = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, evreg, 0);
+            try ctx.buf.appendSlice(ctx.allocator, inst.encStoreR64MemDisp32(valreg, base_reg, elem_off).slice());
+        }
     }
 
     // Push ref (result) — EAX still holds it (the element loop touches only

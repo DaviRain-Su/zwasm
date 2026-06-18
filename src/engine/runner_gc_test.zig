@@ -272,6 +272,25 @@ test "runI32Export: array.new_default + array.set + array.get of a v128 element 
     try testing.expectEqual(@as(u32, 44), runI32Export(testing.allocator, &bytes, "f"));
 }
 
+test "runI32Export: array.new_fixed 2 v128 elements + array.get + extract_lane 3 → 44 (D-460 JIT v128-GC)" {
+    // D-460 bundle: v128 GC emit on BOTH arches (arm64 + x86_64 mirror).
+    // (type $a (array (mut v128))); (memory 1) data[0..16]={1,2,3,44}.
+    // array.new_fixed $a 2 (v128.load 0) (v128.load 0); array.get element 1;
+    // extract_lane 3 → 44. Each element is force-spilled across the alloc CALL
+    // (ADR-0060); the v128.load producer is spilled-dst aware. Element 1 sits
+    // at byte 12 + 1*16 = 28 — pins the 16-byte stride + Q-store of new_fixed.
+    // array.new_fixed = fb 08 typeidx N; array.get = fb 0b.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x5e, 0x7b, 0x01, 0x60, 0x00,
+        0x01, 0x7f, 0x03, 0x02, 0x01, 0x01, 0x05, 0x03, 0x01, 0x00, 0x01, 0x07, 0x05, 0x01, 0x01, 0x66,
+        0x00, 0x00, 0x0a, 0x1c, 0x01, 0x1a, 0x00, 0x41, 0x00, 0xfd, 0x00, 0x04, 0x00, 0x41, 0x00, 0xfd,
+        0x00, 0x04, 0x00, 0xfb, 0x08, 0x00, 0x02, 0x41, 0x01, 0xfb, 0x0b, 0x00, 0xfd, 0x1b, 0x03, 0x0b,
+        0x0b, 0x16, 0x01, 0x00, 0x41, 0x00, 0x0b, 0x10, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
+        0x03, 0x00, 0x00, 0x00, 0x2c, 0x00, 0x00, 0x00,
+    };
+    try testing.expectEqual(@as(u32, 44), runI32Export(testing.allocator, &bytes, "f"));
+}
+
 test "runI32Export: 12 live v128 force-spill + v128.or chain + extract_lane → 4095 (D-461 SIMD spill)" {
     // 12 v128 locals live simultaneously force a v128 spill (arm64 13 V-regs,
     // x86_64 6 XMM). v128.or-chains them; extract_lane 0 of OR(1,2,4,...,2048)
