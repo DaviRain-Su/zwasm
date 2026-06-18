@@ -56,13 +56,13 @@ Status→Implemented + retrospective section; D-464 item (4) closed).
    (ubuntu+win @0e1fca6e7 recorded). 9 adversarial fixtures in `component_async_tests.zig`.
 2. **Audit DONE 2026-06-18 (CLEAN)** — `audit_scaffolding` 0 block/0 soon (only J.3 chronic debt=61);
    `private/audit-2026-06-18.md`. Fuzz smoke 0 crashes.
-3. **D-460 v128-GC JIT emit — x86_64 struct/array MIRROR DONE @3d8be3c00** (ACTIVE BUNDLE). arm64 had
-   struct/array get/set/new (f79a3ced/41015a9b); x86_64 now mirrors via MOVUPS + running-sum struct offset +
-   new `encShlRImm8` index×16 stride; 3 runI32Export fixtures rewritten splat+replace_lane→`v128.load` (struct.new
-   force-spills field operand [ADR-0060] + x86_64 replace_lane not spilled-dst aware → masked the GC op). Both
-   arches GREEN (arm64 2953/2965, Rosetta 2959/2971). **NEXT (bundle): array_new_fixed v128 BOTH arches** (still
-   8-byte, needs a NEW fixture) + **array_copy** (trampoline `jitGcArrayCopy` elem-size — exotic). Recipe: index×16
-   + 16-byte MOVUPS/LDR-Q. See D-460 row.
+3. **D-460 v128-GC JIT emit — get/set/new/new_fixed DONE BOTH arches** (@3d8be3c00 x86_64 struct/array mirror +
+   @8137c7268 array_new_fixed both arches). arm64 had struct/array get/set/new (f79a3ced/41015a9b); x86_64 now
+   mirrors via MOVUPS + running-sum struct offset + new `encShlRImm8` index×16 stride; array_new_fixed adds the
+   16-byte stride/STR-Q arm. 4 runI32Export fixtures use a `v128.load` producer (struct.new/array.new_* force-spill
+   the operand [ADR-0060] + x86_64 replace_lane not spilled-dst aware → would mask the GC op). Both arches GREEN
+   (arm64 2954/2966, Rosetta 2960/2972). **REMAINING D-460 = array_copy ONLY** (trampoline `jitGcArrayCopy`
+   per-element byte-copy must use v128 elem size — exotic, gc/array-copy-inline.6). Then D-460 closes.
 4. **D-461 x86_64 v128 spill — 4 op families DONE** (extend @83256d210 3-host, Extadd @4b839f29a, splat/zero
    @612a1b6b9, **load_lane @5785dffa2 — ubuntu+win BOTH exit-0 this session**). Remaining = **replace_lane ONLY**
    (entangled with D-034 GPR-scalar; do WITH that cohort). **Remote**: load_lane 3-host GREEN. ubuntunote nix-disk

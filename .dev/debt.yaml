@@ -1837,13 +1837,14 @@ entries:
       RESIDUAL (the still-open part = the "JIT GC-v128 emit" bundle): SIMD is JIT-only by design (D-244), so
       OBSERVING a v128 GC field via i32x4.extract_lane (gc/array-copy-inline.6 → expects 16) needs JIT GC-v128
       struct/array op emit on BOTH arches. Phase-I scope (2026-06-16):
-      - **DONE both arches**: struct_get / struct_set / struct_new + array_get / array_set (arm64 f79a3ced/
-        41015a9b; **x86_64 mirror @3d8be3c00** — MOVUPS + running-sum struct offset + encShlRImm8 index×16 stride;
-        3 runI32Export fixtures rewritten splat+replace_lane→v128.load because struct.new force-spills its field
-        operand [ADR-0060] and x86_64 replace_lane is not yet spilled-dst aware [D-461/D-034 cohort] → masked the
-        GC op). **REMAINING**: array_new_fixed (both arches still 8-byte; needs a NEW fixture) + array_copy
-        (trampoline jitGcArrayCopy element-size logic — exotic, gc/array-copy-inline.6). array_new_default already
-        @memsets (size-agnostic). Recipe for the remaining: v128 index×16 stride + 16-byte XMM (MOVUPS) load/store.
+      - **DONE both arches**: struct_get / struct_set / struct_new + array_get / array_set / **array_new_fixed**
+        (arm64 f79a3ced/41015a9b + @8137c7268; **x86_64 mirror @3d8be3c00 + array_new_fixed @8137c7268** — MOVUPS +
+        running-sum struct offset + encShlRImm8 index×16 stride; array_new_fixed: 16-byte stride + MOVUPS [x86_64] /
+        STR Q via X15 [arm64]). 4 runI32Export fixtures (struct new/get, struct set, array set/get, array new_fixed)
+        all use a `v128.load` producer because struct.new/array.new_* force-spill the operand [ADR-0060] and x86_64
+        replace_lane is not yet spilled-dst aware [D-461/D-034 cohort]. **REMAINING**: array_copy only (trampoline
+        jitGcArrayCopy element-size logic — exotic, gc/array-copy-inline.6; per-element byte copy must use the
+        v128-aware elem size). array_new_default already @memsets (size-agnostic).
       - The element/field width is `FieldInfo.size` / `arrayElemValType==0x7B`; mirror struct field via the
         StructInfo offset+size already materialised (D-460 core).
       - TEST VEHICLE: `engine/runner_gc_test.zig` `runI32Export(alloc, &wasm_bytes, "f")` compiles a module to
