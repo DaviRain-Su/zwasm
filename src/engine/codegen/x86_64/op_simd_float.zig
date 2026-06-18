@@ -57,12 +57,12 @@ pub fn emitF32x4DivCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!vo
 
 pub fn emitF32x4MinCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitF32x4Min(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitF32x4Min(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 pub fn emitF32x4MaxCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitF32x4Max(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitF32x4Max(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 pub fn emitF32x4PminCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
@@ -100,12 +100,12 @@ pub fn emitF64x2DivCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!vo
 
 pub fn emitF64x2MinCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitF64x2Min(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitF64x2Min(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 pub fn emitF64x2MaxCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitF64x2Max(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitF64x2Max(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 pub fn emitF64x2PminCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
@@ -539,6 +539,7 @@ fn emitV128FpMin(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     encs: FpMinMaxEncoders,
 ) Error!void {
     if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
@@ -548,22 +549,30 @@ fn emitV128FpMin(
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
-    const rhs_x = try gpr.resolveXmm(alloc, rhs_v);
-    const lhs_x = try gpr.resolveXmm(alloc, lhs_v);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    // D-034 (g): spill-aware fmin (5 v128 roles, peak-4-live). dst→home or XMM7;
+    // scratch XMM14, scratch2 XMM15. Spilled lhs/rhs are loaded just-in-time:
+    // scratch2 (XMM15) doubles as the temp for a spilled rhs (steps 2-3) then a
+    // spilled lhs (step 4) — its own scratch2 role only begins at step 6. The
+    // no-spill path stays byte-identical (loadV128Into / resolveOrLoadV128 emit
+    // nothing extra for home regs).
     const scratch_x = abi.fp_spill_stage_xmms[0]; // XMM14
     const scratch2_x = abi.fp_spill_stage_xmms[1]; // XMM15
+    const result_slot = alloc.slot(result_v, .fpr);
+    const dst_x: inst.Xmm = switch (result_slot) {
+        .reg => |id| abi.fpSlotToReg(id) orelse return Error.SlotOverflow,
+        .spill => .xmm7,
+    };
 
-    // 1. dst = MOVAPS lhs (skip if dst==lhs)
-    if (dst_x != lhs_x) {
-        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, lhs_x).slice());
-    }
-    // 2. dst = MIN(dst, rhs)            ; dst = min1
-    try buf.appendSlice(allocator, encs.minmax(dst_x, rhs_x).slice());
-    // 3. scratch = MOVAPS rhs
-    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(scratch_x, rhs_x).slice());
-    // 4. scratch = MIN(scratch, lhs)    ; scratch = min2
-    try buf.appendSlice(allocator, encs.minmax(scratch_x, lhs_x).slice());
+    // 1. dst = lhs (MOVAPS reg-home — skip if dst==home — or RBP-disp load).
+    try loadV128Into(allocator, buf, alloc, spill_base_off, dst_x, lhs_v);
+    // 2. dst = MIN(dst, rhs).
+    const rhs_reg = try resolveOrLoadV128(allocator, buf, alloc, spill_base_off, rhs_v, scratch2_x);
+    try buf.appendSlice(allocator, encs.minmax(dst_x, rhs_reg).slice());
+    // 3. scratch = MOVAPS rhs (rhs is in its home reg or scratch2 from step 2).
+    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(scratch_x, rhs_reg).slice());
+    // 4. scratch = MIN(scratch, lhs). rhs is dead → scratch2 free to hold a spilled lhs.
+    const lhs_reg = try resolveOrLoadV128(allocator, buf, alloc, spill_base_off, lhs_v, scratch2_x);
+    try buf.appendSlice(allocator, encs.minmax(scratch_x, lhs_reg).slice());
     // 5. dst = OR(dst, scratch)         ; dst = min_or
     try buf.appendSlice(allocator, encs.or_(dst_x, scratch_x).slice());
     // 6. scratch2 = MOVAPS dst          ; scratch2 = min_or
@@ -577,7 +586,48 @@ fn emitV128FpMin(
     // 10. dst = ANDN(dst, scratch2)     ; dst = ~nan_fraction_mask & min_or_2 = final
     try buf.appendSlice(allocator, encs.andn(dst_x, scratch2_x).slice());
 
+    try storeV128IfSpilled(allocator, buf, spill_base_off, result_slot);
     try pushed_vregs.append(allocator, result_v);
+}
+
+/// D-034 (g) helpers for the spill-aware fmin/fmax (5-v128-role ops).
+/// `loadV128Into`: put operand `v`'s value into `reg` (MOVAPS from its home reg,
+/// skipped when reg already IS the home; or an RBP-disp v128 load when spilled).
+fn loadV128Into(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, spill_base_off: u32, reg: inst.Xmm, v: usize) Error!void {
+    switch (alloc.slot(v, .fpr)) {
+        .reg => |id| {
+            const home = abi.fpSlotToReg(id) orelse return Error.SlotOverflow;
+            if (reg != home) try buf.appendSlice(allocator, inst.encMovapsXmmXmm(reg, home).slice());
+        },
+        .spill => |off| {
+            const abs_off = spill_base_off + off;
+            if (abs_off > 0x7FFF_FFFF) return Error.SlotOverflow;
+            try buf.appendSlice(allocator, inst.encLoadXmmV128MemRBPDisp32(reg, -@as(i32, @intCast(abs_off))).slice());
+        },
+    }
+}
+
+/// `resolveOrLoadV128`: return the operand's home reg directly when not spilled
+/// (no emit); when spilled, load it into `temp` and return `temp`.
+fn resolveOrLoadV128(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, spill_base_off: u32, v: usize, temp: inst.Xmm) Error!inst.Xmm {
+    return switch (alloc.slot(v, .fpr)) {
+        .reg => |id| abi.fpSlotToReg(id) orelse return Error.SlotOverflow,
+        .spill => |off| blk: {
+            const abs_off = spill_base_off + off;
+            if (abs_off > 0x7FFF_FFFF) return Error.SlotOverflow;
+            try buf.appendSlice(allocator, inst.encLoadXmmV128MemRBPDisp32(temp, -@as(i32, @intCast(abs_off))).slice());
+            break :blk temp;
+        },
+    };
+}
+
+/// `storeV128IfSpilled`: flush XMM7 → the result's spill slot when the result spilled.
+fn storeV128IfSpilled(allocator: Allocator, buf: *std.ArrayList(u8), spill_base_off: u32, result_slot: regalloc.Slot) Error!void {
+    if (result_slot == .spill) {
+        const abs_off = spill_base_off + result_slot.spill;
+        if (abs_off > 0x7FFF_FFFF) return Error.SlotOverflow;
+        try buf.appendSlice(allocator, inst.encStoreXmmV128MemRBPDisp32(-@as(i32, @intCast(abs_off)), .xmm7).slice());
+    }
 }
 
 /// fmax recipe (13 instructions). dst ends holding the canonical
@@ -588,6 +638,7 @@ fn emitV128FpMax(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     encs: FpMinMaxEncoders,
 ) Error!void {
     if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
@@ -597,20 +648,28 @@ fn emitV128FpMax(
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
-    const rhs_x = try gpr.resolveXmm(alloc, rhs_v);
-    const lhs_x = try gpr.resolveXmm(alloc, lhs_v);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    // D-034 (g): spill-aware fmax. dst is NOT written until step 5, so its reg
+    // (home or XMM7) doubles as the just-in-time temp for a spilled rhs (steps
+    // 2-3) then a spilled lhs (step 4); from step 5 it carries the result.
+    // No-spill path stays byte-identical.
     const scratch_x = abi.fp_spill_stage_xmms[0]; // XMM14
     const scratch2_x = abi.fp_spill_stage_xmms[1]; // XMM15
+    const result_slot = alloc.slot(result_v, .fpr);
+    const dst_x: inst.Xmm = switch (result_slot) {
+        .reg => |id| abi.fpSlotToReg(id) orelse return Error.SlotOverflow,
+        .spill => .xmm7,
+    };
 
-    // 1. scratch = MOVAPS lhs
-    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(scratch_x, lhs_x).slice());
-    // 2. scratch = MAX(scratch, rhs)        ; scratch = max1
-    try buf.appendSlice(allocator, encs.minmax(scratch_x, rhs_x).slice());
-    // 3. scratch2 = MOVAPS rhs
-    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(scratch2_x, rhs_x).slice());
-    // 4. scratch2 = MAX(scratch2, lhs)      ; scratch2 = max2
-    try buf.appendSlice(allocator, encs.minmax(scratch2_x, lhs_x).slice());
+    // 1. scratch = MOVAPS lhs (or RBP-disp load when spilled).
+    try loadV128Into(allocator, buf, alloc, spill_base_off, scratch_x, lhs_v);
+    // 2. scratch = MAX(scratch, rhs).
+    const rhs_reg = try resolveOrLoadV128(allocator, buf, alloc, spill_base_off, rhs_v, dst_x);
+    try buf.appendSlice(allocator, encs.minmax(scratch_x, rhs_reg).slice());
+    // 3. scratch2 = MOVAPS rhs (home reg or dst_x from step 2).
+    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(scratch2_x, rhs_reg).slice());
+    // 4. scratch2 = MAX(scratch2, lhs). rhs dead → dst_x free to hold a spilled lhs.
+    const lhs_reg = try resolveOrLoadV128(allocator, buf, alloc, spill_base_off, lhs_v, dst_x);
+    try buf.appendSlice(allocator, encs.minmax(scratch2_x, lhs_reg).slice());
     // 5. dst = MOVAPS scratch              ; dst = max1
     try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, scratch_x).slice());
     // 6. dst = XOR(dst, scratch2)          ; dst = max_xor (= max1 ^ max2)
@@ -630,31 +689,32 @@ fn emitV128FpMax(
     // 13. dst = ANDN(dst, scratch)         ; dst = ~nan_fraction_mask & max_blended_nan_positive = final
     try buf.appendSlice(allocator, encs.andn(dst_x, scratch_x).slice());
 
+    try storeV128IfSpilled(allocator, buf, spill_base_off, result_slot);
     try pushed_vregs.append(allocator, result_v);
 }
 
-pub fn emitF32x4Min(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+pub fn emitF32x4Min(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
     var encs = f32x4_minmax_encs;
     encs.minmax = inst.encMinps;
-    return emitV128FpMin(allocator, buf, alloc, pushed_vregs, next_vreg, encs);
+    return emitV128FpMin(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, encs);
 }
 
-pub fn emitF32x4Max(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+pub fn emitF32x4Max(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
     var encs = f32x4_minmax_encs;
     encs.minmax = inst.encMaxps;
-    return emitV128FpMax(allocator, buf, alloc, pushed_vregs, next_vreg, encs);
+    return emitV128FpMax(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, encs);
 }
 
-pub fn emitF64x2Min(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+pub fn emitF64x2Min(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
     var encs = f64x2_minmax_encs;
     encs.minmax = inst.encMinpd;
-    return emitV128FpMin(allocator, buf, alloc, pushed_vregs, next_vreg, encs);
+    return emitV128FpMin(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, encs);
 }
 
-pub fn emitF64x2Max(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+pub fn emitF64x2Max(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
     var encs = f64x2_minmax_encs;
     encs.minmax = inst.encMaxpd;
-    return emitV128FpMax(allocator, buf, alloc, pushed_vregs, next_vreg, encs);
+    return emitV128FpMax(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, encs);
 }
 
 // §17.4 relaxed-SIMD min/max — RAW hardware MINPS/MAXPS/MINPD/MAXPD (single

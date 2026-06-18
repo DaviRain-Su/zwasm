@@ -241,7 +241,7 @@ test "emitF32x4Min: 10-instruction NaN-correction synthesis" {
     try pushed.append(testing.allocator, 1); // rhs
     var next_vreg: u32 = 2;
 
-    try op_simd_float.emitF32x4Min(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_float.emitF32x4Min(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
@@ -287,7 +287,7 @@ test "emitF32x4Max: 13-instruction NaN-correction synthesis" {
     try pushed.append(testing.allocator, 1);
     var next_vreg: u32 = 2;
 
-    try op_simd_float.emitF32x4Max(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_float.emitF32x4Max(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
@@ -339,7 +339,7 @@ test "emitF64x2Min: PD encoders + PSRLQ shift=13 (10 instr)" {
     try pushed.append(testing.allocator, 1);
     var next_vreg: u32 = 2;
 
-    try op_simd_float.emitF64x2Min(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_float.emitF64x2Min(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
