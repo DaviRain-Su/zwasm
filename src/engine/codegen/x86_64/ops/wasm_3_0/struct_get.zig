@@ -39,7 +39,9 @@ const slab: abi.Gpr = .r11;
 
 pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void {
     const fieldidx: u32 = ins.extra;
-    const field_off: u32 = header_size + fieldidx * 8;
+    // D-460: running-sum offset (v128 fields are 16 bytes); equals
+    // header_size + fieldidx*8 for an all-scalar struct. Mirrors arm64.
+    const field_off: u32 = header_size + ctx.func.structFieldByteOffset(@intCast(ins.payload), fieldidx);
 
     const args = try ctx.popUnary();
     // Load the GcRef into a register (stage-0 = R10 if spilled).
@@ -73,6 +75,11 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
             else
                 try ctx.buf.appendSlice(ctx.allocator, inst.encMovqXmmFromR64(xd, tmp).slice());
             try gpr.xmmStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
+        },
+        0x7B => { // v128 (D-460): 16-byte MOVUPS load into the XMM result home.
+            const xd = try gpr.xmmDefSpilledV128(ctx.alloc, args.result, 0);
+            try ctx.buf.appendSlice(ctx.allocator, inst.encMovupsXmmMemBaseDisp32(false, xd, slab, @intCast(field_off)).slice());
+            try gpr.xmmStoreSpilledV128(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
         },
         else => {
             const rd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);

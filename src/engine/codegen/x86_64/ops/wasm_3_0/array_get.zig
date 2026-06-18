@@ -69,6 +69,16 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
                 try ctx.buf.appendSlice(ctx.allocator, inst.encMovqXmmFromR64(xd, len_scratch).slice());
             try gpr.xmmStoreSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
         },
+        0x7B => {
+            // v128 (D-460): 16-byte element. SIB scale tops out at 8, so
+            // scale the index by 16 (idx<<4) into R10 (length, dead after
+            // the OOB check), then MOVUPS [base + R10].
+            try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.d, len_scratch, xidx).slice());
+            try ctx.buf.appendSlice(ctx.allocator, inst.encShlRImm8(.q, len_scratch, 4).slice());
+            const xd = try gpr.xmmDefSpilledV128(ctx.alloc, args.result, 0);
+            try ctx.buf.appendSlice(ctx.allocator, inst.encMovupsMemBaseIdx(false, xd, base, len_scratch).slice());
+            try gpr.xmmStoreSpilledV128(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, args.result, 0);
+        },
         else => {
             const rd = try gpr.gprDefSpilled(ctx.alloc, args.result, 0);
             try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromBaseIdxLsl3(rd, base, xidx).slice());

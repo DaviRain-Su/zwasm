@@ -351,6 +351,20 @@ pub fn encShrRImm8(size: Width, dst: Gpr, imm: u8) EncodedInsn {
     return enc;
 }
 
+/// `SHL r/m, imm8` (opcode 0xC1 /4 ib) — logical shift left by an
+/// 8-bit immediate. Mirrors `encShrRImm8` with the /4 (= SHL/SAL)
+/// modrm digit. Used by array.get/set of a v128 element to scale the
+/// index by 16 (idx << 4) into a byte offset (the SIB scale tops out
+/// at 8, so ×16 needs a pre-shift).
+pub fn encShlRImm8(size: Width, dst: Gpr, imm: u8) EncodedInsn {
+    var enc: EncodedInsn = .{};
+    if (rexForRR(size, .rax, dst)) |rex| enc.push(rex);
+    enc.push(0xC1);
+    enc.push(encodeModrm(0b11, 4, dst.low3())); // /4 = SHL
+    enc.push(imm);
+    return enc;
+}
+
 /// `SAR r/m, imm8` (opcode 0xC1 /7 ib) — arithmetic (sign-
 /// replicating) right shift. Mirrors `encShrRImm8` with the /7
 /// modrm digit. Used by `i31.get_s` (sign-extend `payload >> 1`).

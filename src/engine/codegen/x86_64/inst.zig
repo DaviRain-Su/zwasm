@@ -213,6 +213,7 @@ pub const encSubRSpImm32 = inst_alu.encSubRSpImm32;
 pub const encAddRSpImm32 = inst_alu.encAddRSpImm32;
 pub const encMovImm64Q = inst_alu.encMovImm64Q;
 pub const encShrRImm8 = inst_alu.encShrRImm8;
+pub const encShlRImm8 = inst_alu.encShlRImm8;
 pub const encSarRImm8 = inst_alu.encSarRImm8;
 pub const encAndRImm8 = inst_alu.encAndRImm8;
 pub const encOrRImm8 = inst_alu.encOrRImm8;
@@ -1220,6 +1221,14 @@ test "encShrRImm8: shr rax, 1 → 48 c1 e8 01" {
 test "encShrRImm8: shr r10, 1 → 49 c1 ea 01 (REX.W + REX.B)" {
     const enc = encShrRImm8(.q, .r10, 1);
     try testing.expectEqualSlices(u8, &.{ 0x49, 0xC1, 0xEA, 0x01 }, enc.slice());
+}
+
+test "encShlRImm8: shl rax, 4 → 48 c1 e0 04 (/4 = SHL)" {
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0xC1, 0xE0, 0x04 }, encShlRImm8(.q, .rax, 4).slice());
+}
+
+test "encShlRImm8: shl r10, 4 → 49 c1 e2 04 (REX.W + REX.B)" {
+    try testing.expectEqualSlices(u8, &.{ 0x49, 0xC1, 0xE2, 0x04 }, encShlRImm8(.q, .r10, 4).slice());
 }
 
 test "encAndRImm8: and rax, 1 → 48 83 e0 01" {

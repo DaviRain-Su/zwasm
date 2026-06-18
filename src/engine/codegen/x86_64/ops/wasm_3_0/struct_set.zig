@@ -32,7 +32,8 @@ const slab: abi.Gpr = .r11;
 
 pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void {
     const fieldidx: u32 = ins.extra;
-    const field_off: u32 = header_size + fieldidx * 8;
+    // D-460: running-sum offset (v128 fields are 16 bytes); mirrors arm64.
+    const field_off: u32 = header_size + ctx.func.structFieldByteOffset(@intCast(ins.payload), fieldidx);
 
     // Operand stack: [.., ref, value] (value on top). Pop value then ref.
     if (ctx.pushed_vregs.items.len < 2) return ctx_mod.Error.AllocationMissing;
@@ -64,6 +65,10 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
             else
                 try ctx.buf.appendSlice(ctx.allocator, inst.encMovqR64FromXmm(tmp, xv).slice());
             try ctx.buf.appendSlice(ctx.allocator, inst.encStoreR64MemDisp32(tmp, slab, @intCast(field_off)).slice());
+        },
+        0x7B => { // v128 (D-460): 16-byte MOVUPS store from the value operand.
+            const xv = try gpr.xmmLoadSpilledV128(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, value_vreg, 0);
+            try ctx.buf.appendSlice(ctx.allocator, inst.encMovupsXmmMemBaseDisp32(true, xv, slab, @intCast(field_off)).slice());
         },
         else => {
             const xval = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, value_vreg, 0);

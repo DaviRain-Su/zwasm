@@ -69,9 +69,17 @@ pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void 
     while (j > 0) {
         j -= 1;
         const fvreg = ctx.pushed_vregs.pop().?;
-        const valreg = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, fvreg, 0);
-        const field_off: u32 = header_size + j * 8;
-        try ctx.buf.appendSlice(ctx.allocator, inst.encStoreR64MemDisp32(valreg, base_reg, @intCast(field_off)).slice());
+        // D-460: running-sum offset (v128 fields are 16 bytes); mirrors arm64.
+        const field_off: u32 = header_size + ctx.func.structFieldByteOffset(typeidx, j);
+        if (ctx.func.structFieldValType(typeidx, j) == 0x7B) {
+            // v128 field: 16-byte MOVUPS store. base_reg is reused across
+            // stores; MOVUPS addresses [base_reg + field_off] directly.
+            const xv = try gpr.xmmLoadSpilledV128(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, fvreg, 0);
+            try ctx.buf.appendSlice(ctx.allocator, inst.encMovupsXmmMemBaseDisp32(true, xv, base_reg, @intCast(field_off)).slice());
+        } else {
+            const valreg = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, fvreg, 0);
+            try ctx.buf.appendSlice(ctx.allocator, inst.encStoreR64MemDisp32(valreg, base_reg, @intCast(field_off)).slice());
+        }
     }
 
     // Push ref (result) — EAX still holds it (the field loop touches only
