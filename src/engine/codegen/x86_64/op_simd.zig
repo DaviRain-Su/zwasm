@@ -518,8 +518,11 @@ pub fn v128LoadLane(
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
     const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
-    const vec_x = try gpr.resolveXmm(alloc, vec_v);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    // D-461: spill-aware vec-read (STAGE0/XMM14) + dst-write (STAGE1/XMM15).
+    // No internal XMM scratch here (RCX GPR roundtrip), so the two stages
+    // never collide. arm64 already spill-aware via emitV128LoadLane.
+    const vec_x = try gpr.xmmLoadSpilledV128(allocator, buf, alloc, spill_base_off, vec_v, 0);
+    const dst_x = try gpr.xmmDefSpilledV128(alloc, result_v, 1);
 
     try v128MemPrologue(allocator, buf, oob_fixups, idx_r, offset, access_size, func_idx);
 
@@ -544,6 +547,7 @@ pub fn v128LoadLane(
         else => unreachable,
     };
     try buf.appendSlice(allocator, enc_pinsr.slice());
+    try gpr.xmmStoreSpilledV128(allocator, buf, alloc, spill_base_off, result_v, 1);
     try pushed_vregs.append(allocator, result_v);
 }
 
