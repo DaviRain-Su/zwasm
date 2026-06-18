@@ -1341,27 +1341,41 @@ pub fn emitI32x4TruncSatF32x4S(allocator: Allocator, buf: *std.ArrayList(u8), al
 /// from XMM8..XMM13) + XMM14 + XMM15 in zwasm — already covered
 /// by the existing fp_spill_stage_xmms reservation; no ABI change
 /// needed. Closes the last of the 4 deferred §9.7-ae u-variants.
-pub fn emitI32x4TruncSatF32x4U(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+pub fn emitI32x4TruncSatF32x4U(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
     const src_v = pushed_vregs.pop().?;
     const result_v = next_vreg.*;
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
-    const src_x = try gpr.resolveXmm(alloc, src_v);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    // D-034 (g): 2-scratch in-place — both stages are the recipe's scratch
+    // (tmp1/tmp2), so load src INTO dst (home or XMM7 when spilled); src is read
+    // only here (the step-2 init), the rest of the recipe operates on dst.
     const tmp2 = abi.fp_spill_stage_xmms[0]; // XMM14: zero, then magic, then mask, then zero again
     const tmp1 = abi.fp_spill_stage_xmms[1]; // XMM15: second-path copy
+    const result_slot = alloc.slot(result_v, .fpr);
+    const dst_x: inst.Xmm = switch (result_slot) {
+        .reg => |id| abi.fpSlotToReg(id) orelse return Error.SlotOverflow,
+        .spill => .xmm7,
+    };
+    switch (alloc.slot(src_v, .fpr)) {
+        .reg => |id| {
+            const src_home = abi.fpSlotToReg(id) orelse return Error.SlotOverflow;
+            if (dst_x != src_home) try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, src_home).slice());
+        },
+        .spill => |off| {
+            const abs_off = spill_base_off + off;
+            if (abs_off > 0x7FFF_FFFF) return Error.SlotOverflow;
+            try buf.appendSlice(allocator, inst.encLoadXmmV128MemRBPDisp32(dst_x, -@as(i32, @intCast(abs_off))).slice());
+        },
+    }
 
     // 1: tmp2 = 0 (XORPS XMM14, XMM14).
     try buf.appendSlice(allocator, inst.encXorps(tmp2, tmp2).slice());
 
-    // 2: dst = MAXPS(src, 0) — clamp negatives + NaN to 0.
+    // 2: dst = MAXPS(dst, 0) — clamp negatives + NaN to 0 (dst already holds src).
     // (MAXPS returns 2nd operand on NaN per Intel SDM; with
     // 2nd operand = 0 the result is 0 for NaN lanes.)
-    if (dst_x != src_x) {
-        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, src_x).slice());
-    }
     try buf.appendSlice(allocator, inst.encMaxps(dst_x, tmp2).slice());
 
     // 3-5: tmp2 = magic = 0x4f000000 (= f32(INT_MAX+1) via PSRLD-1
@@ -1410,6 +1424,11 @@ pub fn emitI32x4TruncSatF32x4U(allocator: Allocator, buf: *std.ArrayList(u8), al
     // holds 0x80000000 + 0x7FFFFFFF = 0xFFFFFFFF = UINT_MAX. ✓
     try buf.appendSlice(allocator, inst.encPaddD(dst_x, tmp1).slice());
 
+    if (result_slot == .spill) {
+        const abs_off = spill_base_off + result_slot.spill;
+        if (abs_off > 0x7FFF_FFFF) return Error.SlotOverflow;
+        try buf.appendSlice(allocator, inst.encStoreXmmV128MemRBPDisp32(-@as(i32, @intCast(abs_off)), .xmm7).slice());
+    }
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -1745,5 +1764,5 @@ pub fn emitI32x4TruncSatF32x4SCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInst
 
 pub fn emitI32x4TruncSatF32x4UCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitI32x4TruncSatF32x4U(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitI32x4TruncSatF32x4U(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }

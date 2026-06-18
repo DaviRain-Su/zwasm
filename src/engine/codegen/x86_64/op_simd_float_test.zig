@@ -888,13 +888,14 @@ test "emitI32x4TruncSatF32x4U: 14-instr two-path inline-magic recipe" {
     try pushed.append(testing.allocator, 0);
     var next_vreg: u32 = 1;
 
-    try op_simd_float.emitI32x4TruncSatF32x4U(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_float.emitI32x4TruncSatF32x4U(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
-    // src = xmm8, dst = xmm9, tmp2 = xmm14, tmp1 = xmm15.
-    try expected.appendSlice(testing.allocator, inst.encXorps(.xmm14, .xmm14).slice());
+    // src = xmm8, dst = xmm9, tmp2 = xmm14, tmp1 = xmm15. D-034 (g): src is
+    // loaded into dst first (in-place), so MOVAPS dst,src precedes the XORPS.
     try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm9, .xmm8).slice());
+    try expected.appendSlice(testing.allocator, inst.encXorps(.xmm14, .xmm14).slice());
     try expected.appendSlice(testing.allocator, inst.encMaxps(.xmm9, .xmm14).slice());
     try expected.appendSlice(testing.allocator, inst.encPcmpeqD(.xmm14, .xmm14).slice());
     try expected.appendSlice(testing.allocator, inst.encPsrldImm(.xmm14, 1).slice());
