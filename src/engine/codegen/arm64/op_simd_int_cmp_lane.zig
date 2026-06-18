@@ -40,8 +40,10 @@ fn emitV128SplatFromGpr(
     encoder: *const fn (rd: u5, rn: u5) u32,
 ) Error!void {
     const src_vreg = ctx.pushed_vregs.pop().?;
-    // SPILL-EXEMPT: scalar i32/i64 src; GPR spill-aware path is its own follow-on.
-    const src_reg = try gpr.resolveGpr(ctx.alloc, src_vreg);
+    // D-034 (b): spill-aware GPR splat-source (was resolveGpr-EXEMPT). gprLoadSpilled
+    // stage0/X14 (X-file) — disjoint from the V-file qDef stage (V29); DUP reads the
+    // GPR and writes the V-reg, distinct register files, no collision.
+    const src_reg = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
 
     const result_vreg = ctx.next_vreg.*;
     ctx.next_vreg.* += 1;
@@ -105,8 +107,10 @@ pub fn emitI32x4ExtractLane(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 /// reuse), the MOV is a no-op (encMovV16B Vd, Vd is harmless).
 pub fn emitI32x4ReplaceLane(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     const new_lane_vreg = ctx.pushed_vregs.pop().?;
-    // SPILL-EXEMPT: i32 new-lane scalar (GPR); spill-aware path is its own follow-on.
-    const new_lane_w = try gpr.resolveGpr(ctx.alloc, new_lane_vreg);
+    // D-034 (a): spill-aware GPR new-lane (was resolveGpr-EXEMPT). gprLoadSpilled
+    // stage0 → X14 if spilled (X-file, disjoint from the V-file qLoad/qDef stages
+    // used by src/result; consumed by INS before any further GPR-stage use).
+    const new_lane_w = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, new_lane_vreg, 0);
 
     const src_vreg = ctx.pushed_vregs.pop().?;
     const src_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
@@ -179,8 +183,9 @@ fn emitV128ReplaceLane(
     lane_mask: u32,
 ) Error!void {
     const new_lane_vreg = ctx.pushed_vregs.pop().?;
-    // SPILL-EXEMPT: scalar new-lane (GPR); spill-aware path is its own follow-on alongside other GPR sites.
-    const new_lane_x = try gpr.resolveGpr(ctx.alloc, new_lane_vreg);
+    // D-034 (a): spill-aware GPR new-lane (was resolveGpr-EXEMPT). gprLoadSpilled
+    // stage0/X14 (X-file, disjoint from V-file qLoad/qDef); covers i8x16/i16x8/i64x2.
+    const new_lane_x = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, new_lane_vreg, 0);
 
     const src_vreg = ctx.pushed_vregs.pop().?;
     const src_v = try gpr.qLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_vreg, 0);
