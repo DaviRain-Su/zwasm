@@ -63,13 +63,13 @@ Status→Implemented + retrospective section; D-464 item (4) closed).
    2026-06-18: the wasmtime native sweep does NOT cover SIMD-GC — array-copy-inline.wast is SIMD→simd_runner, not
    the wasm-3.0 corpus; 38 gc-sweep fails are pre-existing ADR-0192 residuals, NOT regressions). Only an optional
    edge fixture remains (low value). Do NOT grind consumer-gated (D-464(2), D-305).
-4. **D-461 x86_64 v128 spill — 5 op families DONE** (extend, Extadd, v128.load splat/zero, load_lane @5785dffa2,
-   **i32x4/i16x8/i64x2.splat @60c4f043a**). **ROOT of the remaining D-461 ops = the D-034 GPR-scalar SPILL-EXEMPT
-   path** (confirmed 2026-06-18): arm64 `emitV128SplatFromGpr`(resolveGpr src) + `emitV128ExtractLane`(resolveGpr
-   result) are GPR-exempt → i8x16.splat UnsupportedOps a spilled GPR scalar (i8x16 fails arm64, i32x4 passes —
-   divergence not yet root-caused; enumerate hypotheses before the fix). **NEXT = open the D-034 GPR-scalar spill
-   cohort** (unblocks i8x16.splat + replace_lane + extract-results + splat-sources). Also: f32x4/f64x2.splat (no
-   spill_base_off param). ubuntunote nix-disk FIXED (lesson `2026-06-18-remote-zig-cache-fills-disk-*`).
+4. **D-461 v128 spill — integer splat family + narrow-extract NOW COMPLETE both arches**. This turn: bisection
+   root-caused the i8x16 "UnsupportedOp" = arm64 `emitV128ExtractLane` GPR-RESULT was resolveGpr-EXEMPT (i8x16/
+   i16x8/i64x2.extract_lane; only i32x4 had its own handler) → FIXED @a534d1c45; that GREEN ref unblocked **x86_64
+   i8x16.splat @f543f4672** (dst→STAGE1, PSHUFB landmine). Prior: extend/Extadd/v128.load/load_lane @5785dffa2/
+   i32x4-i16x8-i64x2.splat @60c4f043a. **REMAINING D-461 (EXOTIC, high-pressure only)**: f32x4/f64x2.splat (need
+   spill_base_off param threading + FP-scalar source) + replace_lane (D-034 arm64-GPR-scalar cohort). NEXT options:
+   f32x4/f64x2.splat (self-contained) / D-034 cohort (replace_lane) / pivot to other 完成形 work.
 
 ## Recently closed arcs (detail in ADRs/git/debt — one-liners)
 
