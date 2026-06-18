@@ -96,22 +96,22 @@ pub fn emitI64x2MulCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!vo
 
 pub fn emitI8x16NegCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitI8x16Neg(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitI8x16Neg(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 pub fn emitI16x8NegCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitI16x8Neg(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitI16x8Neg(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 pub fn emitI32x4NegCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitI32x4Neg(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitI32x4Neg(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 pub fn emitI64x2NegCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitI64x2Neg(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitI64x2Neg(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 pub fn emitI8x16AbsCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
@@ -647,6 +647,7 @@ fn emitV128IntNeg(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     encoder_psub: *const fn (dst: inst.Xmm, src: inst.Xmm) inst.EncodedInsn,
 ) Error!void {
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
@@ -655,30 +656,33 @@ fn emitV128IntNeg(
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
-    const src_x = try gpr.resolveXmm(alloc, src_v);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
-    const scratch_x = abi.fp_spill_stage_xmms[0]; // XMM14
+    // D-034 (g): spill-aware v128 src+dst. The PXOR/PSUB scratch moves to XMM7
+    // (mirror of the done FP abs/neg), freeing both stages for src(0) + dst(1).
+    const src_x = try gpr.xmmLoadSpilledV128(allocator, buf, alloc, spill_base_off, src_v, 0);
+    const dst_x = try gpr.xmmDefSpilledV128(alloc, result_v, 1);
+    const scratch_x: inst.Xmm = .xmm7;
 
     try buf.appendSlice(allocator, inst.encPxor(scratch_x, scratch_x).slice());
     try buf.appendSlice(allocator, encoder_psub(scratch_x, src_x).slice());
     try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, scratch_x).slice());
+    try gpr.xmmStoreSpilledV128(allocator, buf, alloc, spill_base_off, result_v, 1);
     try pushed_vregs.append(allocator, result_v);
 }
 
-pub fn emitI8x16Neg(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntNeg(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPsubB);
+pub fn emitI8x16Neg(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntNeg(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPsubB);
 }
 
-pub fn emitI16x8Neg(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntNeg(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPsubW);
+pub fn emitI16x8Neg(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntNeg(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPsubW);
 }
 
-pub fn emitI32x4Neg(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntNeg(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPsubD);
+pub fn emitI32x4Neg(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntNeg(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPsubD);
 }
 
-pub fn emitI64x2Neg(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
-    return emitV128IntNeg(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPsubq);
+pub fn emitI64x2Neg(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
+    return emitV128IntNeg(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPsubq);
 }
 
 /// Wasm spec §4.4.4 (i*x*.abs) — pop one v128, push v128 with
