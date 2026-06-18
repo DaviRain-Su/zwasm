@@ -2046,12 +2046,16 @@ entries:
             - all_true v128-source FIXED @e52d5a5f9 (stage1/XMM15 vs PXOR-scratch XMM14).
             - **FP-round (ceil/floor/trunc/nearest, f32x4+f64x2) DONE @2c6f0235c** — emitV128FpRound has 0 internal
               scratch → clean 2-stage migration (src stage0, dst stage1). 2 fixtures (f32x4.ceil/f64x2.floor).
-          REMAINING (g) splits by difficulty: **TRACTABLE** (≤1 internal scratch XMM, like the round ops):
-          abs/neg (:779/:808 use XMM14 only), simple single-instr unaries. **SCRATCH-HEAVY** (consume BOTH XMM14+
-          XMM15 internally → NO free stage for spilled src/dst, the genuine wall): convert/trunc_sat (:1176/:1275/
-          :1445/:1541) + the 3-v128-operand FP binops (:290 min/max etc., 2 src+dst+XMM7-alias). The scratch-heavy
-          set needs per-op staging redesign OR a 3rd reserved stage XMM (a perf-costly global pool reduction —
-          REJECT for an exotic path; favour per-op memory-scratch or recipe restructure). Opt-in-JIT-only, exotic.
+          **abs/neg DONE @2fa6ce553** — KEY TECHNIQUE: move the op's internal scratch (the sign mask) from a stage
+          XMM (XMM14) to **XMM7** (a reserved scratch unused by the op), freeing BOTH stages for src(0)+dst(1). This
+          generalises: any op with ≤1 internal scratch becomes a clean helper migration by parking that scratch on
+          XMM7. REMAINING (g): **SCRATCH-HEAVY** ops that consume BOTH XMM14+XMM15 internally — convert/trunc_sat
+          (:1176/:1275/:1445/:1541) + 3-v128-operand FP binops (:290 min/max, 2src+dst+XMM7-alias). For these, XMM7
+          gives only a 3rd reg (XMM14/15/7); when an op needs 2 internal scratch + src + dst (=4 when all spill) it
+          still falls short → needs per-op in-place restructure (compute in the src stage, store to dst slot) OR
+          memory-operand scratch. REJECT a global 3rd-stage-XMM pool cut (perf cost for an exotic path). The clean
+          XMM7-park ops (≤1 scratch) are now ALL done (round 0-scratch + abs/neg 1-scratch); the rest are the hard
+          per-op-restructure tail. Opt-in-JIT-only, exotic.
       NOT D-034 (genuinely-structural, leave): op_simd.zig:490/:672 (v128 select/bitselect need 3 simultaneous V
       regs vs 2 stage regs — a stage-count limit, not a missing migration).
       STAGING confirmed collision-free: arm64 GPR stages = X14/X15 (`abi.spill_stage_gprs`), disjoint from the

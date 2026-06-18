@@ -32,16 +32,16 @@ CLOSED (below). **windowsmini RESUMED**. Version `2.0.0-alpha.3`.
 ## Active bundle
 
 - **Bundle-ID**: D-034 SIMD spill-completeness cohort (scalar-operand sibling of D-461 + the v128-source arith gap)
-- **Cycles-remaining**: ~5 (sub-cats a–g; **(e) GPR-result + (g) all_true-source DONE @e52d5a5f9; (g) FP-round
-  DONE @2c6f0235c**; opened 2026-06-18)
+- **Cycles-remaining**: ~5 (sub-cats a–g; DONE: (e) GPR-result + (g) all_true-src @e52d5a5f9; (g) FP-round
+  @2c6f0235c; (g) abs/neg @2fa6ce553; opened 2026-06-18)
 - **Continuity-memo**: mechanical swap (resolveGpr/Fp/Xmm → gprLoadSpilled/fpLoadSpilled/xmmLoadSpilledV128).
-  **(g) = the big one (D-461 "v128-operand COMPLETE" was OVERSTATED for arith/convert)**; split by difficulty:
-  NEXT = TRACTABLE (g) sites (abs/neg op_simd_float.zig:779/:808 use XMM14 only → src/dst on free stages, like
-  round). Then the SCRATCH-HEAVY wall: convert/trunc_sat (:1176/:1275/:1445/:1541 use BOTH XMM14+XMM15) + 3-v128
-  FP binops (:290 min/max) — no free stage for spilled src/dst; need per-op recipe restructure (REJECT a global
-  3rd-stage-XMM pool cut — perf cost for an exotic path). Remaining scalar sub-cats: (a) GPR new-lane (arm64
-  :109/:183), (b) GPR splat-src (:43), (c) FP new-lane (:126), (f) shift-amt (:425). LANDMINE: audit each op's
-  internal scratch-XMM before picking the spilled operand's stage (all_true used stage1 vs PXOR-scratch stage0).
+  **KEY TECHNIQUE (abs/neg): park the op's internal scratch on XMM7** (reserved, op-unused) to free BOTH stages
+  for src(0)+dst(1) — clean for any ≤1-scratch op. Those are now ALL done (round 0-scratch + abs/neg 1-scratch).
+  REMAINING (g) = the SCRATCH-HEAVY tail: convert/trunc_sat (:1176/:1275/:1445/:1541 use BOTH XMM14+XMM15) +
+  3-v128 FP binops (:290 min/max). XMM7 gives only a 3rd reg; 2-scratch+src+dst=4-when-all-spill still short →
+  need per-op in-place restructure (compute in src stage, store to dst slot) or memory-operand scratch. REJECT a
+  global 3rd-stage-XMM pool cut (perf cost, exotic path). Scalar sub-cats remain: (a) GPR new-lane (arm64
+  :109/:183), (b) GPR splat-src (:43), (c) FP new-lane (:126), (f) shift-amt (:425) — need GPR/FP-pressure fixtures.
 - **Exit-condition**: every a–g sub-category's operand forced to spill flows through its op on BOTH arches; zero
   bare resolveGpr/resolveFp/resolveXmm SPILL-EXEMPT sites remain (except the structural 3-V-reg select/bitselect).
 
@@ -49,9 +49,9 @@ CLOSED (below). **windowsmini RESUMED**. Version `2.0.0-alpha.3`.
 
 0. **ADR-0195 guest↔guest async — CAMPAIGN COMPLETE** (D-335 closed; detail in git + ADR-0195; residuals D-463
    CLOSED / D-464 future-bucket). **D-461 v128-DST-spill arc COMPLETE both arches** (FP replace_lane @4acd24152).
-1. **Active bundle = D-034** (above): drive SIMD spill-completeness. (e) GPR-result @e52d5a5f9 + (g) all_true-src
-   @e52d5a5f9 + (g) FP-round @2c6f0235c DONE; NEXT = (g) tractable abs/neg (op_simd_float.zig:779/:808), then the
-   scratch-heavy convert/binop wall (need per-op restructure; details in D-034 (g)).
+1. **Active bundle = D-034** (above): drive SIMD spill-completeness. DONE: (e) GPR-result + (g) all_true-src
+   @e52d5a5f9, (g) FP-round @2c6f0235c, (g) abs/neg @2fa6ce553 (XMM7-park technique). NEXT = scratch-heavy (g)
+   convert/trunc_sat + FP binops (per-op in-place restructure) OR scalar sub-cats (a/b/c/f, need pressure fixtures).
 2. **Audit DONE 2026-06-18 (CLEAN)** — `audit_scaffolding` 0 block/0 soon (J.3 chronic debt); fuzz 0 crashes.
 3. **D-460 v128-GC JIT emit DONE both arches** (@3d8be3c00/@8137c7268/@5292569e0; 6 runI32Export fixtures = the
    authoritative JIT verification). Only an optional edge fixture remains (low value). Consumer-gated, do NOT grind:
