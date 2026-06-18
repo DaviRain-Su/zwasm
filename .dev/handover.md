@@ -32,8 +32,8 @@ CLOSED (below). **windowsmini RESUMED**. Version `2.0.0-alpha.3`.
 ## Active bundle
 
 - **Bundle-ID**: D-034 SIMD spill-completeness cohort (scalar-operand sibling of D-461 + the v128-source arith gap)
-- **Cycles-remaining**: ~2 (sub-cats a–g; DONE through @e4a9e79d6: (e) GPR-result + (g) all_true-src/FP-round/
-  abs-neg/FP-compare/FP-unop+int-abs + **ALL converts/trunc_sat** (s/u, low, f32x4+f64x2, +relaxed); opened 2026-06-18)
+- **Cycles-remaining**: ~1-2 (sub-cats a–g; DONE through @5484c6763: (e) + **ALL of (g)** incl NaN-min/max → the
+  ENTIRE v128-operand spill arc (D-461 + D-034 g) COMPLETE both arches; opened 2026-06-18)
 - **Continuity-memo**: ALL 4 spill templates now exist — 0-scratch (round/sqrt/converts-s/int-abs), 1-scratch
   XMM7-park (abs/neg), 3-operand FMA (FP-compare), **2-scratch single-source in-place (convert_i32x4_u @bceeef4cf:
   load src INTO dst home-or-XMM7, recipe reads dst, store XMM7 if spilled)**. add/sub/mul/div + pmin/pmax already
@@ -49,10 +49,10 @@ CLOSED (below). **windowsmini RESUMED**. Version `2.0.0-alpha.3`.
 
 0. **ADR-0195 guest↔guest async — CAMPAIGN COMPLETE** (D-335 closed; detail in git + ADR-0195; residuals D-463
    CLOSED / D-464 future-bucket). **D-461 v128-DST-spill arc COMPLETE both arches** (FP replace_lane @4acd24152).
-1. **Active bundle = D-034** (above): SIMD spill-completeness; through @e4a9e79d6 — **ALL converts/trunc_sat DONE**.
-   REMAINING (g) = ONLY the 2-source spec NaN-min/max (emitV128FpMin/Max) — **PHASE-I plan recorded in D-034 row**
-   (just-in-time loads into XMM7/14/15, no new encoders; intricate interleaving → careful fresh-context chunk; a
-   min/max NaN miscompile is a real bug, don't rush). Then scalar sub-cats (a/b/c/f, need GPR/FP-pressure fixtures).
+1. **Active bundle = D-034** (above): SIMD spill-completeness; through @5484c6763 — **ALL of (g) DONE incl
+   NaN-min/max; the ENTIRE v128-operand spill arc is COMPLETE both arches.** REMAINING D-034 = ONLY the scalar
+   sub-cats (a) GPR new-lane (arm64 :109/:183), (b) GPR splat-src (:43), (c) FP new-lane (:126), (f) shift-amt
+   (:425) — need NEW GPR/FP-pressure fixtures (≥pool-size live scalars at the lane op, distinct from v128-pressure).
 2. **Audit DONE 2026-06-18 (CLEAN)** — `audit_scaffolding` 0 block/0 soon (J.3 chronic debt); fuzz 0 crashes.
 3. **D-460 v128-GC JIT emit DONE both arches** (@3d8be3c00/@8137c7268/@5292569e0; 6 runI32Export fixtures = the
    authoritative JIT verification). Only an optional edge fixture remains (low value). Consumer-gated, do NOT grind:
