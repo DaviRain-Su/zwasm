@@ -1887,8 +1887,13 @@ entries:
       (3) **v128 memory-LOAD op dsts** — arm64 clean (emitV128LoadFamily). x86_64 splat/zero (6 ops :249/282/313/343/
           373/402: load8/16/32/64_splat + load32/64_zero) DONE @612a1b6b9 (dst→stage1; load8 PSHUFB scratch stays
           stage0; spill_base_off already present, no threading). Fixture 12×v128.load32_splat→4095 arm64+Rosetta GREEN.
-          REMAINING: **load_lane** (:439/514 — reads a v128 vec + writes dst, different shape; vec+dst both resolveXmm).
+          **load_lane** DONE @5785dffa2 (v128LoadLane :500 — vec-read→xmmLoadSpilledV128 STAGE0/XMM14 +
+          dst-write→xmmDefSpilled/Store STAGE1/XMM15; no internal XMM scratch [RCX GPR roundtrip] so stages never
+          collide; 12-v128 fixture runner_gc_test load32_lane→4095 arm64+Rosetta GREEN).
           (NOT arithmetic binops — those are fully spill-aware: sources :95-96, dsts proven by `v128.or` spilling.)
+      **REMAINING D-461 (the only result-write gap left)**: **replace_lane** ×4 — ENTANGLED with D-034 (a green
+      force-spill fixture also spills the new-lane scalar GPR which arm64 handles SPILL-EXEMPT); do it WITH the
+      D-034 arm64-GPR cohort, not as an isolated D-461 chunk (see (1) above). Extend/Extadd/v128-load all DONE.
       EXOTIC (high-v128-pressure only; concrete D-460 array-copy blocker already cleared by extract_lane).
       Original surfacing context below.
 

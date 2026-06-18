@@ -56,18 +56,18 @@ Status→Implemented + retrospective section; D-464 item (4) closed).
    (ubuntu+win @0e1fca6e7 recorded). 9 adversarial fixtures in `component_async_tests.zig`.
 2. **Audit DONE 2026-06-18 (CLEAN)** — `audit_scaffolding` 0 block/0 soon (only J.3 chronic debt=61);
    `private/audit-2026-06-18.md`. Fuzz smoke 0 crashes.
-3. **D-461 x86_64 v128 result-write spill — 3 op families DONE this session** (arm64 was already spill-aware for
-   all; x86_64 migrated dst→stage1/XMM15, scratch stays stage0/XMM14; each with a 12-v128 force-spill fixture,
-   arm64+Rosetta GREEN): **extend** @83256d210 (also ubuntu+windows = 3-host), **Extadd-pairwise** @4b839f29a (ubuntu
-   green), **v128.load splat/zero** (6 ops) @612a1b6b9. **Remaining D-461** (detail in row): **load_lane** (op_simd.zig
-   :439/514, reads vec+dst — next clean-ish candidate, arm64-verify first per lesson); **replace_lane** ENTANGLED with
-   D-034 arm64-GPR-scalar (deferred to the D-034 cohort). Or pivot to dogfood. Do NOT grind consumer-gated (D-464(2),
-   D-305).
-4. **Remote**: extend 3-host GREEN; Extadd ubuntu-green; **v128.load splat/zero now ubuntu-green too** (test-all OK
-   @fc7c2a04e). **ubuntunote nix failure FIXED 2026-06-18**: was a FULL DISK (100%) — a 402GB `.zig-cache`;
-   `rm -rf .zig-cache` freed 405G (→9%), cold test-all rebuilt + GREEN. Lesson `2026-06-18-remote-zig-cache-fills-
-   disk-*` (remote "nix dependency failed" → check `df -h`; non-code-gap re-kick not revert; prune remote cache).
-   windows batch 7/12 (Extadd+memload pending, non-ABI, Win64-proven stage-XMM). D-028/windows-listen flakes cosmetic.
+3. **D-461 x86_64 v128 result-write spill — 4 op families DONE this session** (arm64 was already spill-aware for
+   all; x86_64 migrated src→stage0/XMM14, dst→stage1/XMM15; each with a 12-v128 force-spill fixture, arm64+Rosetta
+   GREEN): **extend** @83256d210 (3-host), **Extadd-pairwise** @4b839f29a, **v128.load splat/zero** (6 ops)
+   @612a1b6b9, **load_lane** @5785dffa2 (vec-read+dst-write, no internal XMM scratch → clean). **Remaining D-461 =
+   replace_lane ONLY** — ENTANGLED with D-034 arm64-GPR-scalar (do it WITH the D-034 cohort, NOT isolated; see row).
+   So D-461 clean work is essentially exhausted → **next: pivot to dogfood OR open the D-034 GPR-scalar cohort.**
+   Do NOT grind consumer-gated (D-464(2), D-305).
+4. **Remote**: extend 3-host GREEN; Extadd+splat/zero ubuntu-green @fc7c2a04e. load_lane pending next remote kick
+   (non-ABI codegen, Win64-proven stage-XMM pattern). **ubuntunote nix failure FIXED 2026-06-18**: was a FULL DISK
+   (100%) — 402GB `.zig-cache`; `rm -rf .zig-cache` freed 405G (→9%), cold test-all GREEN. Lesson
+   `2026-06-18-remote-zig-cache-fills-disk-*` (remote "nix dependency failed" → check `df -h`; non-code re-kick not
+   revert). windows batch (memload+load_lane pending, non-ABI). D-028/windows-listen flakes cosmetic.
 
 ## Recently closed arcs (detail in ADRs/git/debt — one-liners)
 
