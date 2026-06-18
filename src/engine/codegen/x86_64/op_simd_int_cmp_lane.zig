@@ -49,7 +49,7 @@ pub fn emitI8x16LtSCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!vo
 
 pub fn emitI8x16LtUCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitI8x16LtU(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitI8x16LtU(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 pub fn emitI8x16GtSCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
@@ -59,7 +59,7 @@ pub fn emitI8x16GtSCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!vo
 
 pub fn emitI8x16GtUCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitI8x16GtU(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitI8x16GtU(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 pub fn emitI8x16LeSCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
@@ -69,7 +69,7 @@ pub fn emitI8x16LeSCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!vo
 
 pub fn emitI8x16LeUCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitI8x16LeU(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitI8x16LeU(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 pub fn emitI8x16GeSCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
@@ -79,7 +79,7 @@ pub fn emitI8x16GeSCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!vo
 
 pub fn emitI8x16GeUCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitI8x16GeU(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitI8x16GeU(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 // §9.12-B / B94 (ADR-0075) — `(ctx, ins)` adapters for the
@@ -102,7 +102,7 @@ pub fn emitI16x8LtSCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!vo
 
 pub fn emitI16x8LtUCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitI16x8LtU(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitI16x8LtU(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 pub fn emitI16x8GtSCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
@@ -112,7 +112,7 @@ pub fn emitI16x8GtSCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!vo
 
 pub fn emitI16x8GtUCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitI16x8GtU(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitI16x8GtU(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 pub fn emitI16x8LeSCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
@@ -122,7 +122,7 @@ pub fn emitI16x8LeSCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!vo
 
 pub fn emitI16x8LeUCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitI16x8LeU(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitI16x8LeU(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 pub fn emitI16x8GeSCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
@@ -132,7 +132,7 @@ pub fn emitI16x8GeSCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!vo
 
 pub fn emitI16x8GeUCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitI16x8GeU(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitI16x8GeU(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 // §9.12-B / B95 (ADR-0075) — `(ctx, ins)` adapters for the
@@ -155,7 +155,7 @@ pub fn emitI32x4LtSCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!vo
 
 pub fn emitI32x4LtUCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitI32x4LtU(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitI32x4LtU(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 pub fn emitI32x4GtSCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
@@ -165,7 +165,7 @@ pub fn emitI32x4GtSCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!vo
 
 pub fn emitI32x4GtUCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitI32x4GtU(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitI32x4GtU(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 pub fn emitI32x4LeSCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
@@ -175,7 +175,7 @@ pub fn emitI32x4LeSCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!vo
 
 pub fn emitI32x4LeUCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitI32x4LeU(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitI32x4LeU(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 pub fn emitI32x4GeSCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
@@ -185,7 +185,7 @@ pub fn emitI32x4GeSCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!vo
 
 pub fn emitI32x4GeUCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitI32x4GeU(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitI32x4GeU(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 // §9.12-B / B96 (ADR-0075) — `(ctx, ins)` adapters for the
@@ -852,6 +852,7 @@ fn emitV128IntCmpUnsigned(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     encoder_minmax: *const fn (dst: inst.Xmm, src: inst.Xmm) inst.EncodedInsn,
     encoder_pcmpeq: *const fn (dst: inst.Xmm, src: inst.Xmm) inst.EncodedInsn,
     kind: UnsignedCmpKind,
@@ -863,9 +864,19 @@ fn emitV128IntCmpUnsigned(
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
-    const rhs_x = try gpr.resolveXmm(alloc, rhs_v);
-    const lhs_x = try gpr.resolveXmm(alloc, lhs_v);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    // D-034 (g): spill-aware 3-v128-operand. dst → home or XMM7; a spilled rhs
+    // loads into stage1/XMM15 (survives minmax + the gt/lt tail), a spilled lhs
+    // into stage0/XMM14 (dead after the MOVAPS for gt/lt; survives for ge/le,
+    // which never builds the XMM14 all-ones). The D-066 XMM7 aliasing stashes
+    // below only fire when dst is a home reg (a stage/XMM7 never equals a home
+    // reg), so the no-spill emit is byte-identical. result-spill flushes XMM7.
+    const rhs_x = try resolveOrLoadV128(allocator, buf, alloc, spill_base_off, rhs_v, abi.fp_spill_stage_xmms[1]);
+    const lhs_x = try resolveOrLoadV128(allocator, buf, alloc, spill_base_off, lhs_v, abi.fp_spill_stage_xmms[0]);
+    const result_slot = alloc.slot(result_v, .fpr);
+    const dst_x: inst.Xmm = switch (result_slot) {
+        .reg => |id| abi.fpSlotToReg(id) orelse return Error.SlotOverflow,
+        .spill => .xmm7,
+    };
 
     // Aliasing safety (D-066 mirror; D-071 part c discharge).
     // Two independent risky aliases:
@@ -904,7 +915,35 @@ fn emitV128IntCmpUnsigned(
             try buf.appendSlice(allocator, inst.encPxor(dst_x, ones).slice());
         },
     }
+
+    if (result_slot == .spill) {
+        const abs_off = spill_base_off + result_slot.spill;
+        if (abs_off > 0x7FFF_FFFF) return Error.SlotOverflow;
+        try buf.appendSlice(allocator, inst.encStoreXmmV128MemRBPDisp32(-@as(i32, @intCast(abs_off)), .xmm7).slice());
+    }
     try pushed_vregs.append(allocator, result_v);
+}
+
+/// D-034 (g) file-local v128 spill helper: returns the operand's home XMM when
+/// not spilled (no emit); when spilled, emits an RBP-disp v128 load into `temp`
+/// and returns `temp`. Mirrors op_simd_float.zig's resolveOrLoadV128.
+fn resolveOrLoadV128(
+    allocator: Allocator,
+    buf: *std.ArrayList(u8),
+    alloc: regalloc.Allocation,
+    spill_base_off: u32,
+    v: usize,
+    temp: inst.Xmm,
+) Error!inst.Xmm {
+    return switch (alloc.slot(v, .fpr)) {
+        .reg => |id| abi.fpSlotToReg(id) orelse return Error.SlotOverflow,
+        .spill => |off| blk: {
+            const abs_off = spill_base_off + off;
+            if (abs_off > 0x7FFF_FFFF) return Error.SlotOverflow;
+            try buf.appendSlice(allocator, inst.encLoadXmmV128MemRBPDisp32(temp, -@as(i32, @intCast(abs_off))).slice());
+            break :blk temp;
+        },
+    };
 }
 
 pub fn emitI8x16GtU(
@@ -913,8 +952,9 @@ pub fn emitI8x16GtU(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
-    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmaxub, inst.encPcmpeqB, .gt);
+    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPmaxub, inst.encPcmpeqB, .gt);
 }
 
 pub fn emitI8x16LtU(
@@ -923,8 +963,9 @@ pub fn emitI8x16LtU(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
-    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPminub, inst.encPcmpeqB, .lt);
+    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPminub, inst.encPcmpeqB, .lt);
 }
 
 pub fn emitI8x16LeU(
@@ -933,8 +974,9 @@ pub fn emitI8x16LeU(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
-    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPminub, inst.encPcmpeqB, .le);
+    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPminub, inst.encPcmpeqB, .le);
 }
 
 pub fn emitI8x16GeU(
@@ -943,8 +985,9 @@ pub fn emitI8x16GeU(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
-    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmaxub, inst.encPcmpeqB, .ge);
+    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPmaxub, inst.encPcmpeqB, .ge);
 }
 
 pub fn emitI16x8GtU(
@@ -953,8 +996,9 @@ pub fn emitI16x8GtU(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
-    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmaxuw, inst.encPcmpeqW, .gt);
+    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPmaxuw, inst.encPcmpeqW, .gt);
 }
 
 pub fn emitI16x8LtU(
@@ -963,8 +1007,9 @@ pub fn emitI16x8LtU(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
-    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPminuw, inst.encPcmpeqW, .lt);
+    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPminuw, inst.encPcmpeqW, .lt);
 }
 
 pub fn emitI16x8LeU(
@@ -973,8 +1018,9 @@ pub fn emitI16x8LeU(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
-    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPminuw, inst.encPcmpeqW, .le);
+    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPminuw, inst.encPcmpeqW, .le);
 }
 
 pub fn emitI16x8GeU(
@@ -983,8 +1029,9 @@ pub fn emitI16x8GeU(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
-    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmaxuw, inst.encPcmpeqW, .ge);
+    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPmaxuw, inst.encPcmpeqW, .ge);
 }
 
 pub fn emitI32x4GtU(
@@ -993,8 +1040,9 @@ pub fn emitI32x4GtU(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
-    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmaxud, inst.encPcmpeqD, .gt);
+    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPmaxud, inst.encPcmpeqD, .gt);
 }
 
 pub fn emitI32x4LtU(
@@ -1003,8 +1051,9 @@ pub fn emitI32x4LtU(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
-    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPminud, inst.encPcmpeqD, .lt);
+    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPminud, inst.encPcmpeqD, .lt);
 }
 
 pub fn emitI32x4LeU(
@@ -1013,8 +1062,9 @@ pub fn emitI32x4LeU(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
-    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPminud, inst.encPcmpeqD, .le);
+    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPminud, inst.encPcmpeqD, .le);
 }
 
 pub fn emitI32x4GeU(
@@ -1023,8 +1073,9 @@ pub fn emitI32x4GeU(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
-    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, inst.encPmaxud, inst.encPcmpeqD, .ge);
+    return emitV128IntCmpUnsigned(allocator, buf, alloc, pushed_vregs, next_vreg, spill_base_off, inst.encPmaxud, inst.encPcmpeqD, .ge);
 }
 
 pub fn emitI8x16AllTrue(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {

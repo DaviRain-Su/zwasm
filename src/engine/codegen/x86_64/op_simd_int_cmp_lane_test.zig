@@ -230,7 +230,7 @@ test "emitI8x16GtU: PMAXUB + PCMPEQB rhs + PXOR all-ones (gt path)" {
     try pushed.append(testing.allocator, 1);
     var next_vreg: u32 = 2;
 
-    try op_simd_int_cmp_lane.emitI8x16GtU(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_int_cmp_lane.emitI8x16GtU(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
@@ -260,7 +260,7 @@ test "emitI16x8LtU: PMINUW + PCMPEQW rhs + PXOR all-ones (lt path)" {
     try pushed.append(testing.allocator, 1);
     var next_vreg: u32 = 2;
 
-    try op_simd_int_cmp_lane.emitI16x8LtU(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_int_cmp_lane.emitI16x8LtU(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
@@ -290,7 +290,7 @@ test "emitI32x4LeU: PMINUD + PCMPEQD lhs (le path, no NOT)" {
     try pushed.append(testing.allocator, 1);
     var next_vreg: u32 = 2;
 
-    try op_simd_int_cmp_lane.emitI32x4LeU(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_int_cmp_lane.emitI32x4LeU(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
@@ -318,7 +318,7 @@ test "emitI32x4GeU: PMAXUD + PCMPEQD lhs (ge path, no NOT)" {
     try pushed.append(testing.allocator, 1);
     var next_vreg: u32 = 2;
 
-    try op_simd_int_cmp_lane.emitI32x4GeU(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_int_cmp_lane.emitI32x4GeU(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
@@ -351,7 +351,7 @@ test "emitI8x16GeU: dst aliases lhs — stash lhs to XMM7 before PMAXUB" {
     try pushed.append(testing.allocator, 1);
     var next_vreg: u32 = 2;
 
-    try op_simd_int_cmp_lane.emitI8x16GeU(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_int_cmp_lane.emitI8x16GeU(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
@@ -380,7 +380,7 @@ test "emitI16x8LeU: dst aliases lhs — stash lhs to XMM7 before PMINUW" {
     try pushed.append(testing.allocator, 1);
     var next_vreg: u32 = 2;
 
-    try op_simd_int_cmp_lane.emitI16x8LeU(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_int_cmp_lane.emitI16x8LeU(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
