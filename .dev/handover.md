@@ -31,21 +31,24 @@ CLOSED (below). **windowsmini RESUMED**. Version `2.0.0-alpha.3`.
 
 ## Active bundle
 
-- **Bundle-ID**: D-034 GPR/FP-scalar SPILL-EXEMPT cohort (the scalar-operand sibling of the DONE D-461 v128-arc)
-- **Cycles-remaining**: ~4 (6 sub-categories a–f; opened 2026-06-18, Phase-I findings in the D-034 debt row)
-- **Continuity-memo**: same mechanical swap as D-461 (resolveGpr/Fp → gprLoadSpilled/fpLoadSpilled, X14/X15 stages
-  disjoint from V29/V30). Easiest first chunk = (e) GPR-RESULT (any_true/all_true/reduce; result-spill via
-  array.new_fixed, mirrors extract_lane @a534d1c45). Verification = NEW e2e GPR/FP-pressure fixtures (force a SCALAR
-  to spill; author WAT → --engine jit → confirm UnsupportedOp → migrate → GREEN both arches via Rosetta).
-- **Exit-condition**: every a–f sub-category's scalar forced to spill flows through its lane op on BOTH arches;
-  zero `resolveGpr`/`resolveFp` SPILL-EXEMPT scalar sites remain (except the structural 3-V-reg select/bitselect).
+- **Bundle-ID**: D-034 SIMD spill-completeness cohort (scalar-operand sibling of D-461 + the v128-source arith gap)
+- **Cycles-remaining**: ~5 (sub-categories a–g; **(e) GPR-result DONE @e52d5a5f9**; opened 2026-06-18)
+- **Continuity-memo**: same mechanical swap as D-461 (resolveGpr/Fp/Xmm → gprLoadSpilled/fpLoadSpilled/
+  xmmLoadSpilledV128). **(e) surfaced the big one: (g) — D-461 "v128-operand COMPLETE" was OVERSTATED**; ~30 bare
+  resolveXmm v128 source/dst sites in x86_64 op_simd_float.zig (FP arith/convert) + op_simd_int_arith.zig remain
+  → UnsupportedOp under v128 spill. NEXT chunk = (g) FP binops (op_simd_float.zig:290 min/max etc.) — audit each
+  op's internal scratch-XMM for the stage collision LANDMINE (all_true used stage1/XMM15 vs PXOR-scratch XMM14).
+  Remaining scalar sub-cats: (a) GPR new-lane (arm64 :109/:183), (b) GPR splat-src (:43), (c) FP new-lane (:126),
+  (f) shift-amt (:425). Verification = force-spill fixtures (array.new_fixed result-spill OR ≥pool live-source).
+- **Exit-condition**: every a–g sub-category's operand forced to spill flows through its op on BOTH arches; zero
+  bare resolveGpr/resolveFp/resolveXmm SPILL-EXEMPT sites remain (except the structural 3-V-reg select/bitselect).
 
 ## RESUME POINTER (2026-06-18) — for a fresh session
 
 0. **ADR-0195 guest↔guest async — CAMPAIGN COMPLETE** (D-335 closed; detail in git + ADR-0195; residuals D-463
    CLOSED / D-464 future-bucket). **D-461 v128-DST-spill arc COMPLETE both arches** (FP replace_lane @4acd24152).
-1. **Active bundle = D-034** (above): drive the GPR/FP-scalar spill cohort. Start at sub-category (e) GPR-RESULT
-   (any_true/all_true/reduce; result-spill via array.new_fixed, mirrors extract_lane @a534d1c45 — easiest first).
+1. **Active bundle = D-034** (above): drive the SIMD spill-completeness cohort. (e) GPR-result DONE @e52d5a5f9;
+   NEXT = (g) x86_64 v128-source spill in FP/int arith binops (~30 sites; D-461 "complete" was overstated).
 2. **Audit DONE 2026-06-18 (CLEAN)** — `audit_scaffolding` 0 block/0 soon (J.3 chronic debt); fuzz 0 crashes.
 3. **D-460 v128-GC JIT emit DONE both arches** (@3d8be3c00/@8137c7268/@5292569e0; 6 runI32Export fixtures = the
    authoritative JIT verification). Only an optional edge fixture remains (low value). Consumer-gated, do NOT grind:

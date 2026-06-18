@@ -1927,7 +1927,10 @@ entries:
       XMM7 stash only fires all-home; fixture array.new_fixed 2×f32x4.replace_lane→get→i32x4.extract=0x41100000
       RED→GREEN x86_64-Rosetta; arm64 already qLoad/qDef. The "3 XMM + XMM7 vs 2 stages" worry dissolved: value
       needs no stage). The fixture crossed runner_gc_test.zig's 2000-cap → v128-on-JIT block extracted to
-      runner_v128_jit_test.zig (ADR-0198). **The ENTIRE v128-DST-spill arc is now COMPLETE (both arches).**
+      runner_v128_jit_test.zig (ADR-0198). **The v128-DST-spill arc is COMPLETE for the LANE/LOAD/EXTEND/EXTADD/
+      BITMASK ops (both arches)** — CORRECTION 2026-06-18: this did NOT cover the arith/convert/reduce binops, whose
+      v128 sources/dsts remain bare-resolveXmm on x86_64 (now tracked as D-034(g); the all_true reduce was fixed
+      @e52d5a5f9).
       REMAINING (1 residual, EXOTIC, no consumer): **new-lane SCALAR spill** (GPR for int / FP for f32x4-f64x2
       replace_lane; also splat-sources etc.) = the **D-034 GPR/FP-scalar SPILL-EXEMPT cohort** — needs
       GPR/FP-PRESSURE test fixtures (distinct from v128-pressure), a separate campaign.
@@ -2032,10 +2035,19 @@ entries:
       (c) **FP new-lane** (f32x4/f64x2.replace_lane): arm64 op_simd_float.zig:126 `resolveFp`; x86_64 op_simd_float.zig
           :1011/:1137 stays `resolveXmm` (deliberately, the FP-scalar half of this cohort).
       (d) **FP splat-source**: x86_64 already `xmmLoadSpilled` 8-byte (done); arm64 audit needed.
-      (e) **GPR result** (reduce / any_true / all_true): arm64 op_simd_int_cmp_lane.zig:322/:359 + op_simd.zig:774
-          `resolveGpr` "mirrors pre-spill-aware GPR-result" — RESULT spill, easier (array.new_fixed pressure like the
-          done extract_lane GPR-result @a534d1c45, NOT input-pressure).
+      (e) **GPR result** (reduce / any_true / all_true): **DONE @e52d5a5f9** — 3 arm64 sites
+          (emitV128ReduceWithEncoder / emitI64x2AllTrue / emitV128AnyTrue) gprDefSpilled stage0 + gprStoreSpilled;
+          3 runI32Export fixtures (i32x4/i64x2.all_true, v128.any_true). The fixtures ALSO surfaced (g) below.
       (f) **shift-amount scalar** (i32): arm64 op_simd_int_arith.zig:425 `resolveGpr`.
+      (g) **v128 SOURCE/DST spill across arith/convert/reduce binops — D-461 "v128-operand arc COMPLETE" was
+          OVERSTATED** (it covered lane/load/extend/extadd/bitmask + now reduce, NOT the arith binops). ~30 bare
+          `resolveXmm` source/dst sites: x86_64 op_simd_float.zig (FP add/sub/mul/div/min/max :290-292/:519/:568/
+          :1365 + convert/ceil/etc. single-src) + op_simd_int_arith.zig (:469/:568/:608/:654/:724/:753/:790/:869/
+          :1239) → UnsupportedOp under v128 spill pressure. x86_64 all_true v128-source FIXED @e52d5a5f9 (the first
+          instance, stage1/XMM15 vs PXOR-scratch XMM14). arm64 likely covered via shared emitV128Unop/Binop (audit).
+          This (g) is now the BULK of remaining spill-completeness work — same mechanical resolveXmm→xmmLoadSpilledV128
+          migration as D-461, but ~30 sites each needing a force-spill fixture (audit per-op for stage-XMM-scratch
+          collisions — the LANDMINE). Opt-in-JIT-only, exotic, but a real completeness gap.
       NOT D-034 (genuinely-structural, leave): op_simd.zig:490/:672 (v128 select/bitselect need 3 simultaneous V
       regs vs 2 stage regs — a stage-count limit, not a missing migration).
       STAGING confirmed collision-free: arm64 GPR stages = X14/X15 (`abi.spill_stage_gprs`), disjoint from the
