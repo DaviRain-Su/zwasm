@@ -63,13 +63,12 @@ Status→Implemented + retrospective section; D-464 item (4) closed).
    2026-06-18: the wasmtime native sweep does NOT cover SIMD-GC — array-copy-inline.wast is SIMD→simd_runner, not
    the wasm-3.0 corpus; 38 gc-sweep fails are pre-existing ADR-0192 residuals, NOT regressions). Only an optional
    edge fixture remains (low value). Do NOT grind consumer-gated (D-464(2), D-305).
-4. **D-461 v128-DST-spill — COMPLETE for ALL lane ops both arches**. splat(all 6) @60c4f043a/@539e7512a;
-   extract_lane(GPR-narrow @a534d1c45 + FP @d7e7f1fbb); x86_64 i8x16.splat @f543f4672; **integer replace_lane
-   vec/dst @c9548931b** (this turn — closes the v128-dst story). **REMAINING D-461 (2 distinct EXOTIC residuals, NO
-   consumer)**: (i) **x86_64 FP replace_lane** (f32x4/f64x2 — 3 XMM operands + XMM7 scratch vs 2 stage XMMs, needs
-   careful staging); (ii) **new-lane SCALAR spill = the D-034 GPR/FP-scalar SPILL-EXEMPT cohort** (replace_lane
-   new-lane + splat-sources etc.; needs GPR/FP-PRESSURE fixtures — a separate campaign). **The clean v128-spill arc
-   is DONE.** NEXT: D-034 cohort (GPR/FP-scalar pressure) OR FP-replace_lane OR pivot to other 完成形 work.
+4. **D-461 v128-DST-spill arc — FULLY COMPLETE both arches** (FP replace_lane @4acd24152 closed the last op;
+   vec→stage0/dst→stage1, new-lane FP scalar stays resolveXmm SPILL-EXEMPT). Its fixture crossed
+   runner_gc_test.zig's 2000-cap → v128-on-JIT block split to `runner_v128_jit_test.zig` (ADR-0198). D-461 →
+   `note`; **now-class debt = NONE**. Only EXOTIC residual left: the **D-034 GPR/FP-scalar SPILL-EXEMPT cohort**
+   (new-lane scalar spill; needs GPR/FP-pressure fixtures, NO consumer — a separate campaign, do NOT grind).
+   NEXT: pivot to other 完成形 work; open the D-034 cohort only if a consumer appears.
 
 ## Recently closed arcs (detail in ADRs/git/debt — one-liners)
 
@@ -106,8 +105,8 @@ TIER-1 (`afcf889a`/`05b35c28`; D-446/447 deferred), ① wasip3 conformance (7 re
 - **Surfaces**: C-API 293/293 · Zig-API complete (full WASI parity) · lean CLI · memory-safety sound · dogfooded into
   cw. Runners ReleaseSafe (ADR-0177; `check_releasesafe_runners.sh`).
 - **EH**: cross-instance JIT EH on BOTH arches (arm64 `4f73d9ee` + x86_64 `c534afca`). Interp + JIT EH corpus green.
-- **Debt**: 61 entries; `now`-class = **D-461 ONLY** (SIMD-spill; remaining op = replace_lane, D-034-entangled).
-  D-460 v128-GC emit DONE both arches (`partial` = optional edge fixture). D-335 → `note` (ADR-0195 scheduler DONE).
+- **Debt**: 61 entries; `now`-class = **NONE** (D-461 v128-spill arc COMPLETE → `note`; residual = D-034 scalar
+  cohort, exotic/no-consumer). D-460 v128-GC emit DONE both arches. D-335 → `note` (ADR-0195 scheduler DONE).
   Rest front-tagged (future-bucket/parked); D-462 feature-separation = user-gated.
 - **Realworld corpus**: 56 fixtures (c/cpp/emcc/go/tinygo/rust/zig), interp 56/0; JIT run-stage opt-in.
 - **Tag**: `v2.0.0-alpha.3` tag-only (no Release → Latest stays v1.11.0), USER-ONLY.

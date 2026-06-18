@@ -1877,7 +1877,7 @@ entries:
       wasmtime tests/misc_testsuite/gc/{alloc-v128-struct,const-expr-gc-simd,v128-with-gc-ref,array-copy-inline}.wast
   - id: "D-461"
     layer: "code"
-    status: "now"
+    status: "note"
     front: D-wmt-misc
     description: |-
       now (barrier DISSOLVED 2026-06-18): the "blocked-by" sub-barrier (x86_64 regalloc v128-spill OOB) was FIXED
@@ -1921,12 +1921,17 @@ entries:
       0x41100000. **extract_lane family (GPR narrow + FP) FULLY spill-aware.**
       **replace_lane — INTEGER vec/dst DONE @c9548931b** (i8x16/i16x8/i32x4/i64x2: vec→xmmLoadSpilledV128 stage0,
       dst→xmmDefSpilledV128 stage1, PINSR-GPR no-scratch; arm64 already qLoad/qDef; fixture array.new_fixed 2×
-      i32x4.replace_lane→get→extract=9). **This closes the v128-DST-spill story for ALL lane ops.** REMAINING two
-      DISTINCT residuals (both EXOTIC, no consumer): (i) **x86_64 FP replace_lane** (f32x4/f64x2) — 3 XMM operands
-      (value FP + vec + dst) + an XMM7 aliasing scratch vs only 2 stage XMMs → needs careful staging, harder; (ii)
-      **new-lane SCALAR spill** (GPR for int / FP for f32x4-f64x2 replace_lane; also splat-sources etc.) = the
-      **D-034 GPR/FP-scalar SPILL-EXEMPT cohort** — needs GPR/FP-PRESSURE test fixtures (distinct from v128-pressure),
-      a separate campaign. Extend/Extadd/v128-load/load_lane/splat(all)/extract(GPR+FP)/replace_lane(int-vec/dst) DONE.
+      i32x4.replace_lane→get→extract=9). **This closes the v128-DST-spill story for ALL lane ops.**
+      **replace_lane — FP vec/dst DONE @4acd24152** (f32x4/f64x2: vec→xmmLoadSpilledV128 stage0, dst→
+      xmmDefSpilledV128 stage1 + flush; new-lane FP scalar stays resolveXmm SPILL-EXEMPT = arm64 resolveFp exempt;
+      XMM7 stash only fires all-home; fixture array.new_fixed 2×f32x4.replace_lane→get→i32x4.extract=0x41100000
+      RED→GREEN x86_64-Rosetta; arm64 already qLoad/qDef. The "3 XMM + XMM7 vs 2 stages" worry dissolved: value
+      needs no stage). The fixture crossed runner_gc_test.zig's 2000-cap → v128-on-JIT block extracted to
+      runner_v128_jit_test.zig (ADR-0198). **The ENTIRE v128-DST-spill arc is now COMPLETE (both arches).**
+      REMAINING (1 residual, EXOTIC, no consumer): **new-lane SCALAR spill** (GPR for int / FP for f32x4-f64x2
+      replace_lane; also splat-sources etc.) = the **D-034 GPR/FP-scalar SPILL-EXEMPT cohort** — needs
+      GPR/FP-PRESSURE test fixtures (distinct from v128-pressure), a separate campaign.
+      Extend/Extadd/v128-load/load_lane/splat(all)/extract(GPR+FP)/replace_lane(int+FP vec/dst) DONE.
       EXOTIC (high-pressure only; concrete D-460 array-copy blocker already cleared by extract_lane).
       Original surfacing context below.
 
