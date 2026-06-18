@@ -75,9 +75,6 @@ Status→Implemented + retrospective section; D-464 item (4) closed).
 
 - **D-305 first milestone** (@4cceeb1e, ADR-0196): cross-component STRING marshalling; `component_graph.zig`
   two-level instantiation + boundary trampoline via `canon.CanonContext`. Common shapes now ALL done (see top).
-- **D-461 regalloc-origin rework** (ADR-0194, @3cd2ede6, CLOSED Phase I-V): x86_64 v128-spill OOB fixed by
-  threading per-arch `max_reg_slots_gpr` into `computeSpillOffsets`; arm64 2922 + x86_64-Rosetta green. Result-write
-  remainder (Extend/Extadd/replace_lane/binop-dsts, x86_64, EXOTIC) = D-461 debt row.
 
 ## Closed/paused (detail in git + debt.yaml)
 
