@@ -59,15 +59,17 @@ Status→Implemented + retrospective section; D-464 item (4) closed).
 3. **D-460 v128-GC JIT emit — FULLY DONE BOTH ARCHES** (struct/array get/set/new @3d8be3c00 + array_new_fixed
    @8137c7268 + array_copy @5292569e0). x86_64 mirrors arm64 via MOVUPS + running-sum struct offset + `encShlRImm8`
    index×16; array_copy resolves elem size from `ObjectHeader.info` (was 8-byte) in arch-indep `jitGcArrayCopy`.
-   6 runI32Export RED→GREEN fixtures. **status=partial**: only the wasmtime-sweep formality left (discharge via
-   `wasmtime_misc_native_sweep.sh gc` — its splat-producer is NOW spilled-dst aware per point 4). Do NOT grind
-   consumer-gated (D-464(2), D-305).
+   6 runI32Export RED→GREEN fixtures = the AUTHORITATIVE JIT verification. **Substantively COMPLETE** (clarified
+   2026-06-18: the wasmtime native sweep does NOT cover SIMD-GC — array-copy-inline.wast is SIMD→simd_runner, not
+   the wasm-3.0 corpus; 38 gc-sweep fails are pre-existing ADR-0192 residuals, NOT regressions). Only an optional
+   edge fixture remains (low value). Do NOT grind consumer-gated (D-464(2), D-305).
 4. **D-461 x86_64 v128 spill — 5 op families DONE** (extend, Extadd, v128.load splat/zero, load_lane @5785dffa2,
-   **i32x4/i16x8/i64x2.splat @60c4f043a**). Remaining: **i8x16.splat** (x86_64 stage1 BLOCKED on an arm64 i8x16
-   spilled-operand gap — fix arm64 first for a GREEN ref), **f32x4/f64x2.splat** (no spill_base_off param),
-   **replace_lane** (D-034 GPR-scalar cohort). NEXT options: arm64 i8x16 spill gap (unblocks i8x16) / D-034 cohort
-   / discharge D-460 via `wasmtime_misc_native_sweep.sh gc` (splat-producer now spilled-dst aware). ubuntunote
-   nix-disk FIXED (402GB `.zig-cache` → `rm -rf`; lesson `2026-06-18-remote-zig-cache-fills-disk-*`).
+   **i32x4/i16x8/i64x2.splat @60c4f043a**). **ROOT of the remaining D-461 ops = the D-034 GPR-scalar SPILL-EXEMPT
+   path** (confirmed 2026-06-18): arm64 `emitV128SplatFromGpr`(resolveGpr src) + `emitV128ExtractLane`(resolveGpr
+   result) are GPR-exempt → i8x16.splat UnsupportedOps a spilled GPR scalar (i8x16 fails arm64, i32x4 passes —
+   divergence not yet root-caused; enumerate hypotheses before the fix). **NEXT = open the D-034 GPR-scalar spill
+   cohort** (unblocks i8x16.splat + replace_lane + extract-results + splat-sources). Also: f32x4/f64x2.splat (no
+   spill_base_off param). ubuntunote nix-disk FIXED (lesson `2026-06-18-remote-zig-cache-fills-disk-*`).
 
 ## Recently closed arcs (detail in ADRs/git/debt — one-liners)
 
