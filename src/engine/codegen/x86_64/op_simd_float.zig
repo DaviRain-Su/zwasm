@@ -1282,16 +1282,20 @@ pub fn emitF32x4ConvertI32x4U(allocator: Allocator, buf: *std.ArrayList(u8), all
 /// uses CMPPS-self-eq to detect NaN, AND-masks NaN to +0.0 before
 /// CVTTPS2DQ, then XOR-corrects positive-OOR's 0x80000000 to
 /// 0x7FFFFFFF via a sign-extend-of-bit-31 derived mask.
-pub fn emitI32x4TruncSatF32x4S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32) Error!void {
+pub fn emitI32x4TruncSatF32x4S(allocator: Allocator, buf: *std.ArrayList(u8), alloc: regalloc.Allocation, pushed_vregs: *std.ArrayList(u32), next_vreg: *u32, spill_base_off: u32) Error!void {
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
     const src_v = pushed_vregs.pop().?;
     const result_v = next_vreg.*;
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
-    const src_x = try gpr.resolveXmm(alloc, src_v);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
-    const tmp = abi.fp_spill_stage_xmms[0]; // XMM14
+    // D-034 (g): 1-scratch XMM7-park — park the NaN-mask tmp on XMM7, freeing
+    // both stages for src(0)+dst(1). src/dst/tmp are all live at once (step 3
+    // MOVAPS dst,src while tmp holds the mask) but are 3 distinct reserved regs;
+    // src stays in stage0 (nothing in the recipe overwrites it after step 3).
+    const src_x = try gpr.xmmLoadSpilledV128(allocator, buf, alloc, spill_base_off, src_v, 0);
+    const dst_x = try gpr.xmmDefSpilledV128(alloc, result_v, 1);
+    const tmp: inst.Xmm = .xmm7;
 
     // 1-2: tmp = CMPPS(src, src, EQ_OQ) → all-1s where lane is not
     // NaN (since x==x is false only for NaN), 0 elsewhere.
@@ -1320,6 +1324,7 @@ pub fn emitI32x4TruncSatF32x4S(allocator: Allocator, buf: *std.ArrayList(u8), al
     try buf.appendSlice(allocator, inst.encPsradImm(tmp, 31).slice());
     try buf.appendSlice(allocator, inst.encPxor(dst_x, tmp).slice());
 
+    try gpr.xmmStoreSpilledV128(allocator, buf, alloc, spill_base_off, result_v, 1);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -1730,7 +1735,7 @@ pub fn emitF32x4DemoteF64x2ZeroCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirIns
 
 pub fn emitI32x4TruncSatF32x4SCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitI32x4TruncSatF32x4S(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitI32x4TruncSatF32x4S(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 pub fn emitI32x4TruncSatF32x4UCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {

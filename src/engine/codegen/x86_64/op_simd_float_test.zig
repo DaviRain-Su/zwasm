@@ -802,20 +802,20 @@ test "emitI32x4TruncSatF32x4S: 9-instr NaN-mask + XOR-fix recipe" {
     try pushed.append(testing.allocator, 0);
     var next_vreg: u32 = 1;
 
-    try op_simd_float.emitI32x4TruncSatF32x4S(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_float.emitI32x4TruncSatF32x4S(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
-    // src = xmm8, dst = xmm9, tmp = xmm14.
-    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm14, .xmm8).slice());
-    try expected.appendSlice(testing.allocator, inst.encCmpps(.xmm14, .xmm8, 0x00).slice());
+    // src = xmm8, dst = xmm9, tmp = xmm7 (D-034 (g): NaN-mask parked on XMM7).
+    try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm7, .xmm8).slice());
+    try expected.appendSlice(testing.allocator, inst.encCmpps(.xmm7, .xmm8, 0x00).slice());
     try expected.appendSlice(testing.allocator, inst.encMovapsXmmXmm(.xmm9, .xmm8).slice());
-    try expected.appendSlice(testing.allocator, inst.encAndps(.xmm9, .xmm14).slice());
-    try expected.appendSlice(testing.allocator, inst.encXorps(.xmm14, .xmm9).slice());
+    try expected.appendSlice(testing.allocator, inst.encAndps(.xmm9, .xmm7).slice());
+    try expected.appendSlice(testing.allocator, inst.encXorps(.xmm7, .xmm9).slice());
     try expected.appendSlice(testing.allocator, inst.encCvttps2dq(.xmm9, .xmm9).slice());
-    try expected.appendSlice(testing.allocator, inst.encPand(.xmm14, .xmm9).slice());
-    try expected.appendSlice(testing.allocator, inst.encPsradImm(.xmm14, 31).slice());
-    try expected.appendSlice(testing.allocator, inst.encPxor(.xmm9, .xmm14).slice());
+    try expected.appendSlice(testing.allocator, inst.encPand(.xmm7, .xmm9).slice());
+    try expected.appendSlice(testing.allocator, inst.encPsradImm(.xmm7, 31).slice());
+    try expected.appendSlice(testing.allocator, inst.encPxor(.xmm9, .xmm7).slice());
     try testing.expectEqualSlices(u8, expected.items, buf.items);
 }
 

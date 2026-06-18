@@ -607,3 +607,24 @@ test "runI32Export: f32x4.convert_i32x4_u of a spilled v128 src/dst → 0x408000
     };
     try testing.expectEqual(@as(u32, 0x40800000), runI32Export(testing.allocator, &bytes, "f"));
 }
+
+// ============================================================
+// D-034 (g) — v128 spill for the 1-internal-scratch trunc_sat /
+// convert ops via the XMM7-park template (like abs/neg): park the
+// op's single scratch on XMM7, freeing both stages for src(0)+dst(1).
+// trunc_sat_f32x4_s uses 1 scratch (NaN-mask tmp). arm64 already
+// spill-aware.
+// ============================================================
+
+test "runI32Export: i32x4.trunc_sat_f32x4_s of a spilled v128 src/dst → 3 (D-034 (g) 1-scratch trunc_sat)" {
+    // trunc_sat_f32x4_s(3.7) = 3; extract_lane 0 = 3.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x5e,
+        0x7b, 0x01, 0x60, 0x00, 0x01, 0x7f, 0x03, 0x02, 0x01, 0x01, 0x07, 0x05,
+        0x01, 0x01, 0x66, 0x00, 0x00, 0x0a, 0x21, 0x01, 0x1f, 0x00, 0x43, 0xcd,
+        0xcc, 0x6c, 0x40, 0xfd, 0x13, 0x43, 0xcd, 0xcc, 0x6c, 0x40, 0xfd, 0x13,
+        0xfb, 0x08, 0x00, 0x02, 0x41, 0x01, 0xfb, 0x0b, 0x00, 0xfd, 0xf8, 0x01,
+        0xfd, 0x1b, 0x00, 0x0b,
+    };
+    try testing.expectEqual(@as(u32, 3), runI32Export(testing.allocator, &bytes, "f"));
+}
