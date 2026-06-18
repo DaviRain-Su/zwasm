@@ -63,8 +63,11 @@ Status→Implemented + retrospective section; D-464 item (4) closed).
    :439/514, reads vec+dst — next clean-ish candidate, arm64-verify first per lesson); **replace_lane** ENTANGLED with
    D-034 arm64-GPR-scalar (deferred to the D-034 cohort). Or pivot to dogfood. Do NOT grind consumer-gated (D-464(2),
    D-305).
-4. **Remote**: D-461 extend @83256d210 GREEN on ALL 3 HOSTS (arm64+Rosetta+ubuntu @b8d6ba461; **windows exit 0**,
-   gate recorded @aaec6db9d). D-028/windows-listen IPC flakes cosmetic.
+4. **Remote**: extend 3-host GREEN; Extadd ubuntu-green; v128.load splat/zero arm64+Rosetta-green. **ubuntu @29a6e8c9
+   FAILED = nix-shell-env DEPENDENCY BUILD failure on ubuntunote (INFRA/env, NOT a test/code regression — no
+   assertion fail, no listen-flake; `zig build test-all` never ran). Code is arm64-native + x86_64-Rosetta verified.
+   → Step 0.7 D3 NON-CODE-GAP exception: RE-KICK ubuntu, do NOT auto-revert.** windows batch 7/12 (Extadd+memload
+   pending, non-ABI, same Win64-proven stage-XMM mechanism). D-028/windows-listen IPC flakes cosmetic.
 
 ## Recently closed arcs (detail in ADRs/git/debt — one-liners)
 
