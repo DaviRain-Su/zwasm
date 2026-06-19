@@ -1339,7 +1339,25 @@ entries:
     layer: "code"
     status: "partial"
     description: |-
-      **(A) LOCALIZED 2026-06-20 (func-bisect) — a call's i32 RETURN VALUE is wrong under JIT, mis-firing a `br_if`.**
+      **(A) RE-PARKED 2026-06-20 after 3 bounded investigations (corrected characterization; bundle pivoted,
+      delta=0).** Net progress this session = TWO false leads REMOVED + a clean deterministic observable
+      established. **Both prior "localizations" REFUTED**: (1) the spill-hole/func-233 theory (poison-bisect — probe
+      artifact); (2) the call-i32-return-mis-fires-br_if theory below (discriminator: 3 independent zero-injection
+      probes — force ALL i32 returns→0 module-wide, ALL i64 returns→0, and scoped to goargs — each left the
+      divergence UNCHANGED; the goargs capture disasm is clean `bl makeslice; mov w21,w0; cbnz w21` no clobber; a
+      minimal call-return wat CANNOT reproduce). So the wrong goargs branch is driven by a **NON-call-return value**
+      — a miscompiled branch condition, a wrong-width/offset LOAD, or a wrong arith/store BEFORE host-call #5; NOT in
+      `op_call.zig`. **"GENERAL bug" hypothesis ALSO REFUTED** (no synthetic wat reproduces it) → it IS a narrow
+      elusive trigger in the fat-Go runtime = NICHE (fat-Go JIT-run-stage only; interp+spec+TinyGo+realworld-compile
+      56/56 all green). **CLEAN OBSERVABLE (the durable deliverable)**: host-call stream diverges at #5 — interp
+      `args_sizes_get→args_get`, JIT `args_sizes_get→clock_time_get`; first divergent guest func = `runtime.goargs`
+      (835); deterministic, stable 3/3, NOT a heisenbug. (mem.cksum can't bisect — clock_time_get writes wall-clock
+      so memory legitimately diverges from #2 on.) **RESUMABLE next step** (when prioritized): a per-guest-func ENTRY
+      tracer in BOTH engines (heed lesson `build-options-field-needs-all-exes`) → confirm goargs is the flip point →
+      surgically trace the EXACT value goargs branches on + walk its producer dataflow back to the miscompiled
+      load/arith. Re-parked per ROI (niche, ~1.3M+390K tokens, no fix); not grinding further now. Repros:
+      `private/spikes/d331a-retval/` (gitignored).
+      **(A) [SUPERSEDED — REFUTED above] LOCALIZED 2026-06-20 (func-bisect) — a call's i32 RETURN VALUE is wrong under JIT, mis-firing a `br_if`.**
       First divergent guest func = **`runtime.goargs` (func 835)**. The miscompiled instr: `func835+0x0654 cbnz w21`
       where **w21 = w0 = the i32 return of the `bl` at 0x062c** (`runtime.makeslice`/`mallocgc`). The wat is
       `call $makeslice … br_if N` (a morestack-restart flag normally 0 → fall through); under JIT w0 is wrongly

@@ -52,25 +52,15 @@ comp-assert 170/0; 3-host green. Lessons `host-fn-two-value-types`, `component-r
 **Step-0.7 NOTE**: `failed command: test…--listen=-` is COSMETIC (exits 0); trust `[run_remote_*] OK/FAIL` + `N
 passed, 0 failed`, not that line.
 
-**PARKED / gated (do NOT speculatively grind)**: D-305 long-tail (list<record>/variant/multi-param — niche, + needs
+**PARKED / gated (do NOT speculatively grind)**: **D-331A RE-PARKED 2026-06-20** — 3 bounded investigations this
+session REMOVED two false leads (spill-hole + call-return-value, both refuted by zero-injection probes) + left a
+clean deterministic observable (host-call #5 divergence; first divergent func `runtime.goargs`/835; the wrong branch
+is driven by a NON-call-return value — a miscompiled load/branch/arith before #5). "General bug" hypothesis refuted
+(no minimal wat repro) → NICHE (fat-Go JIT-run only; everything else green). Resumable next step in the D-331 row
+(per-guest-func entry tracer both engines → surgical dataflow trace of goargs's branch input). Not grinding further
+(ROI; ~1.7M tokens, no fix). · D-305 long-tail (list<record>/variant/multi-param — niche, + needs
 `component_graph.zig` 1895/2000 file-split first); D-330 c_sha256 PROVABLY-BLOCKED (bucket-2); D-464 async; 21
 `blocked-by` (upstream/proposal/time-gate/corpus).
-
-## Active bundle
-
-- **Bundle-ID**: D-331A-call-retval
-- **Cycles-remaining**: ~1-2 (discriminator → fix + test)
-- **Continuity-memo**: LOCALIZED 2026-06-20 (func-bisect — see D-331 row). Bug = a call's i32 RETURN VALUE is wrong
-  under JIT, mis-firing a `br_if`. Culprit func = `runtime.goargs` (835); `func835+0x0654 cbnz w21` where
-  w21=w0=return of `bl makeslice` @0x062c — JIT leaves w0 NONZERO (should be 0) → br_if fires → goargs "restart" →
-  stale re-run → clock path. **GENERAL, not Go-specific** ("call → br_if on i32 return value"). goargs's own
-  loads/compares are correct; fault is the call return reg (or its caller-saved spill/reload @0x0614-0x0644).
-  REPRO: `ZWASM_DEBUG=mem.cksum timeout 25 ./zig-out/bin/zwasm run --engine {interp,jit} test/realworld/wasm/go_hello_wasi.wasm 2>&1 | grep -oE 'jit [a-z_]+'` (diverges #5).
-  NEXT = discriminator: trace w0 right after `bl makeslice` vs interp(0) → callee return-lowering vs caller reg
-  restore (`op_call.zig` return-reg capture / spill-around-call). Then build the SMALLEST wat repro (call returning
-  i32 → br_if, under reg pressure) as the characterization test, fix in arm64 codegen, 3-host gate.
-- **Exit-condition**: the call-return-value miscompile reproduced by a minimal wat fixture (RED) + fixed in arm64
-  codegen (GREEN) + 3-host green; go_hello_wasi JIT host-call stream matches interp through #5.
 
 ## Closed arcs (detail in ADRs/git/debt)
 
