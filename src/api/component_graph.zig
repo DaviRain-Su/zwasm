@@ -568,9 +568,17 @@ fn buildCoreInstance(
         .inline_exports => return null,
         .instantiate => |inst_def| {
             const core_bytes = nthCoreModule(&child.decoded, inst_def.module) orelse return GraphError.NoCoreModule;
+            // D-466: NO function-scope `errdefer destroy(module)` — once appended
+            // to graph.modules, graph.deinit (the instantiateGraph errdefer) owns
+            // module's deinit+destroy; a surviving errdefer double-frees when a
+            // LATER step in this fn (linker / pour / instance build) fails, e.g. an
+            // unsupported boundary downstream. Clean up explicitly for the only
+            // pre-append fallible step (compile); an OOM-append leak is tolerated.
             const module = try alloc.create(Module);
-            errdefer alloc.destroy(module);
-            module.* = try engine.compile(core_bytes);
+            module.* = engine.compile(core_bytes) catch |e| {
+                alloc.destroy(module);
+                return e;
+            };
             try graph.modules.append(alloc, module);
 
             const lk = try alloc.create(Linker);
@@ -749,7 +757,9 @@ fn installBoundaryTrampoline(
         const param_is_string = ft.params.len == 1 and isString(ft.params[0].ty);
         if (ft.params.len != 0 and !param_is_string) return GraphError.UnsupportedBoundaryType;
         const bctx = try graph.alloc.create(BoundaryCtx);
-        errdefer graph.alloc.destroy(bctx);
+        // D-466: no local errdefer — graph.deinit (the instantiateGraph errdefer) owns
+        // bctx once appended below; a surviving errdefer double-frees on a later
+        // defineFuncCtx failure (an OOM-append leak of one struct is tolerated, as elsewhere).
         bctx.* = .{
             .callee = provider.child,
             .core_func_name = r.core_func.name,
@@ -790,7 +800,8 @@ fn installBoundaryTrampoline(
     if (!boundaryShapeOk(ft, list_elem_size > 0)) return GraphError.UnsupportedBoundaryType;
 
     const bctx = try graph.alloc.create(BoundaryCtx);
-    errdefer graph.alloc.destroy(bctx);
+    // D-466: no local errdefer — graph.deinit owns bctx once appended below; a
+    // surviving errdefer double-frees on a later defineFuncCtx failure.
     bctx.* = .{
         .callee = provider.child,
         .core_func_name = r.core_func.name,
@@ -880,7 +891,8 @@ fn installAsyncBoundary(
     const cb_funcidx = try as.registerCallback(cb_inst, cb.name);
 
     const bctx = try graph.alloc.create(BoundaryCtx);
-    errdefer graph.alloc.destroy(bctx);
+    // D-466: no local errdefer — graph.deinit owns bctx once appended below; a
+    // surviving errdefer double-frees on a later defineFuncCtx failure.
     bctx.* = .{
         .callee = provider.child,
         .core_func_name = r.core_func.name,
@@ -1278,7 +1290,7 @@ fn installGraphFutureBuiltin(
     const as = try graph.asyncState();
     const elem_size = graphStreamFutureElemSize(graph.alloc, &child.info, type_index);
     const fctx = try graph.alloc.create(GraphFutureCtx);
-    errdefer graph.alloc.destroy(fctx);
+    // D-466: no local errdefer — graph.deinit owns fctx once appended below.
     fctx.* = .{ .as = as, .elem_size = elem_size, .child_idx = child.idx };
     try graph.future_ctxs.append(graph.alloc, fctx);
     switch (op) {

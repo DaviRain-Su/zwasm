@@ -367,6 +367,11 @@ const adder_graph_path = "test/component/adder_graph.wasm";
 /// the cross-component call MUST trap (never a silent wrong/empty marshal).
 const oob_param_graph_path = "test/component/oob_param_graph.wasm";
 
+/// D-466 regression: a 2-component graph whose B exports a 5-param func — an
+/// UNSUPPORTED boundary arity → `instantiateGraph` returns UnsupportedBoundaryType.
+/// Exercises the FAILED-instantiate cleanup path (must not double-free).
+const unsupported_boundary_graph_path = "test/component/unsupported_boundary_graph.wasm";
+
 test "C2-3b-1: a real 2-component graph decodes (nested components + instances + wiring)" {
     var threaded: std.Io.Threaded = .init(testing.allocator, .{});
     defer threaded.deinit();
@@ -494,6 +499,22 @@ test "C2-3b-2 (EXIT): a 2-component graph links + runs (A calls B across compone
     var results = [_]Value{.{ .i32 = 0 }};
     try graph.invokeFlat("add-five", &.{.{ .i32 = 10 }}, &results);
     try testing.expectEqual(@as(i32, 15), results[0].i32);
+}
+
+test "D-466: a graph with an unsupported boundary shape fails to instantiate WITHOUT a double-free" {
+    var threaded: std.Io.Threaded = .init(testing.allocator, .{});
+    defer threaded.deinit();
+    const io = threaded.io();
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(io, unsupported_boundary_graph_path, testing.allocator, .limited(1 << 20));
+    defer testing.allocator.free(bytes);
+
+    var eng = try Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    // The 5-param boundary is unsupported → instantiateGraph errors mid-build,
+    // AFTER an earlier child's module (and any bctx/fctx) were appended to the
+    // graph. Its `errdefer graph.deinit()` must free each EXACTLY once — the prior
+    // surviving local errdefers double-freed, which testing.allocator panics on.
+    try testing.expectError(error.UnsupportedBoundaryType, instantiateGraph(&eng, testing.allocator, bytes, .{}));
 }
 
 test "D-305 (security): an OOB (ptr,len) into a cross-component string import TRAPS, not silently returns 0" {
