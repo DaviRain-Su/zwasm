@@ -129,7 +129,7 @@ entries:
     front: B-hardening
   - id: "D-294"
     layer: "code"
-    status: "partial"
+    status: "note"
     description: |-
       partial: JIT call_indirect on a NULL (uninitialized, in-bounds) table element mislabelled its trap as
       indirect_call_mismatch (code 3); interp + all 3 reference engines (wasmtime/wasmer/v1, D-292-D audit) say
@@ -158,7 +158,7 @@ entries:
       → Both residuals (R1 subtyping-trampoline sentinel, R2 code-2 channel split) are D-293-class; the
       load-bearing D-294 bug (inline null-elem mislabel) is FIXED (4fa16b29). Residuals fold into D-293.
     first_raised: "2026-06-06"
-    last_reviewed: "2026-06-15"
+    last_reviewed: "2026-06-19"
     refs: |-
       Fixed: 4fa16b29. src/engine/codegen/{arm64,x86_64}/{op_call,op_tail_call,ctx,emit}.zig +
       x86_64/op_control.zig (demux) + api/trap_surface.zig (jitTrapCode 13). Tests: runner_trap_test.zig,
@@ -2126,10 +2126,10 @@ entries:
           (dst→home/XMM7 via file-local dstHomeOrXmm7; vec loaded into dst — and into high_x for shr_s — via
           loadV128IntoLocal each use; storeXmm7IfSpilledLocal flush; all in op_simd_int_arith.zig). Earlier sites: cmp/
           ne/extmul = 3-operand template; extmul-high/i64x2 = dst/XMM15 load-temp; abs/neg = XMM7-park; LoadExtend/
-          StoreLane single-operand→stage0. REMAINING 4 sites (same both-stages-internal class, apply just-in-time
-          reload + the new file-local helpers): emitI8x16Swizzle (PSHUFB idx-ctrl), emitI8x16Shuffle (2-operand PSHUFB),
-          emitI8x16Popcnt (reads src 2× → load src into a stage twice; dst→home/XMM7; XMM7 src-alias stash fires only
-          when dst home), emitI64x2Mul (XMM14+XMM15 + XMM7 rhs-stash).
+          StoreLane single-operand→stage0. FINAL 4 sites DONE (the both-stages-internal class via just-in-time reload):
+          emitI8x16Popcnt @391bd4552 (src read 2×), emitI8x16Swizzle + emitI8x16Shuffle @f4baa004a, emitI64x2Mul
+          @411dd1e14 (two-path: all-reg verbatim + spill restructure). **18/18 — arc closed @411dd1e14, ubuntu+windows
+          GREEN.**
           Fixture: the live-stack v128-pressure trick (13 live v128 + OR/drop chain) forces dst/src spill; verify via
           wasmtime. (LoadExtend/StoreLane fixtures already use this — see runner_v128_jit_test.zig.)
           STRUCTURAL-EXEMPT (leave): op_simd.zig:961 emitV128Select val2 (3 v128 regs vs 2 stages); emitV128Bitselect

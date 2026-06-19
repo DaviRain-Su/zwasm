@@ -50,9 +50,9 @@ consolidate the duplicated spill helpers into a shared op_simd.zig pub set.
    `audit_scaffolding`** pass (timely after the 18-site arc + many debt edits; the last audit was 2026-06-18).
    Consumer-gated (do NOT grind): D-305 rare CM shapes, D-464 broader async.
 2. **Audit DONE 2026-06-18 (CLEAN)** — `audit_scaffolding` 0 block/0 soon (J.3 chronic debt); fuzz 0 crashes.
-3. **D-460 v128-GC: struct/array get/set/new_fixed emit DONE both arches** (@3d8be3c00/@8137c7268/@5292569e0; 6
-   runI32Export fixtures). REMAINING = the v128-array.copy slice (item 1 NEXT). Consumer-gated, do NOT grind:
-   D-464(2) broader async + D-305 rare CM shapes (those NEED a consumer; D-460 array.copy does NOT).
+3. **D-460 v128-GC arc COMPLETE both arches** — struct/array get/set/new_fixed/new_default emit (@3d8be3c00/
+   @8137c7268/@5292569e0) + array.copy (@5292569e0, jit_abi.zig:1049 `ai.element.size`); 7 runI32Export fixtures.
+   D-460 → `note`. Consumer-gated, do NOT grind: D-464(2) broader async + D-305 rare CM shapes (need a consumer).
 4. **D-461 v128-DST-spill arc — FULLY COMPLETE both arches** (FP replace_lane @4acd24152; ADR-0198). D-461 → `note`.
    Its scalar-operand sibling D-034 arc is now also CLOSED @411dd1e14 (the entire v128 spill story is complete).
 
@@ -66,9 +66,8 @@ consolidate the duplicated spill helpers into a shared op_simd.zig pub set.
 - **doc-inventory freshening DONE** (`42441634` README + ADR-0193 P4 doc-sync): reader-facing surfaces clean
   (C-API 293/293, component 158/0/0, Wasm 2.0 skip-impl==0, 3.0 all-9-proposals, version anchors retired).
 - **ADR-0192 wasmtime differential campaign — paused**: goal met (9 real engine bugs fixed via wasmtime
-  misc_testsuite + 6 SIMD via D-457). Residuals: **`D-460`** v128-GC (arm64 struct/array get/set EMIT DONE
-  `f79a3ced`/`41015a9b`; array.new_fixed/copy + x86_64 mirror unblocked NOW by the D-461 spill fixes in progress),
-  **`D-209`** memory64 >4 GiB offset, **D-456** host-import fixtures (parked). Harness `scripts/wasmtime_misc_*.sh`.
+  misc_testsuite + 6 SIMD via D-457). Residuals: **`D-460`** v128-GC COMPLETE both arches (`note`); **`D-209`**
+  memory64 >4 GiB offset, **D-456** host-import fixtures (parked). Harness `scripts/wasmtime_misc_*.sh`.
 
 **Closed campaigns (detail in git/lessons)**: prior 4-front async-maturity (2026-06-16) — ② wasmtime async .wast
 TIER-1 (`afcf889a`/`05b35c28`; D-446/447 deferred), ① wasip3 conformance (7 real-rust fixtures, `.#gen-wasip3`),
@@ -91,9 +90,9 @@ TIER-1 (`afcf889a`/`05b35c28`; D-446/447 deferred), ① wasip3 conformance (7 re
 - **Surfaces**: C-API 293/293 · Zig-API complete (full WASI parity) · lean CLI · memory-safety sound · dogfooded into
   cw. Runners ReleaseSafe (ADR-0177; `check_releasesafe_runners.sh`).
 - **EH**: cross-instance JIT EH on BOTH arches (arm64 `4f73d9ee` + x86_64 `c534afca`). Interp + JIT EH corpus green.
-- **Debt**: 62 entries; `now`-class = **D-034** (GPR/FP-scalar spill cohort = active bundle; D-461 v128 arc DONE →
-  `note`). D-460 v128-GC emit DONE both arches. D-335 → `note` (ADR-0195 scheduler DONE).
-  Rest front-tagged (future-bucket/parked); D-462 feature-separation = user-gated.
+- **Debt**: 62 entries; **ZERO `now`-class** (D-034 spill arc CLOSED @411dd1e14 → `note`; D-460 v128-GC + D-461 +
+  D-293 + D-294 all `note`). Remaining partials: D-305 (consumer-gated CM shapes), D-330/D-331 (parked go_* JIT).
+  Rest front-tagged (future-bucket/parked); D-462 feature-separation = user-gated. **完成形 plateau.**
 - **Realworld corpus**: 56 fixtures (c/cpp/emcc/go/tinygo/rust/zig), interp 56/0; JIT run-stage opt-in.
 - **Tag**: `v2.0.0-alpha.3` tag-only (no Release → Latest stays v1.11.0), USER-ONLY.
 
