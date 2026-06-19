@@ -64,10 +64,15 @@ Resumable anytime; NOT grinding further now — proceeding to the non-blocked qu
    2. **D-305(a) DONE @4c8329428** — generic `defineFuncRaw` collapsed BoundarySig/3/4 → one Value-slice path.
    3. **D-305(b) DONE** — record param (b1 @b3ee9fcf0) + result-retptr (b2 @3b5a0a4f8); comp-assert 168/0. Lessons
       `host-fn-two-value-types` + `component-record-retptr-asymmetry`.
-   **QUEUE DISCHARGED** — the explicit non-blocked queue (D-467 → D-305 a/b) is now COMPLETE. **NEXT CYCLE = Step
-   0.5 debt RE-SURVEY** (the 逐次 mandate: re-survey for newly-drivable items before stopping). If the sweep finds
-   nothing drivable, remaining work is genuinely gated (D-305 long-tail consumer-gated; D-330 bucket-2; D-464 async;
-   the 21 blocked-by upstream/proposal/corpus) → a legit bucket-3 with re-arm, NOT a surrender. Do the sweep FIRST.
+   **QUEUE DISCHARGED** (D-467 → D-305 a/b). Re-survey done: 0 now-class. Driving D-305 completeness via the GENERIC
+   canon path (not speculative grind — reuses tested machinery).
+   4. **D-305(b3) DONE @35a543854** — record-with-STRING param via the canon `liftFlat`→`lowerFlat` round-trip
+   (`canonHasPointer` gate; `CoreValue`==`RtValue`); rec_str_param fixture →8; comp-assert 169/0. The round-trip path
+   generalizes to list params + nested records for free. **NEXT (drivable, same arc)**: record-with-pointer RESULT
+   (retptr + `lowerFlat` into A's return area — symmetric to b3, reuses the b2 retptr seam), then list-of-record /
+   multi-param-with-pointer. All consumer-gated completeness but bounded + generic-design (not speculative grind).
+   Then re-survey debt; if nothing else drivable → legit bucket-3 w/ re-arm (D-330 bucket-2, D-331A hard-parked,
+   D-464 async, 21 blocked-by).
    PARKED (do NOT drive): **D-330** c_sha256 `\n` PROVABLY-BLOCKED (bucket-2; 1-byte cosmetic, constraint conflict);
    the 21 `blocked-by` (upstream Zig D-010/148/312/323 · proposal D-300/336 · phase/time-gate · consumer/corpus); D-464 async.
 2. **Audit DONE 2026-06-18 CLEAN** (0 block/0 soon; fuzz 0 crashes). **v128 spill story COMPLETE** (D-460/D-461/D-034

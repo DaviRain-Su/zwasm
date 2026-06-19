@@ -1019,6 +1019,16 @@ entries:
     layer: code
     status: partial
     description: |-
+      **(b3) RECORD-WITH-STRING param DONE @35a543854 (2026-06-20)**: a record
+      param containing an internal pointer (string/list) crosses via the canonical
+      round-trip `liftFlat(importer_cx, A_words)` → `lowerFlat(callee_cx, value)`
+      (reuses canon.zig recursion + round-trip test :1212; no per-field hand-walk).
+      Gated by `canonHasPointer`; flat records keep pass-through. `CoreValue` ==
+      operand `RtValue` so args feed liftFlat verbatim. rec_str_param fixture
+      (f({msg:"hello",n:3})→8); comp-assert 169/0. The round-trip path generalizes
+      to list params + nested records for free (lowerFlat recurses). REMAINING
+      (consumer-gated): record-with-pointer RESULT (retptr + lowerFlat into A's
+      return area), multi-param-with-pointer, variant payloads.
       **(b) RECORD AGGREGATE DONE (2026-06-20)**: core record param+result both
       marshal. **(b1) flat-record PARAM @b3ee9fcf0**: a record whose fields all
       flatten to i32 (point{x,y:u32}) → N direct core words, pass-through (no
