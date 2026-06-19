@@ -54,9 +54,12 @@ killing a vreg on a br_table fall-out path. c_sha256 107, go_hello prints, `labe
 x86_64. **VERIFICATION LESSON (cost 3 reverts)**: a JIT-codegen fix MUST be checked with `test-spec-wasm-2.0-assert`
 (the JIT assert runner) on BOTH arm64 AND `-Dtarget=x86_64-macos` — NOT `test-spec`(interp)/`zig build test`(unit).
 D-330/D-331 discharged; lesson updated.
-**Sweep queue (next)**: D-209 memory64 >4GiB offset (≤1 CHUNK — codegen ALREADY exists both arches; only an
-artificial cap at `lower.zig:1004` gates it; lift for i64 memories + fixture) → D-336 borrow-export (blocked
-sort=value) → D-456 host-stubs (test-harness). (#1 simd = test-harness.)
+**D-209 memory64 >4GiB static offset CLOSED @b8cf64123**: lifted the artificial `readMemargOffset` u32 cap (the
+validator already gatekeeps per-memory offset width; zir payload is u64; 64-bit base+offset carry-trap codegen
+already on both arches). RED fixture `offset_ge_4gib_oob_trap` BadMemarg→OOB-trap; memory64 spec assert 9317/0.
+**Sweep queue (next)**: D-336 borrow-export (blocked sort=value infra — VERIFY before invest) → D-456 host-stubs
+(test-harness). (#1 simd = test-harness.) When the easy known-items drain, re-run the gap-inventory subagent
+(EASIEST-first, VERIFY-BEFORE-INVEST 裏取り — past inventories flagged already-fixed items as open).
 
 **Phase 17 完成形 plateau** (validated — do NOT re-walk): async COMPLETE; v128 spill (D-034/D-460/D-461) CLOSED;
 surface audits clean 2026-06-18; fuzz 0-crash; realworld JIT compile 56/56. NOT-WORTH: D-294-R2 TrapKind.
