@@ -2225,34 +2225,6 @@ entries:
       src/api/component_graph.zig (graphStream*/graphFuture*/graphWaitable* + pourSyntheticExport arms; pollSet);
       src/feature/component/async.zig (SharedStream/SharedFuture/WaitableSet rendezvous primitives);
       test/component/two_async_components_*.wat (the d-a..d-c-2 fixtures); ADR-0195
-  - id: D-467
-    layer: code
-    status: now
-    description: |-
-      **271 simd `skip-impl` are a REAL invoke-boundary gap, NOT "just the test harness"** (user directive
-      2026-06-19: don't accept harness-blame — unskipping may expose latent v128-ABI bugs). The simd corpus
-      passes 24805/0 for ops whose operands come from `v128.const`, but 271 asserts are `skip-impl` because the
-      spec-runner cannot INVOKE an export whose signature involves v128 at the call boundary. Verified breakdown
-      (over test/spec/wasm-2.0-simd-assert/*/manifest.txt): (a) **v128-param-pending** — load_lane/store_lane
-      (store8_lane x16, load8_lane x16, store16/load16 x8 each, store/load32/64_lane x4 each): the export takes a
-      v128 PARAM (+ a memory addr) and/or returns v128; (b) **unsupported-shape ('f32',)->('v128',)** —
-      f32x4.splat and kin (an f32 param widening to a v128 result); (c) **directive-register** — a wast
-      directive form the runner doesn't bind. Root: `src/engine/codegen/shared/entry.zig` (the JIT entry/wrapper
-      that marshals call args/results) has progressively discharged v128-param shapes (single/two/four-v128-param
-      setters, all_true, extract_lane — see the `(v128-param-pending discharge)` doc-comments :1862-1982) but
-      NOT yet load/store-lane (v128-param + i32 addr -> v128) nor f32->v128 splat; the simd_assert_runner value
-      parser likewise can't emit/check a v128 literal arg/result for these. DISCHARGE (sequential, non-blocked):
-      extend entry.zig arg/result v128 marshalling + the simd-runner invoke value parse to cover load/store-lane
-      + f32->v128, flip the manifests' `skip-impl` -> live asserts, run BOTH `ZWASM_SPEC_ENGINE=interp|jit`.
-      Watch for latent bugs the v128 call-boundary now exercises (the whole point per the user). Exit: simd
-      `skip-impl` -> 0 for these categories (directive-register may stay if it is a genuine wast-directive the
-      runner legitimately can't model -> document that residue). Queued AFTER the active D-331A-memdiff bundle;
-      see handover Non-blocked queue.
-    first_raised: "2026-06-19"
-    last_reviewed: "2026-06-19"
-    refs: |-
-      src/engine/codegen/shared/entry.zig (v128-param marshal discharge sites :1862-1982);
-      test/spec/simd_assert_runner.zig (invoke value parse); test/spec/wasm-2.0-simd-assert/simd_{load,store}*_lane/manifest.txt
 conventions: |-
   > Tracked technical debt. Refresh on every `/continue` resume —
   > see `.claude/skills/continue/SKILL.md` Step 0.5.

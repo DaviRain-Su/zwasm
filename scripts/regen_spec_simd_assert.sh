@@ -481,6 +481,14 @@ SUPPORTED = {
     (("i64",), ("i32",)): True,
     (("f32",), ("f32",)): True,
     (("f64",), ("f64",)): True,
+    # D-467 load/store-lane. load: (i32 addr, v128) → v128
+    # (`v128.load{8,16,32,64}_lane`). store test export: (i32 addr,
+    # v128) → i64 (stores the lane, reads back i64). Active data
+    # segments are materialized into linear memory before invoke, so
+    # no extra memory setup is needed. Entry helpers:
+    # `callV128_i32v128`, `callI64_i32v128`.
+    (("i32", "v128"), ("v128",)): True,
+    (("i32", "v128"), ("i64",)): True,
 }
 
 lines = []

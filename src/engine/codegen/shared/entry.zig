@@ -1,4 +1,4 @@
-// FILE-SIZE-EXEMPT: uniform-pattern catalog (125 callXX_yy per-shape entry helpers; monotonic growth with Wasm signature shapes — +8 for D-467 multi-scalar→v128 simd constructor shapes) (cap=3200) (per ADR-0063 + ADR-0099 Revision 2026-05-24)
+// FILE-SIZE-EXEMPT: uniform-pattern catalog (127 callXX_yy per-shape entry helpers; monotonic growth with Wasm signature shapes — +8 D-467 multi-scalar→v128 + 2 D-467 load/store-lane (i32,v128)→v128/i64) (cap=3200) (per ADR-0063 + ADR-0099 Revision 2026-05-24)
 // Comptime generation is a follow-up; see ADR-0063 Alternative B + debt ledger.
 
 //! JIT entry frame (ADR-0017).
@@ -2445,6 +2445,43 @@ pub fn callVoid_i32v128(
     const Vec = @Vector(16, u8);
     const Fn = *const fn (*const JitRuntime, u32, Vec) callconv(.c) void;
     return invokeAndCheckVoid(rt, module.entry(func_idx, Fn), .{ a0, @as(Vec, @bitCast(a1)) });
+}
+
+/// Wasm spec §4.4 — `(i32, v128) → v128` invocation (D-467,
+/// `v128.load{8,16,32,64}_lane`). The export takes an i32 address +
+/// a v128 source, loads N bits from linear memory into the addressed
+/// lane, and returns the merged v128. Per AAPCS64 / SysV: a0 →
+/// W1/ESI (i32 address), a1 → V0/XMM0 (v128); independent GPR / FP
+/// pools. Result v128 in V0/XMM0. Active data segments are
+/// materialized into linear memory by the runner before invoke.
+pub fn callV128_i32v128(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: u32,
+    a1: [16]u8,
+) Error![16]u8 {
+    const Vec = @Vector(16, u8);
+    const Fn = *const fn (*const JitRuntime, u32, Vec) callconv(.c) Vec;
+    const result = try invokeAndCheck(rt, Vec, module.entry(func_idx, Fn), .{ a0, @as(Vec, @bitCast(a1)) });
+    return @bitCast(result);
+}
+
+/// Wasm spec §4.4 — `(i32, v128) → i64` invocation (D-467,
+/// `v128.store{8,16,32,64}_lane` test exports). The export stores the
+/// addressed lane to linear memory then reads back an i64 from the
+/// same address and returns it (the spec fixture's read-back probe).
+/// ABI mirrors `callV128_i32v128`; result i64 in X0/RAX.
+pub fn callI64_i32v128(
+    module: linker.JitModule,
+    func_idx: u32,
+    rt: *JitRuntime,
+    a0: u32,
+    a1: [16]u8,
+) Error!u64 {
+    const Vec = @Vector(16, u8);
+    const Fn = *const fn (*const JitRuntime, u32, Vec) callconv(.c) u64;
+    return invokeAndCheck(rt, u64, module.entry(func_idx, Fn), .{ a0, @as(Vec, @bitCast(a1)) });
 }
 
 // ============================================================

@@ -765,6 +765,14 @@ fn runAssertReturn(
             };
             break :blk @as(u64, @bitCast(r));
         }
+        // D-467 `v128.store{8,16,32,64}_lane` test exports —
+        // (i32 addr, v128) → i64: store the lane, read back i64.
+        if (n_args == 2 and args[0] == .i32 and args[1] == .v128 and result_kind == .i64) {
+            break :blk entry.callI64_i32v128(compiled.module, func_idx, &rt, args[0].i32, args[1].v128) catch |err| {
+                try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+                return false;
+            };
+        }
         try stdout.print("FAIL  {s}: scalar-result unsupported (n_args={d}, shape) for {s}({s}) -> {s}\n", .{ name, n_args, fn_name, args_s, results_s });
         return false;
     };
@@ -958,6 +966,14 @@ fn invokeV128(
     }
     if (n_args == 4 and args[0] == .f64 and args[1] == .f64 and args[2] == .f64 and args[3] == .f64) {
         return entry.callV128_f64f64f64f64(compiled.module, func_idx, rt, @as(f64, @bitCast(args[0].f64)), @as(f64, @bitCast(args[1].f64)), @as(f64, @bitCast(args[2].f64)), @as(f64, @bitCast(args[3].f64))) catch |err| {
+            try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
+            return null;
+        };
+    }
+    // D-467 `v128.load{8,16,32,64}_lane` — (i32 addr, v128) → v128.
+    // Active data segments are pre-materialized into linear memory.
+    if (n_args == 2 and args[0] == .i32 and args[1] == .v128) {
+        return entry.callV128_i32v128(compiled.module, func_idx, rt, args[0].i32, args[1].v128) catch |err| {
             try stdout.print("FAIL  {s}: call {s}({s}): {s}\n", .{ name, fn_name, args_s, @errorName(err) });
             return null;
         };
