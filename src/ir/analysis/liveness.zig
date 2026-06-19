@@ -61,63 +61,6 @@ pub const stackEffect = stack_effect_mod.stackEffect;
 // is the single source of truth shared with regalloc + emit.
 const local_homing = @import("local_homing.zig");
 
-/// One control-nesting frame for the single-pass liveness walk.
-/// Hoisted to module scope (was local to `compute`) so the D-330
-/// `captureBlockMergeVregs` helper can take a `*Frame`.
-const Frame = struct {
-    entry_depth: u32,
-    param_arity: u8,
-    result_arity: u8,
-    is_if: bool,
-    // D-330: distinguishes a `loop` frame (backward branch target —
-    // no forward result merge) from a `block` frame, so block-merge
-    // capture skips loops.
-    is_loop: bool,
-    merge_captured: bool,
-    param_vregs: [8]u32,
-    // D-093 (d-11) — if/block result-merge survival. emit's per-arch
-    // `.else` (if) / first br-or-br_if (block) captures the top
-    // `result_arity` vregs as the merge target; the matching `.end`
-    // MOVs the other arm's results into the captured slot. Without
-    // liveness tracking the captured vreg's last_use_pc stops early,
-    // so regalloc may alias its slot (or park it in a call-clobbered
-    // callee-saved reg) and the post-block consumer reads garbage.
-    merge_vregs: [8]u32,
-};
-
-/// D-330 — on the FIRST forward `br`/`br_if`/`br_table` to a
-/// `block(result_arity>0)`, capture the targeted block's result
-/// operands as its canonical merge vregs (mirrors the emit's
-/// `captureOrEmitBlockMergeMov` first-capture). The block's `.end`
-/// then extends these vregs' `last_use_pc` to the post-block
-/// consumer, so the regalloc keeps them live across any
-/// intervening call instead of parking the result in a
-/// callee-saved register a call would clobber.
-///
-/// No-op for: `loop` targets (backward branch — no forward
-/// merge), function-level escapes (depth ≥ stack), zero-result
-/// blocks, already-captured frames, and a too-shallow operand
-/// stack (dead-code branch). `result_arity ≤ 8` is guaranteed by
-/// the block-open arity check.
-fn captureBlockMergeVregs(
-    block_stack: *[]Frame,
-    block_stack_len: usize,
-    depth: u32,
-    sim: []const u32,
-) void {
-    if (depth >= block_stack_len) return;
-    const fr = &block_stack.*[block_stack_len - 1 - @as(usize, depth)];
-    if (fr.is_if or fr.is_loop or fr.merge_captured or fr.result_arity == 0) return;
-    const arity: usize = fr.result_arity;
-    if (sim.len < arity) return;
-    const base = sim.len - arity;
-    var i: usize = 0;
-    while (i < arity) : (i += 1) {
-        fr.merge_vregs[i] = sim[base + i];
-    }
-    fr.merge_captured = true;
-}
-
 fn isControlFlow(op: ZirOp) bool {
     // After sub-7.5c-iv, every Wasm 1.0 control-flow op is
     // handled explicitly in `compute`. The function exists
@@ -181,6 +124,26 @@ pub fn compute(
     // sees the re-pushed vregs consumed by else-arm body, which
     // bumps their `last_use_pc` forward and prevents regalloc from
     // aliasing their spill slots across the if-frame.
+    const Frame = struct {
+        entry_depth: u32,
+        param_arity: u8,
+        result_arity: u8,
+        is_if: bool,
+        merge_captured: bool,
+        param_vregs: [8]u32,
+        // D-093 (d-11) — if-frame result-merge survival. emit's
+        // per-arch `.else` captures the top `result_arity` vregs
+        // as the merge target; the matching `.end` MOVs the else-
+        // arm's results into the captured slot. Without liveness
+        // tracking the captured vreg's last_use_pc stops at .else
+        // (the truncate-and-not-extend point), so regalloc may
+        // alias its slot with subsequent pushes and the post-if
+        // consumer reads garbage. Pre-d-11 surfaced as
+        // `if.wast:as-binary-operands` got 16/expected 12 (two
+        // composed `(if (result i32))`s in i32.mul; both merge
+        // slots collapsed onto the second if's else-arm vreg).
+        merge_vregs: [8]u32,
+    };
     // Dynamic control-nesting stack (D-331): fat toolchains (standard Go's
     // giant runtime funcs — go_hello_wasi func[303] has 11151 instrs nesting
     // blocks >256 deep) exceed any fixed cap. The interp runs them, so the JIT
@@ -260,30 +223,6 @@ pub fn compute(
                             sim_stack[base + i] = fr.param_vregs[i];
                         }
                     }
-                } else if (!fr.is_if and fr.merge_captured and fr.result_arity > 0) {
-                    // D-330 — block-result merge survival. The emit's
-                    // `captureOrEmitBlockMergeMov` captured these vregs
-                    // (the result operands of the FIRST br/br_if to this
-                    // block) as the canonical merge target; `.end` homes
-                    // the fall-through result into them. Bump their
-                    // last_use_pc to this `.end` and swap them onto the
-                    // operand stack so the post-block consumer pops the
-                    // canonical vreg. Without this the merge vreg dies at
-                    // the branch (range `[def,def]`), so the regalloc may
-                    // park it in a callee-saved reg (X20-X22 / RBX-R14)
-                    // that an intervening call clobbers — the taken edge
-                    // jumps over `.end`'s home MOV, leaving it stale
-                    // (c_sha256 dropped the final `\n`). Mirrors the
-                    // if/else handling above.
-                    if (sim_len >= @as(usize, fr.result_arity)) {
-                        const base = sim_len - @as(usize, fr.result_arity);
-                        var i: u32 = 0;
-                        while (i < fr.result_arity) : (i += 1) {
-                            ranges.items[sim_stack[base + i]].last_use_pc = pc;
-                            ranges.items[fr.merge_vregs[i]].last_use_pc = pc;
-                            sim_stack[base + i] = fr.merge_vregs[i];
-                        }
-                    }
                 }
                 block_stack_len -= 1;
                 // D-328: a catch-target block's results are delivered by the
@@ -338,10 +277,6 @@ pub fn compute(
                 .param_arity = 0,
                 .result_arity = @intCast(result_arity_u),
                 .is_if = false,
-                // D-330: a `loop` is a backward-branch target (no
-                // forward result merge); only `block`/`try_table`
-                // capture merge vregs at the first br/br_if.
-                .is_loop = instr.op == .loop,
                 .merge_captured = false,
                 .param_vregs = undefined,
                 .merge_vregs = undefined,
@@ -423,7 +358,6 @@ pub fn compute(
                 .param_arity = param_arity,
                 .result_arity = result_arity,
                 .is_if = true,
-                .is_loop = false,
                 .merge_captured = false,
                 .param_vregs = param_vregs,
                 .merge_vregs = undefined,
@@ -498,15 +432,6 @@ pub fn compute(
             // inner void block then its slot was reused by the
             // `i32.const 0x2` that followed).
             const depth: u32 = @intCast(instr.payload);
-            // D-330: capture the targeted block's result operands as
-            // its merge vregs (mirrors emit's first-branch
-            // captureOrEmitBlockMergeMov). The block's `.end` extends
-            // their last_use_pc to the post-block consumer; without
-            // this the merge vreg dies at the branch and the regalloc
-            // may park it in a callee-saved reg that an intervening
-            // call clobbers (c_sha256 `\n`: vreg in X22, clobbered by
-            // a putchar call between the branch and the consumer).
-            captureBlockMergeVregs(&block_stack, block_stack_len, depth, sim_stack[0..sim_len]);
             const target_depth: u32 = if (depth >= block_stack_len)
                 0
             else
@@ -529,18 +454,6 @@ pub fn compute(
                 sim_len -= 1;
                 const cond_vreg = sim_stack[sim_len];
                 ranges.items[cond_vreg].last_use_pc = pc;
-            }
-            // D-330: same merge-vreg capture as the `br` handler. For
-            // br_if the result operands stay on the stack (both edges),
-            // but the captured merge vregs must still survive to the
-            // block's `.end` so an intervening call doesn't clobber
-            // their callee-saved reg on the taken edge (which jumps
-            // over `.end`'s home MOV). br_table targets multiple
-            // depths via emitBranchToDepth; capture for the immediate
-            // (payload) depth is the common single-result case.
-            if (instr.op == .br_if or instr.op == .br_table) {
-                const depth_bi: u32 = @intCast(instr.payload);
-                captureBlockMergeVregs(&block_stack, block_stack_len, depth_bi, sim_stack[0..sim_len]);
             }
             continue;
         }
