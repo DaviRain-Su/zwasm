@@ -620,12 +620,20 @@ entries:
       blocked-by (pinned Zig 0.16 stdlib): windows netConnect surfaces NTSTATUS
       0xC0000236 (CONNECTION_REFUSED) as error.Unexpected (unmapped in the Threaded
       AFD connect path) — a wasi:sockets guest sees error-code `unknown` instead of
-      `connection-refused` on windows. Test pins the degraded expectation
-      (p2_sockets "connect to a closed port", windows arm). Discharge: a stdlib
-      upgrade maps the status (re-run the test expecting ConnectionRefused), or a
-      local NTSTATUS-mapping wrapper if a consumer needs the precise code sooner.
+      `connection-refused` on windows. **ESCALATED 2026-06-19 @5e3ce37fa**: the
+      same windows Threaded-Io connect path does not merely mis-map — it can ABORT
+      the test runner (ntdll crash through `netConnectIpWindows` on a real loopback
+      connect to a just-closed ephemeral port), aborting the ENTIRE windows
+      unit-test binary and blocking the Win64 gate (recorded
+      `track_heisenbug win-p2-sockets-connect segv`; unrelated to the triggering
+      batch — p2_sockets untouched since 66976f436). FIX: the test now SKIPS the
+      real-network portion on windows (the degraded windows arm is gone — it never
+      reached `finishConnect` anyway); the pure errorToCode mapping still asserts on
+      every host. Discharge: a stdlib upgrade maps the status AND makes the windows
+      connect robust (re-run expecting ConnectionRefused, drop the windows skip), or
+      a local NTSTATUS-mapping + crash-safe connect wrapper if a consumer needs it.
     first_raised: "2026-06-13"
-    last_reviewed: "2026-06-13"
+    last_reviewed: "2026-06-19"
     refs: |-
       src/wasi/p2_sockets.zig (windows arm of the connect-refused test); D-319 probes
     front: B-hardening
