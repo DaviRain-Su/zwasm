@@ -11,10 +11,12 @@ now cross-component STRING composition, D-305 milestone), 100% spec (`test-spec`
 
 **D-305 cross-component linker — COMMON shapes + ARITY-COLLAPSE DONE** (ADR-0196; detail in the D-305 debt
 row + git): string/list params (@689040e6), string result (@184b5e05), `(string)->string` (@2b9b14ee), boundary
-error-trap (@30bd1881, SECURITY — marshalling failures TRAP). **(a) generic `defineFuncRaw` @4c8329428** replaced
-the per-arity BoundarySig/3/4 with ONE Value-slice path (`boundaryShapeOk` accepts ANY flat-scalar arity; arity5
-fixture proves the ceiling is gone; comp-assert 166/0). Only **(b) record/result AGGREGATE marshalling** remains
-(fixture-blocked on a nominal-type WAT wasm-tools-validate snag, NOT engine code).
+error-trap (@30bd1881, SECURITY — marshalling failures TRAP). **(a) `defineFuncRaw` @4c8329428** replaced the per-arity
+BoundarySig/3/4 with ONE Value-slice path (any flat-scalar arity). **(b) record AGGREGATE DONE**: (b1) flat-record
+PARAM pass-through @b3ee9fcf0 + (b2) flat-record RESULT via retptr @3b5a0a4f8 (lift producer returns a storage
+ptr, raw-copy blob to A's retptr). comp-assert 168/0. The nominal-type WAT snag was a spelling issue (spike-solved).
+Remaining long-tail (consumer-gated, do NOT grind): mixed params+record-result, nested-pointer records, variant
+results.
 
 **ADR-0195 guest↔guest async (multi-task scheduler) — FUNCTIONALLY COMPLETE 2026-06-17** (the D-335 last
 functional gap; campaign closed-arc below). Cross-component async now works end-to-end: multi-task scheduler
@@ -59,13 +61,13 @@ Resumable anytime; NOT grinding further now — proceeding to the non-blocked qu
    each, re-survey debt for newly-drivable items before stopping:
    1. **D-467 DONE @0c0970b1** — simd invoke-boundary gap CLOSED: splat + multi-scalar→v128 + load/store-lane
       unskipped (skip-impl 271→1, only `directive-register` residue); test-spec-simd 25075/0; NO latent v128-ABI bug.
-   2. **D-305(a) DONE @4c8329428** — generic `defineFuncRaw` collapsed BoundarySig/3/4 → one Value-slice path;
-      per-arity churn structurally closed (arity5 fixture; comp-assert 166/0). Lesson `host-fn-two-value-types`.
-   3. **D-305(b) ← ACTIVE NEXT** — record/result AGGREGATE cross-component marshalling. NOT a hard block: walk
-      `extended_challenge` first — the blocker is a WAT-authoring snag (a nominal record must be EXPORTED from B +
-      IMPORTED in A; anonymous record in a func sig → wasm-tools "func not valid to be used as export"). SPIKE the
-      nominal-type fixture spelling (cf. the async-graph fixture's 2 non-obvious spellings) BEFORE declaring blocked;
-      the canon.store/load routing is already built+tested in feature/component/canon.zig.
+   2. **D-305(a) DONE @4c8329428** — generic `defineFuncRaw` collapsed BoundarySig/3/4 → one Value-slice path.
+   3. **D-305(b) DONE** — record param (b1 @b3ee9fcf0) + result-retptr (b2 @3b5a0a4f8); comp-assert 168/0. Lessons
+      `host-fn-two-value-types` + `component-record-retptr-asymmetry`.
+   **QUEUE DISCHARGED** — the explicit non-blocked queue (D-467 → D-305 a/b) is now COMPLETE. **NEXT CYCLE = Step
+   0.5 debt RE-SURVEY** (the 逐次 mandate: re-survey for newly-drivable items before stopping). If the sweep finds
+   nothing drivable, remaining work is genuinely gated (D-305 long-tail consumer-gated; D-330 bucket-2; D-464 async;
+   the 21 blocked-by upstream/proposal/corpus) → a legit bucket-3 with re-arm, NOT a surrender. Do the sweep FIRST.
    PARKED (do NOT drive): **D-330** c_sha256 `\n` PROVABLY-BLOCKED (bucket-2; 1-byte cosmetic, constraint conflict);
    the 21 `blocked-by` (upstream Zig D-010/148/312/323 · proposal D-300/336 · phase/time-gate · consumer/corpus); D-464 async.
 2. **Audit DONE 2026-06-18 CLEAN** (0 block/0 soon; fuzz 0 crashes). **v128 spill story COMPLETE** (D-460/D-461/D-034

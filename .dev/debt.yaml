@@ -1019,6 +1019,23 @@ entries:
     layer: code
     status: partial
     description: |-
+      **(b) RECORD AGGREGATE DONE (2026-06-20)**: core record param+result both
+      marshal. **(b1) flat-record PARAM @b3ee9fcf0**: a record whose fields all
+      flatten to i32 (point{x,y:u32}) → N direct core words, pass-through (no
+      memory); `boundaryFlatShape` resolves each param's CanonType + sums
+      `canonFlatWidth`. **(b2) flat-record RESULT @3b5a0a4f8** (retptr): a record
+      result > MAX_FLAT_RESULTS=1 returns via a return area — the LIFT producer
+      (B) RETURNS a storage pointer (NOT retptr-in, unlike the string-result
+      path), the boundary raw-copies the blob to A's retptr (flat record = no
+      internal pointer → copy IS the lower). Fixtures record_param/record_result
+      (authored via the nominal-type spelling the spike found:
+      `(export $pe "point" (type $point))` + alias wiring — see lesson
+      [[host-fn-two-value-types]] sibling `component-record-retptr-asymmetry`).
+      comp-assert 168/0. REMAINING long-tail (consumer-gated, do NOT grind):
+      mixed flat-params + record-result, single-field records, records CONTAINING
+      string/list (nested-pointer aggregates need recursive canon.store/load),
+      variant/enum/flags results. The "rare shape" worry is now structurally
+      dissolved for the common record case.
       **(a) ARITY-COLLAPSE DONE @4c8329428 (2026-06-20)**: STOPPED the per-arity
       churn — replaced BoundarySig/3/4 + boundaryTrampoline/3/4 with ONE generic
       Value-slice path. New `linker.defineFuncRaw` (runtime-arity: arity travels
