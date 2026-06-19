@@ -154,6 +154,19 @@ pub fn on(comptime mod: []const u8) bool {
     return enabled(mod);
 }
 
+/// FNV-1a 64-bit hash — a tiny, dependency-free content checksum used by the
+/// `mem.cksum` diagnostic (D-331A) to fingerprint linear memory at host-call
+/// boundaries and diff an interp run against a JIT run (first divergent boundary
+/// localizes a miscompile). Pure; not gated (the caller gates on `on("mem.cksum")`).
+pub fn fnv1a(bytes: []const u8) u64 {
+    var h: u64 = 0xcbf29ce484222325;
+    for (bytes) |b| {
+        h ^= b;
+        h *%= 0x100000001b3;
+    }
+    return h;
+}
+
 /// Force-disable the cached whitelist. Test-only: lets a unit test
 /// re-evaluate `ZWASM_DEBUG` after mutating the process env.
 pub fn resetForTest() void {

@@ -49,6 +49,7 @@ const wasm_v3_plus = @intFromEnum(build_options.wasm_level) >=
     @intFromEnum(@TypeOf(build_options.wasm_level).v3_0);
 
 const dispatch = @import("../ir/dispatch_table.zig");
+const dbg = @import("../support/dbg.zig");
 const zir = @import("../ir/zir.zig");
 const runtime = @import("../runtime/runtime.zig");
 const memory_ops = @import("../instruction/wasm_1_0/memory.zig");
@@ -391,6 +392,9 @@ fn callOp(c: *InterpCtx, instr: *const ZirInstr) anyerror!void {
     // and fall through to ordinary ZirFunc dispatch.
     if (idx < rt.host_calls.len) {
         if (rt.host_calls[idx]) |hc| {
+            // D-331A: fingerprint linear memory at every host-call boundary so an
+            // interp trace can be diffed against the JIT's fd_write/poll_oneoff hooks.
+            dbg.print("mem.cksum", "interp {d} {x}", .{ idx, dbg.fnv1a(rt.memory) });
             hc.fn_ptr(rt, hc.ctx) catch |err| {
                 // Cross-module EH (10.E-eh-tail cycle 120): a cross-
                 // module call's thunk transfers an uncaught throw into
