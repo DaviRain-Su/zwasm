@@ -42,8 +42,10 @@ consolidate the duplicated spill helpers into a shared op_simd.zig pub set.
 - **Continuity-memo**: a read-only MEMORY-DIVERGENCE DIFF — `fnv1a(linear-mem + globals)` hashed at the shared
   WASI host-call boundary for BOTH engines (`wasi/jit_dispatch.zig:65/:352` + interp `interp/mvp.zig:392`),
   gated `ZWASM_DEBUG=mem.cksum`; run go_hello under `--engine interp` vs `jit`, diff the cksum traces → FIRST
-  divergent host-call window, then `jit.dump` those funcs. Phase-I plan subagent (ac6d07ac) running for exact
-  file:line + accessors (memOf(rt)/globals). NOT ADR-gated (read-only at existing sites).
+  divergent host-call window, then `jit.dump` those funcs. **Phase-I plan DONE → `private/notes/d331a-memdiff-plan.md`**
+  (accessors: JIT `memOf(rt)`+`rt.globals_base[0..globals_count]`; interp `rt.memory`+`rt.globals`; `fnv1a` helper
+  in `support/dbg.zig`; **CRITICAL gotcha: hash active 64-bit value-bits only, NOT struct padding — else false
+  divergence**; TDD first asserts interp-vs-interp determinism). NOT ADR-gated (read-only, ~25-35 LOC). NEXT: implement the hook.
 - **Exit-condition**: the `mem.cksum` interp-vs-jit diff localizes the first divergence on go_hello to a named
   host-call window (or the diff infra is committed + a follow-up debt row names the localized window).
 
