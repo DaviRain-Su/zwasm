@@ -1330,7 +1330,7 @@ pub fn compile(
             // §9.12-B / B91: SIMD int binary arith cohort migrated to ctx tuple.
             // §9.7 / 9.7-d: i64x2.mul synthesis (no native SSE4.1 form;
             // PMULUDQ + shift/add idiom uses XMM14/15 as scratch).
-            .@"i64x2.mul" => try op_simd_int_arith.emitI64x2Mul(allocator, &buf, alloc, &pushed_vregs, &next_vreg),
+            .@"i64x2.mul" => try op_simd_int_arith.emitI64x2Mul(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off),
             // §9.7 / 9.7-e: lane access foundation (i32x4 only — other
             // shapes follow in 9.7-f). Splat broadcasts a scalar i32
             // across 4 lanes; extract_lane pulls one lane back to

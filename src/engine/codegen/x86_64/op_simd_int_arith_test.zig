@@ -205,7 +205,7 @@ test "emitI64x2Mul: emits the 11-instruction PMULUDQ synthesis sequence" {
     try pushed.append(testing.allocator, 1);
     var next_vreg: u32 = 2;
 
-    try op_simd_int_arith.emitI64x2Mul(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_int_arith.emitI64x2Mul(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     // Build expected sequence verbatim from the encoders (use
     // the same constants as the handler so encoder churn is
@@ -246,7 +246,7 @@ test "emitI64x2Mul: dst aliases lhs — final MOVAPS elided" {
     try pushed.append(testing.allocator, 1);
     var next_vreg: u32 = 2;
 
-    try op_simd_int_arith.emitI64x2Mul(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_int_arith.emitI64x2Mul(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     // Same sequence minus the `MOVAPS dst, lhs` step (instructions
     // 1-8 unchanged; step 9 = dst_x == lhs_x = XMM8 → elided).
@@ -295,7 +295,7 @@ test "emitI64x2Mul: dst aliases rhs — stash rhs to XMM7 (D-071 part a)" {
     try pushed.append(testing.allocator, 1);
     var next_vreg: u32 = 2;
 
-    try op_simd_int_arith.emitI64x2Mul(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_int_arith.emitI64x2Mul(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);

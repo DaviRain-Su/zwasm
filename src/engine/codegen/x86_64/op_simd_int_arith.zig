@@ -128,7 +128,7 @@ pub fn emitI32x4MulCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!vo
 
 pub fn emitI64x2MulCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!void {
     _ = ins;
-    return emitI64x2Mul(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg);
+    return emitI64x2Mul(ctx.allocator, ctx.buf, ctx.alloc, ctx.pushed_vregs, ctx.next_vreg, ctx.spill_base_off);
 }
 
 // §9.12-B / B92 (ADR-0075) — `(ctx, ins)` adapters for the SIMD
@@ -912,6 +912,7 @@ pub fn emitI64x2Mul(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
 ) Error!void {
     if (pushed_vregs.items.len < 2) return Error.AllocationMissing;
     const rhs_v = pushed_vregs.pop().?;
@@ -920,43 +921,83 @@ pub fn emitI64x2Mul(
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
-    const rhs_x = try gpr.resolveXmm(alloc, rhs_v);
-    const lhs_x = try gpr.resolveXmm(alloc, lhs_v);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
-
-    // SIMD scratch: reuse fp_spill_stage_xmms[0..1]. The spill-
-    // staging path is unused inside this handler (no nested
-    // xmmLoadSpilled), so XMM14 / XMM15 are free to clobber.
     const s1 = abi.fp_spill_stage_xmms[0]; // XMM14
     const s2 = abi.fp_spill_stage_xmms[1]; // XMM15
 
-    var rhs_for_op = rhs_x;
-    if (dst_x != lhs_x and dst_x == rhs_x) {
-        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(.xmm7, rhs_x).slice());
-        rhs_for_op = .xmm7;
+    // The PMULUDQ synthesis needs lhs+rhs each live across 3 reads + 2 scratch
+    // (s1/s2) — at the SSE baseline there is no free reg to also stage a spilled
+    // operand, and PMULUDQ has no memory form. So the all-in-register case keeps
+    // the proven recipe verbatim (byte-identical, unit-tested), and only the
+    // spill case (D-034 (g)) restructures with just-in-time reloads.
+    if (alloc.slot(result_v, .fpr) == .reg and alloc.slot(lhs_v, .fpr) == .reg and alloc.slot(rhs_v, .fpr) == .reg) {
+        const rhs_x = try gpr.resolveXmm(alloc, rhs_v);
+        const lhs_x = try gpr.resolveXmm(alloc, lhs_v);
+        const dst_x = try gpr.resolveXmm(alloc, result_v);
+
+        var rhs_for_op = rhs_x;
+        if (dst_x != lhs_x and dst_x == rhs_x) {
+            try buf.appendSlice(allocator, inst.encMovapsXmmXmm(.xmm7, rhs_x).slice());
+            rhs_for_op = .xmm7;
+        }
+
+        // 1-3: cross term a_hi * b_lo into s1.
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(s1, lhs_x).slice());
+        try buf.appendSlice(allocator, inst.encPsrlqImm(s1, 32).slice());
+        try buf.appendSlice(allocator, inst.encPmuludq(s1, rhs_for_op).slice());
+
+        // 4-6: cross term a_lo * b_hi into s2.
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(s2, rhs_for_op).slice());
+        try buf.appendSlice(allocator, inst.encPsrlqImm(s2, 32).slice());
+        try buf.appendSlice(allocator, inst.encPmuludq(s2, lhs_x).slice());
+
+        // 7-8: combine cross terms and shift into the high half.
+        try buf.appendSlice(allocator, inst.encPaddQ(s1, s2).slice());
+        try buf.appendSlice(allocator, inst.encPsllqImm(s1, 32).slice());
+
+        // 9-11: low product into dst, then add cross terms.
+        if (dst_x != lhs_x) {
+            try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, lhs_x).slice());
+        }
+        try buf.appendSlice(allocator, inst.encPmuludq(dst_x, rhs_for_op).slice());
+        try buf.appendSlice(allocator, inst.encPaddQ(dst_x, s1).slice());
+
+        try pushed_vregs.append(allocator, result_v);
+        return;
     }
 
-    // 1-3: cross term a_hi * b_lo into s1.
-    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(s1, lhs_x).slice());
-    try buf.appendSlice(allocator, inst.encPsrlqImm(s1, 32).slice());
-    try buf.appendSlice(allocator, inst.encPmuludq(s1, rhs_for_op).slice());
+    // Spill path: dst → home/XMM7; lhs/rhs reloaded just-in-time into s1/s2/dst.
+    // dst==rhs home-alias stashes rhs → XMM7 before dst is overwritten by lhs
+    // (fires only when dst is a home reg → XMM7 free; a spilled result lands dst
+    // on XMM7, where rhs can never alias it).
+    const dst_x = try dstHomeOrXmm7(alloc, result_v);
+    const rhs_stashed = switch (alloc.slot(rhs_v, .fpr)) {
+        .reg => |id| (abi.fpSlotToReg(id) orelse return Error.SlotOverflow) == dst_x,
+        .spill => false,
+    };
+    if (rhs_stashed) try buf.appendSlice(allocator, inst.encMovapsXmmXmm(.xmm7, dst_x).slice());
 
-    // 4-6: cross term a_lo * b_hi into s2.
-    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(s2, rhs_for_op).slice());
-    try buf.appendSlice(allocator, inst.encPsrlqImm(s2, 32).slice());
-    try buf.appendSlice(allocator, inst.encPmuludq(s2, lhs_x).slice());
-
-    // 7-8: combine cross terms and shift into the high half.
+    // s1 = a_hi * b_lo  (s2 holds rhs across the multiply).
+    try loadV128IntoLocal(allocator, buf, alloc, spill_base_off, s1, lhs_v); // s1 = lhs
+    try buf.appendSlice(allocator, inst.encPsrlqImm(s1, 32).slice()); // s1 = a_hi
+    if (rhs_stashed) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(s2, .xmm7).slice());
+    } else try loadV128IntoLocal(allocator, buf, alloc, spill_base_off, s2, rhs_v); // s2 = rhs
+    try buf.appendSlice(allocator, inst.encPmuludq(s1, s2).slice()); // s1 = a_hi * b_lo
+    // s2 = b_hi * a_lo  (dst doubles as the a_lo holder, left holding lhs).
+    try buf.appendSlice(allocator, inst.encPsrlqImm(s2, 32).slice()); // s2 = b_hi
+    try loadV128IntoLocal(allocator, buf, alloc, spill_base_off, dst_x, lhs_v); // dst = lhs
+    try buf.appendSlice(allocator, inst.encPmuludq(s2, dst_x).slice()); // s2 = b_hi * a_lo
+    // combine cross terms into the high half.
     try buf.appendSlice(allocator, inst.encPaddQ(s1, s2).slice());
     try buf.appendSlice(allocator, inst.encPsllqImm(s1, 32).slice());
-
-    // 9-11: low product into dst, then add cross terms.
-    if (dst_x != lhs_x) {
-        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(dst_x, lhs_x).slice());
-    }
-    try buf.appendSlice(allocator, inst.encPmuludq(dst_x, rhs_for_op).slice());
+    // low product into dst (still = lhs = a_lo), then add cross terms.
+    if (rhs_stashed) {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(s2, .xmm7).slice());
+    } else try loadV128IntoLocal(allocator, buf, alloc, spill_base_off, s2, rhs_v); // s2 = rhs (reload)
+    try buf.appendSlice(allocator, inst.encPmuludq(dst_x, s2).slice()); // dst = a_lo * b_lo
     try buf.appendSlice(allocator, inst.encPaddQ(dst_x, s1).slice());
 
+    try storeXmm7IfSpilledLocal(allocator, buf, alloc, spill_base_off, result_v);
     try pushed_vregs.append(allocator, result_v);
 }
 
