@@ -318,8 +318,9 @@ pub fn runCwasmWasi(
 /// `invoke_name` overrides the entry-point selection (default
 /// `_start` → `main` → first func export). When non-null, the
 /// runner locates the func export with that exact name and calls
-/// it with zero args. Phase 11 bench prerequisite per §9.12-G;
-/// arg marshalling + result printing remain Phase 11 scope.
+/// it with **zero args** — this is the zero-arg wrapper; typed
+/// `--invoke NAME=a,b,...` arg marshalling + result printing live
+/// in `cli/invoke_args.zig` (D-273).
 pub fn runWasmCaptured(
     alloc: std.mem.Allocator,
     io: std.Io,

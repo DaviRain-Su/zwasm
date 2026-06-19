@@ -1639,9 +1639,9 @@ pub export fn wasm_instance_exports(i: ?*const Instance, out: ?*ExternVec) callc
 /// `wasm_func_call(func, args, results)` — invoke `func` with
 /// `args.size` input values, write `results.size` output values
 /// into `results.data`, return null on success or a non-null
-/// `wasm_trap_t*` on Trap. The Trap surface is stubbed in this
-/// chunk (single empty struct); §9.3 / 3.7 fills its message body
-/// + lifetime helpers (`wasm_trap_delete` / `wasm_trap_message`).
+/// owned `wasm_trap_t*` on Trap (a kinded trap with a real message
+/// body; freed via `wasm_trap_delete`, read via `wasm_trap_message`
+/// — see `api/trap_surface.zig`).
 ///
 /// Args / result vec sizes must match `func.sig.params.len` /
 /// `func.sig.results.len` exactly — mismatch raises a Trap rather

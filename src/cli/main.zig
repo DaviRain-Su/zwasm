@@ -20,12 +20,12 @@
 //!                             WASI (D-244); jit additionally executes SIMD
 //!                             (the interp does not). `--engine=jit` accepted.
 //!     <path.wasm>             instead of the default `_start` / `main`
-//!                             selection. Phase 11 bench prerequisite
-//!                             per §9.12-G; arg marshalling + result
-//!                             printing remain Phase 11 scope.
+//!                             selection. Typed `--invoke NAME=a,b,...`
+//!                             arg marshalling + result printing are
+//!                             handled in `cli/invoke_args.zig` (D-273).
 //!   compile <path.wasm>       Produce a `.cwasm` v0.1 artifact (per
-//!     -o <out.cwasm>          ADR-0039). Generator pipeline only —
-//!                             Phase 12's loader executes the artifact.
+//!     -o <out.cwasm>          ADR-0039). Generator side; `run
+//!                             <file.cwasm>` loads + executes it.
 //!
 //! The surface is `run` + `compile` only (ADR-0159, §16.4): the
 //! wasmtime/wazero-aligned あるべき論 shape for a runtime. Validation

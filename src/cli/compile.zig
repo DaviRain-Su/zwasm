@@ -7,8 +7,9 @@
 //! `engine.codegen.aot.produce.produceFromCompiledWasm`,
 //! and writes the artifact to disk.
 //!
-//! Generator-only: Phase 12's loader executes the `.cwasm`.
-//! Bench-delta capture defers to Phase 12 per ADR-0039.
+//! Generator side of the `.cwasm` pipeline; the loader/runner
+//! (`engine.codegen.aot.run` via `cli/run.zig runCwasmWasi`) executes
+//! the artifact today (`zwasm run <file.cwasm>`).
 //!
 //! Zone 3 (`src/cli/`).
 
