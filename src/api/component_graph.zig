@@ -811,9 +811,11 @@ fn installBoundaryTrampoline(
     };
     try graph.boundaries.append(graph.alloc, bctx);
 
-    // D-305: a 3-flat-scalar param func binds the 3-word trampoline; 1-2 param
-    // shapes (incl. string/list marshalling) keep the 2-word `BoundarySig`.
-    if (ft.params.len == 3) {
+    // D-305: a 3/4-flat-scalar param func binds the matching wide trampoline;
+    // 1-2 param shapes (incl. string/list marshalling) keep the 2-word `BoundarySig`.
+    if (ft.params.len == 4) {
+        try lk.defineFuncCtx(ns, core_export_name, @ptrCast(bctx), BoundarySig4, boundaryTrampoline4);
+    } else if (ft.params.len == 3) {
         try lk.defineFuncCtx(ns, core_export_name, @ptrCast(bctx), BoundarySig3, boundaryTrampoline3);
     } else {
         try lk.defineFuncCtx(ns, core_export_name, @ptrCast(bctx), BoundarySig, boundaryTrampoline);
@@ -1347,6 +1349,11 @@ fn boundaryShapeOk(ft: ctypes.FuncType, param0_is_list: bool) bool {
     if (ft.params.len == 3) {
         return isFlat4Scalar(ft.params[0].ty) and isFlat4Scalar(ft.params[1].ty) and isFlat4Scalar(ft.params[2].ty);
     }
+    // D-305: 4 flat-4 scalars → the 4-word `BoundarySig4` pass-through trampoline.
+    if (ft.params.len == 4) {
+        return isFlat4Scalar(ft.params[0].ty) and isFlat4Scalar(ft.params[1].ty) and
+            isFlat4Scalar(ft.params[2].ty) and isFlat4Scalar(ft.params[3].ty);
+    }
     return false;
 }
 
@@ -1458,6 +1465,19 @@ const BoundarySig3 = fn (*Caller, u32, u32, u32) BoundaryError!u32;
 fn boundaryTrampoline3(caller: *Caller, w0: u32, w1: u32, w2: u32) BoundaryError!u32 {
     const bctx = caller.data(BoundaryCtx);
     var args = [_]Value{ .{ .i32 = @bitCast(w0) }, .{ .i32 = @bitCast(w1) }, .{ .i32 = @bitCast(w2) } };
+    var res = [_]Value{.{ .i32 = 0 }};
+    try bctx.core_inst.invoke(bctx.core_func_name, &args, &res);
+    return @bitCast(res[0].i32);
+}
+
+/// D-305: the 4-flat-scalar boundary signature `(w0,w1,w2,w3) -> i32` — four flat
+/// words pass straight through to the callee (no memory marshalling), as
+/// `BoundarySig3` but one wider. `boundaryShapeOk` gates this to all-flat-scalar.
+const BoundarySig4 = fn (*Caller, u32, u32, u32, u32) BoundaryError!u32;
+
+fn boundaryTrampoline4(caller: *Caller, w0: u32, w1: u32, w2: u32, w3: u32) BoundaryError!u32 {
+    const bctx = caller.data(BoundaryCtx);
+    var args = [_]Value{ .{ .i32 = @bitCast(w0) }, .{ .i32 = @bitCast(w1) }, .{ .i32 = @bitCast(w2) }, .{ .i32 = @bitCast(w3) } };
     var res = [_]Value{.{ .i32 = 0 }};
     try bctx.core_inst.invoke(bctx.core_func_name, &args, &res);
     return @bitCast(res[0].i32);

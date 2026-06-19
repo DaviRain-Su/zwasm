@@ -1,0 +1,5 @@
+# D-305: a 4-param cross-component call. B exports sel4(a,b,c,d)->u32=d;
+# boundaryShapeOk rejected params.len==4 before BoundarySig4. A calls
+# sel4(7,8,9,10) -> 10. Provenance: test/component/arity4_graph.wat.
+graph test/component/arity4_graph.wasm
+assert_flat_i32 run -> 10
