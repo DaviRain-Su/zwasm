@@ -1280,6 +1280,7 @@ pub fn emitI8x16Popcnt(
     alloc: regalloc.Allocation,
     pushed_vregs: *std.ArrayList(u32),
     next_vreg: *u32,
+    spill_base_off: u32,
     simd_const_fixups: *std.ArrayList(@import("types.zig").SimdConstFixup),
     extra_consts: *std.ArrayList([16]u8),
     simd_consts_base: u32,
@@ -1290,25 +1291,36 @@ pub fn emitI8x16Popcnt(
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
-    const src_x = try gpr.resolveXmm(alloc, src_v);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    // D-034 (g): spill-aware. t1=XMM14, t2=XMM15 are internal scratch; dst→home/
+    // XMM7. src is read twice (into t1) — materialise it just-in-time: a home reg
+    // directly, an XMM7 stash when dst aliases src's home (the D-071 alias, fires
+    // only when dst is a home reg → XMM7 is free), or an RBP-disp reload from the
+    // slot each time when spilled.
+    const dst_x = try dstHomeOrXmm7(alloc, result_v);
     const t1 = abi.fp_spill_stage_xmms[0]; // XMM14
     const t2 = abi.fp_spill_stage_xmms[1]; // XMM15
+    const src_reg: ?inst.Xmm = switch (alloc.slot(src_v, .fpr)) {
+        .reg => |id| blk: {
+            const home = abi.fpSlotToReg(id) orelse return Error.SlotOverflow;
+            if (home == dst_x) {
+                try buf.appendSlice(allocator, inst.encMovapsXmmXmm(.xmm7, home).slice());
+                break :blk .xmm7;
+            }
+            break :blk home;
+        },
+        .spill => null,
+    };
 
     const lut_idx = try op_simd.lookupOrAppendExtraConst(allocator, extra_consts, simd_consts_base, POPCNT_LUT);
     const mask_idx = try op_simd.lookupOrAppendExtraConst(allocator, extra_consts, simd_consts_base, NIBBLE_MASK_BROADCAST);
-
-    var src_for_op = src_x;
-    if (dst_x == src_x) {
-        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(.xmm7, src_x).slice());
-        src_for_op = .xmm7;
-    }
 
     // 1: t2 = nibble_mask (0x0F per byte).
     try op_simd.emitConstLoad(allocator, buf, simd_const_fixups, t2, mask_idx);
     // 2-4: t1 = high_nibbles per byte. PSRLW shifts at word level
     // so the mask AND is required.
-    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(t1, src_for_op).slice());
+    if (src_reg) |r| {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(t1, r).slice());
+    } else try loadV128IntoLocal(allocator, buf, alloc, spill_base_off, t1, src_v);
     try buf.appendSlice(allocator, inst.encPsrlwImm(t1, 4).slice());
     try buf.appendSlice(allocator, inst.encPand(t1, t2).slice());
     // 5-6: dst = LUT, then PSHUFB(dst, t1) → dst = popcount(high).
@@ -1316,7 +1328,9 @@ pub fn emitI8x16Popcnt(
     try buf.appendSlice(allocator, inst.encPshufb(dst_x, t1).slice());
     // 7-8: t1 = low_nibbles per byte. PAND with mask suffices —
     // no shift needed.
-    try buf.appendSlice(allocator, inst.encMovapsXmmXmm(t1, src_for_op).slice());
+    if (src_reg) |r| {
+        try buf.appendSlice(allocator, inst.encMovapsXmmXmm(t1, r).slice());
+    } else try loadV128IntoLocal(allocator, buf, alloc, spill_base_off, t1, src_v);
     try buf.appendSlice(allocator, inst.encPand(t1, t2).slice());
     // 9-10: t2 = LUT (reload — t2 was the mask, no longer needed),
     // then PSHUFB(t2, t1) → t2 = popcount(low).
@@ -1325,6 +1339,7 @@ pub fn emitI8x16Popcnt(
     // 11: dst = popcount(high) + popcount(low) = popcount(byte).
     try buf.appendSlice(allocator, inst.encPaddB(dst_x, t2).slice());
 
+    try storeXmm7IfSpilledLocal(allocator, buf, alloc, spill_base_off, result_v);
     try pushed_vregs.append(allocator, result_v);
 }
 

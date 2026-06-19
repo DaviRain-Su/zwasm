@@ -149,7 +149,7 @@ test "emitI8x16Popcnt: dst aliases src — stash src to XMM7 before const loads 
     var extras: std.ArrayList([16]u8) = .empty;
     defer extras.deinit(testing.allocator);
 
-    try op_simd_int_arith.emitI8x16Popcnt(testing.allocator, &buf, alloc, &pushed, &next_vreg, &fixups, &extras, 0);
+    try op_simd_int_arith.emitI8x16Popcnt(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0, &fixups, &extras, 0);
 
     const stash = inst.encMovapsXmmXmm(.xmm7, .xmm8).slice();
     try testing.expect(buf.items.len >= stash.len);
@@ -177,7 +177,7 @@ test "emitI8x16Popcnt: dst != src — no alias stash emitted (control)" {
     var extras: std.ArrayList([16]u8) = .empty;
     defer extras.deinit(testing.allocator);
 
-    try op_simd_int_arith.emitI8x16Popcnt(testing.allocator, &buf, alloc, &pushed, &next_vreg, &fixups, &extras, 0);
+    try op_simd_int_arith.emitI8x16Popcnt(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0, &fixups, &extras, 0);
 
     // First instruction must be MOVUPS xmm15, [RIP+mask] — the
     // const-load placeholder for the nibble mask, NOT a stash.

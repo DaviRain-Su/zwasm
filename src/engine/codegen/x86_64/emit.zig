@@ -1590,7 +1590,7 @@ pub fn compile(
             // (1 op, 2 const-pool entries shared via extra_consts).
             .@"i8x16.popcnt" => {
                 const simd_consts_base: u32 = if (func.simd_consts) |sc| @intCast(sc.len) else 0;
-                try op_simd_int_arith.emitI8x16Popcnt(allocator, &buf, alloc, &pushed_vregs, &next_vreg, &simd_const_fixups, &extra_consts, simd_consts_base);
+                try op_simd_int_arith.emitI8x16Popcnt(allocator, &buf, alloc, &pushed_vregs, &next_vreg, spill_base_off, &simd_const_fixups, &extra_consts, simd_consts_base);
             },
             // §9.7/9.7-ao — f64x2.convert_low_i32x4_u via IEEE-754
             // mantissa-overlay trick (5 instr + 2 const-pool entries).
