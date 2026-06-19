@@ -60,20 +60,21 @@ consolidate the duplicated spill helpers into a shared op_simd.zig pub set.
    **D-323 windows sockets** @3d8314df (the stdlib's windows real-TCP-connect crashed + aborted the Win64 unit binary;
    skipped on windows). **Step-0.7 NOTE**: `failed command: test…--listen=-` is COSMETIC (exits 0) — lesson
    `2026-06-19-zig-build-test-listen-failed-command-is-cosmetic`; trust `[run_remote_*] OK/FAIL` + `N passed, 0
-   failed`, not that line. NEXT FRONT (pick any): (1) **D-305 follow-ons** — STOP per-arity churn at 4; for 5..7 +
-   record/aggregate params do the GENERIC refactor: a linker `defineFuncRaw` (Value-slice host fn) collapses all
-   arities + enables aggregate marshalling (canon.store/load, already built) in ONE path (record fixtures need
-   NOMINAL types: B exports type + A imports it; flat record = pass-through, but a wasm-tools validate snag
-   remains). (2) **D-331(A) go-runtime poll_oneoff miscompile** — build the **memory-divergence diff** FIRST
-   (~120-200 LOC, NOT ADR-gated: hash mem+globals at the shared host-call boundary jit_dispatch.zig:352/:65 +
-   interp mvp.zig:392, diff JIT vs interp; approach in D-331 (A)); the per-func interp-fallback knob is ADR-gated
-   + ~600-1000 LOC, defer.
-   **D-330 c_sha256 `\n` is PROVABLY-BLOCKED (bucket-2, survey-confirmed)**: genuine constraint conflict
-   (block-result liveness extension fixes c_sha256 but regresses br_table/labels), cosmetic (1 byte, values+interp
-   correct), row says do-NOT-re-run the blanket fix — do not drive. D-464 broader async stays consumer-gated.
-2. **Audit DONE 2026-06-18 (CLEAN)** — `audit_scaffolding` 0 block/0 soon (J.3 chronic debt); fuzz 0 crashes.
-3. **v128 spill story COMPLETE both arches** — D-460 v128-GC + D-461 v128-DST-spill + D-034 scalar-operand all
-   CLOSED (`note`; SHAs in their rows). D-464(2) broader async stays consumer-gated.
+   failed`, not that line.
+   **NON-BLOCKED QUEUE (逐次, user 2026-06-19)** — work IN ORDER; each is drivable now (no external block); after
+   each, re-survey debt for newly-drivable items before stopping:
+   1. **D-331(A)** = the ACTIVE BUNDLE above (memdiff diagnostic → localize → fix the go-runtime poll_oneoff miscompile).
+   2. **D-467 (now)** — UNSKIP the 271 simd `skip-impl` (NOT a harness excuse — exercises the v128 call-boundary
+      ABI, may expose latent bugs, user). Extend `entry.zig` v128 arg/result marshal + simd-runner invoke value
+      parse for load/store-lane (v128-param + i32 addr → v128) + f32→v128 splat; flip manifests skip-impl→live;
+      run interp+jit. directive-register residue documented if a genuine wast-directive limit.
+   3. **D-305** — STOP per-arity churn at 4; do the GENERIC `defineFuncRaw` (Value-slice host fn) refactor →
+      collapses 5..7 arities + record/result aggregate marshalling (canon.store/load, built) in ONE path
+      (record fixtures need NOMINAL types; a wasm-tools validate snag remains).
+   PARKED (do NOT drive): **D-330** c_sha256 `\n` PROVABLY-BLOCKED (bucket-2; 1-byte cosmetic, constraint conflict);
+   the 21 `blocked-by` (upstream Zig D-010/148/312/323 · proposal D-300/336 · phase/time-gate · consumer/corpus); D-464 async.
+2. **Audit DONE 2026-06-18 CLEAN** (0 block/0 soon; fuzz 0 crashes). **v128 spill story COMPLETE** (D-460/D-461/D-034
+   all `note`).
 
 ## Recently closed arcs (detail in ADRs/git/debt — one-liners)
 
