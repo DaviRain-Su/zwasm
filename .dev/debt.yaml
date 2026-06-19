@@ -1339,6 +1339,25 @@ entries:
     layer: "code"
     status: "partial"
     description: |-
+      **(A) FINAL-RE-PARKED 2026-06-20 after 4 investigations — well-characterized; further progress needs
+      INFRASTRUCTURE, not a surgical step.** 4th (dataflow) investigation removed a THIRD theory and re-localized
+      decisively: at the divergence boundary LINEAR MEMORY IS PROVABLY IDENTICAL between engines (argv-slice headers
+      byte-identical; `args_sizes_get` writes argc=1/bufsz=39 in both) — yet JIT's `goargs` skips the `args_get`
+      call. So the divergent branch condition lives in a **Wasm-local / REGISTER, not guest memory** → kills the
+      memory-load-width theory too. **CURRENT ROOT-CAUSE CLASS (high confidence)**: a miscompiled branch-condition
+      VREG (or its spill/reload) inside `runtime.goargs`(835)'s `br_table` state machine (local-0 = state, dispatched
+      by the pc=19 br_table). Interp branch-trace captured as the diff target:
+      `IF pc=26 c=0; BR_IF pc=79 d=14 c=0; IF pc=107 c=1 TAKEN; BR_TABLE idx=4→3; idx=6→5; IF pc=172 c=1 TAKEN;
+      BR_TABLE idx=17→10` → then args_sizes(594)→args_get(593). JIT lowers these via `op_control.zig:branchOnReg`
+      CBZ/CBNZ on a `gprLoadSpilled` vreg (op_control.zig:324). **GENUINE WALL**: pinning WHICH arm the JIT mis-takes
+      needs a JIT-side per-branch runtime tracer — none exists; wiring one = an invasive vreg-preserving trace thunk
+      through the JIT ABI (infrastructure project, NOT surgical). **TWO RESUMABLE PATHS** (when prioritized w/ fresh
+      budget): (1) build that JIT per-branch condition-value tracer (gate func 835), diff vs the interp trace above →
+      first divergent arm → walk its vreg producer; (2) UNTRIED surgical bet — a state-machine-shaped minimal `.wat`
+      (br_table on a local + several br_if under register pressure) that reproduces the JIT-vs-interp branch
+      divergence (prior minimal wats were call-return-shaped = wrong premise). NICHE (fat-Go JIT-run only; everything
+      else green). 4 theories now removed (spill-hole / call-return / memory-load-width / cbnz-w21). Not grinding
+      further (ROI; ~1.8M tokens). REFUTED PRIOR LAYERS BELOW = audit trail; do NOT re-walk.
       **(A) RE-PARKED 2026-06-20 after 3 bounded investigations (corrected characterization; bundle pivoted,
       delta=0).** Net progress this session = TWO false leads REMOVED + a clean deterministic observable
       established. **Both prior "localizations" REFUTED**: (1) the spill-hole/func-233 theory (poison-bisect — probe

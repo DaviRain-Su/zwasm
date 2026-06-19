@@ -52,26 +52,13 @@ comp-assert 170/0; 3-host green. Lessons `host-fn-two-value-types`, `component-r
 **Step-0.7 NOTE**: `failed command: test…--listen=-` is COSMETIC (exits 0); trust `[run_remote_*] OK/FAIL` + `N
 passed, 0 failed`, not that line.
 
-**PARKED / gated (do NOT speculatively grind)**: D-305 long-tail (list<record>/variant/multi-param — niche, + needs
-`component_graph.zig` 1895/2000 file-split first); D-330 c_sha256 PROVABLY-BLOCKED (bucket-2); D-464 async; 21
-`blocked-by` (upstream/proposal/time-gate/corpus).
-
-## Active bundle
-
-- **Bundle-ID**: D-331A-dataflow (FINAL surgical attempt — crack or conclude genuinely-hard)
-- **Cycles-remaining**: 1 (then fix, or final re-park as deep-hard + clean bucket-3)
-- **Continuity-memo**: D-331A re-opened per the drive-hard/parked directive. Bug = a DETERMINISTIC JIT wrong-branch
-  in `runtime.goargs` (835) during Go schedinit; the branch CONDITION value is wrong but it is NOT a call-return
-  (3 zero-injection probes refuted that) — so per lesson `elusive-jit-miscompile-techniques` the branch localizes
-  the SYMPTOM, not the cause. NEXT (the one fresh direction left): instrument to capture the EXACT value goargs's
-  divergent branch tests, then walk its PRODUCER dataflow back (which load/arith/local computed it) and find where
-  JIT vs interp first diverge in computing THAT value. Observable: host-call stream diverges at #5 (interp
-  `args_sizes_get→args_get`, JIT `→clock_time_get`). REPRO: `ZWASM_DEBUG=mem.cksum timeout 25 ./zig-out/bin/zwasm
-  run --engine {interp,jit} test/realworld/wasm/go_hello_wasi.wasm 2>&1 | grep -oE 'jit [a-z_]+'`. Use `dbg.on`
-  runtime gate (NOT build_options). NICHE (fat-Go JIT-run only) but a real codegen-correctness bug. Full audit
-  trail: D-331 row.
-- **Exit-condition**: the miscompiled producer op (load width/offset / arith / local-get) located → localized fix;
-  OR a 4th refutation → final re-park as genuinely-deep-hard, and the loop is then a clean bucket-3.
+**PARKED / gated (do NOT speculatively grind)**: **D-331A FINAL-RE-PARKED 2026-06-20** — 4 investigations removed
+4 false theories (spill-hole / call-return / memory-load-width / cbnz-w21). Now well-characterized: a miscompiled
+branch-condition VREG inside `runtime.goargs`(835)'s br_table state machine (linear memory PROVABLY identical at the
+divergence → it's a register, not memory). Further progress needs INFRASTRUCTURE (a JIT per-branch tracer) or an
+untried state-machine-shaped minimal-wat bet — both in the D-331 row; not surgical. NICHE (fat-Go JIT-run only).
+· D-305 long-tail (list<record>/variant/multi-param — niche, + needs `component_graph.zig` 1895/2000 file-split
+first); D-330 c_sha256 PROVABLY-BLOCKED (bucket-2); D-464 async; 21 `blocked-by` (upstream/proposal/time-gate/corpus).
 
 ## Closed arcs (detail in ADRs/git/debt)
 
