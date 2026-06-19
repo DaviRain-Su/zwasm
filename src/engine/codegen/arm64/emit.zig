@@ -584,11 +584,14 @@ pub fn compile(
         const loc_off_u: u32 = local_base_off + layout.offsets[loc_idx];
         const ty = func.localValType(loc_idx);
         if (ty == .v128) {
-            if (loc_off_u + 8 > 32760) return Error.UnsupportedOp;
-            const lo_off: u15 = @intCast(loc_off_u);
-            const hi_off: u15 = @intCast(loc_off_u + 8);
-            try gpr.writeU32(allocator, &buf, inst.encStrImm(31, 31, lo_off));
-            try gpr.writeU32(allocator, &buf, inst.encStrImm(31, 31, hi_off));
+            // D-289/D-331(B): v128 slot zero-init = two STR XZR (8B each). Both
+            // large-offset-safe via X16 — `frameStrGpr` emits the identical
+            // `encStrImm(31,31,off)` for off<=32760 and routes through the X16
+            // scratch base past the imm cap, so a frame with enough v128 locals
+            // (offset >32760) no longer returns UnsupportedOp. X16 is dead during
+            // prologue zero-init (same scratch the scalar branch below uses).
+            try gpr.frameStrGpr(allocator, &buf, 31, loc_off_u, false, 16);
+            try gpr.frameStrGpr(allocator, &buf, 31, loc_off_u + 8, false, 16);
         } else {
             // D-289: scalar slot zero-init (STR XZR), large-off-safe via X16.
             try gpr.frameStrGpr(allocator, &buf, 31, loc_off_u, false, 16);
