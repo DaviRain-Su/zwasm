@@ -145,6 +145,11 @@ const BoundaryCtx = struct {
     /// (a flat record has no internal pointer → no lift/lower). 0 = not a
     /// record-result boundary.
     result_blob_size: u32 = 0,
+    /// D-305(b3): the single param is a record CONTAINING a string/list — it
+    /// crosses via a canon liftFlat (from the importer's memory) → lowerFlat (into
+    /// the callee's memory) round-trip instead of by-words pass-through. Requires
+    /// `importer` set (the lift reads A's memory). false = no pointer-bearing param.
+    param_record_marshal: bool = false,
     /// Set when the imported func is async-lifted (ADR-0195 c-2b): the shared
     /// graph scheduler state the async trampoline enqueues the callee subtask
     /// into. null for a synchronous boundary.
@@ -846,6 +851,10 @@ fn installBoundaryTrampoline(
         .core_inst = core_inst,
         .func_type = ft,
         .list_elem_size = list_elem_size,
+        // D-305(b3): a record-with-pointer param round-trips via liftFlat/lowerFlat,
+        // which lifts from the IMPORTER's (A's) memory — so it needs `importer`.
+        .importer = if (shape.record_marshal) importer else null,
+        .param_record_marshal = shape.record_marshal,
     };
     try graph.boundaries.append(graph.alloc, bctx);
 
@@ -1417,7 +1426,7 @@ const boundary_core_i32: [marshal.raw_max_words]zir.ValType = .{.i32} ** marshal
 
 /// The resolved boundary shape: whether the func flattens to the all-i32 core
 /// signature the generic trampoline marshals, and its flattened param word count.
-const BoundaryShape = struct { ok: bool, words: usize };
+const BoundaryShape = struct { ok: bool, words: usize, record_marshal: bool = false };
 
 /// Resolve the boundary's flattened all-i32 core shape + param word count.
 /// Accepts: a single `(string)` / `(list<primitive>)` param (2 ptr,len words,
@@ -1434,6 +1443,25 @@ fn boundaryFlatShape(alloc: Allocator, info: *const ctypes.TypeInfo, ft: ctypes.
     const result_ok = if (ft.result) |rt| isFlat4Scalar(rt) else false;
     if (!result_ok) return no;
     if (ft.params.len == 1 and (isString(ft.params[0].ty) or param0_is_list)) return .{ .ok = true, .words = 2 };
+    // D-305(b3): a single record param CONTAINING an internal pointer (string/list)
+    // can't pass through by-words — it crosses via a canon liftFlat/lowerFlat
+    // round-trip (the pointed-to bytes are copied A→B). Accept it with the canon-
+    // flattened word count; a FLAT record (no pointer) falls through to the cheap
+    // pass-through path below.
+    if (ft.params.len == 1) {
+        var tmp = std.heap.ArenaAllocator.init(alloc);
+        defer tmp.deinit();
+        if (canon.canonTypeFromDecoded(tmp.allocator(), info, ft.params[0].ty)) |ct| {
+            if (ct == .record and canonHasPointer(ct)) {
+                var words: std.ArrayList(canon.CoreType) = .empty;
+                canon.flattenType(tmp.allocator(), ct, &words) catch return no;
+                if (words.items.len == 0 or words.items.len > marshal.raw_max_words) return no;
+                return .{ .ok = true, .words = words.items.len, .record_marshal = true };
+            }
+        } else |_| {
+            // Type resolution failed → not a record; fall through to the flat path.
+        }
+    }
     if (ft.params.len == 0 or ft.params.len > marshal.raw_max_words) return no;
     var total: usize = 0;
     for (ft.params) |p| {
@@ -1476,6 +1504,26 @@ fn canonFlatWidth(t: canon.CanonType) usize {
             break :blk n;
         },
         else => 0,
+    };
+}
+
+/// D-305(b3): does a canonical type contain an internal pointer (string / list /
+/// resource handle) anywhere — directly or nested in a record? Such a value can
+/// NOT pass through by-words (the pointer is into the SOURCE memory); it must
+/// cross via a `liftFlat`/`lowerFlat` round-trip that copies the pointed-to bytes
+/// into the target memory. A flat record (`canonHasPointer == false`) keeps the
+/// cheap pass-through path. Variant pointer-payloads are not yet handled (defer).
+fn canonHasPointer(t: canon.CanonType) bool {
+    return switch (t) {
+        .prim => |p| p == .string,
+        .list, .own, .borrow, .stream, .future => true,
+        .record => |fields| {
+            for (fields) |f| {
+                if (canonHasPointer(f.ty)) return true;
+            }
+            return false;
+        },
+        else => false,
     };
 }
 
@@ -1538,6 +1586,29 @@ fn boundaryTrampolineRaw(caller: *Caller, args: []const RtValue, results: []RtVa
 /// the popped operands are not aliased.
 fn boundaryMarshal(caller: *Caller, bctx: *BoundaryCtx, args: []const RtValue) BoundaryError!u32 {
     const params = bctx.func_type.params;
+
+    // D-305(b3): a record-with-pointer param crosses via a canon round-trip — lift
+    // the value from A's flattened words (`liftFlat` reads A's memory for the
+    // string/list bytes), then lower it into B's memory (`lowerFlat` copies the
+    // bytes via B's realloc + emits B's pointers). The lowered words invoke B.
+    // `CoreValue` == the operand `RtValue`, so `args` is the flat input verbatim.
+    if (bctx.param_record_marshal) {
+        var rec_arena = std.heap.ArenaAllocator.init(caller.allocator());
+        defer rec_arena.deinit();
+        const ra = rec_arena.allocator();
+        const ct = canon.canonTypeFromDecoded(ra, &bctx.callee.info, params[0].ty) catch return error.OutOfBoundsLoad;
+        const importer = bctx.importer orelse return error.OutOfBoundsStore;
+        var idx: usize = 0;
+        const value = canon.liftFlat(importer.canonContext(), ra, ct, args, &idx) catch return error.OutOfBoundsLoad;
+        var out: std.ArrayList(canon.CoreValue) = .empty;
+        canon.lowerFlat(bctx.callee.canonContext(), ra, value, ct, &out) catch return error.OutOfBoundsStore;
+        const bargs = ra.alloc(Value, out.items.len) catch return error.OutOfMemory;
+        for (out.items, 0..) |cv, i| bargs[i] = .{ .i32 = cv.i32 };
+        var res = [_]Value{.{ .i32 = 0 }};
+        try bctx.core_inst.invoke(bctx.core_func_name, bargs, &res);
+        return @bitCast(res[0].i32);
+    }
+
     var arg_buf: [marshal.raw_max_words]Value = undefined;
     // Bridge the operand-stack words (RtValue) to the public `Value` invoke takes.
     // Every boundary word is a flat i32 (flat scalar or string/list ptr/len).
