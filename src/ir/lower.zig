@@ -992,17 +992,16 @@ pub const Lowerer = struct {
     /// Decode a memarg offset. Wasm 3.0 §5.4.6: a memory64 offset is a
     /// u64 (≤ 10-byte LEB; clang/lld pad these to fixed relocatable
     /// width). The body is already validated — the validator gatekeeps
-    /// the per-memory-type width + malformed-overlong rejection
-    /// (`skipMemargOffset`) — so decode at u64 here and range-check
-    /// against the u32 `payload` slot. A genuine > 4 GiB memory64
-    /// offset needs payload widening (D-209). D-209 root realworld
-    /// case: clang `--target=wasm64` emits a 9-byte offset LEB that
-    /// u32-width decoding rejected as Error.Overlong.
+    /// the per-memory-type width (`skipMemargOffset`: an i32 memory's
+    /// offset is decoded at u32 width, so an offset > 2^32 on an i32
+    /// memory is rejected upstream) — so a u64 offset that reaches here
+    /// belongs to a memory64. The `zir` payload slot is u64, so D-209:
+    /// keep the full u64 (the prior u32 cap was the artificial narrowing
+    /// that rejected a genuine > 4 GiB memory64 offset; the 64-bit
+    /// base+offset + carry-trap codegen already handles it on both arches).
     // SIBLING-PUB: lower_simd.zig emitMemargLane (per ADR-0089 extraction)
-    pub fn readMemargOffset(self: *Lowerer) Error!u32 {
-        const off64 = try leb128.readUleb128(u64, self.body, &self.pos);
-        if (off64 > std.math.maxInt(u32)) return Error.BadMemarg;
-        return @intCast(off64);
+    pub fn readMemargOffset(self: *Lowerer) Error!u64 {
+        return try leb128.readUleb128(u64, self.body, &self.pos);
     }
 
     /// memory.size / memory.grow: takes a single memidx byte (was
