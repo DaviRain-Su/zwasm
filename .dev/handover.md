@@ -54,11 +54,12 @@ consolidate the duplicated spill helpers into a shared op_simd.zig pub set.
    **D-331(B) go_regex SlotOverflow — CLOSED 2026-06-19 @adb7b99a** (arm64 large-frame spill-offset overflow >
    W-form imm12 cap 16380; siblings routed through frame{Ldr,Str}{Gpr,Fp}; go_regex diff-jit MATCHES wasmtime
    94 B; detail in D-331 row + lesson `2026-06-19-arm64-large-frame-spill-offset`).
-   **D-305 3-PARAM ARITY — DONE @db79e7df** (BoundarySig3 pass-through; arity3_graph; comp-assert 164/0).
+   **D-305 3+4-PARAM ARITY — DONE @db79e7df/@6e791d8c** (BoundarySig3/4 pass-through; arity3/4_graph;
+   comp-assert 165/0).
    **D-466 failed-instantiateGraph DOUBLE-FREE — FIXED @99a33f9f** (local errdefers outliving the append to
    graph-owned lists; dropped at module/3×bctx/fctx; regression test unsupported_boundary_graph). **D-323 windows
    sockets — FIXED @3d8314df** (the stdlib's windows real-TCP-connect crashed + aborted the Win64 unit binary;
-   skipped on windows). NEXT FRONT (pick any; all drivable now): (1) **D-305 follow-ons** — 4..7 flat-scalar
+   skipped on windows). NEXT FRONT (pick any; all drivable now): (1) **D-305 follow-ons** — 5..7 flat-scalar
    arities (same recipe as 3); then aggregate record/result params (NOMINAL-type fixtures: B exports type + A
    imports it; flat record = pass-through but a wasm-tools validate snag remains; non-flat → canon.store/load,
    already built). (2) **D-331(A) go-runtime poll_oneoff miscompile** — build the **memory-divergence diff** FIRST
