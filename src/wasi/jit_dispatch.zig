@@ -314,6 +314,7 @@ pub fn environ_get(rt: *JitRuntime, envv_ptrs: i32, envv_buf: i32) callconv(.c) 
 /// needs to surface program exit codes for differential
 /// comparison with wasmtime).
 pub fn proc_exit(rt: *JitRuntime, rval: i32) callconv(.c) void {
+    dbg.print("wasi.jit", "proc_exit rval={d}", .{rval});
     // D-244: record the requested exit code on the host (mirroring the interp
     // `procExit`) so `runWasmJit` can surface it; then raise trap_flag to
     // unwind the JIT body to its epilogue (the JIT's proc_exit mechanism).
@@ -357,6 +358,7 @@ pub fn clock_res_get(rt: *JitRuntime, clock_id: i32, resolution_ptr: i32) callco
 
 pub fn poll_oneoff(rt: *JitRuntime, in_ptr: i32, out_ptr: i32, nsubscriptions: i32, nevents_ptr: i32) callconv(.c) i32 {
     dbg.print("mem.cksum", "jit poll_oneoff {x}", .{dbg.fnv1a(memOf(rt))});
+    dbg.print("wasi.jit", "poll_oneoff nsubs={d}", .{nsubscriptions});
     const host = hostOf(rt) orelse return @intFromEnum(Errno.nosys);
     return @intCast(@intFromEnum(wasi_clocks.pollOneoff(host, memOf(rt), @bitCast(in_ptr), @bitCast(out_ptr), @bitCast(nsubscriptions), @bitCast(nevents_ptr))));
 }
@@ -366,6 +368,7 @@ pub fn poll_oneoff(rt: *JitRuntime, in_ptr: i32, out_ptr: i32, nsubscriptions: i
 /// `sched_yield()` — no host / mem / args; always success.
 pub fn sched_yield(rt: *JitRuntime) callconv(.c) i32 {
     _ = rt;
+    dbg.print("wasi.jit", "sched_yield", .{});
     return @intCast(@intFromEnum(wasi_proc.schedYield()));
 }
 
