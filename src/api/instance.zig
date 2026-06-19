@@ -597,12 +597,11 @@ fn buildBindings(
 
 /// `wasm_instance_new(store, module, imports, trap_out)` —
 /// allocate an Instance bound to the given Module and lower its
-/// code into the owned Runtime. The `imports` and `trap_out`
-/// parameters are full-shape per upstream wasm.h but stubbed
-/// here (`anyopaque` / unused) until §9.3 / 3.6 chunk b wires
-/// `wasm_func_call` and §9.3 / 3.7 wires `wasm_extern_vec_t` /
-/// `wasm_trap_t`. Returns null on any null required input,
-/// instantiation failure, or OOM.
+/// code into the owned Runtime. `imports` is the upstream
+/// `const wasm_extern_vec_t*` (recast below, indexed by the
+/// module's import count); `trap_out` surfaces a start-function
+/// trap per the wasm-c-api contract (D-275). Returns null on any
+/// null required input, instantiation failure, or OOM.
 pub export fn wasm_instance_new(
     s: ?*Store,
     m: ?*const Module,
