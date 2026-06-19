@@ -207,7 +207,7 @@ entries:
     front: B-hardening
   - id: "D-293"
     layer: "code"
-    status: "partial"
+    status: "note"
     description: |-
       note (2026-06-06; spun out of D-292 A3): the JIT `bounds_fixups` channel is a generic catch-all that
       multiplexes MANY trap kinds, not just oob_memory. D-292 A1–A3 demuxed the common 4 (unreachable / div /
@@ -298,7 +298,7 @@ entries:
       kinds (a subagent plan mis-classified them). Test: hand-assembled `_start` doing `table.get` (or
       call_indirect into a 0/under-sized table) with OOB idx → runVoidExportWasi trap_code==2==oob_table.
     first_raised: "2026-06-06"
-    last_reviewed: "2026-06-15"
+    last_reviewed: "2026-06-19"
     refs: |-
       D-292 (parent program, ADR-0164) + D-165 (trap-code infra); src/api/trap_surface.zig (jitTrapCode);
       src/engine/codegen/{arm64,x86_64}/{op_table,op_convert,op_call,op_tail_call,ops/wasm_3_0/*}.zig +
@@ -1824,6 +1824,11 @@ entries:
     status: "partial"
     front: D-wmt-misc
     description: |-
+      **2026-06-19 UNBLOCKED**: the body below noted "x86_64 replace_lane not yet spilled-dst aware [D-461/D-034
+      cohort]" as a soft blocker for fixtures — that cohort is now CLOSED (D-034 SIMD spill arc @411dd1e14, both
+      arches). REMAINING = ONLY the v128-aware array.copy element-size (jitGcArrayCopy trampoline: per-element byte
+      copy must use FieldInfo.size, 16 for v128, not the scalar stride). Self-contained, non-consumer-gated; NEXT.
+      ----
       partial (ADR-0192 wasmtime differential, 2026-06-16). v128 field inside a GC aggregate (struct/array).
       CORE DONE (`60c54db5`): `fieldSlotSize` gives v128 a 16-byte slot (offsets were already a running sum);
       struct.new/get/set copy `field.size` bytes (8 scalar/ref, 16 v128) into the tagless Value union; the
@@ -1870,7 +1875,7 @@ entries:
       Discharge: a struct.new/get + array.new_fixed/copy/get v128 round-trip via runI32Export on BOTH arches;
       array-copy-inline.6 returns 16 under the native runner; e2e edge fixture under test/edge_cases/p10/gc/.
     first_raised: "2026-06-16"
-    last_reviewed: "2026-06-18"
+    last_reviewed: "2026-06-19"
     refs: |-
       src/feature/gc/type_info.zig:167-175 (fieldSlotSize); src/feature/gc/type_info.zig (materialiseGcTypes offsets);
       src/instruction/wasm_3_0/{struct_ops,array_ops}.zig; src/runtime/instance/instantiate.zig (evalGlobalInitGc);
