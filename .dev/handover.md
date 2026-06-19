@@ -47,12 +47,16 @@ gate, repeat. Do NOT stop to ask "is this high-value." **Inventory DONE** (subag
 (only real skip-impl = simd `directive-register` = test-harness residue; #2/#3 validator-rejects already done, stale
 comments fixed @94f0b7122). **#9 DONE @97abd6887**: arm64 v128 LOCAL ZERO-INIT large-frame `UnsupportedOp` (>32760
 → frameStrGpr/X16; fixture setup_v128_zeroinit) — the 9 go_* already compiled (stale "fail"). **D-330 + D-331A
-root FOUND (the elusive class = ONE bug); fix arm64-correct but REVERTED (x86_64 regression).** See `## Active
-bundle` for the full root + the re-land plan. Reverted to keep main green; diff @1c59101ff; lesson
-`block-result-merge-vreg-survival`.
-**Sweep queue (after re-land)**: D-209 memory64 >4GiB offset (≤1 CHUNK — survey found the codegen ALREADY exists
-both arches; only an artificial cap at `lower.zig:1004` gates it; lift it for i64 memories + fixture) → D-336
-borrow-export (blocked sort=value) → D-456 host-stubs (test-harness). (#1 simd = test-harness.)
+CLOSED @45be79c7f (br_table-aware re-land) — the elusive JIT-value-miscompile class (~1.8M tokens / 6 prior
+investigations) was ONE bug**: a `block(result)` reached by a forward `br/br_if/br_table` captures its merge vregs,
+but liveness let their range die at the branch → regalloc parked the value in a callee-saved reg an intervening call
+clobbers → stale → wrong branch. Fix: mirror if/else `merge_vregs` survival (D-093 d-11) in SHARED `liveness.zig`.
+The first attempt (1c59101ff) regressed x86_64 labels.wast switch (used br_table's COUNT as a depth); re-land
+captures EVERY br_table target. Verified arm64 (c_sha256 107, go_hello prints, realworld-diff 56/56) + x86_64 via
+Rosetta (test-spec EXIT=0). D-330/D-331 discharged; lesson `block-result-merge-vreg-survival`.
+**Sweep queue (next)**: D-209 memory64 >4GiB offset (≤1 CHUNK — codegen ALREADY exists both arches; only an
+artificial cap at `lower.zig:1004` gates it; lift for i64 memories + fixture) → D-336 borrow-export (blocked
+sort=value) → D-456 host-stubs (test-harness). (#1 simd = test-harness.)
 
 **Phase 17 完成形 plateau** (validated — do NOT re-walk): async COMPLETE; v128 spill (D-034/D-460/D-461) CLOSED;
 surface audits clean 2026-06-18; fuzz 0-crash; realworld JIT compile 56/56. NOT-WORTH: D-294-R2 TrapKind.
@@ -67,22 +71,6 @@ passed, 0 failed`, not that line.
 
 **PARKED / gated (do NOT speculatively grind)**: D-305 long-tail (list<record>/variant/multi-param — niche, +
 `component_graph.zig` 1895/2000 file-split first); D-464 async; 21 `blocked-by` (upstream/proposal/time-gate/corpus).
-(D-331A's old "needs-infrastructure / NICHE" text is SUPERSEDED — root found, fix arm64-correct; see the bundle.)
-
-## Active bundle
-
-- **Bundle-ID**: D-330-D-331A-reland (block-merge-vreg liveness fix, br_table-aware, x86_64-verified)
-- **Cycles-remaining**: 1-2
-- **Continuity-memo**: ROOT FOUND + arm64 fix works (closes D-330 c_sha256 `\n` + D-331A go-runtime; diff
-  @1c59101ff, lesson `block-result-merge-vreg-survival`). It REGRESSED x86_64 `labels.wast switch` (got 25 exp 50) →
-  REVERTED. Cause: `liveness.zig captureBlockMergeVregs` is called with ONE `depth` at the br site, but `br_table`
-  branches to MANY target depths — so a `block(result)` reached only via a `br_table` arm never captures its merge
-  vregs, OR captures the wrong one. RE-LAND: in `compute`'s br_table handling, call `captureBlockMergeVregs` for
-  EACH target depth (every case + default). Verify on BOTH arches: arm64 `zig build test-spec` + **x86_64 via
-  Rosetta `zig build test-spec -Dtarget=x86_64-macos`** (the lens that catches this) + the labels switch must = 50;
-  c_sha256 → 107; go_hello prints; realworld-diff 56/56; full emit byte-tests + spec + edge green; then 3-host.
-- **Exit-condition**: c_sha256 107 AND labels.wast switch = 50 on BOTH arm64 AND x86_64 (Rosetta + ubuntu) AND full
-  net green → re-discharge D-330 + D-331.
 
 ## Closed arcs (detail in ADRs/git/debt)
 
