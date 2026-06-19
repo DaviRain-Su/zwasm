@@ -1,16 +1,14 @@
 # Block-result merge vregs must survive an intervening call (D-330 + D-331A)
 
-> **STATUS: LANDED @45be79c7f (br_table-aware, both arches verified).** The first
-> attempt (`1c59101ff`) regressed x86_64 `labels.wast switch` (`got 25`): for
-> `br_table` it used `instr.payload` — which is the CASE COUNT, not a depth — as a
-> single target, so it captured the wrong block + missed the real targets. FIX:
-> `br_table` encodes `payload=count`, `extra=start`, targets =
-> `branch_targets[start..start+count]` + default at `[start+count]`; capture for
-> EVERY target depth. Verified arm64 (c_sha256 107, go_hello, realworld-diff 56/56)
-> AND x86_64 via Rosetta (`zig build test-spec -Dtarget=x86_64-macos` EXIT=0,
-> labels switch=50). LESSON within the lesson: a shared regalloc-input change is
-> verified on x86_64 by **execution** (Rosetta + ubuntu), NOT cross-compile alone —
-> the first attempt's cross-compile was clean but x86_64 EXECUTION regressed.
+> **STATUS 2026-06-20: fix IDENTIFIED + arm64-correct, but REVERTED** — the
+> `liveness.zig` change below closes D-330/D-331A on arm64 (c_sha256 107,
+> go_hello prints) yet REGRESSES x86_64 `labels.wast switch` (`got 25, expected
+> 50`): the `captureBlockMergeVregs` call fires on a single `depth` but `br_table`
+> has MULTIPLE targets, so the multi-target br_table → block-result merge case is
+> mishandled (x86_64 regalloc surfaces it; arm64 happened to allocate OK). The
+> diff is preserved in commit `1c59101ff`. RE-LAND requires handling `br_table`
+> (capture for every target depth) + verifying on x86_64 (Rosetta `-Dtarget=
+> x86_64-macos` + ubuntu). The diagnosis + method below are CORRECT.
 
 
 **The bug** (one root, two famous symptoms): a `block (result T)` reached by a
