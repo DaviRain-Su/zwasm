@@ -56,7 +56,13 @@ Resumable anytime; NOT grinding further now — proceeding to the non-blocked qu
    failed`, not that line.
    **NON-BLOCKED QUEUE (逐次, user 2026-06-19)** — work IN ORDER; each is drivable now (no external block); after
    each, re-survey debt for newly-drivable items before stopping:
-   1. **D-467 (now) ← ACTIVE NEXT** — UNSKIP the 271 simd `skip-impl` (NOT a harness excuse — exercises the v128 call-boundary
+   1. **D-467 (now) ← ACTIVE** — IN PROGRESS: splat category DONE (i64/f32/f64→v128 @c5d9dc0f/@efb441ce, 75 skips
+      removed 271→196, all green — boundaries marshal correctly). **NEXT slice = load/store-lane (164 skips, the big
+      remainder)**: v128-param + i32 addr → v128 (load) / →() (store); reuse `entry.callV128_v128i32`(:2004) +
+      `callVoid_i32v128` — add SUPPORTED rows + runner arms, verify the lane-op export shape flattens exactly (memarg
+      + lane-imm). Recipe: entry helper (often reusable) + runner arm + SUPPORTED row in regen_spec_simd_assert.sh →
+      regen → flip skip-impl. (`.f32/.f64` Value fields store RAW BITS u32/u64 → @bitCast.) directive-register (1) = genuine residue.
+      ORIGINAL: UNSKIP the 271 simd `skip-impl` (NOT a harness excuse — exercises the v128 call-boundary
       ABI, may expose latent bugs, user). Extend `entry.zig` v128 arg/result marshal + simd-runner invoke value
       parse for load/store-lane (v128-param + i32 addr → v128) + f32→v128 splat; flip manifests skip-impl→live;
       run interp+jit. directive-register residue documented if a genuine wast-directive limit.
