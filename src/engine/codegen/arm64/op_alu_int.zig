@@ -562,8 +562,7 @@ fn captureWideResult(ctx: *EmitCtx, vreg: u32, src: Xn) Error!void {
         },
         .spill => |off| {
             const abs_off: u32 = ctx.spill_base_off + off;
-            if (abs_off > 32760) return Error.SlotOverflow;
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImm(src, 31, @intCast(abs_off)));
+            try gpr.frameStrGpr(ctx.allocator, ctx.buf, src, abs_off, false, abi.spill_stage_gprs[0]);
         },
     }
     try ctx.pushed_vregs.append(ctx.allocator, vreg);

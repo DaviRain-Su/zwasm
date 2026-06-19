@@ -1057,12 +1057,7 @@ pub fn emitAtomicRmw(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         },
         .spill => |off| {
             const abs_off: u32 = ctx.spill_base_off + off;
-            if (abs_off > 16380) return Error.SlotOverflow;
-            if (m.res64) {
-                try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImm(0, 31, @intCast(abs_off)));
-            } else {
-                try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(0, 31, @intCast(abs_off)));
-            }
+            try gpr.frameStrGpr(ctx.allocator, ctx.buf, 0, abs_off, !m.res64, abi.spill_stage_gprs[0]);
         },
     }
     try ctx.pushed_vregs.append(ctx.allocator, result);
@@ -1129,12 +1124,7 @@ pub fn emitAtomicCmpxchg(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         },
         .spill => |off| {
             const abs_off: u32 = ctx.spill_base_off + off;
-            if (abs_off > 16380) return Error.SlotOverflow;
-            if (m.res64) {
-                try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImm(0, 31, @intCast(abs_off)));
-            } else {
-                try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(0, 31, @intCast(abs_off)));
-            }
+            try gpr.frameStrGpr(ctx.allocator, ctx.buf, 0, abs_off, !m.res64, abi.spill_stage_gprs[0]);
         },
     }
     try ctx.pushed_vregs.append(ctx.allocator, result);
@@ -1153,8 +1143,7 @@ fn captureW0I32(ctx: *EmitCtx) Error!void {
         },
         .spill => |off| {
             const abs_off: u32 = ctx.spill_base_off + off;
-            if (abs_off > 16380) return Error.SlotOverflow;
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(0, 31, @intCast(abs_off)));
+            try gpr.frameStrGpr(ctx.allocator, ctx.buf, 0, abs_off, true, abi.spill_stage_gprs[0]);
         },
     }
     try ctx.pushed_vregs.append(ctx.allocator, result);

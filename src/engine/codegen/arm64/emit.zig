@@ -381,7 +381,10 @@ pub fn compile(
         // #(N&0xFFF)` sequence. Larger needs a MOVZ/MOVK chain
         // (post-MVP). Long Go binaries with deep spill regions
         // exceed the prior 4096 cap.
-        if (frame_bytes > 0xFFFFFF) return Error.SlotOverflow;
+        if (frame_bytes > 0xFFFFFF) {
+            dbg.print("codegen", "arm64/emit: SlotOverflow frame_bytes={d} func[{d}]\n", .{ frame_bytes, func.func_idx });
+            return Error.SlotOverflow;
+        }
         const fb_high: u12 = @intCast((frame_bytes >> 12) & 0xFFF);
         const fb_low: u12 = @intCast(frame_bytes & 0xFFF);
         if (fb_high != 0) try gpr.writeU32(allocator, &buf, inst.encSubImm12Lsl12(31, 31, fb_high));
@@ -944,7 +947,10 @@ pub fn compile(
             .@"ref.null" => {
                 const vreg = next_vreg;
                 next_vreg += 1;
-                if (vreg >= alloc.slots.len) return Error.SlotOverflow;
+                if (vreg >= alloc.slots.len) {
+                    dbg.print("codegen", "arm64/emit: ref.null SlotOverflow vreg={d} slots.len={d} func[{d}]\n", .{ vreg, alloc.slots.len, func.func_idx });
+                    return Error.SlotOverflow;
+                }
                 const xd = try gpr.gprDefSpilled(alloc, vreg, 0);
                 try gpr.writeU32(allocator, &buf, inst.encMovzImm16(xd, 0));
                 try gpr.gprStoreSpilled(allocator, &buf, alloc, ctx.spill_base_off, vreg, 0);
@@ -962,7 +968,10 @@ pub fn compile(
             .@"ref.func" => {
                 const vreg = next_vreg;
                 next_vreg += 1;
-                if (vreg >= alloc.slots.len) return Error.SlotOverflow;
+                if (vreg >= alloc.slots.len) {
+                    dbg.print("codegen", "arm64/emit: ref.func SlotOverflow vreg={d} slots.len={d} func[{d}]\n", .{ vreg, alloc.slots.len, func.func_idx });
+                    return Error.SlotOverflow;
+                }
                 const xresult = try gpr.gprDefSpilled(alloc, vreg, 0);
                 const byte_off: u64 = @as(u64, ins.payload) * jit_abi.func_entity_size;
                 // Load base pointer.
@@ -1473,12 +1482,11 @@ pub fn compile(
                     },
                     .spill => |off| {
                         const abs_off: u32 = spill_base_off + off;
-                        if (abs_off > 16380) return Error.SlotOverflow;
                         if (grow_is_mem64) {
                             try gpr.writeU32(allocator, &buf, inst.encSxtw(0, 0));
-                            try gpr.writeU32(allocator, &buf, inst.encStrImm(0, 31, @intCast(abs_off)));
+                            try gpr.frameStrGpr(allocator, &buf, 0, abs_off, false, abi.spill_stage_gprs[0]);
                         } else {
-                            try gpr.writeU32(allocator, &buf, inst.encStrImmW(0, 31, @intCast(abs_off)));
+                            try gpr.frameStrGpr(allocator, &buf, 0, abs_off, true, abi.spill_stage_gprs[0]);
                         }
                     },
                 }
@@ -1668,7 +1676,10 @@ pub fn compile(
                         while (ci < ct_arity) : (ci += 1) {
                             const rv = next_vreg;
                             next_vreg += 1;
-                            if (rv >= alloc.slots.len) return Error.SlotOverflow;
+                            if (rv >= alloc.slots.len) {
+                                dbg.print("codegen", "arm64/emit: catch-target .end SlotOverflow func[{d}] vreg={d} >= slots.len={d} ct_bidx={d} ct_arity={d} ct_entry_depth={d} labels.len={d}\n", .{ func.func_idx, rv, alloc.slots.len, ct_bidx, ct_arity, ct_entry_depth, labels.items.len });
+                                return Error.SlotOverflow;
+                            }
                             try pushed_vregs.append(allocator, rv);
                         }
                     }

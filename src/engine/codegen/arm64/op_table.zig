@@ -336,8 +336,7 @@ pub fn emitTableGrow(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         },
         .spill => |off| {
             const abs_off: u32 = ctx.spill_base_off + off;
-            if (abs_off > 16380) return Error.SlotOverflow;
-            try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(0, 31, @intCast(abs_off)));
+            try gpr.frameStrGpr(ctx.allocator, ctx.buf, 0, abs_off, true, abi.spill_stage_gprs[0]);
         },
     }
     try ctx.pushed_vregs.append(ctx.allocator, result);

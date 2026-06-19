@@ -984,7 +984,10 @@ pub fn compile(
                 while (ci < ct_arity) : (ci += 1) {
                     const rv = next_vreg;
                     next_vreg += 1;
-                    if (rv >= alloc.slots.len) return Error.SlotOverflow;
+                    if (rv >= alloc.slots.len) {
+                        dbg.print("codegen", "x86_64/emit: catch-target .end SlotOverflow func[{d}] vreg={d} >= slots.len={d} ct_bidx={d} ct_arity={d} ct_entry_depth={d} labels.len={d}\n", .{ func.func_idx, rv, alloc.slots.len, ct_bidx, ct_arity, ct_entry_depth, labels.items.len });
+                        return Error.SlotOverflow;
+                    }
                     try pushed_vregs.append(allocator, rv);
                 }
             }

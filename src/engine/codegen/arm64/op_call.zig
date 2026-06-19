@@ -107,21 +107,18 @@ fn homedCallerSavedSpillReload(ctx: *EmitCtx, dir: SpillDir) Error!void {
         const off_u: u32 = ctx.local_base_off + ctx.local_offsets[lidx];
         const ty = ctx.func.localValType(lidx);
         switch (ty) {
-            .i32 => {
-                if (off_u > 16380) return Error.SlotOverflow;
-                const w: u14 = @intCast(off_u);
-                switch (dir) {
-                    .spill => try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(home_reg, 31, w)),
-                    .reload => try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImmW(home_reg, 31, w)),
-                }
+            // D-331(B): large-frame-safe. The reload destination doubles as the
+            // address scratch (frameLdrGpr); the spill value occupies home_reg so
+            // its store materialises the address into spill_stage_gprs[0] (X14 —
+            // non-allocatable, free across the call). Small offsets stay
+            // byte-identical to the prior inline STR/LDR.
+            .i32 => switch (dir) {
+                .spill => try gpr.frameStrGpr(ctx.allocator, ctx.buf, home_reg, off_u, true, abi.spill_stage_gprs[0]),
+                .reload => try gpr.frameLdrGpr(ctx.allocator, ctx.buf, home_reg, off_u, true),
             },
-            .i64 => {
-                if (off_u > 32760) return Error.SlotOverflow;
-                const x: u15 = @intCast(off_u);
-                switch (dir) {
-                    .spill => try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImm(home_reg, 31, x)),
-                    .reload => try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(home_reg, 31, x)),
-                }
+            .i64 => switch (dir) {
+                .spill => try gpr.frameStrGpr(ctx.allocator, ctx.buf, home_reg, off_u, false, abi.spill_stage_gprs[0]),
+                .reload => try gpr.frameLdrGpr(ctx.allocator, ctx.buf, home_reg, off_u, false),
             },
             // local_homing.isHomeableType only homes i32/i64.
             .f32, .f64, .v128, .ref => unreachable,
@@ -770,54 +767,46 @@ fn captureCallResult(ctx: *EmitCtx, callee_sig: FuncType, memory_class: bool, bu
                 .i32 => switch (ctx.alloc.slot(result, .gpr)) {
                     .reg => |id| {
                         const wd = abi.slotToReg(id) orelse return Error.SlotOverflow;
-                        if (abs_off > 16380) return Error.SlotOverflow;
-                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImmW(wd, 31, @intCast(abs_off)));
+                        try gpr.frameLdrGpr(ctx.allocator, ctx.buf, wd, abs_off, true);
                     },
                     .spill => |off| {
                         const dst_off: u32 = ctx.spill_base_off + off;
-                        if (abs_off > 16380 or dst_off > 16380) return Error.SlotOverflow;
-                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImmW(14, 31, @intCast(abs_off)));
-                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(14, 31, @intCast(dst_off)));
+                        try gpr.frameLdrGpr(ctx.allocator, ctx.buf, abi.spill_stage_gprs[0], abs_off, true);
+                        try gpr.frameStrGpr(ctx.allocator, ctx.buf, abi.spill_stage_gprs[0], dst_off, true, abi.spill_stage_gprs[1]);
                     },
                 },
                 .i64, .ref => switch (ctx.alloc.slot(result, .gpr)) {
                     .reg => |id| {
                         const xd = abi.slotToReg(id) orelse return Error.SlotOverflow;
-                        if (abs_off > 32760) return Error.SlotOverflow;
-                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(xd, 31, @intCast(abs_off)));
+                        try gpr.frameLdrGpr(ctx.allocator, ctx.buf, xd, abs_off, false);
                     },
                     .spill => |off| {
                         const dst_off: u32 = ctx.spill_base_off + off;
-                        if (abs_off > 32760 or dst_off > 32760) return Error.SlotOverflow;
-                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(14, 31, @intCast(abs_off)));
-                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImm(14, 31, @intCast(dst_off)));
+                        try gpr.frameLdrGpr(ctx.allocator, ctx.buf, abi.spill_stage_gprs[0], abs_off, false);
+                        try gpr.frameStrGpr(ctx.allocator, ctx.buf, abi.spill_stage_gprs[0], dst_off, false, abi.spill_stage_gprs[1]);
                     },
                 },
                 .f32 => switch (ctx.alloc.slot(result, .fpr)) {
                     .reg => |id| {
                         const vd = abi.fpSlotToReg(id) orelse return Error.SlotOverflow;
-                        if (abs_off > 16380) return Error.SlotOverflow;
-                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrSImm(vd, 31, @intCast(abs_off)));
+                        try gpr.frameLdrFp(ctx.allocator, ctx.buf, vd, abs_off, .s, abi.spill_stage_gprs[0]);
                     },
                     .spill => |off| {
                         const dst_off: u32 = ctx.spill_base_off + off;
-                        if (abs_off > 16380 or dst_off > 16380) return Error.SlotOverflow;
-                        // Stage via V29 (fp_spill_stage_vregs[0]).
-                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrSImm(29, 31, @intCast(abs_off)));
-                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrSImm(29, 31, @intCast(dst_off)));
+                        // Stage via V29 (fp_spill_stage_vregs[0]); GPR address scratch = X14.
+                        try gpr.frameLdrFp(ctx.allocator, ctx.buf, abi.fp_spill_stage_vregs[0], abs_off, .s, abi.spill_stage_gprs[0]);
+                        try gpr.frameStrFp(ctx.allocator, ctx.buf, abi.fp_spill_stage_vregs[0], dst_off, .s, abi.spill_stage_gprs[0]);
                     },
                 },
                 .f64 => switch (ctx.alloc.slot(result, .fpr)) {
                     .reg => |id| {
                         const vd = abi.fpSlotToReg(id) orelse return Error.SlotOverflow;
-                        if (abs_off > 32760) return Error.SlotOverflow;
-                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrDImm(vd, 31, @intCast(abs_off)));
+                        try gpr.frameLdrFp(ctx.allocator, ctx.buf, vd, abs_off, .d, abi.spill_stage_gprs[0]);
                     },
                     .spill => |off| {
                         const dst_off: u32 = ctx.spill_base_off + off;
-                        if (abs_off > 32760 or dst_off > 32760) return Error.SlotOverflow;
-                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrDImm(29, 31, @intCast(abs_off)));
-                        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrDImm(29, 31, @intCast(dst_off)));
+                        try gpr.frameLdrFp(ctx.allocator, ctx.buf, abi.fp_spill_stage_vregs[0], abs_off, .d, abi.spill_stage_gprs[0]);
+                        try gpr.frameStrFp(ctx.allocator, ctx.buf, abi.fp_spill_stage_vregs[0], dst_off, .d, abi.spill_stage_gprs[0]);
                     },
                 },
                 .v128 => return Error.UnsupportedOp,
@@ -870,8 +859,7 @@ fn captureCallResult(ctx: *EmitCtx, callee_sig: FuncType, memory_class: bool, bu
                 },
                 .spill => |off| {
                     const abs_off: u32 = ctx.spill_base_off + off;
-                    if (abs_off > 16380) return Error.SlotOverflow;
-                    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(src_reg, 31, @intCast(abs_off)));
+                    try gpr.frameStrGpr(ctx.allocator, ctx.buf, src_reg, abs_off, true, abi.spill_stage_gprs[0]);
                 },
             },
             .i64, .ref => switch (ctx.alloc.slot(result, .gpr)) {
@@ -884,8 +872,7 @@ fn captureCallResult(ctx: *EmitCtx, callee_sig: FuncType, memory_class: bool, bu
                 },
                 .spill => |off| {
                     const abs_off: u32 = ctx.spill_base_off + off;
-                    if (abs_off > 32760 or (abs_off & 7) != 0) return Error.SlotOverflow;
-                    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImm(src_reg, 31, @intCast(abs_off)));
+                    try gpr.frameStrGpr(ctx.allocator, ctx.buf, src_reg, abs_off, false, abi.spill_stage_gprs[0]);
                 },
             },
             .f32 => switch (ctx.alloc.slot(result, .fpr)) {
@@ -898,8 +885,7 @@ fn captureCallResult(ctx: *EmitCtx, callee_sig: FuncType, memory_class: bool, bu
                 },
                 .spill => |off| {
                     const abs_off: u32 = ctx.spill_base_off + off;
-                    if (abs_off > 16380) return Error.SlotOverflow;
-                    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrSImm(src_reg, 31, @intCast(abs_off)));
+                    try gpr.frameStrFp(ctx.allocator, ctx.buf, src_reg, abs_off, .s, abi.spill_stage_gprs[0]);
                 },
             },
             .f64 => switch (ctx.alloc.slot(result, .fpr)) {
@@ -912,8 +898,7 @@ fn captureCallResult(ctx: *EmitCtx, callee_sig: FuncType, memory_class: bool, bu
                 },
                 .spill => |off| {
                     const abs_off: u32 = ctx.spill_base_off + off;
-                    if (abs_off > 32760 or (abs_off & 7) != 0) return Error.SlotOverflow;
-                    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrDImm(src_reg, 31, @intCast(abs_off)));
+                    try gpr.frameStrFp(ctx.allocator, ctx.buf, src_reg, abs_off, .d, abi.spill_stage_gprs[0]);
                 },
             },
             // v128 capture via MOV V_dst.16B, V_src.16B (alias of
@@ -929,8 +914,7 @@ fn captureCallResult(ctx: *EmitCtx, callee_sig: FuncType, memory_class: bool, bu
                 },
                 .spill => |off| {
                     const abs_off: u32 = ctx.spill_base_off + off;
-                    if (abs_off > 65520 or (abs_off & 0xF) != 0) return Error.SlotOverflow;
-                    try gpr.writeU32(ctx.allocator, ctx.buf, inst_neon.encStrQImm(src_reg, 31, @intCast(abs_off)));
+                    try gpr.frameStrFp(ctx.allocator, ctx.buf, src_reg, abs_off, .q, abi.spill_stage_gprs[0]);
                 },
             },
         }
