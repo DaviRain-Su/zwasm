@@ -9,11 +9,12 @@ Project at the **完成形 plateau** (all dims confirmed): clean (C/Zig/CLI audi
 now cross-component STRING composition, D-305 milestone), 100% spec (`test-spec` 25539/0), lightweight-yet-fast
 (v1-JIT parity, D-265 closed). Robustness: interp+JIT fuzz 0 crashes. Closed-arc detail lives in git/ADRs/lessons.
 
-**D-305 cross-component linker — COMMON shapes ALL DONE + 3-host/x86_64-verified** (ADR-0196; detail in the
-D-305 debt row + git): string/list params (@689040e6), string result (@184b5e05), `(string)->string` (@2b9b14ee),
-boundary error-trap (@30bd1881, SECURITY — marshalling failures now TRAP, not silent-wrong). component_model
-163/0; ubuntu OK @dfdcfdcf. Remaining rare shapes (record/result aggregates, >2-param arities) = consumer-gated
-debt, do NOT grind speculatively.
+**D-305 cross-component linker — COMMON shapes + ARITY-COLLAPSE DONE** (ADR-0196; detail in the D-305 debt
+row + git): string/list params (@689040e6), string result (@184b5e05), `(string)->string` (@2b9b14ee), boundary
+error-trap (@30bd1881, SECURITY — marshalling failures TRAP). **(a) generic `defineFuncRaw` @4c8329428** replaced
+the per-arity BoundarySig/3/4 with ONE Value-slice path (`boundaryShapeOk` accepts ANY flat-scalar arity; arity5
+fixture proves the ceiling is gone; comp-assert 166/0). Only **(b) record/result AGGREGATE marshalling** remains
+(fixture-blocked on a nominal-type WAT wasm-tools-validate snag, NOT engine code).
 
 **ADR-0195 guest↔guest async (multi-task scheduler) — FUNCTIONALLY COMPLETE 2026-06-17** (the D-335 last
 functional gap; campaign closed-arc below). Cross-component async now works end-to-end: multi-task scheduler
@@ -58,9 +59,13 @@ Resumable anytime; NOT grinding further now — proceeding to the non-blocked qu
    each, re-survey debt for newly-drivable items before stopping:
    1. **D-467 DONE @0c0970b1** — simd invoke-boundary gap CLOSED: splat + multi-scalar→v128 + load/store-lane
       unskipped (skip-impl 271→1, only `directive-register` residue); test-spec-simd 25075/0; NO latent v128-ABI bug.
-   2. **D-305 ← ACTIVE NEXT** — STOP per-arity churn at 4; do the GENERIC `defineFuncRaw` (Value-slice host fn) refactor →
-      collapses 5..7 arities + record/result aggregate marshalling (canon.store/load, built) in ONE path
-      (record fixtures need NOMINAL types; a wasm-tools validate snag remains).
+   2. **D-305(a) DONE @4c8329428** — generic `defineFuncRaw` collapsed BoundarySig/3/4 → one Value-slice path;
+      per-arity churn structurally closed (arity5 fixture; comp-assert 166/0). Lesson `host-fn-two-value-types`.
+   3. **D-305(b) ← ACTIVE NEXT** — record/result AGGREGATE cross-component marshalling. NOT a hard block: walk
+      `extended_challenge` first — the blocker is a WAT-authoring snag (a nominal record must be EXPORTED from B +
+      IMPORTED in A; anonymous record in a func sig → wasm-tools "func not valid to be used as export"). SPIKE the
+      nominal-type fixture spelling (cf. the async-graph fixture's 2 non-obvious spellings) BEFORE declaring blocked;
+      the canon.store/load routing is already built+tested in feature/component/canon.zig.
    PARKED (do NOT drive): **D-330** c_sha256 `\n` PROVABLY-BLOCKED (bucket-2; 1-byte cosmetic, constraint conflict);
    the 21 `blocked-by` (upstream Zig D-010/148/312/323 · proposal D-300/336 · phase/time-gate · consumer/corpus); D-464 async.
 2. **Audit DONE 2026-06-18 CLEAN** (0 block/0 soon; fuzz 0 crashes). **v128 spill story COMPLETE** (D-460/D-461/D-034

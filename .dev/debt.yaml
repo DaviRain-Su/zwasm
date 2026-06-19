@@ -1019,6 +1019,18 @@ entries:
     layer: code
     status: partial
     description: |-
+      **(a) ARITY-COLLAPSE DONE @4c8329428 (2026-06-20)**: STOPPED the per-arity
+      churn — replaced BoundarySig/3/4 + boundaryTrampoline/3/4 with ONE generic
+      Value-slice path. New `linker.defineFuncRaw` (runtime-arity: arity travels
+      in `host_func_marshal.RawHostFnCtx`, `rawThunk` pops n_params operands into
+      a []Value; bridges operand-stack `runtime.Value` ↔ public `zwasm.Value` —
+      two distinct unions) + single `boundaryTrampolineRaw`. `boundaryShapeOk`
+      now accepts ANY flat-scalar arity (bounded by `raw_max_words`=32), no
+      hand-coded ceiling. arity5_graph fixture proves it (comp-assert 166/0);
+      D-466 unsupported fixture repointed at a wide-u64 param. REMAINING = only
+      **(b) record/result AGGREGATE marshalling** (below): still fixture-blocked
+      on the nominal-type WAT wasm-tools-validate snag, NOT on engine code. The
+      arity-churn worry is now structurally closed; do NOT add per-arity Zig fns.
       **RARE-SHAPE PROGRESS 2026-06-19**: **3-PARAM ARITY DONE @db79e7df** — added
       BoundarySig3 + boundaryTrampoline3 (3 flat-4 scalars → 3 core i32 words,
       pass-through; boundaryShapeOk + install dispatch on params.len). Fixture
