@@ -29,34 +29,19 @@ cancelled cross-component cases + cancel-op/waitable wait-poll-drop graph builti
 C-API @b4d75506 (Windows export fix); interp+JIT fuzz 808 mods 0 crashes. ADR-0193 (D-462) + D-461 (ADR-0194)
 CLOSED (below). **windowsmini RESUMED**. Version `2.0.0-alpha.3`.
 
-## Active bundle
+**D-034 SIMD spill-completeness arc — CLOSED 2026-06-19 @411dd1e14 (bundle exit-condition met).** All scalar
+sub-categories (a–g) + the full 18-site x86_64 v128-operand (g) sub-arc are spill-aware on both arches; the only
+remaining bare-resolve sites are the structural emitV128Select val2 (3-V-reg-vs-2-stage) + emitI64x2Mul's
+byte-identical all-reg fast path. Detail + per-op SHAs in the D-034 debt row (now `note`) + git. Low-pri follow-up:
+consolidate the duplicated spill helpers into a shared op_simd.zig pub set.
 
-- **Bundle-ID**: D-034 SIMD spill-completeness cohort (scalar-operand sibling of D-461 + the v128-source arith gap)
-- **Cycles-remaining**: ~1 (4 of 18 x86_64 int-arith (g) sites remain). DONE through @b870f146a — 15 sites incl.
-  i8x16 shl/shr_u/shr_s + i64x2 shr_s @b870f146a (just-in-time reload). Templates: cmp/ne/extmul-low = 3-operand;
-  extmul-high/i64x2 = dst/XMM15 load-temp; abs/neg = XMM7-park; LoadExtend/StoreLane single-operand→stage0; shifts =
-  just-in-time reload (dst→home/XMM7, vec reloaded into dst each use). File-local helpers: resolveOrLoadV128 +
-  storeV128IfSpilledLocal (op_simd_int_cmp_lane.zig); dstHomeOrXmm7 + loadV128IntoLocal + storeXmm7IfSpilledLocal
-  (op_simd_int_arith.zig).
-- **Continuity-memo**: x86_64-only asymmetry. **REMAINING 4 sites (same both-stages-internal class)**: emitI8x16Swizzle
-  (PSHUFB idx-ctrl) + emitI8x16Shuffle (2-operand PSHUFB), emitI8x16Popcnt (reads src 2× → reload src into a stage
-  twice; dst→home/XMM7; XMM7 src-alias stash only when dst home), emitI64x2Mul (XMM14+XMM15+XMM7-rhs-stash). Apply the
-  just-in-time reload + the new file-local helpers (op_simd_int_arith.zig already has dstHomeOrXmm7/loadV128IntoLocal/
-  storeXmm7IfSpilledLocal; swizzle/shuffle are in op_simd_int_cmp_lane.zig → use its resolveOrLoadV128). Fixture =
-  live-stack 13-v128-pressure trick (OR/drop chain). **GOTCHA: verify values via wasmtime `--invoke f -W gc=y
-  -W function-references=y <f>.wasm` + double-check the SIMD opcode byte.** REJECT a global 3rd-stage-XMM pool cut.
-- **Exit-condition**: every a–g sub-category's operand forced to spill flows through its op on BOTH arches; zero
-  bare resolveGpr/resolveFp/resolveXmm SPILL-EXEMPT sites remain (except the structural 3-V-reg select/bitselect).
-
-## RESUME POINTER (2026-06-18) — for a fresh session
+## RESUME POINTER (2026-06-19) — for a fresh session
 
 0. **ADR-0195 guest↔guest async — CAMPAIGN COMPLETE** (D-335 closed; detail in git + ADR-0195; residuals D-463
    CLOSED / D-464 future-bucket). **D-461 v128-DST-spill arc COMPLETE both arches** (FP replace_lane @4acd24152).
-1. **Active bundle = D-034** (above): through @b870f146a — 15 sites DONE. **REMAINING = 4 x86_64 int-arith (g) sites**
-   (same both-stages-internal class, just-in-time-reload technique): emitI8x16Swizzle, emitI8x16Shuffle (op_simd_int_
-   cmp_lane.zig), emitI8x16Popcnt, emitI64x2Mul (op_simd_int_arith.zig). Drive op-by-op TDD (live-stack v128-pressure
-   fixture, RED→GREEN both arches; verify values via wasmtime GC flags). The file-local helpers already exist in both
-   files. This closes the whole D-034 (g) sub-arc → bundle exit-condition met.
+1. **D-034 SIMD spill arc CLOSED @411dd1e14** (above) — no active bundle. NEXT: pick the next Phase 17 完成形 front
+   from the debt sweep (Step 0.5). Candidate non-consumer-gated work: the D-034 helper-consolidation cleanup (low-pri),
+   or scan `.dev/debt.yaml` `now`-class rows. Consumer-gated (do NOT grind): D-305 rare CM shapes, D-464 broader async.
 2. **Audit DONE 2026-06-18 (CLEAN)** — `audit_scaffolding` 0 block/0 soon (J.3 chronic debt); fuzz 0 crashes.
 3. **D-460 v128-GC JIT emit DONE both arches** (@3d8be3c00/@8137c7268/@5292569e0; 6 runI32Export fixtures = the
    authoritative JIT verification). Only an optional edge fixture remains (low value). Consumer-gated, do NOT grind:

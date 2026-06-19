@@ -2018,9 +2018,25 @@ entries:
       blocks D-460 array-copy-inline.6 + x86_64 v128-GC mirror
   - id: "D-034"
     layer: "code"
-    status: "now"
+    status: "note"
     front: D-wmt-misc
     description: |-
+      **RESOLVED 2026-06-19 @411dd1e14 — the ENTIRE D-034 SIMD spill-completeness arc is COMPLETE on both arches.**
+      All scalar sub-categories (a–g) + the full 18-site x86_64 v128-operand (g) sub-arc are spill-aware; every op's
+      operands, when forced to spill under high register pressure, flow through a stage / XMM7-park / just-in-time
+      reload instead of a bare resolve. The ONLY remaining bare resolveXmm sites are op_simd.zig emitV128Select val2
+      (the structural 3-V-reg-vs-2-stage exemption) + the byte-identical all-reg fast path inside emitI64x2Mul (its
+      spill case is the restructured else-branch). Techniques (all x86_64; arm64 was already spill-aware via shared
+      helpers): 3-operand template (operands→stage0/1-or-home, dst→home/XMM7, store-if-spilled, XMM7 alias-stash only
+      when dst home); XMM7-park scratch (neg/abs); dst/XMM15 as spilled-operand load-temp (extmul-high/i64x2); and the
+      **just-in-time reload** (shifts/swizzle/shuffle/popcnt/i64x2-mul — reload a spilled operand from its RBP-disp slot
+      into a stage each use). Verified op-by-op RED→GREEN on Mac-arm64 + x86_64-Rosetta, values cross-checked vs
+      wasmtime, with live-stack v128-pressure fixtures (13 live v128 + OR/drop chain) in runner_v128_jit_test.zig.
+      File-local helpers: op_simd_int_cmp_lane.zig (resolveOrLoadV128 / loadV128IntoCmp / dstHomeOrXmm7Cmp /
+      storeV128IfSpilledLocal); op_simd_int_arith.zig (dstHomeOrXmm7 / loadV128IntoLocal / storeXmm7IfSpilledLocal).
+      Follow-up (low priority): consolidate the duplicated spill helpers across op_simd_float/int_cmp_lane/int_arith
+      into a shared op_simd.zig pub set. Historical inventory + per-op SHAs preserved below + in git @411dd1e14.
+      ----
       now (opened 2026-06-18 as the next autonomous work after the D-461 v128-DST-spill arc closed @4acd24152;
       driven NOT deferred per the anti-premature-deferral mandate — D-034 is self-contained/fully-specifiable here,
       unlike consumer-gated D-305/D-464). The **GPR/FP-SCALAR SPILL-EXEMPT cohort**: SIMD lane/reduce ops resolve a
