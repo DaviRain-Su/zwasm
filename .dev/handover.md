@@ -66,13 +66,16 @@ Resumable anytime; NOT grinding further now — proceeding to the non-blocked qu
       `host-fn-two-value-types` + `component-record-retptr-asymmetry`.
    **QUEUE DISCHARGED** (D-467 → D-305 a/b). Re-survey done: 0 now-class. Driving D-305 completeness via the GENERIC
    canon path (not speculative grind — reuses tested machinery).
-   4. **D-305(b3) DONE @35a543854** — record-with-STRING param via the canon `liftFlat`→`lowerFlat` round-trip
-   (`canonHasPointer` gate; `CoreValue`==`RtValue`); rec_str_param fixture →8; comp-assert 169/0. The round-trip path
-   generalizes to list params + nested records for free. **NEXT (drivable, same arc)**: record-with-pointer RESULT
-   (retptr + `lowerFlat` into A's return area — symmetric to b3, reuses the b2 retptr seam), then list-of-record /
-   multi-param-with-pointer. All consumer-gated completeness but bounded + generic-design (not speculative grind).
-   Then re-survey debt; if nothing else drivable → legit bucket-3 w/ re-arm (D-330 bucket-2, D-331A hard-parked,
-   D-464 async, 21 blocked-by).
+   4. **D-305(b3+b4) DONE** — record-with-STRING param @35a543854 (canon liftFlat/lowerFlat) + RESULT @17e84953b
+   (canon load/store, retptr); fixtures rec_str_param→8 / rec_str_result→109 (string bytes proven to cross BOTH
+   directions); comp-assert 170/0. **D-305 cross-component aggregate marshalling is now substantially COMPLETE**
+   (flat + string records, both directions; list/scalar params; arity-general).
+   **NEXT — re-survey + FILE SPLIT GATE**: `component_graph.zig` = 1895/2000; the next CM-marshal slice (list<record>
+   / multi-param-with-pointer / variant — all niche, consumer-gated) MUST first extract the boundary marshalling into
+   a sibling `component_boundary.zig` (ADR-0099 split, architectural chunk) or it breaches the hard cap. Options next
+   cycle: (a) do that split (clean, drivable), or (b) re-survey debt — if no higher-value drivable item, the CM
+   aggregate arc is complete-enough → legit bucket-3 w/ re-arm (D-330 bucket-2, D-331A hard-parked, D-464 async, 21
+   blocked-by). Prefer (a) only if more CM shapes are genuinely wanted; else the split is itself low-value churn.
    PARKED (do NOT drive): **D-330** c_sha256 `\n` PROVABLY-BLOCKED (bucket-2; 1-byte cosmetic, constraint conflict);
    the 21 `blocked-by` (upstream Zig D-010/148/312/323 · proposal D-300/336 · phase/time-gate · consumer/corpus); D-464 async.
 2. **Audit DONE 2026-06-18 CLEAN** (0 block/0 soon; fuzz 0 crashes). **v128 spill story COMPLETE** (D-460/D-461/D-034

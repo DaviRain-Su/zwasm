@@ -1019,6 +1019,19 @@ entries:
     layer: code
     status: partial
     description: |-
+      **(b4) RECORD-WITH-STRING RESULT DONE @17e84953b (2026-06-20)**: a record
+      result containing an internal pointer returns via retptr but can't be
+      raw-copied (b2) — B-relative pointers. The boundary invokes B's producer
+      (→ pointer to the record in B's mem), `canon.load`s it from B (lifts the
+      string), `canon.store`s it into A's retptr (lowers the string into A's OWN
+      mem + A-relative pointers). load/store recurse over fields. Detected by
+      `resultRecordWithPointer`. rec_str_result fixture (mk()→{msg:"hi",n:5}, A
+      reads n+first_byte=109 — proves bytes crossed); comp-assert 170/0.
+      **record-with-string now works BOTH directions.** REMAINING (niche,
+      consumer-gated): list<record>, multi-param-with-pointer, variant payloads.
+      **FILE-SIZE GATE**: `component_graph.zig` at 1895/2000 — the NEXT CM-marshal
+      slice MUST first extract the boundary trampolines/marshalling into a sibling
+      (e.g. `component_boundary.zig`) per ADR-0099, else it breaches the hard cap.
       **(b3) RECORD-WITH-STRING param DONE @35a543854 (2026-06-20)**: a record
       param containing an internal pointer (string/list) crosses via the canonical
       round-trip `liftFlat(importer_cx, A_words)` → `lowerFlat(callee_cx, value)`
