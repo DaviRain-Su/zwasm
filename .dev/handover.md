@@ -51,18 +51,17 @@ consolidate the duplicated spill helpers into a shared op_simd.zig pub set.
    NOT-WORTH-DOING per Simplicity-First (do NOT re-litigate): D-294-R2 (a new TrapKind for a conformance-neutral
    message nicety = over-engineering on an already-spec-correct trap); the helper-consolidation (low-ROI big refactor
    re-churning the whole verified v128-spill arc for a benign internal DRY smell).
-   **D-331(B) go_regex SlotOverflow — CLOSED 2026-06-19 @adb7b99a** (arm64 large-frame spill-offset overflow >
-   W-form imm12 cap 16380; siblings routed through frame{Ldr,Str}{Gpr,Fp}; go_regex diff-jit MATCHES wasmtime
-   94 B; detail in D-331 row + lesson `2026-06-19-arm64-large-frame-spill-offset`).
-   **D-305 3+4-PARAM ARITY — DONE @db79e7df/@6e791d8c** (BoundarySig3/4 pass-through; arity3/4_graph;
-   comp-assert 165/0).
-   **D-466 failed-instantiateGraph DOUBLE-FREE — FIXED @99a33f9f** (local errdefers outliving the append to
-   graph-owned lists; dropped at module/3×bctx/fctx; regression test unsupported_boundary_graph). **D-323 windows
-   sockets — FIXED @3d8314df** (the stdlib's windows real-TCP-connect crashed + aborted the Win64 unit binary;
-   skipped on windows). NEXT FRONT (pick any; all drivable now): (1) **D-305 follow-ons** — 5..7 flat-scalar
-   arities (same recipe as 3); then aggregate record/result params (NOMINAL-type fixtures: B exports type + A
-   imports it; flat record = pass-through but a wasm-tools validate snag remains; non-flat → canon.store/load,
-   already built). (2) **D-331(A) go-runtime poll_oneoff miscompile** — build the **memory-divergence diff** FIRST
+   **CLOSED 2026-06-19** (detail in git/debt/lessons): **D-331(B)** go_regex arm64 large-frame spill-offset
+   @adb7b99a (diff-jit MATCHES wasmtime); **D-305 3+4-param arity** @db79e7df/@6e791d8c (BoundarySig3/4; comp-assert
+   165/0); **D-466** failed-instantiateGraph double-free @99a33f9f (errdefers outliving append; regression test);
+   **D-323 windows sockets** @3d8314df (the stdlib's windows real-TCP-connect crashed + aborted the Win64 unit binary;
+   skipped on windows). **Step-0.7 NOTE**: `failed command: test…--listen=-` is COSMETIC (exits 0) — lesson
+   `2026-06-19-zig-build-test-listen-failed-command-is-cosmetic`; trust `[run_remote_*] OK/FAIL` + `N passed, 0
+   failed`, not that line. NEXT FRONT (pick any): (1) **D-305 follow-ons** — STOP per-arity churn at 4; for 5..7 +
+   record/aggregate params do the GENERIC refactor: a linker `defineFuncRaw` (Value-slice host fn) collapses all
+   arities + enables aggregate marshalling (canon.store/load, already built) in ONE path (record fixtures need
+   NOMINAL types: B exports type + A imports it; flat record = pass-through, but a wasm-tools validate snag
+   remains). (2) **D-331(A) go-runtime poll_oneoff miscompile** — build the **memory-divergence diff** FIRST
    (~120-200 LOC, NOT ADR-gated: hash mem+globals at the shared host-call boundary jit_dispatch.zig:352/:65 +
    interp mvp.zig:392, diff JIT vs interp; approach in D-331 (A)); the per-func interp-fallback knob is ADR-gated
    + ~600-1000 LOC, defer.
