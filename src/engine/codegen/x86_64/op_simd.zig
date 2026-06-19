@@ -443,11 +443,14 @@ pub fn v128LoadExtend(
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
 
     const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
-    const dst_x = try gpr.resolveXmm(alloc, result_v);
+    // D-034 (g): spill-aware dst. The load source is memory and the address is in
+    // GPRs, so dst can use spill stage0/XMM14 (no other XMM scratch); flush after.
+    const dst_x = try gpr.xmmDefSpilledV128(alloc, result_v, 0);
 
     try v128MemPrologue(allocator, buf, oob_fixups, idx_r, offset, 8, func_idx);
     try buf.appendSlice(allocator, inst.encMovssMovsdMemBaseIdx(.f64, false, dst_x, .rax, .rdx).slice());
     try buf.appendSlice(allocator, extend_encoder(dst_x, dst_x).slice());
+    try gpr.xmmStoreSpilledV128(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }
 
@@ -568,7 +571,9 @@ pub fn v128StoreLane(
     const idx_v = pushed_vregs.pop().?;
 
     const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
-    const vec_x = try gpr.resolveXmm(alloc, vec_v);
+    // D-034 (g): spill-aware vec. vec is read once by PEXTR (into RCX), so a spilled
+    // vec loads into stage0/XMM14; no v128 result to store.
+    const vec_x = try gpr.xmmLoadSpilledV128(allocator, buf, alloc, spill_base_off, vec_v, 0);
 
     // PEXTR the lane to RCX BEFORE the prologue clobbers RCX.
     const enc_pextr = switch (access_size) {
