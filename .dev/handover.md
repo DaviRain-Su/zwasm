@@ -48,11 +48,15 @@ gate, repeat. Do NOT stop to ask "is this high-value." **Inventory DONE** (subag
 comments fixed @94f0b7122). **#9 DONE @97abd6887**: the 9 go_* already compiled (the "fail" was stale; D-331B
 go_* closed), but the sweep surfaced + fixed a real latent residual — arm64 v128 LOCAL ZERO-INIT large-frame
 `UnsupportedOp` (>32760 offset → routed through frameStrGpr/X16; fixture setup_v128_zeroinit; emit byte-tests
-unchanged). **ACTIVE SWEEP QUEUE (next)**: D-456 UnknownImport host-stubs (define stubs to un-skip spec fixtures) →
-D-283/D-330 JIT diff-miscompiles (debug_jit_auto, but verify they're not stale like #9) → D-336 borrow-export →
-D-209 memory64. (D-294 trap-label folds into D-293 refactor = NOT cheap; #1 simd directive-register = test-harness.)
-VERIFY-BEFORE-INVEST: the inventory had ≥2 stale entries (#2/#3 done, #9 go_* already-compiling) — confirm each gap
-is genuinely open first (裏取り).
+unchanged). **ACTIVE SWEEP = D-330** (lone realworld diff-jit miscompile, CONFIRMED live: c_sha256 jit 106B vs interp/wasmtime
+107B — drops the final `\n`). Root: a value that should be 10 reads 0 at `func 4 _start pc678 i32.ne` gating the
+final putchar. **4 source-level investigations DISPROVEN** (not regalloc/vreg-numbering/D-331B-class) → needs lldb
+instruction-level single-step (tooling: `ZWASM_DEBUG=jit.dump` + `scripts/jit_value_trace.sh` + lldb). SMALLEST repro
+of the elusive JIT-value-miscompile class (shares symptom w/ D-331A). **Stale inventory entries confirmed**: #2/#3
+done, #9 go_* already-compiling, **D-283 emcc_fasta already byte-exact**. VERIFY-BEFORE-INVEST each gap.
+**Queue after**: D-209 memory64 >4GiB offset (real differential, well-defined L/multi-arch, reliable) → D-336
+borrow-export (blocked on sort=value infra) → D-456 host-stubs (test-harness coverage). (D-294 trap-label = D-293
+refactor; #1 simd = test-harness.)
 
 **Phase 17 完成形 plateau** (validated — do NOT re-walk): async COMPLETE; v128 spill (D-034/D-460/D-461) CLOSED;
 surface audits clean 2026-06-18; fuzz 0-crash; realworld JIT compile 56/56. NOT-WORTH: D-294-R2 TrapKind.
