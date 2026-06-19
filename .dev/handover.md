@@ -48,12 +48,15 @@ gate, repeat. Do NOT stop to ask "is this high-value." **Inventory DONE** (subag
 comments fixed @94f0b7122). **#9 DONE @97abd6887**: the 9 go_* already compiled (the "fail" was stale; D-331B
 go_* closed), but the sweep surfaced + fixed a real latent residual — arm64 v128 LOCAL ZERO-INIT large-frame
 `UnsupportedOp` (>32760 offset → routed through frameStrGpr/X16; fixture setup_v128_zeroinit; emit byte-tests
-unchanged). **ACTIVE SWEEP = D-330** (lone realworld diff-jit miscompile, CONFIRMED live: c_sha256 jit 106B vs interp/wasmtime
-107B — drops the final `\n`). Root: a value that should be 10 reads 0 at `func 4 _start pc678 i32.ne` gating the
-final putchar. **4 source-level investigations DISPROVEN** (not regalloc/vreg-numbering/D-331B-class) → needs lldb
-instruction-level single-step (tooling: `ZWASM_DEBUG=jit.dump` + `scripts/jit_value_trace.sh` + lldb). SMALLEST repro
-of the elusive JIT-value-miscompile class (shares symptom w/ D-331A). **Stale inventory entries confirmed**: #2/#3
-done, #9 go_* already-compiling, **D-283 emcc_fasta already byte-exact**. VERIFY-BEFORE-INVEST each gap.
+unchanged). **ACTIVE SWEEP = D-330 CRACKED 2026-06-20 (lldb single-step), fix in progress.** GENERAL codegen bug (not just the
+`\n`): for a `block (result T)` reached by BOTH a `br_if` and a fall-through, the first `br_if`'s capture-no-MOV
+(`op_control_merge_mov.zig:199-207`, via `op_control.zig:416-422 branchOnReg`) leaves the merge reg unset on a
+taken-branch edge — `.end`'s fall-through home-MOV into `merge_top_vregs` is JUMPED OVER by a subsequent taken
+`br_if`, so a consumer reads a stale merge reg (0 instead of 10) → wrong branch → dropped `\n`. Same family as the
+if/else-merge-MOV on the block+br_if+fall-through shape. Fix (subagent): first br_if must MOV into the canonical
+merge reg, not assume capture==consumer reg. HOT PATH (every block-result merge) — full test net + emit byte-tests
++ realworld-diff + spec must stay green; c_sha256 must → 107B. **MAY also illuminate D-331A** (same class). Stale
+inventory entries confirmed (#2/#3/#9/D-283 already done).
 **Queue after**: D-209 memory64 >4GiB offset (real differential, well-defined L/multi-arch, reliable) → D-336
 borrow-export (blocked on sort=value infra) → D-456 host-stubs (test-harness coverage). (D-294 trap-label = D-293
 refactor; #1 simd = test-harness.)
