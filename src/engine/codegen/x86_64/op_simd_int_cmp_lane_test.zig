@@ -1044,7 +1044,7 @@ test "emitI64x2ExtmulLowI32x4S: PSHUFD imm=0x50 x2 + PMULDQ (3 instr)" {
     try pushed.append(testing.allocator, 1);
     var next_vreg: u32 = 2;
 
-    try op_simd_int_cmp_lane.emitI64x2ExtmulLowI32x4S(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_int_cmp_lane.emitI64x2ExtmulLowI32x4S(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
@@ -1071,7 +1071,7 @@ test "emitI64x2ExtmulHighI32x4U: PSHUFD imm=0xFA x2 + PMULUDQ (3 instr)" {
     try pushed.append(testing.allocator, 1);
     var next_vreg: u32 = 2;
 
-    try op_simd_int_cmp_lane.emitI64x2ExtmulHighI32x4U(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_int_cmp_lane.emitI64x2ExtmulHighI32x4U(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
@@ -1098,7 +1098,7 @@ test "emitI32x4ExtmulHighI16x8S: PSHUFD x2 + PMOVSXWD x2 + PMULLD (5 instr)" {
     try pushed.append(testing.allocator, 1);
     var next_vreg: u32 = 2;
 
-    try op_simd_int_cmp_lane.emitI32x4ExtmulHighI16x8S(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_int_cmp_lane.emitI32x4ExtmulHighI16x8S(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
@@ -1127,7 +1127,7 @@ test "emitI16x8ExtmulHighI8x16U: PSHUFD x2 + PMOVZXBW x2 + PMULLW (5 instr)" {
     try pushed.append(testing.allocator, 1);
     var next_vreg: u32 = 2;
 
-    try op_simd_int_cmp_lane.emitI16x8ExtmulHighI8x16U(testing.allocator, &buf, alloc, &pushed, &next_vreg);
+    try op_simd_int_cmp_lane.emitI16x8ExtmulHighI8x16U(testing.allocator, &buf, alloc, &pushed, &next_vreg, 0);
 
     var expected: std.ArrayList(u8) = .empty;
     defer expected.deinit(testing.allocator);
