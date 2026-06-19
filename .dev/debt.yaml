@@ -1287,6 +1287,22 @@ entries:
     layer: "code"
     status: "partial"
     description: |-
+      **(A) CHARACTERIZED 2026-06-19 — go-runtime JIT miscompile = a REGALLOC SPILL live-range hole (arm64).**
+      7 deep investigations (full arc + repro + poison diagnostic → `private/notes/d331a-memdiff-plan.md`) built a
+      mem.cksum host-call hash + a `-Dd331` per-guest-call tracer (REVERTED @7b37ad6d — build-graph gap) and
+      progressively REFUTED: fixalloc↔recordspan loop, host-call-#5/args_get (probe artifacts), func-233 i64.ne value
+      divergence (696 outcomes match), and the func-235/op_control.zig branch-fixup theory (the profilealloc gate
+      lowers CORRECTLY — CBZ/backward-B/CSINC/bounds-checked LDR all verified). DECISIVE poison diagnostic: a prologue
+      frame-fill makes the otherwise-NONDETERMINISTIC JIT run DETERMINISTIC → **`runtime.mallocgcTiny`(func 233) reads
+      UNINITIALIZED frame (spill) memory**; neither fill VALUE fixes it → a real spilled value's producer-STR is
+      missing on a merge path. RULED OUT (don't re-chase): linear-mem/globals/grow zeroing, vm_base(X28) refresh.
+      **FIX-PATH (next, well-defined)**: bisect the uninitialized slot via escalating per-8-byte poison (garbage
+      encodes its source offset) → then audit regalloc spill emission + `op_call.zig spillHomedCallerSaved` for a
+      call-crossing TEMP vreg (NOT a homed local — D-291 only covered homed locals) whose spill-STR is on one
+      predecessor edge but not the merge path feeding the gate operand. Bug is in SPILL/regalloc, NOT op_control.zig
+      / load encoders. PARKED as well-characterized debt 2026-06-19 (bundle pivoted) after ~1.3M-token investigation;
+      resumable from the notes' bisect plan. NICHE: fat-Go JIT-run-stage only; interp + spec + TinyGo all green.
+      ---
       **(A) BISECT-INFRA APPROACH CHOSEN 2026-06-19** (scoping subagent): the per-func interp-fallback
       knob is ADR-gated + large (~600-1000 LOC new engine-boundary ABI — JIT calls are statically-linked
       native `BL`/`CALL` with no JIT↔interp trampoline; `op_call.zig:166`/`shared/linker.zig:296`). The

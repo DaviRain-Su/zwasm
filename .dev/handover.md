@@ -35,28 +35,14 @@ remaining bare-resolve sites are the structural emitV128Select val2 (3-V-reg-vs-
 byte-identical all-reg fast path. Detail + per-op SHAs in the D-034 debt row (now `note`) + git. Low-pri follow-up:
 consolidate the duplicated spill helpers into a shared op_simd.zig pub set.
 
-## Active bundle
-
-- **Bundle-ID**: D-331A-memdiff (correctness — fix the go-runtime miscompile)
-- **Cycles-remaining**: ~3 (root cause = a JIT CONTROL-FLOW/branch-fixup miscompile; pinned to func 235's gate; now minimal-repro + fix)
-- **Continuity-memo**: a JIT **branch-bypass** miscompile (full detail+repro → `private/notes/d331a-memdiff-plan.md`).
-  Tool = a `-Dd331` per-guest-call tracer (REVERTED @7b37ad6d — its build.zig added `d331_probe` to the main
-  options but NOT the test-exe options module → x86_64 fresh build failed compiling emit_test; Mac cache masked it.
-  Re-add WITH d331_probe in EVERY `addOptions()` instance, OR just use the minimal-repro path below). REFUTED (don't
-  re-chase): mem.cksum hash=clock-jitter; func 314 byte-identical; "host-call #5"=probe artifact; **func 233 i64.ne
-  value diverges = REFUTED (all 696 compare/eqz outcomes match interp)**. REAL bug: in `runtime.mallocgcSmallScanNoHeader`
-  (func 235) the profilealloc gate `MemProfileRate i64.ne nextSample; i32.eqz; if{br <skip>}` (WAT 82064-82071) is
-  **BYPASSED in JIT** — after `call publicationBarrier` the JIT jumps straight to `profilealloc`(243), the gate
-  `i32.eqz` NEVER runs (37× JIT vs 40× interp); spurious profile path → Go throw/sigpanic (the timeout loop is Go's
-  traceback printer). LOCUS: conditional-branch lowering for `if`/`br N` OUT of deeply-nested blocks right after a
-  `call` + `global.get 0; local.set 1; br_if` reload — `arm64/op_control.zig` (if/else/end + br/br_if target fixups)
-  + emit.zig block-label bookkeeping. **NEXT (convergent, NOT more value-probing)**: build a MINIMAL .wat — deep
-  nested blocks → call → global-reload br_if → `i32.eqz; if{br <outer>}` — interp-vs-jit; if JIT skips the br, disasm
-  the tiny fixture + fix op_control.zig; if it won't trigger, vary block depth / post-call reload (regalloc state).
-- **Exit-condition**: the op_control.zig branch-fixup bug is fixed (go_hello JIT runs the gate eqz like interp →
-  gcTrigger.test, no spurious profilealloc; callseq #559 matches) + a boundary fixture, OR the exact bad fixup+minimal repro is named in D-331.
-
 ## RESUME POINTER (2026-06-19) — for a fresh session
+
+**D-331A PARKED as well-characterized debt 2026-06-19** (bundle pivoted after ~1.3M-token / 7-investigation arc —
+diagnostic deliverable DONE, fix is hard). Root cause = an arm64 **REGALLOC SPILL live-range hole**: `mallocgcTiny`
+(func 233) reads an UNINITIALIZED frame/spill slot (poison-diagnostic-confirmed: a frame-fill makes the otherwise-
+NONDETERMINISTIC JIT deterministic) — a call-crossing TEMP vreg's spill-STR is missing on a merge path (D-291
+covered only homed locals). Full arc + bisect fix-plan in D-331 row + `private/notes/d331a-memdiff-plan.md`.
+Resumable anytime; NOT grinding further now — proceeding to the non-blocked queue.
 
 0. **完成形 plateau** (2026-06-19, exhaustively validated — do NOT re-walk): ADR-0195 async campaign COMPLETE;
    v128 spill story (D-034/D-460/D-461) CLOSED; surface audits (C/Zig/CLI) clean; fuzz 0-crash; realworld JIT
@@ -70,12 +56,11 @@ consolidate the duplicated spill helpers into a shared op_simd.zig pub set.
    failed`, not that line.
    **NON-BLOCKED QUEUE (逐次, user 2026-06-19)** — work IN ORDER; each is drivable now (no external block); after
    each, re-survey debt for newly-drivable items before stopping:
-   1. **D-331(A)** = the ACTIVE BUNDLE above (memdiff diagnostic → localize → fix the go-runtime poll_oneoff miscompile).
-   2. **D-467 (now)** — UNSKIP the 271 simd `skip-impl` (NOT a harness excuse — exercises the v128 call-boundary
+   1. **D-467 (now) ← ACTIVE NEXT** — UNSKIP the 271 simd `skip-impl` (NOT a harness excuse — exercises the v128 call-boundary
       ABI, may expose latent bugs, user). Extend `entry.zig` v128 arg/result marshal + simd-runner invoke value
       parse for load/store-lane (v128-param + i32 addr → v128) + f32→v128 splat; flip manifests skip-impl→live;
       run interp+jit. directive-register residue documented if a genuine wast-directive limit.
-   3. **D-305** — STOP per-arity churn at 4; do the GENERIC `defineFuncRaw` (Value-slice host fn) refactor →
+   2. **D-305** — STOP per-arity churn at 4; do the GENERIC `defineFuncRaw` (Value-slice host fn) refactor →
       collapses 5..7 arities + record/result aggregate marshalling (canon.store/load, built) in ONE path
       (record fixtures need NOMINAL types; a wasm-tools validate snag remains).
    PARKED (do NOT drive): **D-330** c_sha256 `\n` PROVABLY-BLOCKED (bucket-2; 1-byte cosmetic, constraint conflict);
