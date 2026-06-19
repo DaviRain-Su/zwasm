@@ -45,11 +45,14 @@ high-value bar is OFF. Sweep toward 0% the 3 gap classes — (1) wasmtime-works-
 non-conformance (skips/missing), (3) instability/crashes — from already-known items, EASIEST-first, TDD + 3-host
 gate, repeat. Do NOT stop to ask "is this high-value." **Inventory DONE** (subagent): spec-skip front already ~0
 (only real skip-impl = simd `directive-register` = test-harness residue; #2/#3 validator-rejects already done, stale
-comments fixed @94f0b7122). **ACTIVE SWEEP = #9 D-331B**: 9 fat-Go fixtures JIT-compile-FAIL `UnsupportedOp` at the
-large-frame SETUP path (>32760 imm-offset, emit.zig:427/484-541) — proven fix pattern = the arm64 large-frame
-addressing already done for go_regex's spill path (lesson `2026-06-19-arm64-large-frame-spill-offset`, byte-matches
-wasmtime). **Sweep queue after**: D-456 UnknownImport host-stubs, D-283/D-330 JIT diff-miscompiles (debug_jit_auto),
-D-336 borrow-export, D-209 memory64. (D-294 trap-label folds into D-293 refactor = NOT cheap; #1 simd = test-harness.)
+comments fixed @94f0b7122). **#9 DONE @97abd6887**: the 9 go_* already compiled (the "fail" was stale; D-331B
+go_* closed), but the sweep surfaced + fixed a real latent residual — arm64 v128 LOCAL ZERO-INIT large-frame
+`UnsupportedOp` (>32760 offset → routed through frameStrGpr/X16; fixture setup_v128_zeroinit; emit byte-tests
+unchanged). **ACTIVE SWEEP QUEUE (next)**: D-456 UnknownImport host-stubs (define stubs to un-skip spec fixtures) →
+D-283/D-330 JIT diff-miscompiles (debug_jit_auto, but verify they're not stale like #9) → D-336 borrow-export →
+D-209 memory64. (D-294 trap-label folds into D-293 refactor = NOT cheap; #1 simd directive-register = test-harness.)
+VERIFY-BEFORE-INVEST: the inventory had ≥2 stale entries (#2/#3 done, #9 go_* already-compiling) — confirm each gap
+is genuinely open first (裏取り).
 
 **Phase 17 完成形 plateau** (validated — do NOT re-walk): async COMPLETE; v128 spill (D-034/D-460/D-461) CLOSED;
 surface audits clean 2026-06-18; fuzz 0-crash; realworld JIT compile 56/56. NOT-WORTH: D-294-R2 TrapKind.
