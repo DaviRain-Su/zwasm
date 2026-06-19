@@ -57,9 +57,14 @@ D-330/D-331 discharged; lesson updated.
 **D-209 memory64 >4GiB static offset CLOSED @b8cf64123**: lifted the artificial `readMemargOffset` u32 cap (the
 validator already gatekeeps per-memory offset width; zir payload is u64; 64-bit base+offset carry-trap codegen
 already on both arches). RED fixture `offset_ge_4gib_oob_trap` BadMemarg→OOB-trap; memory64 spec assert 9317/0.
-**Sweep queue (next)**: D-336 borrow-export (blocked sort=value infra — VERIFY before invest) → D-456 host-stubs
-(test-harness). (#1 simd = test-harness.) When the easy known-items drain, re-run the gap-inventory subagent
-(EASIEST-first, VERIFY-BEFORE-INVEST 裏取り — past inventories flagged already-fixed items as open).
+**Sweep queue — TOP = D-468 (now, HIGH value)**: re-running `test-realworld-diff-jit` post-D-330/D-331A
+surfaced that **all 8 non-trivial go_* fixtures HANG at exit under `--engine jit` (rc=124) but run rc=0 under
+interp** — JIT prints byte-identical correct output then `fatal error: poll_oneoff` → panic-during-panic
+livelock. Root not a value-miscompile; `clocks.zig:167 pollOneoff` is a STUB (non-zero subs → notsup) and Go's
+scheduler park is the guest that needs it. **Leading fix (hyp 1, gap-class #2+#1+#3): implement real
+poll_oneoff clock-subscription polling** (TDD, clean context) + re-run the 8 probes; if still hung, hyp-2 probe
+(WASI-call trace: is proc_exit reached before the poll_oneoff fatal?). Full evidence + 3 hypotheses in D-468.
+Then: D-336 borrow-export (blocked sort=value — VERIFY first), D-456 host-stubs. (#1 simd = test-harness.)
 
 **Phase 17 完成形 plateau** (validated — do NOT re-walk): async COMPLETE; v128 spill (D-034/D-460/D-461) CLOSED;
 surface audits clean 2026-06-18; fuzz 0-crash; realworld JIT compile 56/56. NOT-WORTH: D-294-R2 TrapKind.
