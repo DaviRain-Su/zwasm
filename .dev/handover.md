@@ -35,22 +35,23 @@ remaining bare-resolve sites are the structural emitV128Select val2 (3-V-reg-vs-
 byte-identical all-reg fast path. Detail + per-op SHAs in the D-034 debt row (now `note`) + git. Low-pri follow-up:
 consolidate the duplicated spill helpers into a shared op_simd.zig pub set.
 
+## Active bundle
+
+- **Bundle-ID**: D-331A-memdiff (correctness — localize the go-runtime poll_oneoff miscompile)
+- **Cycles-remaining**: ~3
+- **Continuity-memo**: a read-only MEMORY-DIVERGENCE DIFF — `fnv1a(linear-mem + globals)` hashed at the shared
+  WASI host-call boundary for BOTH engines (`wasi/jit_dispatch.zig:65/:352` + interp `interp/mvp.zig:392`),
+  gated `ZWASM_DEBUG=mem.cksum`; run go_hello under `--engine interp` vs `jit`, diff the cksum traces → FIRST
+  divergent host-call window, then `jit.dump` those funcs. Phase-I plan subagent (ac6d07ac) running for exact
+  file:line + accessors (memOf(rt)/globals). NOT ADR-gated (read-only at existing sites).
+- **Exit-condition**: the `mem.cksum` interp-vs-jit diff localizes the first divergence on go_hello to a named
+  host-call window (or the diff infra is committed + a follow-up debt row names the localized window).
+
 ## RESUME POINTER (2026-06-19) — for a fresh session
 
-0. **ADR-0195 guest↔guest async — CAMPAIGN COMPLETE** (D-335 closed; detail in git + ADR-0195; residuals D-463
-   CLOSED / D-464 future-bucket). **D-461 v128-DST-spill arc COMPLETE both arches** (FP replace_lane @4acd24152).
-1. **D-034 SIMD spill arc CLOSED @411dd1e14** — no active bundle; ZERO `now`-class debt; **D-460 v128-GC arc ALSO
-   COMPLETE** (array.copy was already done @5292569e0 — the 2026-06-19 sweep misread a stale "REMAINING" line; a
-   confirm-before-implement survey caught it, D-460 → `note`, jit_abi.zig docstring corrected). The debt is at the
-   **exhaustively-validated 完成形 plateau** (2026-06-19) — all 4 dimensions at the bar; every Phase-16 activity walked
-   + GREEN (so the next resume need NOT re-walk these): (a) debt-coherence audit @9bd551958 (zero `now`-debt); (b)
-   spill arc ubuntu+windows verified, baseline @66976f436; (c) memory-safety fuzz smoke 0-crash over post-D-034
-   codegen; (d) dogfooding realworld JIT compile-pass 56/56; (e) **surface audits ALL THREE done & clean** — C-API
-   @a6c82e6 (complete vs standard wasm-c-api), Zig-API + CLI @ae032aab (structurally complete, no help-vs-code
-   mismatch); the only findings across all 3 were stale doc-comments, all fixed (@3c84ae3b3, @ce4224afc). JUDGED
-   NOT-WORTH-DOING per Simplicity-First (do NOT re-litigate): D-294-R2 (a new TrapKind for a conformance-neutral
-   message nicety = over-engineering on an already-spec-correct trap); the helper-consolidation (low-ROI big refactor
-   re-churning the whole verified v128-spill arc for a benign internal DRY smell).
+0. **完成形 plateau** (2026-06-19, exhaustively validated — do NOT re-walk): ADR-0195 async campaign COMPLETE;
+   v128 spill story (D-034/D-460/D-461) CLOSED; surface audits (C/Zig/CLI) clean; fuzz 0-crash; realworld JIT
+   compile 56/56. NOT-WORTH-DOING (do NOT re-litigate): D-294-R2 TrapKind nicety; v128-spill helper-consolidation.
    **CLOSED 2026-06-19** (detail in git/debt/lessons): **D-331(B)** go_regex arm64 large-frame spill-offset
    @adb7b99a (diff-jit MATCHES wasmtime); **D-305 3+4-param arity** @db79e7df/@6e791d8c (BoundarySig3/4; comp-assert
    165/0); **D-466** failed-instantiateGraph double-free @99a33f9f (errdefers outliving append; regression test);
