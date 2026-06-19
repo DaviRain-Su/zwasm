@@ -139,6 +139,12 @@ const BoundaryCtx = struct {
     /// lowered INTO). Only set for the retptr-result trampoline (`tag() ->
     /// string`); null for the flat-result trampoline.
     importer: ?*GraphChild = null,
+    /// D-305(b2): for a flat-record RESULT (`() -> record`) crossing via retptr,
+    /// the record's in-memory byte size. The trampoline raw-copies
+    /// `result_blob_size` bytes from B's storage pointer to the importer's retptr
+    /// (a flat record has no internal pointer → no lift/lower). 0 = not a
+    /// record-result boundary.
+    result_blob_size: u32 = 0,
     /// Set when the imported func is async-lifted (ADR-0195 c-2b): the shared
     /// graph scheduler state the async trampoline enqueues the callee subtask
     /// into. null for a synchronous boundary.
@@ -783,6 +789,30 @@ fn installBoundaryTrampoline(
         return;
     }
 
+    // D-305(b2): a flat-record RESULT (`() -> record`, e.g. `point{x,y:u32}`)
+    // flattens to >1 core value, so per the Canonical ABI it returns via a RETPTR:
+    // A allocates the return area in its own memory and passes the pointer; B's
+    // core func writes the record blob into B's memory; the trampoline raw-copies
+    // the fixed-size bytes B→A (a flat record has no internal pointer, so no
+    // lift/lower relocation — unlike the string-result path above). Only the
+    // no-value-param shape is implemented; flat params alongside a record result
+    // are a broader shape (typed deferral).
+    if (resultFlatRecordBlob(graph.alloc, &provider.child.info, ft)) |blob| {
+        if (ft.params.len != 0) return GraphError.UnsupportedBoundaryType;
+        const bctx = try graph.alloc.create(BoundaryCtx);
+        bctx.* = .{
+            .callee = provider.child,
+            .core_func_name = r.core_func.name,
+            .core_inst = core_inst,
+            .func_type = ft,
+            .importer = importer,
+            .result_blob_size = blob.size,
+        };
+        try graph.boundaries.append(graph.alloc, bctx);
+        try lk.defineFuncCtx(ns, core_export_name, @ptrCast(bctx), RetPtrSig, recordRetTrampoline);
+        return;
+    }
+
     // For a single `list<primitive>` param, resolve the element byte size now so
     // the call-time copy moves `count * elem_size` bytes. A `list<u32>` param is a
     // `type_index` into the provider's type space, so resolve via `canon`.
@@ -1343,6 +1373,42 @@ fn resultIsString(alloc: Allocator, info: *const ctypes.TypeInfo, ft: ctypes.Fun
     }
 }
 
+/// D-305(b2): the in-memory size+alignment of a flat-record RESULT that crosses
+/// via retptr, or null if the result is not a by-value record blob. A record
+/// flattening to >1 core value returns via a return area; a flat record (no
+/// internal string/list/handle pointer) is raw-copyable byte-for-byte, so the
+/// retptr marshal needs only its size+alignment. A single-field record (flattens
+/// to 1 core value, no retptr) and aggregates with internal pointers are excluded.
+fn resultFlatRecordBlob(alloc: Allocator, info: *const ctypes.TypeInfo, ft: ctypes.FuncType) ?struct { size: u32 } {
+    const rt = ft.result orelse return null;
+    var tmp = std.heap.ArenaAllocator.init(alloc);
+    defer tmp.deinit();
+    const ct = canon.canonTypeFromDecoded(tmp.allocator(), info, rt) catch return null;
+    if (ct != .record) return null;
+    if (!canonIsByValueBlob(ct)) return null;
+    if (canonFlatWidth(ct) <= canon.MAX_FLAT_RESULTS) return null; // fits a flat result → no retptr
+    return .{ .size = @intCast(canon.sizeOf(ct)) };
+}
+
+/// A canonical type whose in-memory representation is a self-contained byte blob
+/// — fixed-size scalars (incl. wide f32/f64/i64) and records built from them,
+/// with NO internal pointer (string/list/handle). Such a value crosses a retptr
+/// boundary by a raw byte copy (no lift/lower relocation). Broader than
+/// `canonIsFlatI32` (which the register pass-through path needs) since a memory
+/// blob doesn't care about the i32 vs f64 core-word distinction. D-305(b2).
+fn canonIsByValueBlob(t: canon.CanonType) bool {
+    return switch (t) {
+        .prim => |p| p != .string and p != .error_context,
+        .record => |fields| {
+            for (fields) |f| {
+                if (!canonIsByValueBlob(f.ty)) return false;
+            }
+            return true;
+        },
+        else => false,
+    };
+}
+
 /// Backing storage for every boundary's core param/result ValType slices passed
 /// to `defineFuncRaw`. Every flat-scalar/string/list boundary flattens to all-i32
 /// core words, so one static all-i32 array serves them all — no per-boundary
@@ -1570,6 +1636,36 @@ fn retPtrMarshal(caller: *Caller, bctx: *BoundaryCtx, retptr: u32) BoundaryError
     if (@as(usize, retptr) + 8 > importer_cx.mem().len) return error.OutOfBoundsStore;
     std.mem.writeInt(u32, importer_cx.mem()[retptr..][0..4], lowered.ptr, .little);
     std.mem.writeInt(u32, importer_cx.mem()[retptr + 4 ..][0..4], lowered.packed_length, .little);
+}
+
+/// D-305(b2) host trampoline for `() -> flat_record` (e.g. `() -> point`): A
+/// passes a retptr into its OWN memory; allocate a return area in the CALLEE's
+/// memory, invoke B's core func (which writes the record blob there), then
+/// raw-copy the fixed-size bytes from the callee's area to A's retptr. A flat
+/// record has no internal pointer, so the byte copy IS the lower (no relocation).
+/// Out-of-bounds at either end propagates as a guest trap — never a silent fallback.
+fn recordRetTrampoline(caller: *Caller, retptr: u32) BoundaryError!void {
+    const bctx = caller.data(BoundaryCtx);
+    const size: u32 = bctx.result_blob_size;
+
+    // The canon-LIFT producer (B's core func) RETURNS a pointer into B's memory
+    // where it stored the record — it takes no value param (unlike the string
+    // retptr path, whose producer is authored to take a return area). Invoke with
+    // no args; the i32 result is B's storage pointer.
+    var args = [_]Value{};
+    var res = [_]Value{.{ .i32 = 0 }};
+    try bctx.core_inst.invoke(bctx.core_func_name, &args, &res);
+    const b_ptr: u32 = @bitCast(res[0].i32);
+
+    // Raw-copy the record blob from B's memory to A's retptr (a flat record has no
+    // internal pointer → the byte copy IS the lower). Distinct component instances
+    // → distinct memories (no aliasing).
+    const callee_cx = bctx.callee.canonContext();
+    if (@as(usize, b_ptr) + size > callee_cx.mem().len) return error.OutOfBoundsLoad;
+    const importer = bctx.importer orelse return error.OutOfBoundsStore;
+    const importer_cx = importer.canonContext();
+    if (@as(usize, retptr) + size > importer_cx.mem().len) return error.OutOfBoundsStore;
+    @memcpy(importer_cx.mem()[retptr..][0..size], callee_cx.mem()[b_ptr..][0..size]);
 }
 
 /// The `(string) -> string` boundary's flattened core signature:
