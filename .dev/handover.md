@@ -38,48 +38,38 @@ remaining bare-resolve sites are the structural emitV128Select val2 (3-V-reg-vs-
 byte-identical all-reg fast path. Detail + per-op SHAs in the D-034 debt row (now `note`) + git. Low-pri follow-up:
 consolidate the duplicated spill helpers into a shared op_simd.zig pub set.
 
-## RESUME POINTER (2026-06-19) — for a fresh session
+## RESUME POINTER (2026-06-20) — for a fresh session
 
-**D-331A PARKED as well-characterized debt 2026-06-19** (bundle pivoted after ~1.3M-token / 7-investigation arc —
-diagnostic deliverable DONE, fix is hard). Root cause = an arm64 **REGALLOC SPILL live-range hole**: `mallocgcTiny`
-(func 233) reads an UNINITIALIZED frame/spill slot (poison-diagnostic-confirmed: a frame-fill makes the otherwise-
-NONDETERMINISTIC JIT deterministic) — a call-crossing TEMP vreg's spill-STR is missing on a merge path (D-291
-covered only homed locals). Full arc + bisect fix-plan in D-331 row + `private/notes/d331a-memdiff-plan.md`.
-Resumable anytime; NOT grinding further now — proceeding to the non-blocked queue.
+**Phase 17 完成形 plateau** (exhaustively validated — do NOT re-walk): async campaign COMPLETE; v128 spill story
+(D-034/D-460/D-461) CLOSED; surface audits (C/Zig/CLI) clean 2026-06-18; fuzz 0-crash; realworld JIT compile 56/56.
+NOT-WORTH (do NOT re-litigate): D-294-R2 TrapKind; v128-spill helper-consolidation.
 
-0. **完成形 plateau** (2026-06-19, exhaustively validated — do NOT re-walk): ADR-0195 async campaign COMPLETE;
-   v128 spill story (D-034/D-460/D-461) CLOSED; surface audits (C/Zig/CLI) clean; fuzz 0-crash; realworld JIT
-   compile 56/56. NOT-WORTH-DOING (do NOT re-litigate): D-294-R2 TrapKind nicety; v128-spill helper-consolidation.
-   **CLOSED 2026-06-19** (detail in git/debt/lessons): **D-331(B)** go_regex arm64 large-frame spill-offset
-   @adb7b99a (diff-jit MATCHES wasmtime); **D-305 3+4-param arity** @db79e7df/@6e791d8c (BoundarySig3/4; comp-assert
-   165/0); **D-466** failed-instantiateGraph double-free @99a33f9f (errdefers outliving append; regression test);
-   **D-323 windows sockets** @3d8314df (the stdlib's windows real-TCP-connect crashed + aborted the Win64 unit binary;
-   skipped on windows). **Step-0.7 NOTE**: `failed command: test…--listen=-` is COSMETIC (exits 0) — lesson
-   `2026-06-19-zig-build-test-listen-failed-command-is-cosmetic`; trust `[run_remote_*] OK/FAIL` + `N passed, 0
-   failed`, not that line.
-   **NON-BLOCKED QUEUE (逐次, user 2026-06-19)** — work IN ORDER; each is drivable now (no external block); after
-   each, re-survey debt for newly-drivable items before stopping:
-   1. **D-467 DONE @0c0970b1** — simd invoke-boundary gap CLOSED: splat + multi-scalar→v128 + load/store-lane
-      unskipped (skip-impl 271→1, only `directive-register` residue); test-spec-simd 25075/0; NO latent v128-ABI bug.
-   2. **D-305(a) DONE @4c8329428** — generic `defineFuncRaw` collapsed BoundarySig/3/4 → one Value-slice path.
-   3. **D-305(b) DONE** — record param (b1 @b3ee9fcf0) + result-retptr (b2 @3b5a0a4f8); comp-assert 168/0. Lessons
-      `host-fn-two-value-types` + `component-record-retptr-asymmetry`.
-   **QUEUE DISCHARGED** (D-467 → D-305 a/b). Re-survey done: 0 now-class. Driving D-305 completeness via the GENERIC
-   canon path (not speculative grind — reuses tested machinery).
-   4. **D-305(b3+b4) DONE** — record-with-STRING param @35a543854 (canon liftFlat/lowerFlat) + RESULT @17e84953b
-   (canon load/store, retptr); fixtures rec_str_param→8 / rec_str_result→109 (string bytes proven to cross BOTH
-   directions); comp-assert 170/0. **D-305 cross-component aggregate marshalling is now substantially COMPLETE**
-   (flat + string records, both directions; list/scalar params; arity-general).
-   **NEXT — re-survey + FILE SPLIT GATE**: `component_graph.zig` = 1895/2000; the next CM-marshal slice (list<record>
-   / multi-param-with-pointer / variant — all niche, consumer-gated) MUST first extract the boundary marshalling into
-   a sibling `component_boundary.zig` (ADR-0099 split, architectural chunk) or it breaches the hard cap. Options next
-   cycle: (a) do that split (clean, drivable), or (b) re-survey debt — if no higher-value drivable item, the CM
-   aggregate arc is complete-enough → legit bucket-3 w/ re-arm (D-330 bucket-2, D-331A hard-parked, D-464 async, 21
-   blocked-by). Prefer (a) only if more CM shapes are genuinely wanted; else the split is itself low-value churn.
-   PARKED (do NOT drive): **D-330** c_sha256 `\n` PROVABLY-BLOCKED (bucket-2; 1-byte cosmetic, constraint conflict);
-   the 21 `blocked-by` (upstream Zig D-010/148/312/323 · proposal D-300/336 · phase/time-gate · consumer/corpus); D-464 async.
-2. **Audit DONE 2026-06-18 CLEAN** (0 block/0 soon; fuzz 0 crashes). **v128 spill story COMPLETE** (D-460/D-461/D-034
-   all `note`).
+**COMPLETE this session (detail in debt/git/lessons)**: **D-467** simd invoke-boundary skips (271→1, no latent
+v128-ABI bug); **D-305 cross-component AGGREGATE marshalling** — generic `defineFuncRaw` arity-collapse (a) + record
+param/result flat (b1/b2) + record-with-string BOTH directions (b3/b4, canon liftFlat/lowerFlat + load/store);
+comp-assert 170/0; 3-host green. Lessons `host-fn-two-value-types`, `component-record-retptr-asymmetry`.
+
+**Step-0.7 NOTE**: `failed command: test…--listen=-` is COSMETIC (exits 0); trust `[run_remote_*] OK/FAIL` + `N
+passed, 0 failed`, not that line.
+
+**PARKED / gated (do NOT speculatively grind)**: D-305 long-tail (list<record>/variant/multi-param — niche, + needs
+`component_graph.zig` 1895/2000 file-split first); D-330 c_sha256 PROVABLY-BLOCKED (bucket-2); D-464 async; 21
+`blocked-by` (upstream/proposal/time-gate/corpus).
+
+## Active bundle
+
+- **Bundle-ID**: D-331A-poison-bisect
+- **Cycles-remaining**: ~2-3 (localize slot → fix)
+- **Continuity-memo**: arm64 REGALLOC SPILL live-range hole — `mallocgcTiny`(func 233) reads an UNINITIALIZED spill
+  slot (poison-confirmed: a prologue frame-fill makes the NONDETERMINISTIC JIT deterministic). NEXT documented step
+  = escalating per-8-byte poison frame-fill (garbage encodes its source offset) to localize WHICH slot/offset → then
+  audit regalloc spill emission + `op_call.zig spillHomedCallerSaved` for a call-crossing TEMP vreg whose spill-STR
+  misses a merge path (D-291 only covered homed locals; bug is in SPILL, not op_control/load-encoders). Full plan:
+  D-331 row + `private/notes/d331a-memdiff-plan.md`. NICHE: fat-Go JIT-run-stage only; interp+spec+TinyGo green.
+  Driving hard/parked per the no-premature-deferral directive — ONE bounded step/cycle, reassess (not re-pouring the
+  prior ~1.3M-token grind).
+- **Exit-condition**: the uninitialized slot's producing instruction/vreg identified (fix = a localized
+  spill-emission change) OR a poison-bisect finding that re-scopes the root cause.
 
 ## Closed arcs (detail in ADRs/git/debt)
 
