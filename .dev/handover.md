@@ -47,12 +47,16 @@ gate, repeat. Do NOT stop to ask "is this high-value." **Inventory DONE** (subag
 (only real skip-impl = simd `directive-register` = test-harness residue; #2/#3 validator-rejects already done, stale
 comments fixed @94f0b7122). **#9 DONE @97abd6887**: arm64 v128 LOCAL ZERO-INIT large-frame `UnsupportedOp` (>32760
 → frameStrGpr/X16; fixture setup_v128_zeroinit) — the 9 go_* already compiled (stale "fail"). **D-330 + D-331A
-root FOUND (the elusive class = ONE bug); fix arm64-correct but REVERTED (x86_64 regression).** See `## Active
-bundle` for the full root + the re-land plan. Reverted to keep main green; diff @1c59101ff; lesson
-`block-result-merge-vreg-survival`.
-**Sweep queue (after re-land)**: D-209 memory64 >4GiB offset (≤1 CHUNK — survey found the codegen ALREADY exists
-both arches; only an artificial cap at `lower.zig:1004` gates it; lift it for i64 memories + fixture) → D-336
-borrow-export (blocked sort=value) → D-456 host-stubs (test-harness). (#1 simd = test-harness.)
+CLOSED @69a0953b1 (both arches), after 3 reverts** — the elusive JIT-value-miscompile class (~1.9M tokens) was
+TWO liveness bugs: (1) block-result merge vregs not surviving an intervening call (callee-saved clobber); (2) a
+forward `br` draining the sim stack to its TARGET block's depth instead of the INNERMOST open block's, prematurely
+killing a vreg on a br_table fall-out path. c_sha256 107, go_hello prints, `labels.wast switch`=50 on BOTH arm64 +
+x86_64. **VERIFICATION LESSON (cost 3 reverts)**: a JIT-codegen fix MUST be checked with `test-spec-wasm-2.0-assert`
+(the JIT assert runner) on BOTH arm64 AND `-Dtarget=x86_64-macos` — NOT `test-spec`(interp)/`zig build test`(unit).
+D-330/D-331 discharged; lesson updated.
+**Sweep queue (next)**: D-209 memory64 >4GiB offset (≤1 CHUNK — codegen ALREADY exists both arches; only an
+artificial cap at `lower.zig:1004` gates it; lift for i64 memories + fixture) → D-336 borrow-export (blocked
+sort=value) → D-456 host-stubs (test-harness). (#1 simd = test-harness.)
 
 **Phase 17 完成形 plateau** (validated — do NOT re-walk): async COMPLETE; v128 spill (D-034/D-460/D-461) CLOSED;
 surface audits clean 2026-06-18; fuzz 0-crash; realworld JIT compile 56/56. NOT-WORTH: D-294-R2 TrapKind.
@@ -67,26 +71,8 @@ passed, 0 failed`, not that line.
 
 **PARKED / gated (do NOT speculatively grind)**: D-305 long-tail (list<record>/variant/multi-param — niche, +
 `component_graph.zig` 1895/2000 file-split first); D-464 async; 21 `blocked-by` (upstream/proposal/time-gate/corpus).
-(D-331A's old "needs-infrastructure / NICHE" text is SUPERSEDED — root found, fix arm64-correct; see the bundle.)
+(D-330/D-331A now CLOSED @69a0953b1 — see Current state.)
 
-## Active bundle
-
-- **Bundle-ID**: D-330-D-331A-reland (block-merge-vreg liveness fix — STILL FAILS x86_64 JIT)
-- **Cycles-remaining**: 1-2
-- **Continuity-memo**: ROOT FOUND + arm64-correct for c_sha256/go (closes D-330 `\n` + D-331A; diff @1c59101ff,
-  lesson `block-result-merge-vreg-survival`). The `liveness.zig` `captureBlockMergeVregs` extends a block-result
-  merge vreg's range across an intervening call (so it doesn't get parked in a call-clobbered callee-saved reg).
-  Attempt 2 added br_table multi-target capture (@45be79c7f) — STILL `labels.wast switch got 25` on x86_64 JIT.
-  **VERIFICATION GAP (the repeated mistake)**: `test-spec` and `zig build test` are INTERP/unit — they DON'T run
-  the labels JIT assert. The labels JIT test is **`zig build test-spec-wasm-2.0-assert`** (the
-  `spec_assert_runner_non_simd`, 25536 directives, JIT-execute). MUST verify with THAT on BOTH arm64 AND **x86_64
-  via Rosetta `zig build test-spec-wasm-2.0-assert -Dtarget=x86_64-macos`**. NEXT: re-apply the fix, run
-  test-spec-wasm-2.0-assert on x86_64-macos → reproduce `got 25` LOCALLY, then check whether labels passes on
-  arm64 JIT (it may fail there too — never confirmed). The x86_64 EMIT side (`op_control.zig` x86_64 block-merge /
-  emitEndIntra for br_table) likely needs the fix too — liveness alone isn't enough on x86_64.
-- **Exit-condition**: `labels.wast switch`=50 + c_sha256=107 + go_hello prints, verified by
-  `test-spec-wasm-2.0-assert` (NOT test-spec) on BOTH arm64 AND x86_64 (Rosetta) + 3-host ubuntu/win green →
-  re-discharge D-330 + D-331.
 
 ## Closed arcs (detail in ADRs/git/debt)
 

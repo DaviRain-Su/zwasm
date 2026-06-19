@@ -1,14 +1,22 @@
 # Block-result merge vregs must survive an intervening call (D-330 + D-331A)
 
-> **STATUS 2026-06-20: fix IDENTIFIED + arm64-correct, but REVERTED** — the
-> `liveness.zig` change below closes D-330/D-331A on arm64 (c_sha256 107,
-> go_hello prints) yet REGRESSES x86_64 `labels.wast switch` (`got 25, expected
-> 50`): the `captureBlockMergeVregs` call fires on a single `depth` but `br_table`
-> has MULTIPLE targets, so the multi-target br_table → block-result merge case is
-> mishandled (x86_64 regalloc surfaces it; arm64 happened to allocate OK). The
-> diff is preserved in commit `1c59101ff`. RE-LAND requires handling `br_table`
-> (capture for every target depth) + verifying on x86_64 (Rosetta `-Dtarget=
-> x86_64-macos` + ubuntu). The diagnosis + method below are CORRECT.
+> **STATUS: LANDED @69a0953b1 (both arches), after 3 reverts.** Two-part fix: (1)
+> the block-merge-vreg survival below; (2) a SECOND, pre-existing liveness bug the
+> fix's added register pressure EXPOSED — a forward unconditional `br` drained the
+> sim stack to its **target** block's `entry_depth`, prematurely killing a vreg
+> that lives on a `br_table` fall-out path that *skips* the `br` (labels.wast
+> switch: `i32.const 10` died, the freed reg got reused by `const 5` → `mul`=5×5=25
+> not 10×5=50). Fix: a `br` drains only to the **innermost open block's**
+> entry_depth (br is an unconditional terminator → next reachable code resumes at
+> the innermost `.end`). This regressed BOTH arches, not just x86_64.
+>
+> **VERIFICATION LESSON (cost: 3 reverts):** a JIT-codegen fix MUST be verified
+> with the **JIT assert runner** — `zig build test-spec-wasm-2.0-assert` (the
+> `spec_assert_runner_non_simd`, JIT-execute, has `labels.wast switch`) on BOTH
+> arm64 AND `-Dtarget=x86_64-macos` (Rosetta = x86_64 JIT execution). `test-spec`
+> (interp) and `zig build test` (unit) and `test-realworld-diff` all passed while
+> the labels JIT assert failed; cross-compile is NOT execution. When a fix touches
+> regalloc/liveness/emit, run the assert runner that exercises the JIT path.
 
 
 **The bug** (one root, two famous symptoms): a `block (result T)` reached by a
