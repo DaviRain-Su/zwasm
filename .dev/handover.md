@@ -32,18 +32,19 @@ CLOSED (below). **windowsmini RESUMED**. Version `2.0.0-alpha.3`.
 ## Active bundle
 
 - **Bundle-ID**: D-034 SIMD spill-completeness cohort (scalar-operand sibling of D-461 + the v128-source arith gap)
-- **Cycles-remaining**: ~3 (12 of 18 x86_64 int-arith (g) sites remain). DONE through @195218eac — 6 sites:
-  Neg @22f748d82, Pmin/Pmax @3a43ef6e4, signed-cmp(16) @ba6ea97fe, Ne @ab99e083a, unsigned-cmp(12) @c1beacfab,
-  extmul_low(4) @195218eac. cmp/ne/extmul reuse the 3-operand template (operands→stage0/1 or home, dst→home/XMM7,
-  store-if-spilled; XMM7 alias stash fires only when dst home; byte-identical no-spill). Added file-local
-  resolveOrLoadV128 + storeV128IfSpilledLocal helpers in op_simd_int_cmp_lane.zig.
-- **Continuity-memo**: x86_64-only asymmetry (arm64 routes all via spill-aware shared helpers). **EXACT 12-remaining
-  table in the D-034 debt row.** NEXT: extmul_high + i64x2_extmul (PSHUFD; HIGH uses BOTH stages internally → use
-  PSHUFD-from-memory or dst-as-load-temp), LoadExtend-dst/StoreLane-vec (single operand, need a MEMORY fixture).
-  HARD (both stages internal → XMM7-park/in-place): i8x16 Shl/ShrU/ShrS, swizzle/shuffle (PSHUFB ctrl), popcnt, i64x2
-  Mul/Abs/ShrS. REJECT a global 3rd-stage-XMM pool cut. **FIXTURE GOTCHA (cost a miscompile-hunt 2026-06-19): verify
-  each fixture's expected value via wasmtime `--invoke f -W gc=y -W function-references=y <f>.wasm` (interp has no
-  SIMD); double-check the SIMD opcode byte (a mistyped i32x4.gt_s=0x3b as 0x37=eq faked a miscompile).**
+- **Cycles-remaining**: ~3 (9 of 18 x86_64 int-arith (g) sites remain). DONE through @af0b84418 — 9 sites: Neg,
+  Pmin/Pmax, signed-cmp(16), Ne, unsigned-cmp(12), extmul_low(4), extmul_high(4)+i64x2_extmul(4) @c6b2744f5,
+  i64x2_abs @af0b84418. Templates: cmp/ne/extmul-low = 3-operand (operands→stage0/1 or home, dst→home/XMM7,
+  store-if-spilled, XMM7 alias-stash only when dst home, byte-identical no-spill); extmul-high/i64x2 use dst/XMM15 as
+  the spilled-operand load-temp; abs/neg park the scratch on XMM7 + src/dst→stage0/1. File-local resolveOrLoadV128 +
+  storeV128IfSpilledLocal in op_simd_int_cmp_lane.zig.
+- **Continuity-memo**: x86_64-only asymmetry (arm64 routes all via spill-aware shared helpers). **EXACT 9-remaining
+  table in the D-034 debt row.** NEXT: LoadExtend-dst :446 / StoreLane-vec :571 (op_simd.zig; single operand, need a
+  MEMORY fixture — different from the array.new_fixed vehicle). HARD (both stages internal → XMM7-park / dst-as-temp):
+  i8x16 Shl/ShrU/ShrS, i64x2 ShrS, swizzle/shuffle (PSHUFB ctrl), popcnt, i64x2 Mul. REJECT a global 3rd-stage-XMM
+  pool cut. **FIXTURE GOTCHA: verify each fixture's value via wasmtime `--invoke f -W gc=y -W function-references=y
+  <f>.wasm` (interp has no SIMD); double-check the SIMD opcode byte (a mistyped i32x4.gt_s=0x3b as 0x37=eq faked a
+  miscompile 2026-06-19).**
 - **Exit-condition**: every a–g sub-category's operand forced to spill flows through its op on BOTH arches; zero
   bare resolveGpr/resolveFp/resolveXmm SPILL-EXEMPT sites remain (except the structural 3-V-reg select/bitselect).
 
@@ -51,11 +52,11 @@ CLOSED (below). **windowsmini RESUMED**. Version `2.0.0-alpha.3`.
 
 0. **ADR-0195 guest↔guest async — CAMPAIGN COMPLETE** (D-335 closed; detail in git + ADR-0195; residuals D-463
    CLOSED / D-464 future-bucket). **D-461 v128-DST-spill arc COMPLETE both arches** (FP replace_lane @4acd24152).
-1. **Active bundle = D-034** (above): through @195218eac — 6 sites DONE (Neg, Pmin/Pmax, signed-cmp, Ne, unsigned-cmp,
-   extmul_low). **REMAINING = 12 x86_64 int-arith (g) sites** (exact table in the D-034 debt row): extmul_high,
-   i64x2_extmul, swizzle, shuffle, i8x16 Shl/ShrU/ShrS, i64x2 Abs/ShrS/Mul, popcnt, LoadExtend-dst, StoreLane-vec.
-   Drive op-by-op TDD (array.new_fixed v128 fixture, RED→GREEN both arches); verify values via wasmtime (GC flags).
-   NEXT = extmul_high/i64x2_extmul; then LoadExtend/StoreLane (memory fixture).
+1. **Active bundle = D-034** (above): through @af0b84418 — 9 sites DONE. **REMAINING = 9 x86_64 int-arith (g) sites**
+   (exact table in the D-034 debt row): LoadExtend-dst, StoreLane-vec, swizzle, shuffle, i8x16 Shl/ShrU/ShrS, i64x2
+   ShrS, i64x2 Mul, popcnt. Drive op-by-op TDD (array.new_fixed v128 fixture, RED→GREEN both arches; LoadExtend/
+   StoreLane need a MEMORY fixture); verify values via wasmtime (GC flags). NEXT = LoadExtend/StoreLane, then the HARD
+   both-stages-internal cluster (shifts/swizzle/shuffle/mul/popcnt).
 2. **Audit DONE 2026-06-18 (CLEAN)** — `audit_scaffolding` 0 block/0 soon (J.3 chronic debt); fuzz 0 crashes.
 3. **D-460 v128-GC JIT emit DONE both arches** (@3d8be3c00/@8137c7268/@5292569e0; 6 runI32Export fixtures = the
    authoritative JIT verification). Only an optional edge fixture remains (low value). Consumer-gated, do NOT grind:
