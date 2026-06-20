@@ -640,6 +640,12 @@ fn preDecodeSectionBodies(alloc: std.mem.Allocator, module: *Module) bool {
             if (is_funcref_family) {
                 for (seg.funcidxs) |fidx| {
                     if (fidx == std.math.maxInt(u32)) continue; // ref.null sentinel
+                    // `global.get N` marker (top-bit set): the entry resolves at
+                    // table-init time, not a funcidx — skip the range check. The
+                    // JIT path (compile.zig) already had this; the interp
+                    // validator was out of sync, wrongly rejecting a valid
+                    // `(elem funcref (global.get $g))` (D-476).
+                    if (sections.elemEntryIsGlobalGet(fidx)) continue;
                     if (fidx >= total_funcs) return false;
                 }
             }

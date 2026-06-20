@@ -223,6 +223,26 @@ test "parse: GC abstract heap reftypes in imported table + element ref.null are 
     defer m.deinit(testing.allocator);
 }
 
+test "parse: element-segment items global.get + concrete typed-ref accepted (D-476, fuzz-found)" {
+    // (elem funcref (global.get $g)) + (elem (ref null $t) (ref.null $t)). The
+    // element-item reader rejected a global.get-marker in the funcidx-range
+    // check (interp validator, out of sync with the JIT) and a `ref.null $t`
+    // CONCRETE typeidx (readValType only handled abstract heads). Both fixed:
+    // the funcidx-range loop skips the global.get marker, and the 0xD0 reader
+    // routes through readTypedRef (abstract head OR concrete s33 index).
+    // wasm-tools-validated 84-byte module; instantiates on both engines.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x04, 0x01, 0x60, 0x00, 0x00,
+        0x03, 0x03, 0x02, 0x00, 0x00, 0x06, 0x06, 0x01, 0x70, 0x00, 0xd2, 0x00, 0x0b, 0x07,
+        0x05, 0x01, 0x01, 0x66, 0x00, 0x01, 0x09, 0x0e, 0x02, 0x05, 0x70, 0x01, 0x23, 0x00,
+        0x0b, 0x05, 0x63, 0x00, 0x01, 0xd0, 0x00, 0x0b, 0x0a, 0x07, 0x02, 0x02, 0x00, 0x0b,
+        0x02, 0x00, 0x0b, 0x00, 0x17, 0x04, 0x6e, 0x61, 0x6d, 0x65, 0x01, 0x04, 0x01, 0x00,
+        0x01, 0x61, 0x04, 0x04, 0x01, 0x00, 0x01, 0x74, 0x07, 0x04, 0x01, 0x00, 0x01, 0x67,
+    };
+    var m = try parse(testing.allocator, &bytes);
+    defer m.deinit(testing.allocator);
+}
+
 test "parse: needs_gc_heap flag set true when type section declares struct (10.G-foundation cycle 2; ADR-0115 §1)" {
     // Wire test: parser runs needs_heap_detector at the end of
     // parse() so Module.needs_gc_heap reflects the module's

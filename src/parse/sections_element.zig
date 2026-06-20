@@ -295,12 +295,13 @@ fn readFuncrefInitExpr(body: []const u8, pos: *usize, expected: ValType) section
         0xD0 => blk: {
             // ref.null <heaptype>: the heaptype may be ANY abstract head
             // (func/extern/any/eq/i31/struct/array/none/noextern/nofunc/exn),
-            // not just func/extern — its byte encodes the same as the nullable
-            // reftype shorthand, so map via the shared reader (mirrors the
-            // imported-table + element-segment reftype sites). A hardcoded
-            // 0x70/0x6F switch wrongly rejected `(ref.null none)` etc. in valid
-            // GC element segments.
-            const rt_vt = init_expr.readValType(body, pos) catch return sections.Error.BadValType;
+            // not just func/extern, AND the heaptype may be a CONCRETE typeidx
+            // (`(ref.null $t)` = 0xD0 + s33 typeidx), not just an abstract head.
+            // readTypedRef decodes the heaptype directly (abstract head byte OR
+            // non-negative s33 concrete index) → `(ref null ht)`; a plain
+            // readValType only handled the abstract heads (whose bytes coincide
+            // with reftype shorthands) and rejected `(ref.null $t)` (D-476).
+            const rt_vt = init_expr.readTypedRef(body, pos, true) catch return sections.Error.BadValType;
             if (!rt_vt.eql(expected)) return sections.Error.InvalidFunctype;
             break :blk std.math.maxInt(u32);
         },
