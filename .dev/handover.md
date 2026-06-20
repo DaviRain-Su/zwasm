@@ -62,15 +62,14 @@ test-spec-wasm-2.0-assert 25539/0 arm64 + x86_64-macos, test+lint green. Lesson 
 (D-283 (A)+(B) cleared: D-330 miscompiles + D-468 go_* hangs). gap-class #1 (wasmtime-works/zwasm-doesn't) =
 0% for the realworld corpus; a future JIT-vs-wasmtime byte mismatch now fails the gate. Run the lane after
 JIT-codegen changes (`zig build test-realworld-diff-jit`, Mac-host, needs wasmtime).
-**Sweep queue (gap-inventory 2026-06-20, VERIFIED)**: only WASI preview1 stubs remain (gap-class #2; spec
-skip-impl=0, debt now=0, UnsupportedOp=graceful — all confirmed closed). **(1+2) fd_seek + fd_tell DONE
-@571fb5176** — OpenFd gained a logical `pos` cursor (Zig 0.16 std.Io.File is positional-only), fd_read/write use
-positional IO @pos + advance, seek/tell operate on it; set/cur/end + negative-inval tested, file round-trip
-green. **NEXT (3) poll_oneoff clock subscriptions** (`clocks.zig:167` → notsup for nsubs!=0): decode the
-subscription_u union (userdata@0, tag@8 eventtype, clock body: id@16/timeout@24/precision@32/flags@40, 48B
-each), compute the earliest clock timeout, sleep, write 1 event (32B: userdata@0/errno@8/type@10) + nevents.
-Only clock subs (Go's scheduler park); fd-read/write subs can stay notsup until a guest needs them. Then re-run
-gap-inventory. D-336 blocked (sort=value); D-456 = test-harness.
+**Sweep front — KNOWN gaps EXHAUSTED (2026-06-20)**: the gap-inventory's 3 verified WASI preview1 stubs are
+all DONE — fd_seek + fd_tell @571fb5176 (OpenFd gained a logical `pos` cursor; positional IO), poll_oneoff clock
+subscriptions @132cf5527 (decode 48B subscription, sleep to earliest deadline, write 1 clock event; fd subs stay
+notsup). Sweep status: spec skip-impl=0, debt `now`=0, realworld JIT 56/56 gating, no UnsupportedOp runtime
+crash, fuzz 0-crash. **NEXT (broaden the net — known concrete gaps are 0)**: options, EASIEST-first — (a) add a
+realworld/edge fixture exercising file seek + poll end-to-end (locks in the new conformance via the gating
+diff-jit lane; may surface integration gaps); (b) re-run gap-inventory with a WIDER lens (more diverse
+wasmtime-differential programs, deeper fuzz seeds); (c) D-456 host-stub test-harness. D-336 blocked (sort=value).
 
 **Phase 17 完成形 plateau** (validated — do NOT re-walk): async COMPLETE; v128 spill (D-034/D-460/D-461) CLOSED;
 surface audits clean 2026-06-18; fuzz 0-crash; realworld JIT run 56/56 byte-match wasmtime (gating). NOT-WORTH: D-294-R2 TrapKind.
