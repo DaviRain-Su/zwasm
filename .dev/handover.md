@@ -62,15 +62,15 @@ table harness wiring D-475, JIT table64 codegen, wasmtime differential on a new 
 **extended-const @d258097e9** (i32/i64 add/sub/mul in const-exprs, 6 eval/validate sites) + **D-476 @4b10c569c**
 (element global.get + concrete typed-ref `(ref.null $t)` parse-acceptance) — both engines, closed. **8 gaps fixed +
 2 divergences + 2 disproven this session.**
-**D-475 table64: SELF-CONTAINED table64 FULLY interp-conformant — 11/13 memory64 spec dirs distilled + green.** Done
-across slices: parse types @3cbc804ef; validator index-width + interp runtime (TableInstance.idx_type, full-i64 read,
-overflow-safe grow) @389131e36 (enabled by validator_helpers.zig extraction @d96297628); JIT GUARD @389131e36
-(compileWasm rejects i64-table modules — interp is the conformant path); active-element-segment i64-offset fix
-@a7609a65b (turned table_copy/table_init/call_indirect green); u64 limits @cf02b765c+@eac1ed76b (closed table.30/32).
-The last 2 dirs (table.12/34, table_grow.6/7 = UnknownImport) are a **HARNESS-COVERAGE gap, NOT a zwasm miss** (lesson
-`2026-06-20-spec-harness-cross-module-table-unwired`): the harness wires `(register)` cross-module imports for
-func+global ONLY (no table); zwasm's linker DOES support it (defineTable→TableAlias). **NEXT: pick a FRESH sweep axis**
-— table64 conformance is done; cross-module harness wiring + (4) JIT i64 table codegen are tracked lower-pri D-475 debt.
+**D-475 table64: SELF-CONTAINED table64 FULLY interp-conformant — 11/13 memory64 spec dirs distilled + green** (all
+slices done; detail in debt row — parse/validator/interp-runtime/u64-limits/element-offset, JIT GUARD keeps i64-table
+modules off the still-i32 JIT). The 2 remaining dirs (table.12/34, table_grow.6/7) = **HARNESS-COVERAGE gap, NOT a
+zwasm miss** (harness wires `(register)` cross-module func+global only, no table; zwasm's linker supports it via
+defineTable→TableAlias; lesson `2026-06-20-spec-harness-cross-module-table-unwired`). **Slice 4 (JIT table64 codegen)
+SURVEYED — STRUCTURAL, deferred to FRESH context**: not a W→X flip — `jit_abi.TableSlice.len`/`table_size` are u32 so it
+needs a u32→u64 descriptor widening FIRST (Win64-risk: pinned X25 + len offsets + imm12 asserts); bounded 4-cycle bundle
+(C1 widen+thread, C2 get/set W→X, C3 call_indirect, C4 remove-guard) in the debt row, PERF not correctness (low-pri).
+**NEXT: pick a FRESH sweep axis** — table64 conformance itself is DONE.
 
 **Phase 17 完成形 plateau** (validated — do NOT re-walk): async COMPLETE; v128 spill (D-034/D-460/D-461) CLOSED;
 surface audits clean 2026-06-18; fuzz 0-crash; realworld JIT run 56/56 byte-match wasmtime (gating). NOT-WORTH: D-294-R2 TrapKind.
