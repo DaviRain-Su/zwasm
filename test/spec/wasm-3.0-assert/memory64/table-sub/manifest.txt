@@ -1,0 +1,3 @@
+module table-sub.0.wasm
+assert_invalid table-sub.1.wasm
+assert_invalid table-sub.2.wasm
