@@ -664,9 +664,13 @@ fn instantiateJit(store: *Store, module: *const Module, limits: InstantiateLimit
         return null;
     };
     // ADR-0179 budgets: the JIT meters poll-site crossings (not interp insns);
-    // null axes stay unmetered. Memory cap clamps `memory.grow` at setup.
+    // null axes stay unmetered. Memory/table caps clamp grow at runtime.
     jit.setFuel(limits.fuel);
     jit.setMemoryPagesLimit(limits.max_memory_pages);
+    jit.setTableElementsLimit(limits.max_table_elements);
+    // ADR-0200 — point the JIT interrupt poll at the now-heap-pinned own flag so
+    // the facade `interrupt()` can cooperatively cancel a running guest.
+    jit.armSelfInterrupt();
 
     const inst = alloc.create(Instance) catch {
         jit.deinit(alloc);

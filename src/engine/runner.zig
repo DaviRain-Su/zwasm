@@ -881,6 +881,13 @@ pub const JitInstance = struct {
     compiled: CompiledWasm,
     owned: setup_mod.RuntimeOwned,
     wasm_bytes: []const u8,
+    /// ADR-0200 — host-owned cooperative-interruption flag for facade-created
+    /// instances (the embedding API's `Instance.interrupt`). Heap-pinned with
+    /// the JitInstance (stable address); `armSelfInterrupt` points the JIT
+    /// runtime's `interrupt_ptr` at it AFTER heap placement. Mirrors the interp
+    /// `Runtime.interrupt_flag_storage`. Stack-allocated callers that drive
+    /// interruption via an external atomic (`setInterruptFlag`) leave it unused.
+    interrupt_flag: std.atomic.Value(u32) = .init(0),
 
     pub fn init(allocator: Allocator, wasm_bytes: []const u8) Error!JitInstance {
         return initLinked(allocator, wasm_bytes, &.{}, &.{}, &.{});
@@ -959,6 +966,35 @@ pub const JitInstance = struct {
     /// stores a nonzero value. The flag must outlive every `invoke`.
     pub fn setInterruptFlag(self: *JitInstance, flag: ?*const std.atomic.Value(u32)) void {
         self.owned.rt.interrupt_ptr = flag;
+    }
+
+    /// ADR-0200 — arm cooperative interruption against THIS instance's own
+    /// heap-pinned `interrupt_flag` (the embedding-API model). Call once after
+    /// the JitInstance reaches its final heap address; thereafter
+    /// `requestInterrupt` / `clearInterrupt` drive the prologue/back-edge poll.
+    pub fn armSelfInterrupt(self: *JitInstance) void {
+        self.owned.rt.interrupt_ptr = &self.interrupt_flag;
+    }
+
+    /// ADR-0200 — request / clear / query interruption via the owned flag (only
+    /// meaningful after `armSelfInterrupt`). The guest traps `Error.Trap`
+    /// (trap_kind 16) at its next entry / back-edge poll once set.
+    pub fn requestInterrupt(self: *JitInstance) void {
+        self.interrupt_flag.store(1, .monotonic);
+    }
+    pub fn clearInterrupt(self: *JitInstance) void {
+        self.interrupt_flag.store(0, .monotonic);
+    }
+    pub fn interruptRequested(self: *const JitInstance) bool {
+        return self.interrupt_flag.load(.monotonic) != 0;
+    }
+
+    /// ADR-0200 / D-332 — host cap on table size in ELEMENTS (`table.grow` past
+    /// it returns the spec grow-failure −1, not a trap). `null` clears the cap.
+    /// JIT mirror of the facade `setMemoryPagesLimit`; writes the runtime's
+    /// `store_table_elements_max` that `jitTableGrow` checks.
+    pub fn setTableElementsLimit(self: *JitInstance, max_elements: ?u64) void {
+        self.owned.rt.store_table_elements_max = max_elements orelse std.math.maxInt(u64);
     }
 
     /// ADR-0179 #3b / D-314 — arm (or disarm with null) the JIT fuel budget.

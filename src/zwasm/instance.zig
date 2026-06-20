@@ -45,62 +45,73 @@ pub const Instance = struct {
     /// ADR-0179 #3a — request cooperative interruption of this instance from
     /// any thread (timeout / host cancellation). The running guest traps
     /// `error.Interrupted` at the next function entry or loop back-edge poll.
-    /// Idempotent. Call `clearInterrupt` before re-invoking.
-    ///
-    /// INVARIANT / D-314 seam: the facade only produces interp-backed instances
-    /// today, so `handle.runtime` is always present and the budget mutators
-    /// always take effect. The assert pins that — a future JIT-backed facade
-    /// instance (`handle.runtime == null`) MUST route to the JIT limit path
-    /// (D-314), never fall through this setter as a no-op.
+    /// Idempotent. Call `clearInterrupt` before re-invoking. Routes to the
+    /// active engine (ADR-0200): interp flag storage or the JIT's own flag.
     pub fn interrupt(self: *Instance) void {
-        std.debug.assert(self.handle.runtime != null);
-        if (self.handle.runtime) |rt| rt.interrupt_flag_storage.store(1, .monotonic);
+        if (self.handle.runtime) |rt| {
+            rt.interrupt_flag_storage.store(1, .monotonic);
+        } else if (self.jitHandle()) |jit| {
+            jit.requestInterrupt();
+        }
     }
 
     /// Clear a prior `interrupt()` so this instance can be invoked again.
     pub fn clearInterrupt(self: *Instance) void {
-        std.debug.assert(self.handle.runtime != null); // D-314 seam (see `interrupt`)
-        if (self.handle.runtime) |rt| rt.interrupt_flag_storage.store(0, .monotonic);
+        if (self.handle.runtime) |rt| {
+            rt.interrupt_flag_storage.store(0, .monotonic);
+        } else if (self.jitHandle()) |jit| {
+            jit.clearInterrupt();
+        }
     }
 
     /// Whether an interruption is currently pending (set, not yet cleared).
     pub fn interruptRequested(self: *Instance) bool {
         if (self.handle.runtime) |rt| return rt.interrupt_flag_storage.load(.monotonic) != 0;
+        if (self.jitHandle()) |jit| return jit.interruptRequested();
         return false;
     }
 
     /// ADR-0179 #3c — impose a host max on linear-memory size, in PAGES (of
     /// memory 0's page size), an extra cap below the module's declared max.
     /// `memory.grow` past it returns the spec grow-failure (−1), not a trap.
-    /// `null` clears the host cap. (Interp/facade path; the JIT `--engine jit`
-    /// grow cap is clamped at setup — #3c-2.)
+    /// `null` clears the host cap. Routes to the active engine (ADR-0200).
     pub fn setMemoryPagesLimit(self: *Instance, max_pages: ?u64) void {
-        std.debug.assert(self.handle.runtime != null); // D-314 seam (see `interrupt`)
-        if (self.handle.runtime) |rt| rt.store_memory_pages_max = max_pages;
+        if (self.handle.runtime) |rt| {
+            rt.store_memory_pages_max = max_pages;
+        } else if (self.jitHandle()) |jit| {
+            jit.setMemoryPagesLimit(max_pages);
+        }
     }
 
     /// D-316 — impose a host max on table size, in ELEMENTS, applied to every
     /// table in this instance (an extra cap below each table's declared max).
     /// `table.grow` past it returns the spec grow-failure (−1), not a trap.
-    /// `null` clears the host cap. (Interp/facade path; the JIT table-grow cap
-    /// is a documented post-v0.1 enhancement — see the D-314 seam on `interrupt`.)
+    /// `null` clears the host cap. Routes to the active engine (ADR-0200).
     pub fn setTableElementsLimit(self: *Instance, max_elements: ?u64) void {
-        std.debug.assert(self.handle.runtime != null); // D-314 seam (see `interrupt`)
-        if (self.handle.runtime) |rt| rt.store_table_elements_max = max_elements;
+        if (self.handle.runtime) |rt| {
+            rt.store_table_elements_max = max_elements;
+        } else if (self.jitHandle()) |jit| {
+            jit.setTableElementsLimit(max_elements);
+        }
     }
 
-    /// ADR-0179 #3b — set the deterministic instruction budget (fuel). The
-    /// interp decrements once per executed instruction and traps
-    /// `error.OutOfFuel` at 0. `null` = unmetered. (Interp/default engine; JIT
-    /// fuel is a documented post-v0.1 enhancement.)
+    /// ADR-0179 #3b — set the deterministic execution budget (fuel). The interp
+    /// decrements once per executed instruction; the JIT meters poll-site
+    /// crossings (function prologue + loop back-edges) — engines meter
+    /// differently by design. Both trap `error.OutOfFuel` at exhaustion. `null`
+    /// = unmetered. Routes to the active engine (ADR-0200).
     pub fn setFuel(self: *Instance, fuel: ?u64) void {
-        std.debug.assert(self.handle.runtime != null); // D-314 seam (see `interrupt`)
-        if (self.handle.runtime) |rt| rt.fuel = fuel;
+        if (self.handle.runtime) |rt| {
+            rt.fuel = fuel;
+        } else if (self.jitHandle()) |jit| {
+            jit.setFuel(fuel);
+        }
     }
 
     /// Remaining fuel, or `null` if unmetered / no live runtime.
     pub fn fuelRemaining(self: *Instance) ?u64 {
         if (self.handle.runtime) |rt| return rt.fuel;
+        if (self.jitHandle()) |jit| return jit.fuelRemaining();
         return null;
     }
 
@@ -232,10 +243,7 @@ pub const Instance = struct {
         // ADR-0200 — JIT-backed instance (`runtime == null`, `jit` set): route
         // to the native engine. The interp body below assumes `runtime != null`.
         if (self.handle.runtime == null) {
-            if (self.handle.jit) |jp| {
-                const jit: *_runner.JitInstance = @ptrCast(@alignCast(jp));
-                return self.invokeJit(jit, name, args, results);
-            }
+            if (self.jitHandle()) |jit| return self.invokeJit(jit, name, args, results);
             return error.ExportNotFound; // no engine attached
         }
 
@@ -334,6 +342,13 @@ pub const Instance = struct {
             results[i] = _vc.runtimeToZwasm(v, sig.results[i]);
         }
         rt.operand_len = op_base;
+    }
+
+    /// ADR-0200 — cast the Zone-1 `Instance.jit` opaque slot to the engine type
+    /// at the Zone-3 boundary. Null for an interp-backed (or empty) instance.
+    fn jitHandle(self: *Instance) ?*_runner.JitInstance {
+        const jp = self.handle.jit orelse return null;
+        return @ptrCast(@alignCast(jp));
     }
 
     /// ADR-0200 — JIT engine invoke arm. Resolves the export sig (for arity +
@@ -587,6 +602,63 @@ test "facade engine=.jit: multi-result scalar export via invokeMulti (ADR-0200)"
     try inst.invoke("swap2", &.{ .{ .i32 = 7 }, .{ .i32 = 9 } }, &results);
     try testing.expectEqual(@as(i32, 9), results[0].i32);
     try testing.expectEqual(@as(i32, 7), results[1].i32);
+}
+
+test "facade engine=.jit: interrupt traps the next invoke; clear re-enables (ADR-0200 / D-314)" {
+    // f calls g → the calling fn pins the runtime ptr so the prologue interrupt
+    // poll is emitted on BOTH arches (a no-call fn has no poll on x86_64).
+    // (module (func $g (result i32) i32.const 42)
+    //         (func (export "f") (result i32) call $g))
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60,
+        0x00, 0x01, 0x7f, 0x03, 0x03, 0x02, 0x00, 0x00, 0x07, 0x05, 0x01, 0x01,
+        0x66, 0x00, 0x01, 0x0a, 0x0b, 0x02, 0x04, 0x00, 0x41, 0x2a, 0x0b, 0x04,
+        0x00, 0x10, 0x00, 0x0b,
+    };
+    var eng = try _zwasm.Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var mod = try eng.compile(&bytes);
+    defer mod.deinit();
+    var inst = try mod.instantiate(.{ .engine = .jit });
+    defer inst.deinit();
+
+    var results = [_]_zwasm.Value{.{ .i32 = 0 }};
+    try inst.invoke("f", &.{}, &results);
+    try testing.expectEqual(@as(i32, 42), results[0].i32);
+
+    try testing.expect(!inst.interruptRequested());
+    inst.interrupt();
+    try testing.expect(inst.interruptRequested());
+    try testing.expectError(error.Interrupted, inst.invoke("f", &.{}, &results));
+
+    inst.clearInterrupt();
+    try testing.expect(!inst.interruptRequested());
+    try inst.invoke("f", &.{}, &results);
+    try testing.expectEqual(@as(i32, 42), results[0].i32);
+}
+
+test "facade engine=.jit: setFuel bounds an expensive loop with OutOfFuel (ADR-0200)" {
+    // (func (export "f") (result i32) (local $i i32)
+    //   (local.set $i (i32.const 1000000))
+    //   (loop $L (local.set $i (i32.sub (local.get $i) 1)) (br_if $L (local.get $i)))
+    //   (i32.const 42))  — ~1e6 back-edge poll crossings.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60,
+        0x00, 0x01, 0x7f, 0x03, 0x02, 0x01, 0x00, 0x07, 0x05, 0x01, 0x01, 0x66,
+        0x00, 0x00, 0x0a, 0x1c, 0x01, 0x1a, 0x01, 0x01, 0x7f, 0x41, 0xc0, 0x84,
+        0x3d, 0x21, 0x00, 0x03, 0x40, 0x20, 0x00, 0x41, 0x01, 0x6b, 0x21, 0x00,
+        0x20, 0x00, 0x0d, 0x00, 0x0b, 0x41, 0x2a, 0x0b,
+    };
+    var eng = try _zwasm.Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var mod = try eng.compile(&bytes);
+    defer mod.deinit();
+    var inst = try mod.instantiate(.{ .engine = .jit });
+    defer inst.deinit();
+
+    inst.setFuel(100); // « the ~1e6 back-edge crossings the loop needs
+    var results = [_]_zwasm.Value{.{ .i32 = 0 }};
+    try testing.expectError(error.OutOfFuel, inst.invoke("f", &.{}, &results));
 }
 
 test "facade setMemoryPagesLimit: host cap refuses memory.grow past it (ADR-0179 #3c)" {
