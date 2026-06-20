@@ -49,16 +49,18 @@ JIT --invoke result-drop @222a2e45b · table-arena SEGV @66acaeee0 · exec-fuzz 
 try_table dead-code panic @18df72ec1 (D-471) · array.new const-expr overflow @3daee4592 (D-472) · GC-reftype parse
 reject @fae437597 · D-473 JIT global-init OutOfHeap propagation @d9d3325db. Disproven: interp-non-SIMD + D-474
 (loader 7GiB = fragmentation not leak, lesson). Campaign technique (varied smith config → exec+loader fuzz → fix)
-is the productive sweep loop; new axes still surface ~1 gap each. **memory64+SIMD axis @06d0c2ea1**: the v128.load*/
-store*/load_lane/store_lane VALIDATORS hardcoded popExpect(.i32) for the memory ADDRESS — D-324's memory64 idx_type
-threading covered regular load/store + atomics but MISSED the SIMD memory ops, so valid memory64+SIMD modules were
-wrongly rejected ("expected i32 found i64 at 0xfd"). Fixed (readSimdMemarg returns memidx → memIdxTypeAt); JIT already
-lowers the i64 addr (verified roundtrip); simd_assert 25075/0. Atomics confirmed already-correct (vein closed).
-**Sweep status**: 2 fresh axes after the mem64+SIMD fix came back CLEAN — no-import rich (tail-call/multi-value/
-ref-types/GC) 500/500 compile + JIT, and maximal-features (+SIMD/relaxed-simd/threads/EH) 500/500 compile + JIT, 0
-crashes. exec-fuzz can't differential these (rich exports ≠ 0-param/single-scalar; param-widening deliberately out).
-The productive remaining veins are mem64-FEATURE COMBOS (where the SIMD gap lived) + non-fuzz gap-classes (cross-module
-table harness wiring D-475, JIT table64 codegen, wasmtime differential on a new corpus).
+is the productive sweep loop. **memory64+SIMD axis @06d0c2ea1**: v128.load*/store*/lane VALIDATORS hardcoded
+popExpect(.i32) for the address — D-324 covered regular/bulk/atomic load/store but MISSED SIMD; fixed (readSimdMemarg →
+memIdxTypeAt), JIT already lowers i64 addr, simd_assert 25075/0 (lesson `index-width-audit-all-memory-op-families`).
+**Sweep status — at a FLOOR**: fresh axes (no-import-rich, maximal-features, mem64-enabled) all CLEAN (500/500
+compile+JIT, 0 crashes, 0 validation-rejections). **wasmtime-vs-JIT differential BUILT @9ba3f8c9f**
+(`scripts/fuzz_wasmtime_diff.py`, proven exec_seed 6/0) to cover the JIT-SIMD blind spot (interp oracle is non-SIMD) —
+but raw smith corpora hit compared=0: the host-invoke **wrapper_thunk (ADR-0106) sig limitation** fails the whole module
+on any f32/v128-result or 2/4+-param func. **JIT SIMD body codegen VERIFIED CORRECT** (complex SIMD chain matches
+wasmtime + simd_assert 25075/0; the apparent divergences were ALL the wrapper limit, not miscompiles; lesson
+`wasmtime-jit-differential-wrapper-blocked`). Remaining gap-classes (all FRESH-CONTEXT, lower-pri, NOT correctness-sweep):
+cross-module table harness wiring (D-475, harness-coverage), JIT table64 codegen (D-475 slice 4, structural ABI),
+wrapper_thunk broadening (would unblock the differential). Known-item sweep is genuinely exhausted.
 **extended-const @d258097e9** (i32/i64 add/sub/mul in const-exprs, 6 eval/validate sites) + **D-476 @4b10c569c**
 (element global.get + concrete typed-ref `(ref.null $t)` parse-acceptance) — both engines, closed. **8 gaps fixed +
 2 divergences + 2 disproven this session.**
