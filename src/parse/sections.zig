@@ -649,7 +649,7 @@ pub const Import = struct {
 
 pub const ImportPayload = union(enum) {
     func_typeidx: u32,
-    table: struct { elem_type: ValType, min: u32, max: ?u32 },
+    table: struct { elem_type: ValType, min: u32, max: ?u32, idx_type: zir.IdxType = .i32 },
     memory: MemoryEntry,
     global: struct { valtype: ValType, mutable: bool },
     // Wasm 3.0 EH tag import — the tag's type-section index (10.E).
@@ -714,7 +714,7 @@ pub fn decodeImports(parent_alloc: Allocator, body: []const u8) Error!Imports {
                     else => return Error.BadValType,
                 };
                 const limits = try readLimits(body, &pos);
-                break :blk .{ .table = .{ .elem_type = elem_type, .min = limits.min, .max = limits.max } };
+                break :blk .{ .table = .{ .elem_type = elem_type, .min = limits.min, .max = limits.max, .idx_type = limits.idx_type } };
             },
             .memory => blk: {
                 const ml = try readMemLimits(body, &pos);
@@ -745,14 +745,29 @@ fn readName(body: []const u8, pos: *usize) Error![]const u8 {
     return slice;
 }
 
-fn readLimits(body: []const u8, pos: *usize) Error!struct { min: u32, max: ?u32 } {
+/// Decode a table-type's limits (Wasm spec §5.3.1 + the memory64
+/// proposal's table64 extension). Flag-byte bits: 0x01 = has_max,
+/// 0x04 = i64 idx_type (table64). Tables have no shared (0x02) or
+/// custom-page-size (0x08) bits — any other bit is malformed.
+/// table64 is comptime-gated to `-Dwasm >= v3_0` (same gate as
+/// memory64, ADR-0111 D1). min/max stay u32: a table with > 2^32
+/// cells is non-instantiable (each cell is a reference); the full
+/// u64 limit width is deferred (D-475 remaining scope).
+fn readLimits(body: []const u8, pos: *usize) Error!struct { idx_type: zir.IdxType, min: u32, max: ?u32 } {
     if (pos.* >= body.len) return Error.UnexpectedEnd;
     const flag = body[pos.*];
     pos.* += 1;
-    if (flag > 1) return Error.InvalidFunctype;
+    const has_max = (flag & 0x01) != 0;
+    const is_i64 = (flag & 0x04) != 0;
+    if ((flag & ~@as(u8, 0x05)) != 0) return Error.InvalidFunctype;
+    if (is_i64) {
+        if (comptime @intFromEnum(build_options.wasm_level) < @intFromEnum(@TypeOf(build_options.wasm_level).v3_0)) {
+            return Error.Memory64Unsupported;
+        }
+    }
     const min = try leb128.readUleb128(u32, body, pos);
-    const max: ?u32 = if (flag & 1 != 0) try leb128.readUleb128(u32, body, pos) else null;
-    return .{ .min = min, .max = max };
+    const max: ?u32 = if (has_max) try leb128.readUleb128(u32, body, pos) else null;
+    return .{ .idx_type = if (is_i64) .i64 else .i32, .min = min, .max = max };
 }
 
 pub const Tables = struct {
@@ -792,18 +807,13 @@ pub fn decodeTables(parent_alloc: Allocator, body: []const u8) Error!Tables {
                 error.UnexpectedEnd => return Error.UnexpectedEnd,
                 else => return Error.BadValType,
             };
-            if (pos >= body.len) return Error.UnexpectedEnd;
-            const lflag = body[pos];
-            pos += 1;
-            if (lflag != 0 and lflag != 1) return Error.InvalidFunctype;
-            const min = try leb128.readUleb128(u32, body, &pos);
-            const max: ?u32 = if (lflag & 1 != 0) try leb128.readUleb128(u32, body, &pos) else null;
+            const lim = try readLimits(body, &pos);
             const ie_start = pos;
             init_expr.scanInitExpr(body, &pos) catch |e| switch (e) {
                 error.UnexpectedEnd => return Error.UnexpectedEnd,
                 else => return Error.InvalidFunctype,
             };
-            t.* = .{ .elem_type = elem_type, .min = min, .max = max, .init_expr = body[ie_start..pos] };
+            t.* = .{ .idx_type = lim.idx_type, .elem_type = elem_type, .min = lim.min, .max = lim.max, .init_expr = body[ie_start..pos] };
             continue;
         }
         // function-references: table elem_type may be any reftype,
@@ -813,20 +823,11 @@ pub fn decodeTables(parent_alloc: Allocator, body: []const u8) Error!Tables {
             error.UnexpectedEnd => return Error.UnexpectedEnd,
             else => return Error.BadValType,
         };
-        if (pos >= body.len) return Error.UnexpectedEnd;
-        const flag = body[pos];
-        pos += 1;
-        // Wasm spec §5.3.1: table-type limits encoding flag
-        // must be 0 (min only) or 1 (min + max). Any other
-        // value is malformed (binary.87.wasm asserts this for
-        // flag=0x08).
-        if (flag != 0 and flag != 1) return Error.InvalidFunctype;
-        const min = try leb128.readUleb128(u32, body, &pos);
-        const max: ?u32 = if (flag & 1 != 0)
-            try leb128.readUleb128(u32, body, &pos)
-        else
-            null;
-        t.* = .{ .elem_type = elem_type, .min = min, .max = max };
+        // Wasm spec §5.3.1 table-type limits (+ table64 ext): flag 0x00/0x01
+        // (i32) or 0x04/0x05 (i64); any other bit is malformed (binary.87.wasm
+        // asserts this for flag=0x08). See readLimits.
+        const lim = try readLimits(body, &pos);
+        t.* = .{ .idx_type = lim.idx_type, .elem_type = elem_type, .min = lim.min, .max = lim.max };
     }
 
     if (pos != body.len) return Error.TrailingBytes;
@@ -1760,6 +1761,44 @@ test "decodeTables: typed-ref (ref null 0) table (function-references)" {
     try testing.expect(et.ref.heap_type == .concrete);
     try testing.expectEqual(@as(u32, 0), et.ref.heap_type.concrete);
     try testing.expectEqual(@as(u32, 2), t.items[0].min);
+}
+
+// table64 (memory64 proposal's table extension, Wasm 3.0): the table
+// limits flag reuses memory64's bit 0x04 to select an i64-indexed table.
+// Fires only under -Dwasm=v3_0; under v2_0 the comptime gate rejects with
+// Error.Memory64Unsupported (same gate as memory64, ADR-0111 D1).
+test "decodeTables: i64 table min only (table64)" {
+    if (comptime @intFromEnum(build_options.wasm_level) < @intFromEnum(@TypeOf(build_options.wasm_level).v3_0)) return;
+    // count=1; reftype=0x70 (funcref); flag=0x04 (i64, min only); min=3
+    const body = [_]u8{ 0x01, 0x70, 0x04, 0x03 };
+    var t = try decodeTables(testing.allocator, &body);
+    defer t.deinit();
+    try testing.expectEqual(zir.IdxType.i64, t.items[0].idx_type);
+    try testing.expectEqual(@as(u32, 3), t.items[0].min);
+    try testing.expectEqual(@as(?u32, null), t.items[0].max);
+}
+
+test "decodeTables: i64 table min+max (table64)" {
+    if (comptime @intFromEnum(build_options.wasm_level) < @intFromEnum(@TypeOf(build_options.wasm_level).v3_0)) return;
+    // count=1; reftype=0x70; flag=0x05 (i64, min+max); min=30, max=30
+    const body = [_]u8{ 0x01, 0x70, 0x05, 0x1E, 0x1E };
+    var t = try decodeTables(testing.allocator, &body);
+    defer t.deinit();
+    try testing.expectEqual(zir.IdxType.i64, t.items[0].idx_type);
+    try testing.expectEqual(@as(u32, 30), t.items[0].min);
+    try testing.expectEqual(@as(?u32, 30), t.items[0].max);
+}
+
+test "decodeTables: i32 table keeps idx_type i32" {
+    const body = [_]u8{ 0x01, 0x70, 0x00, 0x0A };
+    var t = try decodeTables(testing.allocator, &body);
+    defer t.deinit();
+    try testing.expectEqual(zir.IdxType.i32, t.items[0].idx_type);
+}
+
+test "decodeTables: rejects reserved limits flag bits" {
+    // 0x08 is not a valid table limits flag bit (no custom-page-sizes for tables).
+    try testing.expectError(Error.InvalidFunctype, decodeTables(testing.allocator, &[_]u8{ 0x01, 0x70, 0x08, 0x00 }));
 }
 
 test "decodeMemory: min only + min/max forms (i32 default)" {

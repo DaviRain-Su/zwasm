@@ -325,6 +325,12 @@ pub const FuncType = struct {
 /// counterpart `TableInstance` (in `runtime/runtime.zig`) holds the
 /// actual reference values.
 pub const TableEntry = struct {
+    /// Address-space width discriminator (memory64 proposal's table
+    /// extension, "table64"). `.i32` for legacy tables; `.i64` for an
+    /// `i64`-indexed table (limits-flag bit 0x04, mirroring memory64).
+    /// table.get/set/grow/size/fill/copy/init + call_indirect index this
+    /// table at this width.
+    idx_type: IdxType = .i32,
     elem_type: ValType,
     min: u32,
     max: ?u32 = null,
@@ -333,6 +339,11 @@ pub const TableEntry = struct {
     /// the initial element value. Empty = default (null_ref) fill.
     init_expr: []const u8 = &.{},
 };
+
+/// Index-width discriminator shared by the memory64 + table64 proposals:
+/// the address/index space is either 32-bit (legacy) or 64-bit. Encoded
+/// in the limits-flag byte (bit 0x04).
+pub const IdxType = enum(u1) { i32 = 0, i64 = 1 };
 
 pub const BlockKind = enum(u8) {
     block,

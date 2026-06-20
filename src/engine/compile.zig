@@ -772,6 +772,7 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
                     .elem_type = imp.payload.table.elem_type,
                     .min = imp.payload.table.min,
                     .max = imp.payload.table.max,
+                    .idx_type = imp.payload.table.idx_type,
                 };
                 write_idx += 1;
             }
