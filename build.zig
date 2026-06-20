@@ -840,6 +840,27 @@ pub fn build(b: *std.Build) void {
     const fuzz_campaign_step = b.step("fuzz-campaign", "Run the fuzz loader over the gitignored campaign corpus (§14.3 nightly)");
     fuzz_campaign_step.dependOn(&run_fuzz_campaign.step);
 
+    // `zig build test-fuzz-exec` — D-469 interp-vs-JIT EXECUTION differential.
+    // Invokes each smith module's 0-param/single-scalar-result exports under BOTH
+    // engines (fuel-bounded) and reports value/trap divergences (a JIT-execute
+    // miscompile = a finding). REPORT-ONLY. Mac-host seed corpus; the campaign
+    // corpus rides `zwasm-fuzz-exec <dir>` directly (gitignored, like the loader).
+    const fuzz_exec_mod = createSanitizedModule(b, sanitize_opts, .{
+        .root_source_file = b.path("test/fuzz/fuzz_exec.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    fuzz_exec_mod.addImport("zwasm", zwasm_lib_mod);
+    const fuzz_exec_exe = b.addExecutable(.{
+        .name = "zwasm-fuzz-exec",
+        .root_module = fuzz_exec_mod,
+    });
+    const run_fuzz_exec = b.addRunArtifact(fuzz_exec_exe);
+    run_fuzz_exec.addArg(b.pathFromRoot("test/fuzz/corpus/seed"));
+    run_fuzz_exec.has_side_effects = true;
+    const test_fuzz_exec_step = b.step("test-fuzz-exec", "Interp-vs-JIT execution differential fuzz (D-469)");
+    test_fuzz_exec_step.dependOn(&run_fuzz_exec.step);
+
     // `zig build test-realworld-run` — Phase 6 / §9.6 / 6.1
     // chunk b. Drives each fixture through `cli_run.runWasm`
     // end-to-end (engine → store → WASI → instantiate → entry

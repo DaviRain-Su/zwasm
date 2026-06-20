@@ -29,9 +29,14 @@ rm -rf "$OUT"
 mkdir -p "$OUT"
 
 # Deterministic `wasm-tools smith` modules: seed index → 256 fixed-PRNG bytes.
+# `-c smith_config.json` enables `export-everything` so the modules carry
+# exported functions — required by the D-469 interp-vs-JIT EXECUTION differential
+# fuzzer (`test-fuzz-exec`), which can only invoke EXPORTED funcs. The loader fuzz
+# is unaffected (more exports is still a valid module shape).
+SMITH_CFG="$(cd "$(dirname "$0")/.." && pwd)/test/fuzz/smith_config.json"
 for i in $(seq 0 $((N - 1))); do
   python3 -c "import sys,random; random.seed($i); sys.stdout.buffer.write(bytes(random.randrange(256) for _ in range(256)))" \
-    | wasm-tools smith -o "$OUT/smith_$(printf '%04d' "$i").wasm" 2>/dev/null || true
+    | wasm-tools smith -c "$SMITH_CFG" -o "$OUT/smith_$(printf '%04d' "$i").wasm" 2>/dev/null || true
 done
 
 # Hand-malformed blobs — exercise the reject-not-crash contract.
