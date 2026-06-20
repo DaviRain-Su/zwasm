@@ -18,19 +18,19 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
 ## Active bundle
 
 - **Bundle-ID**: D-477-jit-multiarg-invoke
-- **Cycles-remaining**: ~3
-- **Continuity-memo**: Phase I+II DONE (`.dev/d477_findings.md`). **arm64 SLICE DONE**:
-  `emitAarch64` generalized to N GPR params ≤7 (@50452a498, byte-tested);
-  `compile.zig` requests thunks for EXPORTED multi-arg funcs; `JitInstance.invoke`
-  routes 3-arg-non-(i32³)/4+ args via `invokeViaBufferSingle`→`invokeBufferWrite`
-  when `hasThunk` (@14dfb8b57). arm64 `sum4(2,3,4,5)→14`; verified test-spec-2.0-assert
-  25539/0 on arm64 AND x86_64-macos. **NEXT slices (fresh context)**: (1) x86_64
-  SysV `emitX8664SysV` N-param (caps ≤1 today; args_ptr=RDX collides — reorder like
-  arm64's load-param-1-last); (2) Win64 `emitX8664Win64` N-param (params in
-  RDX/R8/R9 after RCX=rt, +shadow space); (3) CLI arg-threading: `runWasiLenient`
-  has NO args param today (the `runWasiLenient 2-arg` test still rejects) — add it +
-  thread main.zig→runWasmJit→runWasiLenient, drop `main.zig:257` + `runner.zig:657`;
-  (4) FP-class args/results (thunk GPR-only); (5) v128 (8-byte u64 slots can't hold 16B).
+- **Cycles-remaining**: ~2-3
+- **Continuity-memo**: Phase I+II DONE (`.dev/d477_findings.md`). **arm64 + x86_64 SysV
+  GPR multi-arg invoke DONE**: `emitAarch64` (≤7 params, @50452a498) + `emitX8664SysV`
+  (≤5 params, @853299ad5) generalized, byte-tested; `compile.zig` requests thunks for
+  EXPORTED multi-arg; `JitInstance.invoke` routes 3-arg-non-(i32³)/4+ args via
+  `invokeViaBufferSingle`→`invokeBufferWrite` (@14dfb8b57). `sum4(2,3,4,5)→14` on arm64
+  AND x86_64 SysV; verified test-spec-2.0-assert 25539/0 on BOTH (Rosetta runtime).
+  **NEXT slices**: (1) CLI arg-threading = bundle EXIT-COND: `runWasiLenient` has NO
+  args param today (the `runWasiLenient 2-arg` test still rejects) — add args param,
+  thread main.zig→`cli/run.zig` runWasmJit→runWasiLenient + `invoke_args.parseArgsAlloc`,
+  route via the buffer path, drop `main.zig:257` + `runner.zig:657` rejects; (2) Win64
+  `emitX8664Win64` N-param (params RDX/R8/R9 after RCX=rt, +shadow space; ≤3 reg → 4th+
+  stack spill); (3) FP-class args/results (thunk GPR-only); (4) v128 (16B ≠ 8B slot).
 - **Exit-condition**: `zwasm run --engine jit --invoke add=2,3 <multi-arg.wasm>`
   matches interp for i32/i64/f32/f64 multi-arg + multi-result shapes; CLI reject
   gone; debt D-477 → `note`/closed.
