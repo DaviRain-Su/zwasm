@@ -37,6 +37,12 @@ entries:
       typed args + multi/FP/ref results per-arch, wire `runWasiLenient --invoke`→
       `invokeMulti`, drop `runner.zig:657` + `main.zig:257` rejects. v128 = separate
       slice (8-byte u64 slots can't hold 16B). Driven as bundle D-477-jit-multiarg-invoke.
+      ARM64 SLICE DONE: emitAarch64 generalized to N GPR params ≤7 (@50452a498);
+      compile.zig requests thunks for exported multi-arg; JitInstance.invoke routes
+      3-arg-non-(i32³)/4+ args via invokeViaBufferSingle→invokeBufferWrite (@14dfb8b57);
+      sum4(2,3,4,5)→14 on arm64, test-spec-2.0-assert 25539/0 BOTH arches. REMAINING:
+      x86_64 SysV + Win64 N-param emit (cap ≤1 today), CLI arg-threading for
+      runWasiLenient (no args param yet → drop main.zig:257 + runner.zig:657), FP+v128.
     first_raised: "2026-06-20"
     last_reviewed: "2026-06-20"
     refs: |-

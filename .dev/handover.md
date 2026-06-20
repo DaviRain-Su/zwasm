@@ -18,19 +18,19 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
 ## Active bundle
 
 - **Bundle-ID**: D-477-jit-multiarg-invoke
-- **Cycles-remaining**: ~3-4
-- **Continuity-memo**: Phase I (裏取り) + Phase II (characterization) DONE.
-  Findings `.dev/d477_findings.md`. Substrate ALREADY EXISTS (ADR-0106 buffer-write
-  ABI: `invokeMulti`→`invokeBufferWrite`, gated on `hasThunk`). Real gap =
-  `wrapper_thunk.emit` shape limits (≤1 param, GPR-only via `all_gpr_class`, 2-3
-  results; arm64 `emitAarch64:506`). Characterization pins in
-  `runner_multiarg_invoke_test.zig` (2 reject-pins FLIP to value-checks in the
-  Phase IV commit that removes each reject). **NEXT (Phase IV, fresh context)**:
-  generalize `emitAarch64` to N GPR args (arm64 first) → `hasThunk` true for
-  >1-param GPR shapes → route `JitInstance.invoke`/`runWasiLenient --invoke`
-  through `invokeBufferWrite`; then x86_64 SysV+Win64, then FP-class, then v128
-  (separate slice: 8-byte u64 slots can't hold 16B). Drop `runner.zig:657` +
-  `main.zig:257` rejects as the shapes land.
+- **Cycles-remaining**: ~3
+- **Continuity-memo**: Phase I+II DONE (`.dev/d477_findings.md`). **arm64 SLICE DONE**:
+  `emitAarch64` generalized to N GPR params ≤7 (@50452a498, byte-tested);
+  `compile.zig` requests thunks for EXPORTED multi-arg funcs; `JitInstance.invoke`
+  routes 3-arg-non-(i32³)/4+ args via `invokeViaBufferSingle`→`invokeBufferWrite`
+  when `hasThunk` (@14dfb8b57). arm64 `sum4(2,3,4,5)→14`; verified test-spec-2.0-assert
+  25539/0 on arm64 AND x86_64-macos. **NEXT slices (fresh context)**: (1) x86_64
+  SysV `emitX8664SysV` N-param (caps ≤1 today; args_ptr=RDX collides — reorder like
+  arm64's load-param-1-last); (2) Win64 `emitX8664Win64` N-param (params in
+  RDX/R8/R9 after RCX=rt, +shadow space); (3) CLI arg-threading: `runWasiLenient`
+  has NO args param today (the `runWasiLenient 2-arg` test still rejects) — add it +
+  thread main.zig→runWasmJit→runWasiLenient, drop `main.zig:257` + `runner.zig:657`;
+  (4) FP-class args/results (thunk GPR-only); (5) v128 (8-byte u64 slots can't hold 16B).
 - **Exit-condition**: `zwasm run --engine jit --invoke add=2,3 <multi-arg.wasm>`
   matches interp for i32/i64/f32/f64 multi-arg + multi-result shapes; CLI reject
   gone; debt D-477 → `note`/closed.
@@ -38,9 +38,9 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
 ## RESUME POINTER (2026-06-20) — for a fresh session
 
 **🎯 D-477 bundle (user directive, memory `feedback_ai_invented_by_design_not_sacred`)**: see `## Active bundle`
-above + `.dev/d477_findings.md`. Phase I+II DONE; NEXT = Phase IV — generalize `wrapper_thunk.emit` `emitAarch64` to
-N GPR args, route `invoke`/`runWasiLenient` through `invokeBufferWrite`. (C-API-facade interp-only is a SEPARATE
-user-ratified security decision — the CLI JIT --invoke need not route through the facade.)
+above + `.dev/d477_findings.md`. arm64 multi-arg JIT invoke DONE; NEXT = x86_64 SysV `emitX8664SysV` N-param emit,
+then Win64, then CLI arg-threading for `runWasiLenient`. (C-API-facade interp-only is a SEPARATE user-ratified
+security decision — the CLI JIT --invoke need not route through the facade.)
 
 **STANDING DIRECTIVE = CORRECTNESS SWEEP** (user 2026-06-20, memory `feedback_correctness_sweep_phase`): high-value
 bar OFF. Sweep toward 0% the 3 gap classes — (1) wasmtime-works-zwasm-doesn't, (2) wasm/wasi spec non-conformance,
