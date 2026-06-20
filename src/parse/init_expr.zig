@@ -52,6 +52,11 @@ pub fn scanInitExpr(body: []const u8, pos: *usize) Error!void {
                 pos.* += 8;
             },
             0x23 => _ = try leb128.readUleb128(u32, body, pos), // global.get
+            // Extended-const proposal (Wasm 3.0): i32/i64 add/sub/mul are
+            // constant-expression operators (no immediate). A computed global /
+            // element / data offset like `(i32.add (i32.const 4) (global.get 0))`
+            // is valid; the legacy single-op scanner rejected them.
+            0x6A, 0x6B, 0x6C, 0x7C, 0x7D, 0x7E => {},
             0xD0 => { // ref.null reftype
                 if (pos.* >= body.len) return Error.UnexpectedEnd;
                 pos.* += 1;

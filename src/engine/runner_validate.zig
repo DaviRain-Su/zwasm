@@ -104,6 +104,12 @@ pub fn validateGlobalInitExpr(
                 _ = leb128.readSleb128(i64, expr, &pos) catch return Error.InvalidGlobalInitExpr;
                 produced = .i64;
             },
+            // Extended-const proposal (Wasm 3.0): i32/i64 add/sub/mul (no
+            // immediate). Operand-count + operand-type checks are owned by the
+            // interp validator; here we only track the result type for the
+            // final want-check (binop result type == the i32/i64 operand type).
+            0x6A, 0x6B, 0x6C => produced = .i32,
+            0x7C, 0x7D, 0x7E => produced = .i64,
             0x43 => { // f32.const
                 if (pos + 4 > expr.len) return Error.InvalidGlobalInitExpr;
                 pos += 4;
@@ -352,19 +358,55 @@ pub fn evalConstI32ExprCtx(expr: []const u8, ctx: ?GlobalsCtx) Error!i32 {
 /// (memory64), each followed by `end`. An offset is unsigned; the
 /// caller's bounds check rejects out-of-range values. D-219.
 pub fn evalConstOffsetU64(expr: []const u8) Error!u64 {
-    if (expr.len < 2) return Error.UnsupportedConstExpr;
-    var pos: usize = 1;
-    const v: u64 = switch (expr[0]) {
-        0x41 => blk: { // i32.const
-            const n = leb128.readSleb128(i32, expr, &pos) catch return Error.UnsupportedConstExpr;
-            break :blk @as(u32, @bitCast(n));
-        },
-        0x42 => blk: { // i64.const (memory64)
-            const n = leb128.readSleb128(i64, expr, &pos) catch return Error.UnsupportedConstExpr;
-            break :blk @bitCast(n);
-        },
-        else => return Error.UnsupportedConstExpr,
-    };
-    if (pos >= expr.len or expr[pos] != 0x0B) return Error.UnsupportedConstExpr;
-    return v;
+    // Small const-expr stack machine: i32/i64.const + the extended-const
+    // proposal's i32/i64 add/sub/mul (Wasm 3.0). A computed active data/element
+    // offset like `(i32.add (i32.const 4) (i32.const 6))` is valid. i32 values
+    // are kept zero-extended in the u64 slot; i32 arithmetic wraps at 32 bits.
+    var stack: [16]u64 = undefined;
+    var sp: usize = 0;
+    var pos: usize = 0;
+    while (pos < expr.len) {
+        const op = expr[pos];
+        pos += 1;
+        if (op == 0x0B) break;
+        switch (op) {
+            0x41 => { // i32.const
+                const n = leb128.readSleb128(i32, expr, &pos) catch return Error.UnsupportedConstExpr;
+                if (sp >= stack.len) return Error.UnsupportedConstExpr;
+                stack[sp] = @as(u32, @bitCast(n));
+                sp += 1;
+            },
+            0x42 => { // i64.const (memory64)
+                const n = leb128.readSleb128(i64, expr, &pos) catch return Error.UnsupportedConstExpr;
+                if (sp >= stack.len) return Error.UnsupportedConstExpr;
+                stack[sp] = @bitCast(n);
+                sp += 1;
+            },
+            0x6A, 0x6B, 0x6C => { // i32 add/sub/mul — 32-bit wrapping
+                if (sp < 2) return Error.UnsupportedConstExpr;
+                sp -= 1;
+                const a: u32 = @truncate(stack[sp - 1]);
+                const b: u32 = @truncate(stack[sp]);
+                stack[sp - 1] = switch (op) {
+                    0x6A => a +% b,
+                    0x6B => a -% b,
+                    else => a *% b,
+                };
+            },
+            0x7C, 0x7D, 0x7E => { // i64 add/sub/mul — 64-bit wrapping
+                if (sp < 2) return Error.UnsupportedConstExpr;
+                sp -= 1;
+                const a = stack[sp - 1];
+                const b = stack[sp];
+                stack[sp - 1] = switch (op) {
+                    0x7C => a +% b,
+                    0x7D => a -% b,
+                    else => a *% b,
+                };
+            },
+            else => return Error.UnsupportedConstExpr,
+        }
+    }
+    if (sp != 1) return Error.UnsupportedConstExpr;
+    return stack[0];
 }

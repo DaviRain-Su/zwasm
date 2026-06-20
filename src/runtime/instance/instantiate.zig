@@ -904,6 +904,32 @@ pub fn evalGlobalInitGc(
                 pos += 8;
                 sp += 1;
             },
+            // Extended-const proposal (Wasm 3.0): i32/i64 add/sub/mul evaluate at
+            // instantiation with WRAPPING arithmetic (spec §4.4.8 binop). Pop two,
+            // push the result. evalConstExprValue defers the multi-instruction
+            // form here via its UnsupportedConstExpr fallback.
+            0x6A, 0x6B, 0x6C => { // i32.add / i32.sub / i32.mul
+                if (sp < 2) return error.UnsupportedConstExpr;
+                sp -= 1;
+                const a = stack[sp - 1].i32;
+                const b = stack[sp].i32;
+                stack[sp - 1] = .{ .i32 = switch (op) {
+                    0x6A => a +% b,
+                    0x6B => a -% b,
+                    else => a *% b,
+                } };
+            },
+            0x7C, 0x7D, 0x7E => { // i64.add / i64.sub / i64.mul
+                if (sp < 2) return error.UnsupportedConstExpr;
+                sp -= 1;
+                const a = stack[sp - 1].i64;
+                const b = stack[sp].i64;
+                stack[sp - 1] = .{ .i64 = switch (op) {
+                    0x7C => a +% b,
+                    0x7D => a -% b,
+                    else => a *% b,
+                } };
+            },
             0xFD => { // SIMD prefix — only v128.const (sub 0x0C) is constant
                 // (Wasm 2.0 §3.5.4). Needed for a v128 GC aggregate field/
                 // element initialised in a const-expr (D-460).
@@ -1048,11 +1074,38 @@ pub fn evalGlobalInitGc(
 /// only shape v0.1.0 needs is `i32.const N; end` (3+ bytes:
 /// opcode 0x41, sleb128 N, opcode 0x0B).
 pub fn evalConstI32Expr(expr: []const u8) !i32 {
-    if (expr.len < 2 or expr[0] != 0x41) return error.UnsupportedConstExpr;
-    var pos: usize = 1;
-    const v = try leb128.readSleb128(i32, expr, &pos);
-    if (pos >= expr.len or expr[pos] != 0x0B) return error.UnsupportedConstExpr;
-    return v;
+    // i32 const-expr stack machine: i32.const + the extended-const proposal's
+    // i32 add/sub/mul (Wasm 3.0). A computed active element/data offset like
+    // `(i32.add (i32.const 4) (i32.const 6))` is valid; arithmetic wraps.
+    var stack: [16]i32 = undefined;
+    var sp: usize = 0;
+    var pos: usize = 0;
+    while (pos < expr.len) {
+        const op = expr[pos];
+        pos += 1;
+        if (op == 0x0B) break;
+        switch (op) {
+            0x41 => {
+                if (sp >= stack.len) return error.UnsupportedConstExpr;
+                stack[sp] = try leb128.readSleb128(i32, expr, &pos);
+                sp += 1;
+            },
+            0x6A, 0x6B, 0x6C => {
+                if (sp < 2) return error.UnsupportedConstExpr;
+                sp -= 1;
+                const a = stack[sp - 1];
+                const b = stack[sp];
+                stack[sp - 1] = switch (op) {
+                    0x6A => a +% b,
+                    0x6B => a -% b,
+                    else => a *% b,
+                };
+            },
+            else => return error.UnsupportedConstExpr,
+        }
+    }
+    if (sp != 1) return error.UnsupportedConstExpr;
+    return stack[0];
 }
 
 /// Wasm spec §3.4.7 — active data segment offset's result type
@@ -1096,11 +1149,37 @@ pub fn evalConstMemAddrExprWithGlobals(
         else => switch (idx_type) {
             .i32 => return @as(u64, @intCast(@as(u32, @bitCast(try evalConstI32Expr(expr))))),
             .i64 => {
-                if (expr[0] != 0x42) return error.UnsupportedConstExpr;
-                var pos: usize = 1;
-                const v = try leb128.readSleb128(i64, expr, &pos);
-                if (pos >= expr.len or expr[pos] != 0x0B) return error.UnsupportedConstExpr;
-                return @bitCast(v);
+                // i64 const-expr stack machine: i64.const + extended-const
+                // i64 add/sub/mul (memory64 offsets), mirroring evalConstI32Expr.
+                var stack: [16]i64 = undefined;
+                var sp: usize = 0;
+                var pos: usize = 0;
+                while (pos < expr.len) {
+                    const op = expr[pos];
+                    pos += 1;
+                    if (op == 0x0B) break;
+                    switch (op) {
+                        0x42 => {
+                            if (sp >= stack.len) return error.UnsupportedConstExpr;
+                            stack[sp] = try leb128.readSleb128(i64, expr, &pos);
+                            sp += 1;
+                        },
+                        0x7C, 0x7D, 0x7E => {
+                            if (sp < 2) return error.UnsupportedConstExpr;
+                            sp -= 1;
+                            const a = stack[sp - 1];
+                            const b = stack[sp];
+                            stack[sp - 1] = switch (op) {
+                                0x7C => a +% b,
+                                0x7D => a -% b,
+                                else => a *% b,
+                            };
+                        },
+                        else => return error.UnsupportedConstExpr,
+                    }
+                }
+                if (sp != 1) return error.UnsupportedConstExpr;
+                return @bitCast(stack[0]);
             },
         },
     }
@@ -1891,4 +1970,21 @@ test "evalGlobalInitGc: extern.convert_any / any.convert_extern are identity in 
     const v2 = try evalGlobalInitGc(&[_]u8{ 0x41, 0x07, 0xFB, 0x1C, 0xFB, 0x1B, 0xFB, 0x1A, 0x0B }, null, null, &.{}, &.{});
     try testing.expect(Value.isI31Ref(v2));
     try testing.expectEqual(@as(i32, 7), Value.refAsI31Signed(v2));
+}
+
+test "extended-const arithmetic in const-exprs (Wasm 3.0; fuzz-found, both engines)" {
+    // The extended-const proposal adds i32/i64 add/sub/mul to const-exprs.
+    // smith_v4 found zwasm rejected valid modules using them. Eval unit tests
+    // for the interp global path (evalGlobalInitGc) + the i32 offset path
+    // (evalConstI32Expr) — wrapping arithmetic, multi-operand.
+    // (i32.const 40) (i32.const 2) (i32.add) → 42
+    try testing.expectEqual(@as(i32, 42), (try evalGlobalInitGc(&[_]u8{ 0x41, 40, 0x41, 2, 0x6A, 0x0B }, null, null, &.{}, &.{})).i32);
+    // (i64.const 6) (i64.const 7) (i64.mul) → 42
+    try testing.expectEqual(@as(i64, 42), (try evalGlobalInitGc(&[_]u8{ 0x42, 6, 0x42, 7, 0x7E, 0x0B }, null, null, &.{}, &.{})).i64);
+    // nested: (i32.mul (i32.const 5) (i32.const 4)) (i32.const 2) (i32.add) → 22
+    try testing.expectEqual(@as(i32, 22), (try evalGlobalInitGc(&[_]u8{ 0x41, 5, 0x41, 4, 0x6C, 0x41, 2, 0x6A, 0x0B }, null, null, &.{}, &.{})).i32);
+    // i32 offset path: (i32.const 4) (i32.const 6) (i32.add) → 10
+    try testing.expectEqual(@as(i32, 10), try evalConstI32Expr(&[_]u8{ 0x41, 4, 0x41, 6, 0x6A, 0x0B }));
+    // i32.sub wrapping: (i32.const 3) (i32.const 5) (i32.sub) → -2
+    try testing.expectEqual(@as(i32, -2), try evalConstI32Expr(&[_]u8{ 0x41, 3, 0x41, 5, 0x6B, 0x0B }));
 }
