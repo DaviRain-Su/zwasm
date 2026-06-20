@@ -56,8 +56,20 @@ split onto a dedicated result_out channel (Zone-2 ScalarResult → CLI formatSca
 single-slot-dual-meaning removed. e2e 42/42/4/3.5 = interp/wasmtime; i32+f64 regression tests. **Spike method
 (wasmtime `--invoke` vs zwasm `--engine jit --invoke`) is a productive sweep technique** — keep using it.
 **Sweep status**: concrete known gaps = 0; nets = JIT codegen-fuzz + exec-fuzz (value+trap-kind), both 0-finding.
-Remaining: D-456 host-stubs (test-harness), D-336 (blocked). NEXT: more wasmtime-diff spikes (CLI/arg-passing
-surfaces), periodic re-inventory / larger fuzz campaigns, or general 完成形 refinement / debt repayment.
+**Re-inventory 2026-06-20 (Explore subagent) found 0 runtime-reachable category-(a) gaps**: interp path clean;
+all 46 WASI preview1 syscalls wired with wasmtime-matching errno (notsup/nosys/notcapable all correct); JIT
+`UnsupportedEntrySignature/Op` are interp-fallback fastpath bailouts (not user gaps); CM-async waitable-set
+bailout is experimental (ADR-0190, wasmtime's own async-CM is partial — NOT a parity target). exec_seed
+wasmtime-validated 9/9. JIT `--invoke NAME=ARGS` = deliberate arity-limited entry design (loud interp guard).
+**FUZZ_N=6000 campaign FOUND 2 REAL BUGS** (sweep NOT at floor — larger campaigns pay off):
+(1) **DONE @66acaeee0** — JIT table arena sized to `@min(max,65536)` < `min` for a non-funcref table with
+min>65536 → OOB-write at setup → SEGV (interp allocs min correctly; gap-#1+#3). Fix: `@max(tm.min, @min(max,cap))`.
+(2) **DONE @9313c37a8** — NOT a JIT bug: the interp has NO SIMD handlers (SIMD is JIT-only by design;
+simd_assert_runner runs on the JIT runner — see lesson `2026-06-20-interp-is-non-simd-jit-only`). The interp
+traps `unreachable_` at the first v128 op (dispatch null-slot); the exec fuzzer was comparing a SIMD function's
+JIT result against that bailout. Fix: exec-fuzz skips an interp `unreachable_` the JIT doesn't mirror (sound — a
+real `unreachable` traps on both). Campaign now 473 funcs / 0 mismatch. Do NOT implement SIMD-in-interp (236-op
+deliberate boundary). NEXT: more large fuzz campaigns (different seeds) + continue periodic re-probe / 完成形 refinement.
 
 **Phase 17 完成形 plateau** (validated — do NOT re-walk): async COMPLETE; v128 spill (D-034/D-460/D-461) CLOSED;
 surface audits clean 2026-06-18; fuzz 0-crash; realworld JIT run 56/56 byte-match wasmtime (gating). NOT-WORTH: D-294-R2 TrapKind.
