@@ -1,8 +1,8 @@
 //! Interp-vs-JIT EXECUTION differential fuzzer (D-469).
 //!
 //! Walks a corpus of `wasm-tools smith` modules and, for each one that BOTH
-//! engines instantiate, invokes every 0-param / single-{i32,i64}-result export
-//! under the interp (`Instance.invoke`) AND the JIT (`JitInstance.invoke`) with
+//! engines instantiate, invokes every 0-param / single-scalar-result (i32/i64/
+//! f32/f64) export under the interp (`Instance.invoke`) AND the JIT (`JitInstance.invoke`) with
 //! a deterministic fuel budget, then compares the outcomes. A divergence —
 //! interp returns a value the JIT doesn't (or vice versa), or the two return
 //! DIFFERENT values — is a finding (the D-330/D-331A/D-468 class of JIT-execute
@@ -13,10 +13,11 @@
 //! Why FOCUSED (0-param, 1 scalar result): it sidesteps argument generation and
 //! the multi-result / v128 / ref-result marshalling mismatch between the two
 //! invoke ABIs (interp `[]Value`; JIT `[]u64 → ?u64`), while still exercising the
-//! full function body under both engines. Widening to (zero-filled) i32/i64 params
-//! was measured to add 0 funcs on the smith campaign — the single-scalar-RESULT
-//! filter is the binding constraint, not params; a real widening would need
-//! f32/f64 results (with NaN-bit-aware compare), deferred as diminishing-returns.
+//! full function body under both engines. Widening to (zero-filled) i32/i64 PARAMS
+//! was measured to add 0 funcs (the single-scalar-RESULT filter is binding, not
+//! params), so params stay at 0; the RESULT filter does include f32/f64 — FP
+//! execution is a prime divergence source and the bit-compare is sound under the
+//! corpus's `canonicalize-nans`.
 //!
 //! Fuel: both engines are bounded so an infinite-loop smith body can't hang the
 //! fuzzer. The fuel UNITS differ (interp = per-instruction; JIT = poll-site
@@ -43,25 +44,41 @@ const Outcome = union(enum) {
     fuel, // out_of_fuel — not comparable across engines
 };
 
-fn interpInvoke(inst: *zwasm.Instance, name: []const u8, is_i64: bool) Outcome {
+// f32/f64 results: the smith corpus is generated with `canonicalize-nans` so a
+// NaN result is the single canonical bit pattern in BOTH engines — a direct bit
+// compare is sound (a differing NaN payload would be a real spec divergence). The
+// curated f32/f64 exec_seed cases return non-NaN finite values, so the committed
+// gate doesn't depend on the canonicalisation either way.
+
+/// Normalise an interp result Value to its raw bits (32-bit scalars zero-extended
+/// into the low 32, matching the JIT's `dispatchNoArg` carrier encoding).
+fn valueBits(v: zwasm.Value) u64 {
+    return switch (v) {
+        .i32 => |x| @as(u64, @as(u32, @bitCast(x))),
+        .f32 => |x| @as(u64, @as(u32, @bitCast(x))),
+        .i64 => |x| @bitCast(x),
+        .f64 => |x| @bitCast(x),
+        else => 0, // filtered out before invoke
+    };
+}
+
+fn interpInvoke(inst: *zwasm.Instance, name: []const u8) Outcome {
     var results: [1]zwasm.Value = undefined;
     inst.invoke(name, &.{}, results[0..1]) catch |err| {
         if (err == error.OutOfFuel) return .fuel;
         return .trap;
     };
-    return .{ .value = if (is_i64)
-        @bitCast(results[0].i64)
-    else
-        @as(u64, @as(u32, @bitCast(results[0].i32))) };
+    return .{ .value = valueBits(results[0]) };
 }
 
-fn jitInvoke(jit: *engine_runner.JitInstance, gpa: std.mem.Allocator, name: []const u8, is_i64: bool) Outcome {
+fn jitInvoke(jit: *engine_runner.JitInstance, gpa: std.mem.Allocator, name: []const u8) Outcome {
+    // `JitInstance.invoke` returns the scalar result as a u64 carrier already
+    // zero-extended for 32-bit types (dispatchNoArg) — matches `valueBits`.
     const r = jit.invoke(gpa, name, &.{}) catch {
         if (jit.owned.rt.trap_kind == OUT_OF_FUEL_KIND) return .fuel;
         return .trap;
     };
-    const raw = r orelse 0;
-    return .{ .value = if (is_i64) raw else @as(u64, @as(u32, @truncate(raw))) };
+    return .{ .value = r orelse 0 };
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -122,16 +139,21 @@ pub fn main(init: std.process.Init) !void {
             const name = fe.name;
             const sig = interp_inst.exportFuncSig(name) orelse continue;
             if (sig.params.len != 0 or sig.results.len != 1) continue;
-            const tag = std.meta.activeTag(sig.results[0]);
-            const is_i64 = tag == .i64;
-            if (tag != .i32 and !is_i64) continue;
+            // Single scalar result of any number type. f32/f64 EXECUTION is a prime
+            // interp-vs-JIT divergence source (rounding, NaN); the carrier-bit
+            // compare is sound under canonicalize-nans. v128/ref results excluded
+            // (the JIT invoke runs them via the uncompared void path).
+            switch (std.meta.activeTag(sig.results[0])) {
+                .i32, .i64, .f32, .f64 => {},
+                else => continue,
+            }
 
             interp_inst.setFuel(FUEL);
             jit.owned.rt.fuel_cell = std.math.cast(i64, FUEL) orelse std.math.maxInt(i64);
             jit.owned.rt.fuel_metered = 1;
 
-            const io_out = interpInvoke(&interp_inst, name, is_i64);
-            const jo_out = jitInvoke(&jit, gpa, name, is_i64);
+            const io_out = interpInvoke(&interp_inst, name);
+            const jo_out = jitInvoke(&jit, gpa, name);
             if (io_out == .fuel or jo_out == .fuel) continue; // not comparable
             funcs_compared += 1;
 
