@@ -49,6 +49,12 @@ fn writeU32LE(mem: []u8, offset: u32, value: u32) p1.Errno {
     return .success;
 }
 
+fn writeU64LE(mem: []u8, offset: u32, value: u64) p1.Errno {
+    if (@as(usize, offset) + 8 > mem.len) return .fault;
+    std.mem.writeInt(u64, mem[offset..][0..8], value, .little);
+    return .success;
+}
+
 // Slice into guest memory bounded by guest buf+len. Returns
 // null on out-of-bounds; callers translate to `Errno.fault`.
 fn sliceMem(mem: []u8, buf: u32, buf_len: u32) ?[]u8 {
@@ -139,7 +145,12 @@ pub fn writeSlice(host: *Host, fd: p1.Fd, bytes: []const u8) p1.Errno {
         null;
 
     if (buffer) |b| b.appendSlice(host.capture_alloc orelse host.alloc, bytes) catch return .nomem;
-    if (file_opt) |f| f.writeStreamingAll(io_opt.?, bytes) catch return .io;
+    if (file_opt) |f| {
+        // Positional write at the slot's logical cursor + advance (mirrors
+        // fdReadFile; std.Io.File is positional-only).
+        f.writePositionalAll(io_opt.?, bytes, slot.pos) catch return .io;
+        slot.pos += bytes.len;
+    }
     if (std_stream) |s| s.writeStreamingAll(io_opt.?, bytes) catch return .io;
     return .success;
 }
@@ -214,14 +225,13 @@ fn fdReadFile(host: *Host, mem: []u8, slot: *host_mod.OpenFd, iovec_ptr: u32, io
         const buf_len = readU32LE(mem, entry_off + 4) orelse return .fault;
         const dst = sliceMem(mem, buf, buf_len) orelse return .fault;
         if (dst.len == 0) continue;
-        // readStreaming raises error.EndOfStream at EOF (it does NOT
-        // return 0); WASI fd_read reports EOF as nread=0, success.
-        const n: usize = file.readStreaming(io, &[_][]u8{dst}) catch |e| blk: {
-            if (e == error.EndOfStream) break :blk 0;
-            return .io;
-        };
+        // Positional read at the slot's logical cursor (std.Io.File is
+        // positional-only — no OS-cursor seek). EOF returns 0 (NOT
+        // error.EndOfStream, cf. fd_pread); WASI reports it as nread=0, success.
+        const n: usize = file.readPositional(io, &[_][]u8{dst}, slot.pos) catch return .io;
         if (n == 0) break; // EOF
         total += @intCast(n);
+        slot.pos += n;
         if (n < dst.len) break; // short read
 
     }
@@ -262,10 +272,12 @@ pub fn fdRenumber(host: *Host, from: p1.Fd, to: p1.Fd) p1.Errno {
     return .success;
 }
 
-/// `fd_seek(fd, offset, whence, *new_pos_out) → errno`. Stdio
-/// fds (and pipes more generally) cannot seek — return `spipe`.
-/// Non-stdio fds: TODO(4.5) actual seek; return `notsup` for
-/// now.
+/// `fd_seek(fd, offset, whence, *new_pos_out) → errno`. Moves the `.file`
+/// slot's logical cursor (`slot.pos`) per `whence` (set/cur/end) and writes the
+/// resulting absolute offset. Stdio/pipes are not seekable → `spipe`; a negative
+/// resulting offset or an unknown `whence` → `inval`. `end` reads the host file
+/// size via `File.stat`. (std.Io.File is positional-only; the cursor lives in
+/// the slot, see `OpenFd.pos`.)
 pub fn fdSeek(
     host: *Host,
     mem: []u8,
@@ -274,29 +286,42 @@ pub fn fdSeek(
     whence: u8,
     new_pos_ptr: u32,
 ) p1.Errno {
-    _ = offset;
-    _ = whence;
-    _ = mem;
-    _ = new_pos_ptr;
     const slot = host.translateFd(fd) orelse return .badf;
-    return switch (slot.kind) {
-        .stdin, .stdout, .stderr => .spipe,
-        .closed => .badf,
-        .file, .dir => .notsup,
+    switch (slot.kind) {
+        .stdin, .stdout, .stderr => return .spipe,
+        .dir => return .notsup,
+        .closed => return .badf,
+        .file => {},
+    }
+    const handle = slot.host_handle orelse return .badf;
+    const io = host.io orelse return .nosys;
+    const file: std.Io.File = .{ .handle = handle, .flags = .{ .nonblocking = false } };
+    const base: i128 = switch (@as(p1.Whence, @enumFromInt(whence))) {
+        .set => 0,
+        .cur => @intCast(slot.pos),
+        .end => blk: {
+            const st = file.stat(io) catch return .io;
+            break :blk @intCast(st.size);
+        },
+        _ => return .inval,
     };
+    const new_pos: i128 = base + offset;
+    if (new_pos < 0) return .inval;
+    slot.pos = @intCast(new_pos);
+    return writeU64LE(mem, new_pos_ptr, @intCast(new_pos));
 }
 
-/// `fd_tell(fd, *pos_out) → errno`. Same shape as `fd_seek`
-/// — stdio cannot tell, returns `spipe`.
+/// `fd_tell(fd, *pos_out) → errno`. Writes the `.file` slot's current logical
+/// cursor (`slot.pos`). Stdio/pipes have no position → `spipe`.
 pub fn fdTell(host: *Host, mem: []u8, fd: p1.Fd, pos_ptr: u32) p1.Errno {
-    _ = mem;
-    _ = pos_ptr;
     const slot = host.translateFd(fd) orelse return .badf;
-    return switch (slot.kind) {
-        .stdin, .stdout, .stderr => .spipe,
-        .closed => .badf,
-        .file, .dir => .notsup,
-    };
+    switch (slot.kind) {
+        .stdin, .stdout, .stderr => return .spipe,
+        .dir => return .notsup,
+        .closed => return .badf,
+        .file => {},
+    }
+    return writeU64LE(mem, pos_ptr, slot.pos);
 }
 
 // ============================================================
@@ -1576,6 +1601,59 @@ test "fdWrite + fdRead round-trip through a real file fd (D-243 cycle 2)" {
     try testing.expectEqual(p1.Errno.success, fdRead(&h, &mem, rfd, 32, 1, 108));
     try testing.expectEqual(@as(u32, 8), std.mem.readInt(u32, mem[108..112], .little)); // nread
     try testing.expectEqualStrings("hello fd", mem[64..72]);
+}
+
+test "fd_seek + fd_tell move + report the file cursor (set/cur/end whence)" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(testing.io, .{ .sub_path = "seek.txt", .data = "0123456789" });
+    var h = try Host.init(testing.allocator);
+    defer h.deinit();
+    h.io = testing.io;
+    const dirfd = try h.addPreopen(tmp.dir.handle, "/sandbox");
+
+    var mem: [128]u8 = @splat(0);
+    @memcpy(mem[16..24], "seek.txt");
+    try testing.expectEqual(p1.Errno.success, pathOpen(&h, &mem, dirfd, 0, 16, 8, 0, p1.RIGHTS_FD_READ, 0, 0, 100));
+    const fd = std.mem.readInt(u32, mem[100..104], .little);
+    const slot = h.translateFd(fd).?;
+    defer {
+        const f: std.Io.File = .{ .handle = slot.host_handle.?, .flags = .{ .nonblocking = false } };
+        f.close(testing.io);
+        slot.kind = .closed;
+    }
+
+    // iovec scratch at mem[64..]; result slots at mem[104..] (nread) + mem[116..] (new_pos).
+    std.mem.writeInt(u32, mem[32..36], 64, .little); // iovec.buf
+
+    // read 5 → "01234", cursor advances to 5
+    std.mem.writeInt(u32, mem[36..40], 5, .little); // iovec.len
+    try testing.expectEqual(p1.Errno.success, fdRead(&h, &mem, fd, 32, 1, 104));
+    try testing.expectEqualStrings("01234", mem[64..69]);
+
+    // tell → 5
+    try testing.expectEqual(p1.Errno.success, fdTell(&h, &mem, fd, 116));
+    try testing.expectEqual(@as(u64, 5), std.mem.readInt(u64, mem[116..124], .little));
+
+    // seek SET 2 → new_pos 2; read 3 → "234"
+    try testing.expectEqual(p1.Errno.success, fdSeek(&h, &mem, fd, 2, @intFromEnum(p1.Whence.set), 116));
+    try testing.expectEqual(@as(u64, 2), std.mem.readInt(u64, mem[116..124], .little));
+    std.mem.writeInt(u32, mem[36..40], 3, .little);
+    try testing.expectEqual(p1.Errno.success, fdRead(&h, &mem, fd, 32, 1, 104));
+    try testing.expectEqualStrings("234", mem[64..67]);
+
+    // seek END -3 (size 10) → 7; read 3 → "789" (cursor now 10)
+    try testing.expectEqual(p1.Errno.success, fdSeek(&h, &mem, fd, -3, @intFromEnum(p1.Whence.end), 116));
+    try testing.expectEqual(@as(u64, 7), std.mem.readInt(u64, mem[116..124], .little));
+    try testing.expectEqual(p1.Errno.success, fdRead(&h, &mem, fd, 32, 1, 104));
+    try testing.expectEqualStrings("789", mem[64..67]);
+
+    // seek CUR -10 (from 10) → 0
+    try testing.expectEqual(p1.Errno.success, fdSeek(&h, &mem, fd, -10, @intFromEnum(p1.Whence.cur), 116));
+    try testing.expectEqual(@as(u64, 0), std.mem.readInt(u64, mem[116..124], .little));
+
+    // a negative resulting offset is invalid
+    try testing.expectEqual(p1.Errno.inval, fdSeek(&h, &mem, fd, -1, @intFromEnum(p1.Whence.cur), 116));
 }
 
 test "fdFdstatSetFlags: persists allowed bits + masks unknown ones" {

@@ -56,6 +56,12 @@ pub const OpenFd = struct {
     /// `.file` flavour is set by `pathOpen` (§9.4 / 4.5
     /// chunk b).
     host_handle: ?std.posix.fd_t = null,
+    /// Logical sequential cursor for a `.file` slot, in bytes from the file
+    /// start. `fd_read`/`fd_write` use positional IO at this offset and advance
+    /// it (Zig 0.16 `std.Io.File` is positional-only — no OS-cursor seek);
+    /// `fd_seek` sets it, `fd_tell` reads it. `fd_pread`/`fd_pwrite` take an
+    /// explicit offset and do NOT touch it (WASI).
+    pos: u64 = 0,
 };
 
 /// One environment-variable entry. Both `key` and `value` are
