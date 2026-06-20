@@ -18,27 +18,23 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
 ## Active bundle
 
 - **Bundle-ID**: D-477-jit-multiarg-invoke
-- **Cycles-remaining**: ~2
-- **Continuity-memo**: Phase I+II DONE. **EXIT-COND MET @b88435743**: `zwasm run
-  --engine jit --invoke add=2,3` prints 5 (matches interp), verified on the built
-  binary + e2e on arm64 AND x86_64-macos. Done so far: `emitAarch64` ≤7 params
-  (@50452a498) + `emitX8664SysV` ≤5 params (@853299ad5); `compile.zig` requests thunks
-  for EXPORTED multi-arg; `JitInstance.invoke`→`invokeViaBufferSingle` (@14dfb8b57);
-  `runWasiLenientArgs` + `run.zig packJitInvokeArgs` + main.zig JIT arg-threading
-  (@b88435743, dropped the interp-only reject). **GPR multi-arg ALL 3 ARCHES + FP ALL 3 ARCHES
-  DONE**: arm64 (≤7, V-bank @d791dc6b9), x86_64 SysV (≤5, XMM-bank @77c5fd943), Win64 (≤3,
-  positional XMM @3077f165b). addf(2.5,1.5)→4.0 e2e unconditional; GPR runtime ubuntu-green +
-  Win64 GPR clean windows re-run OK @92b31a461 (prior FAIL was `.zig-cache file_hash` = user
-  cache-deletion INFRA, NOT a bug). Win64 FP RUNTIME pending the next windows verdict.
-  **REMAINING slices** (extend bundle, value-ordered): (1) **multi-result (>1) via
-  `invoke`/CLI** NEXT (invokeMulti drives the thunk; needs N-result MEMORY-class store
-  generalization + runWasiLenient→invokeMulti routing + multi-line print); (2) v128 args/
-  results — SURVEYED, model (A)=2 consecutive 16-aligned u64 slots decided (NOT a sig widen),
-  Win64-by-REFERENCE gotcha + shared cumulative-offset helper + CLI v128 literal — NICHE,
-  full design in `private/notes/d477-remaining-slices-design.md` §"Slice 3"; (3) Win64
-  ≥4-param stack-spill (rare). (2)+(3) are bounded niche tails — build on demand.
-- **Exit-condition**: MET (above). Extended close = the 3 remaining slices land →
-  full wasmtime-parity host→guest JIT invoke → D-477 `note`; THEN ADR-0200 API-JIT phase.
+- **Cycles-remaining**: ~1 (core done; residual = niche debt)
+- **Continuity-memo**: **D-477 CORE COMPLETE + runtime-verified ALL 3 ARCHES** (arm64
+  native / x86_64 SysV Rosetta / Win64 windows-gate OK). GPR + FP + ref multi-arg, single
+  result (`invoke`/`runWasiLenientArgs`) + MULTI result (`invokeMulti`, incl 2-arg×2-result
+  @6d750b5a9). Generic two-bank wrapper-thunk (emitAarch64 ≤7 / emitX8664SysV ≤5 /
+  emitX8664Win64 ≤3) replaced the shape helpers; CLI `--invoke add=2,3`→5 interp-parity.
+  All SHAs + designs in debt **D-477 (now `partial`)** + `private/notes/`. **RESIDUAL = 3 NICHE
+  slivers** (embedding API + CLI scalar/FP/ref invoke complete WITHOUT them): (1) CLI `--invoke`
+  multi-RESULT multi-line PRINT — **next sliver if continuing D-477** (embedding-API multi-result
+  via invokeMulti already works + spec-exercised; only the CLI text path prints 1 — wire
+  runWasmJitCaptured→invokeMulti + per-result formatScalar); (2) v128 args (model-A decided,
+  Win64-by-ref); (3) Win64 ≥4-param stack-spill.
+- **🔭 RECOMMENDATION (for user steer)**: D-477 core unblocks the **ADR-0200 API-JIT phase**
+  (the user's stated priority). The 3 slivers are niche + debt-tracked + do NOT gate the API.
+  Recommend PIVOT to the API phase now; build slivers on demand. (Honoring the literal "完遂
+  first" directive ⇒ default next = sliver (1) CLI multi-result-print; user may redirect to API.)
+- **Exit-condition**: MET (CLI add=2,3 = interp @b88435743) + core matrix runtime-verified.
 - **Pre-worked design (先読み)**: all 4 slices designed in `private/notes/d477-remaining-slices-design.md`
   (Win64 register-only ≤3-param collapse + reorder, FP two-bank assignment, v128 16B-slot
   ADR sub-decision, multi-result via invokeMulti). ADR-0200 §"API shape" now carries the
@@ -53,8 +49,10 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
 
 ## RESUME POINTER (2026-06-20) — for a fresh session
 
-**🎯 D-477 bundle (memory `feedback_ai_invented_by_design_not_sacred`)**: see `## Active bundle` + `.dev/d477_findings.md`.
-CLI multi-arg JIT invoke + arm64 FP + Win64/x86_64-SysV GPR DONE; NEXT = x86_64-SysV/Win64 FP-param → v128 → multi-result.
+**🎯 D-477 (memory `feedback_ai_invented_by_design_not_sacred`)**: CORE COMPLETE — GPR+FP+ref multi-arg,
+single+multi result, all 3 arches runtime-verified (debt D-477 `partial`). 3 niche slivers remain (CLI
+multi-result-print / v128-args / Win64-≥4-stackspill). **RECOMMEND pivoting to the ADR-0200 API phase**
+(user priority; slivers don't gate it). Default-if-unsteered = sliver (1) CLI multi-result-print.
 **PARENT ARC = ADR-0200** (user 2026-06-20): D-477 is the gating #1 of "JIT-backed embedding API, JIT-DEFAULT,
 selectable" — interp-only-API was an UNRATIFIED AI deferral, now reversed (SIMD is JIT-only → unrunnable via API).
 After D-477: PRIORITIZED API-JIT phase = peer 裏取り (wasmtime Config/Strategy) → API design → impl → first-party

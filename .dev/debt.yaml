@@ -5,51 +5,35 @@
 entries:
   - id: "D-477"
     layer: "code"
-    status: "now"
+    status: "partial"
     description: |-
-      JIT host-invoke SIGNATURE COMPLETENESS — make the JIT entry path carry the
-      FULL host→guest invoke feature set (multi typed args + multi/v128/ref
-      results), matching wasmtime. USER DIRECTIVE 2026-06-20 (memory
-      `feedback_ai_invented_by_design_not_sacred`): the current "JIT --invoke is
-      zero-arg-only; typed args route to interp" (D-273, main.zig:253-258) is NOT
-      a user-sanctioned design — it is an AI-invented TRANSITIONAL limitation. The
-      user never restricted JIT + WASI multi-arg invoke; do NOT defer behind the
-      "by design" label. User's hard constraint: SIMD-requiring paths MUST be JIT
-      (interp call overhead exceeds JIT), so the JIT must NOT lack multi-arg
-      invoke. APPROACH (next clean session — research-driven あるべき論, NOT a
-      maxed-context cram): 裏取り first — web-search + reference clones (wasmtime,
-      wasmer, V8/wasm) for how a senior runtime does host→guest typed multi-arg
-      JIT invocation (array-call / native-call ABI, trampoline generation, the
-      Func::call boundary) AND how WASI arg-passing interacts with the JIT entry;
-      then design (likely a generic N-arg JIT entry trampoline + CLI invoke_args
-      → JIT dispatch, NOT the shape-specific callI32_i32i32 helpers). Note the
-      C-API-facade interp-only point is a SEPARATE, user-ratified SECURITY
-      decision (memory `project_security_hardening_campaign`) — the CLI `--invoke`
-      JIT path need not go through the C-API facade; reconcile the two. This
-      ALSO unblocks the wasmtime-vs-JIT differential (today zero-arg-only).
-      DONE so far: v128-result zero-arg @1d3dfdb25 (entry.callV128NoArgs +
-      ScalarResult.v128 + CLI u128-decimal; dual-arch). Sibling niche results:
-      multi-RESULT (≥2) + ref-result zero-arg fold into the same trampoline work.
-      PHASE I (裏取り) DONE → `.dev/d477_findings.md`: the array-call substrate
-      ALREADY EXISTS (ADR-0106 buffer-write ABI — `invokeMulti`→`invokeBufferWrite`,
-      gated on `hasThunk`). Real gap = `wrapper_thunk.emit` shape limits (≤1 param,
-      GPR-only via `all_gpr_class`, 2-3 results). Plan: generalize the thunk to N
-      typed args + multi/FP/ref results per-arch, wire `runWasiLenient --invoke`→
-      `invokeMulti`, drop `runner.zig:657` + `main.zig:257` rejects. v128 = separate
-      slice (8-byte u64 slots can't hold 16B). Driven as bundle D-477-jit-multiarg-invoke.
-      ARM64 SLICE DONE: emitAarch64 generalized to N GPR params ≤7 (@50452a498);
-      compile.zig requests thunks for exported multi-arg; JitInstance.invoke routes
-      3-arg-non-(i32³)/4+ args via invokeViaBufferSingle→invokeBufferWrite (@14dfb8b57);
-      sum4(2,3,4,5)→14 on arm64, test-spec-2.0-assert 25539/0 BOTH arches. X86_64 SysV
-      SLICE DONE: emitX8664SysV generalized to ≤5 GPR params (@853299ad5), value-checked
-      on x86_64-macos Rosetta. CLI EXIT-COND MET @b88435743: `zwasm run --engine jit
-      --invoke add=2,3` prints 5 (runWasiLenientArgs + run.zig packJitInvokeArgs +
-      main.zig arg-threading; dropped the interp-only reject). REMAINING completeness:
-      Win64 emitX8664Win64 N-param (enumerates {0,1,3} today), FP-class args/results
-      (thunk GPR-only), v128 (16B≠8B slot), multi-result via invoke/CLI. Then D-477 note
-      + ADR-0200 API-JIT phase.
+      JIT host-invoke signature completeness (multi typed args + multi/ref/v128
+      results), matching wasmtime. Origin: the AI-invented "JIT --invoke is
+      zero-arg-only" limitation (NOT user-sanctioned; memory
+      `feedback_ai_invented_by_design_not_sacred`). CORE COMPLETE + runtime-verified
+      on ALL 3 ARCHES (arm64 native, x86_64 SysV via Rosetta, Win64 via the windows
+      gate): GPR + FP (f32/f64) + ref multi-arg, single result via `JitInstance.invoke`/
+      `runWasiLenientArgs`, MULTI result via `invokeMulti`. The generic two-bank
+      wrapper-thunk (emitAarch64 ≤7 / emitX8664SysV ≤5 / emitX8664Win64 ≤3 params)
+      replaced the shape-specific helpers; `compile.zig` requests thunks for exported
+      multi-arg funcs; CLI `zwasm run --engine jit --invoke add=2,3` prints 5 (interp-
+      parity; dropped the main.zig:257 / runner.zig:657 rejects). SHAs: 50452a498
+      (arm64 GPR) 14dfb8b57 (invoke route) 853299ad5 (SysV GPR) b88435743 (CLI)
+      6db14695d (Win64 GPR) d791dc6b9 (arm64 FP) 77c5fd943 (SysV FP) 3077f165b (Win64 FP)
+      6d750b5a9 (multi-arg×multi-result lock). Design substrate = ADR-0106 buffer-write
+      ABI; full per-arch design in `private/notes/d477-remaining-slices-design.md`.
+      RESIDUAL = 3 NICHE slivers (the embedding API + CLI scalar/FP/ref invoke is
+      complete WITHOUT them; build on demand): (1) CLI `--invoke` multi-RESULT
+      multi-line print (embedding-API multi-result via invokeMulti already works +
+      spec-corpus-exercised; only the CLI text path prints 1 value — wire
+      runWasmJitCaptured→invokeMulti + per-result formatScalar); (2) v128 args/results
+      (model A = 2 consecutive 16-aligned u64 slots DECIDED; Win64-by-REFERENCE gotcha;
+      niche — SIMD bodies execute fine, scalar/FP multi-arg invoke meets the SIMD
+      constraint); (3) Win64 ≥4-param stack-spill (rare). RECOMMENDATION: D-477 core
+      unblocks the ADR-0200 API-JIT phase (the user's priority) — the slivers need not
+      gate it; pivot to the API phase, build slivers on demand.
     first_raised: "2026-06-20"
-    last_reviewed: "2026-06-20"
+    last_reviewed: "2026-06-21"
     refs: |-
       src/cli/main.zig:253-258 (the AI-invented "requires the interp engine" reject)
       src/engine/runner.zig (runWasiLenient entry path; 0-arg + v128-result)
