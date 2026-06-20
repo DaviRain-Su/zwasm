@@ -45,12 +45,22 @@ entries:
       extraction @d96297628 (restored cap headroom). JIT GUARD @389131e36:
       compileWasm rejects i64-table modules with Error.JitTable64Unsupported (the
       JIT codegen still indexes at i32 width — clean fail, not silent miscompile;
-      interp doesn't route through compileWasm). REMAINING: (4) JIT i64 table
-      bounds codegen (W→X form, mirror op_memory.zig:88 mem64 branch, BOTH arches,
-      8 table ops + call_indirect) → REMOVES the guard. (5) distil memory64/raw/
-      table*.wast + call_indirect i64 cases, run both engines + 3 hosts. Slice 4
-      is the big one (2 arches × table ops); verify per the JIT-codegen lesson
-      (test-spec-wasm-2.0-assert on arm64 AND -Dtarget=x86_64-macos).
+      interp doesn't route through compileWasm). SLICE 5 (spec corpus) @3454905ef
+      + @a7609a65b: distilled 11 of 13 table64 spec dirs into wasm-3.0-assert,
+      ALL interp-green (table_get/set/fill/size/copy/copy_mixed/init/call_indirect/
+      -sub/br_table/return_call_indirect; memory64 manifests 10→21). The @a7609a65b
+      fix = i64-table active ELEMENT-segment offset (interp used i32-only
+      evalConstI32Expr → InstantiateFailed / i32-truncated offset mis-populated the
+      table → call_indirect/table.copy/table.init wrong) — routed through the
+      i64 evaluator; turned table_copy(1220 traps)/table_init(632)/call_indirect(104)
+      fully green. REMAINING gaps (the last 2 spec dirs, NOT distilled): table_grow
+      (table_grow.6 InstantiateFailed + 2 runtime mismatches) + table.wast
+      (table.30/32 validator over-rejection of valid modules + table.12/34
+      cross-module (register) i64-table import = UnknownImport). And (4) JIT i64
+      table-bounds codegen (W→X, mirror op_memory.zig:88, BOTH arches × 8 table ops
+      + call_indirect) → removes the guard; verify per the JIT-codegen lesson
+      (2.0-assert on arm64 AND -Dtarget=x86_64-macos). table64 is now a
+      sweep-tractable worklist, not a monolith.
     first_raised: "2026-06-20"
     last_reviewed: "2026-06-20"
     refs: |-
