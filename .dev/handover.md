@@ -56,21 +56,11 @@ reject @fae437597 · D-473 JIT global-init OutOfHeap propagation @d9d3325db. Dis
 (loader 7GiB = fragmentation not leak, lesson). v3 (table/bulk/atomics) CLEAN. **OPEN gaps (debt): D-475** i64-tables
 (memory64 table ext — feature, needs TableType.idx_type). Campaign technique (varied smith config → exec+loader fuzz
 → fix) is the productive sweep loop; new axes still surface ~1 gap each.
-
-## Active bundle
-
-- **Bundle-ID**: extended-const-arithmetic
-- **Cycles-remaining**: ~1
-- **Continuity-memo**: smith_v4 found zwasm REJECTS valid extended-const arithmetic (i32/i64 add/sub/mul =
-  0x6A/0x6B/0x6C/0x7C/0x7D/0x7E) in const-exprs (in-scope per ROADMAP §56). 5 pieces: (1) `init_expr.scanInitExpr`
-  accept the 6 ops (no immediate); (2) `instantiate.evalGlobalInitGc` eval them on its stack (pop2/push1, WRAPPING
-  +%/-%/*%) — VERIFIED working for interp globals; (3) `runner_validate.validateGlobalInitExpr` (JIT path, ~line 68)
-  is single-op → convert to a stack-based const-expr type-validator (else InvalidGlobalInitExpr); (4)
-  `runner_validate.evalConstOffsetU64` (~line 354) for data/elem active offsets — stack machine; (5) tests + a
-  global.get fixture. CAUTION: a PARTIAL fix (1+2 only) creates an interp-accepts/JIT-rejects DIVERGENCE — landed
-  this turn then REVERTED to stay consistent. Do ALL 5 in one commit.
-- **Exit-condition**: `(global i32 (i32.add (i32.const 40) (i32.const 2)))` reads 42 on BOTH engines + data-offset
-  extended-const lands correctly; full test gate green.
+**extended-const DONE @d258097e9** (7th gap fixed): the extended-const proposal (i32/i64 add/sub/mul in const-exprs,
+ROADMAP §56) was rejected; wired through ALL 6 eval/validate sites (parse + interp global/i32-offset/i64-offset +
+JIT global-validate + JIT data/elem offset) in ONE commit — both engines read 42 on global + offset, no divergence.
+Unit tests + committed fuzz seed (extended_const_arith.wasm). NEXT: more varied campaigns OR the D-475 i64-table
+feature slice — the campaign technique has found 7 gaps this session; new axes still surface ~1 each.
 
 **Phase 17 完成形 plateau** (validated — do NOT re-walk): async COMPLETE; v128 spill (D-034/D-460/D-461) CLOSED;
 surface audits clean 2026-06-18; fuzz 0-crash; realworld JIT run 56/56 byte-match wasmtime (gating). NOT-WORTH: D-294-R2 TrapKind.
