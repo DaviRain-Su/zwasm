@@ -790,7 +790,9 @@ pub const Linker = struct {
         // trap_out=null: the Linker path keeps the coarse InstantiateFailed for
         // a start trap (its rich LinkError covers the import-resolution failures);
         // surfacing a start trap here is a follow-up if a consumer needs it (D-275).
-        const inst_ptr = _api_instance.instantiateInternal(mod.c_store, mod.c_handle, pre.asBuilder(), null, limits) orelse return error.InstantiateFailed;
+        // ADR-0200 — Linker path is interp for now (engine selection on the
+        // Linker is a follow-up slice; WASI/host-import JIT bridge pending).
+        const inst_ptr = _api_instance.instantiateInternal(mod.c_store, mod.c_handle, pre.asBuilder(), null, limits, .auto) orelse return error.InstantiateFailed;
         return .{ .handle = inst_ptr, .c_store = mod.c_store };
     }
 

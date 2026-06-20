@@ -624,7 +624,7 @@ pub export fn wasm_instance_new(
     // wasm-c-api contract (null return + `*trap_out` = the start trap).
     // The C ABI `wasm_instance_new` carries no budget knobs (upstream wasm.h
     // shape); per-instance budgets are the Zig facade's `instantiateFacade`.
-    return instantiateInternal(store, module, BuildBindingsCApi{ .imports_array = imports_array }, trap_out, .{});
+    return instantiateInternal(store, module, BuildBindingsCApi{ .imports_array = imports_array }, trap_out, .{}, .auto);
 }
 
 /// Zig-facade no-import instantiation (`src/zwasm/module.zig::Module.instantiate`)
@@ -633,17 +633,12 @@ pub export fn wasm_instance_new(
 /// memory caps are armed before the start function and the initial allocation.
 /// ADR-0200 — per-instance engine selection. `auto` lets the runtime pick
 /// (eventually JIT-default, interp fallback on a JIT-less arch); `jit` /
-/// `interp` force one. The default ratified shape is JIT-default; until the
-/// JIT path covers host imports + WASI, `auto` routes to interp so existing
-/// import-using facade modules keep working — see `instantiateFacade`.
+/// `interp` force one. The fork is centralised in `instantiateInternal` so
+/// every entry point (facade / `wasm_instance_new` / linker) honours it.
 pub const EngineKind = enum { auto, jit, interp };
 
 pub fn instantiateFacade(store: *Store, module: *const Module, trap_out: ?*?*Trap, limits: InstantiateLimits, engine: EngineKind) ?*Instance {
-    // TODO(ADR-0200): route `.auto` → JIT once the host-import / WASI bridge
-    // lands; until then `.auto` = interp so import-using modules keep working
-    // (defer, not workaround — the JIT path is no-import-only this increment).
-    if (engine == .jit) return instantiateJit(store, module, limits);
-    return instantiateInternal(store, module, BuildBindingsCApi{ .imports_array = null }, trap_out, limits);
+    return instantiateInternal(store, module, BuildBindingsCApi{ .imports_array = null }, trap_out, limits, engine);
 }
 
 /// ADR-0200 — build a JIT-backed `Instance` (`runtime == null`, `jit` set).
@@ -768,8 +763,16 @@ pub const InstantiateLimits = struct {
 /// Extern[]-driven bindings) and `src/zwasm/linker.zig` (native
 /// path, host-fn + cross-instance bindings). Both wrap their
 /// resolver in a `BindingsBuilder` and call here.
-pub fn instantiateInternal(store: *Store, module: *const Module, builder_state: anytype, trap_out: ?*?*Trap, limits: InstantiateLimits) ?*Instance {
+pub fn instantiateInternal(store: *Store, module: *const Module, builder_state: anytype, trap_out: ?*?*Trap, limits: InstantiateLimits, engine: EngineKind) ?*Instance {
     const alloc = storeAllocator(store) orelse return null;
+
+    // ADR-0200 — per-instance engine fork, shared by EVERY entry point
+    // (`instantiateFacade`, `wasm_instance_new`, `src/zwasm/linker.zig`). `.jit`
+    // builds a native JIT-backed instance; `.auto`/`.interp` fall through to the
+    // interp setup below. TODO(ADR-0200): route `.auto` → JIT once the JIT path
+    // covers host imports + WASI (defer, not workaround — JIT is no-import-only
+    // this increment, so `.auto` stays interp to keep import-using modules working).
+    if (engine == .jit) return instantiateJit(store, module, limits);
 
     // ADR-0184: open any preopen requests queued by the io-free
     // config builder (`zwasm_wasi_config_preopen_dir`) via the
