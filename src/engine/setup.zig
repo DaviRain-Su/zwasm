@@ -623,7 +623,17 @@ pub fn setupRuntimeLinked(
             // import-inclusive emitted-code layout.
             globals_buf[num_global_imports + i] = instantiate.evalConstExprValue(gd.init_expr) catch |e| blk: {
                 if (e == error.UnsupportedConstExpr) {
-                    break :blk instantiate.evalGlobalInitGc(gd.init_expr, gc_heap_typed, gti_val, func_entities, imp_global_ptrs) catch .{ .bits128 = 0 };
+                    break :blk instantiate.evalGlobalInitGc(gd.init_expr, gc_heap_typed, gti_val, func_entities, imp_global_ptrs) catch |e2| {
+                        // A real GC-heap resource trap (the 4 GiB cap — e.g. a
+                        // too-large `array.new` const-expr, D-472) must FAIL
+                        // instantiation, matching the interp path
+                        // (instantiateRuntime propagates OutOfHeap). Only a
+                        // genuinely-unsupported const-expr SHAPE falls back to a
+                        // 0 global (D-473). Mapped to OutOfMemory (OutOfHeap is
+                        // not in the engine Error set; both = resource failure).
+                        if (e2 == error.OutOfHeap) return error.OutOfMemory;
+                        break :blk .{ .bits128 = 0 };
+                    };
                 }
                 break :blk .{ .bits128 = 0 };
             };

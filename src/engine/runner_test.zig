@@ -2101,12 +2101,12 @@ test "runWasiLenient: array.new_default global with overflowing length → OutOf
         0x00, 0x00, 0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b, 0x00, 0x0b, 0x04, 0x6e, 0x61, 0x6d,
         0x65, 0x04, 0x04, 0x01, 0x00, 0x01, 0x61,
     };
-    // The JIT setup path swallows the OutOfHeap to a 0 global (setup.zig
-    // global-init fallback, D-472 follow-up debt) so it returns cleanly; the
-    // KEY regression is that it no longer PANICS (a pre-fix integer overflow
-    // crashed the process). The interp path's OutOfHeap propagation is covered
-    // by the committed fuzz-seed (array_new_constexpr_overflow.wasm).
-    _ = try runner.runWasiLenient(testing.allocator, &bytes, null, null, null, .{}, null);
+    // D-472 fixed the integer-overflow PANIC; D-473 then made the JIT setup path
+    // PROPAGATE the resource trap (OutOfHeap → OutOfMemory) instead of swallowing
+    // it to a 0 global — so the JIT now FAILS instantiation, matching the interp
+    // path (instantiateRuntime propagates OutOfHeap). Both engines reject the
+    // too-large GC global = no divergence, no panic.
+    try testing.expectError(runner.Error.OutOfMemory, runner.runWasiLenient(testing.allocator, &bytes, null, null, null, .{}, null));
 }
 
 test "runWasiLenient: unsatisfied import → ImportUnsatisfied at instantiation, even if never called (D-451, Wasm spec §4.5.4)" {
