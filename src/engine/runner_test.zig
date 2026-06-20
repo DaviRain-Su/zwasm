@@ -1550,6 +1550,29 @@ test "JitInstance.invokeMulti: 1-param 2-result returns (arg, 42) — param-bear
     try testing.expectEqual(@as(u32, 42), results[1].i32);
 }
 
+test "JitInstance.invokeMulti: 2-param 2-result swap2(7,9)→(9,7) — D-477 N-arg + multi-result combo" {
+    // Locks the multi-arg (2) + multi-result (2) combination unlocked by the
+    // D-477 N-arg thunk generalization (only 0/1-param multi-result was tested
+    // before). arm64 (≤7) + x86_64 SysV (≤5) emit the 2-param 2-GPR-result thunk;
+    // Win64 RUN stays phase-end-gated (verified on Mac arm64 + ubuntu SysV here).
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    // (module (func (export "swap2") (param i32 i32) (result i32 i32)
+    //   local.get 1 local.get 0))  — returns (b, a)
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x08, 0x01, 0x60, 0x02, 0x7f, 0x7f, 0x02, 0x7f, 0x7f, // (i32 i32)->(i32 i32)
+        0x03, 0x02, 0x01, 0x00,
+        0x07, 0x09, 0x01, 0x05, 0x73, 0x77, 0x61, 0x70, 0x32, 0x00, 0x00, // export "swap2"
+        0x0a, 0x08, 0x01, 0x06, 0x00, 0x20, 0x01, 0x20, 0x00, 0x0b, // local.get 1; local.get 0
+    };
+    var inst = try JitInstance.init(testing.allocator, &bytes);
+    defer inst.deinit(testing.allocator);
+    var results = [_]TypedResult{ undefined, undefined };
+    try inst.invokeMulti(testing.allocator, "swap2", &.{ 7, 9 }, &results);
+    try testing.expectEqual(@as(u32, 9), results[0].i32);
+    try testing.expectEqual(@as(u32, 7), results[1].i32);
+}
+
 test "memory64: fresh JitInstance i64.load at the page boundary 0xfff8 (D-234 isolation repro)" {
     // The corpus shows `i64.load 0xfff8` on the persistent cur_jit returning
     // 0x6867666564000000 (low 3 bytes 'a''b''c' zeroed) instead of "abcdefgh"
