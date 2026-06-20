@@ -25,12 +25,14 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
   (@50452a498) + `emitX8664SysV` ≤5 params (@853299ad5); `compile.zig` requests thunks
   for EXPORTED multi-arg; `JitInstance.invoke`→`invokeViaBufferSingle` (@14dfb8b57);
   `runWasiLenientArgs` + `run.zig packJitInvokeArgs` + main.zig JIT arg-threading
-  (@b88435743, dropped the interp-only reject). **REMAINING completeness slices** (extend
-  bundle): (1) Win64 `emitX8664Win64` N-param (today enumerates {0,1,3} params; need 2
-  + ≥4 stack-spill; params RDX/R8/R9 after RCX=rt + shadow space); (2) FP-class args/
-  results (thunk is GPR-only via `all_gpr_class` — add V/XMM load/store); (3) v128 (16B
-  ≠ 8B u64 slot — needs 16B-slot buffer variant or separate path); (4) multi-result (>1)
-  via `invoke`/CLI (ScalarResult is single — invokeMulti already does ≥2 via thunk).
+  (@b88435743, dropped the interp-only reject). **Win64 GPR ≤3-param DONE @6db14695d**
+  (emitX8664Win64 collapsed to generic register-class; add=2,3 now all 3 arches;
+  byte-verified Mac + x86_64-macos, Win64 RUNTIME pending windows-gate verdict).
+  **REMAINING completeness slices** (extend bundle): (1) Win64 ≥4-param stack-spill
+  (deferred); (2) FP-class args/results (thunk GPR-only via `all_gpr_class` — add V/XMM
+  load/store, two-bank GPR/FP arg assignment per `private/notes/`); (3) v128 (16B ≠ 8B u64
+  slot — 16B-slot buffer ADR sub-decision); (4) multi-result (>1) via `invoke`/CLI
+  (ScalarResult single — invokeMulti already does ≥2 via thunk).
 - **Exit-condition**: MET (above). Extended close = the 4 completeness slices land →
   full wasmtime-parity host→guest JIT invoke → D-477 `note`; THEN ADR-0200 API-JIT phase.
 - **Pre-worked design (先読み)**: all 4 slices designed in `private/notes/d477-remaining-slices-design.md`
