@@ -3,6 +3,33 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
+  - id: "D-476"
+    layer: "code"
+    status: "note"
+    description: |-
+      Wasm 3.0 parse/validate ACCEPTANCE gap CLUSTER (gap-class #2): zwasm rejects
+      several VALID Wasm 3.0 GC/func-references modules with "module decode/validate
+      failed" that wasm-tools accepts. NOT a crash — the smith_v5 campaign (func-refs
+      + GC + EH) is codegen-CLEAN (loader 720 JIT-compiled, 0 crashes) and
+      execution-CLEAN (exec-fuzz 0 mismatch); these are parse/validate-acceptance
+      misses only. Two instances of the cluster are already FIXED this session —
+      imported-table + element `ref.null` GC reftypes @fae437597, extended-const
+      arithmetic @d258097e9. CONCRETE OPEN instance: an element-segment item using
+      `global.get` is rejected (`(elem funcref (global.get $g))`, defined OR imported
+      global) while `(elem funcref (ref.func $a))` is accepted — wasm-tools validates
+      both. smith_v5 rejected 924/1686 (some legitimately = shared-everything-threads
+      + i64-tables D-475, but a residue are real acceptance gaps like this one).
+      DISCHARGE (fresh-context systematic audit, NOT one-off whack-a-mole): enumerate
+      every reftype / const-expr / element-item / global-init / data-elem-offset
+      ACCEPTANCE site; generate valid GC/func-ref smith modules; diff zwasm-rejects
+      vs wasm-tools-accepts; fix the cluster (likely more hardcoded funcref/externref
+      switches + element-item global.get + typed-ref forms). The interp validator +
+      JIT runner_validate must stay consistent (both accept) to avoid divergence.
+    first_raised: "2026-06-20"
+    last_reviewed: "2026-06-20"
+    refs: |-
+      src/parse/sections_element.zig (readFuncrefInitExpr / element item const-expr)
+      src/validate/validator.zig (element-segment + const-expr acceptance)
   - id: "D-475"
     layer: "code"
     status: "note"

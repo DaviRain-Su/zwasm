@@ -59,8 +59,13 @@ reject @fae437597 · D-473 JIT global-init OutOfHeap propagation @d9d3325db. Dis
 **extended-const DONE @d258097e9** (7th gap fixed): the extended-const proposal (i32/i64 add/sub/mul in const-exprs,
 ROADMAP §56) was rejected; wired through ALL 6 eval/validate sites (parse + interp global/i32-offset/i64-offset +
 JIT global-validate + JIT data/elem offset) in ONE commit — both engines read 42 on global + offset, no divergence.
-Unit tests + committed fuzz seed (extended_const_arith.wasm). NEXT: more varied campaigns OR the D-475 i64-table
-feature slice — the campaign technique has found 7 gaps this session; new axes still surface ~1 each.
+Unit tests + committed fuzz seed (extended_const_arith.wasm). **smith_v5 (func-refs/GC/EH) codegen-CLEAN (720
+JIT-compiled, 0 crashes) + exec-CLEAN (0 mismatch)** — but 924/1686 rejected reveals a **parse/validate ACCEPTANCE
+gap CLUSTER (D-476)**: zwasm rejects valid Wasm 3.0 GC/func-ref modules (concrete OPEN: `(elem funcref (global.get
+$g))` rejected while ref.func accepted). 2 cluster instances already fixed (@fae437597 reftype, @d258097e9
+ext-const). NEXT: **D-476 systematic acceptance audit** (enumerate every reftype/const-expr/element-item/offset
+acceptance site, diff zwasm-vs-wasm-tools, fix the cluster — NOT one-off whack-a-mole) — best with fresh context;
+OR D-475 i64-table feature. Campaign found 7 gaps this session; remaining are a parse-acceptance cluster + features.
 
 **Phase 17 完成形 plateau** (validated — do NOT re-walk): async COMPLETE; v128 spill (D-034/D-460/D-461) CLOSED;
 surface audits clean 2026-06-18; fuzz 0-crash; realworld JIT run 56/56 byte-match wasmtime (gating). NOT-WORTH: D-294-R2 TrapKind.
