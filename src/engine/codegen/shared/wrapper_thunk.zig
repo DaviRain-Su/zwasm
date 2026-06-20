@@ -434,8 +434,9 @@ pub fn emitX8664Win64(
 /// Total: 16 bytes. `imm26` is the body-relative-to-call-site
 /// displacement in 4-byte words, sign-extended.
 fn emitAarch64(allocator: std.mem.Allocator, params: EmitParams) Error!EmitOutput {
-    if (!all_gpr_class(params.sig.results)) return Error.UnsupportedOp;
-    if (!all_gpr_class(params.sig.params)) return Error.UnsupportedOp;
+    // v128 params/results = a later D-477 slice (16B doesn't fit the 8B u64
+    // slot). f32/f64 ARE handled below via the V-register bank.
+    if (contains_v128(params.sig.params) or contains_v128(params.sig.results)) return Error.UnsupportedOp;
 
     const n_results = params.sig.results.len;
     const n_params = params.sig.params.len;
@@ -443,6 +444,8 @@ fn emitAarch64(allocator: std.mem.Allocator, params: EmitParams) Error!EmitOutpu
     errdefer bytes.deinit(allocator);
 
     if (n_results == 3) {
+        // 3-result MEMORY-class is GPR-only (FP-in-memory-result deferred).
+        if (!all_gpr_class(params.sig.results)) return Error.UnsupportedOp;
         // Param-bearing 3-result (MEMORY-class via X8) deferred — X8=results
         // collides with param marshalling order; needs the x86_64-style reorder.
         if (n_params != 0) return Error.UnsupportedOp;
@@ -470,50 +473,70 @@ fn emitAarch64(allocator: std.mem.Allocator, params: EmitParams) Error!EmitOutpu
         return .{ .bytes = try bytes.toOwnedSlice(allocator) };
     }
 
-    // D-477 generic GPR path — n_results ∈ {1,2}, n_params ≤ 7 (the AAPCS64
-    // integer arg registers X1..X7 after X0=rt; ≥8 params need stack spill,
-    // deferred). The buffer-write thunk receives rt=X0, results_ptr=X1,
-    // args_ptr=X2; it stacks results_ptr+LR, marshals each arg from
-    // [args_ptr + 8k] into the body's AAPCS slot X{k+1}, BLs the
-    // register_write body, then stores each result reg X{i} → [results_ptr+8i].
-    // Reproduces the prior hand-written 0/1-param 2-result shapes byte-for-byte.
-    // 0-result deferred for cross-arch parity (x86_64 still requires ≥2 results);
-    // a 0-result void multi-arg invoke routes via the dispatchVoid* helpers.
+    // D-477 generic two-bank path — n_params ≤ 7, n_results ∈ {1,2}. AAPCS64 uses
+    // INDEPENDENT banks: int/ref params → X1..X7 (X0=rt), f32/f64 params → V0..V7;
+    // an int param does not consume a V slot and vice-versa. Thunk entry: rt=X0,
+    // results_ptr=X1, args_ptr=X2; stack results_ptr+LR, marshal each arg from
+    // [args_ptr + 8k] into its bank register, BL the register-write body, store
+    // the result(s). The GPR param whose dest is X2 (the 2nd GPR param) overwrites
+    // the args base, so it is emitted LAST; FP loads read X2 without writing it.
+    // n_results==2 stays GPR-only (mixed/FP multi-result deferred to that slice).
+    // GPR-only shapes reproduce the prior bytes exactly. (0-result deferred.)
     if (n_results < 1 or n_results > 2 or n_params > 7) return Error.UnsupportedOp;
+    if (n_results == 2 and !all_gpr_class(params.sig.results)) return Error.UnsupportedOp;
 
     // STP X1, X30, [SP, #-16]! — save results_ptr (X1) + LR (BL clobbers X30).
     try writeInsn(allocator, &bytes, 0xA9BF7BE1);
-    // Marshal args. Param k → body slot X{k+1} via `LDR X{k+1}, [X2, #8k]`.
-    // X2 is the args_ptr base, and param 1's destination is X2 itself — so
-    // load every k != 1 first (ascending), then k == 1 LAST (its load
-    // overwrites the base after all other reads are done).
-    var k: usize = 0;
-    while (k < n_params) : (k += 1) {
-        if (k == 1) continue;
-        try writeInsn(allocator, &bytes, ldrParamAarch64(k));
+    // Precompute each param's load word + whether its dest is X2 (the args base).
+    var load_words: [7]u32 = undefined;
+    var load_is_base: [7]bool = [_]bool{false} ** 7;
+    {
+        var gpr_n: u32 = 0;
+        var fp_n: u32 = 0;
+        for (params.sig.params, 0..) |pt, kk| {
+            const off: u32 = @intCast(kk); // byte off = 8k; LDR X/D imm12 = k, LDR S imm12 = 2k.
+            switch (pt) {
+                .i32, .i64, .ref => {
+                    const dest = gpr_n + 1;
+                    load_words[kk] = 0xF9400000 | (off << 10) | (@as(u32, 2) << 5) | dest; // LDR X{dest},[X2,#8k]
+                    load_is_base[kk] = (dest == 2);
+                    gpr_n += 1;
+                },
+                .f32 => {
+                    load_words[kk] = 0xBD400000 | ((off * 2) << 10) | (@as(u32, 2) << 5) | fp_n; // LDR S{fp_n},[X2,#8k]
+                    fp_n += 1;
+                },
+                .f64 => {
+                    load_words[kk] = 0xFD400000 | (off << 10) | (@as(u32, 2) << 5) | fp_n; // LDR D{fp_n},[X2,#8k]
+                    fp_n += 1;
+                },
+                .v128 => unreachable, // rejected above
+            }
+        }
     }
-    if (n_params >= 2) try writeInsn(allocator, &bytes, ldrParamAarch64(1));
-    // BL body — pre-offset = STP (4) + one LDR (4) per param.
+    // Emit all non-base loads first, then the X2-targeting one last (every load
+    // is one 4-byte insn, so BL pre-offset is STP(4) + 4·n_params regardless).
+    for (0..n_params) |kk| if (!load_is_base[kk]) try writeInsn(allocator, &bytes, load_words[kk]);
+    for (0..n_params) |kk| if (load_is_base[kk]) try writeInsn(allocator, &bytes, load_words[kk]);
     try emitBLAarch64(allocator, &bytes, params, @intCast(4 + 4 * n_params));
     // LDP X9, X30, [SP], #16 — X9 = results_ptr, X30 = LR.
     try writeInsn(allocator, &bytes, 0xA8C17BE9);
-    // Store result i (in X{i}) → [results_ptr + 8i]: `STR X{i}, [X9, #8i]`.
-    var i: u32 = 0;
-    while (i < n_results) : (i += 1) {
-        try writeInsn(allocator, &bytes, 0xF9000000 | (i << 10) | (9 << 5) | i);
+    if (n_results == 1) {
+        // Store result 0 → [X9]: GPR from X0, f32 from S0, f64 from D0.
+        try writeInsn(allocator, &bytes, switch (params.sig.results[0]) {
+            .i32, .i64, .ref => @as(u32, 0xF9000120), // STR X0, [X9]
+            .f32 => 0xBD000120, // STR S0, [X9]
+            .f64 => 0xFD000120, // STR D0, [X9]
+            .v128 => unreachable,
+        });
+    } else {
+        try writeInsn(allocator, &bytes, 0xF9000120); // STR X0, [X9]
+        try writeInsn(allocator, &bytes, 0xF9000521); // STR X1, [X9, #8]
     }
     try writeInsn(allocator, &bytes, 0x2A1F03E0); // MOV W0, WZR (ErrCode_OK)
     try writeInsn(allocator, &bytes, 0xD65F03C0); // RET
 
     return .{ .bytes = try bytes.toOwnedSlice(allocator) };
-}
-
-/// AAPCS64 `LDR X{k+1}, [X2, #8*k]` — load arg `k` from the args buffer
-/// (base X2) into the register_write body's param slot. Scaled imm12 = k.
-fn ldrParamAarch64(k: usize) u32 {
-    const t: u32 = @intCast(k + 1);
-    const imm12: u32 = @intCast(k);
-    return 0xF9400000 | (imm12 << 10) | (@as(u32, 2) << 5) | t;
 }
 
 /// Emit a 4-byte BL instruction. `pre_offset` is the number of
@@ -548,6 +571,13 @@ fn all_gpr_class(results: []const @import("../../../ir/zir.zig").ValType) bool {
         .f32, .f64, .v128 => return false,
     };
     return true;
+}
+
+/// True if any type is v128 — those don't fit the 8-byte buffer slot, so the
+/// thunk rejects them until the v128 (16B-slot) slice.
+fn contains_v128(types: []const @import("../../../ir/zir.zig").ValType) bool {
+    for (types) |t| if (t == .v128) return true;
+    return false;
 }
 
 fn all_xmm_class(results: []const @import("../../../ir/zir.zig").ValType) bool {
@@ -1167,6 +1197,39 @@ test "wrapper_thunk: emit aarch64 D-477 8-param → UnsupportedOp (no stack-spil
     const p = [_]VT{ .i32, .i32, .i32, .i32, .i32, .i32, .i32, .i32 };
     const results = [_]VT{.i32};
     try testing.expectError(Error.UnsupportedOp, emit(testing.allocator, .{ .sig = .{ .params = &p, .results = &results }, .body_offset = 256, .thunk_offset = 0 }));
+}
+
+test "wrapper_thunk: emit aarch64 D-477 FP (f64,f64)->f64 — V-bank loads + D0 result (32 bytes)" {
+    // SIBLING-AT: src/engine/codegen/shared/wrapper_thunk.zig (emitX8664SysV/Win64 — x86_64 FP-param marshalling is a later D-477 slice)
+    if (comptime builtin.cpu.arch != .aarch64) return;
+    const VT = @import("../../../ir/zir.zig").ValType;
+    const p = [_]VT{ .f64, .f64 };
+    const results = [_]VT{.f64};
+    const out = try emit(testing.allocator, .{ .sig = .{ .params = &p, .results = &results }, .body_offset = 256, .thunk_offset = 0 });
+    defer testing.allocator.free(out.bytes);
+    try testing.expectEqual(@as(usize, 32), out.bytes.len);
+    try testing.expectEqual(@as(u32, 0xA9BF7BE1), std.mem.readInt(u32, out.bytes[0..4], .little)); // STP X1,X30
+    try testing.expectEqual(@as(u32, 0xFD400040), std.mem.readInt(u32, out.bytes[4..8], .little)); // LDR D0,[X2,#0] (p0, FP bank)
+    try testing.expectEqual(@as(u32, 0xFD400441), std.mem.readInt(u32, out.bytes[8..12], .little)); // LDR D1,[X2,#8] (p1)
+    try testing.expectEqual(@as(u32, 0x94000000 | 61), std.mem.readInt(u32, out.bytes[12..16], .little)); // BL (256-12)/4
+    try testing.expectEqual(@as(u32, 0xA8C17BE9), std.mem.readInt(u32, out.bytes[16..20], .little)); // LDP X9,X30
+    try testing.expectEqual(@as(u32, 0xFD000120), std.mem.readInt(u32, out.bytes[20..24], .little)); // STR D0,[X9] (f64 result)
+    try testing.expectEqual(@as(u32, 0xD65F03C0), std.mem.readInt(u32, out.bytes[28..32], .little)); // RET
+}
+
+test "wrapper_thunk: emit aarch64 D-477 mixed (i32,f32)->f32 — two banks independent (32 bytes)" {
+    // SIBLING-AT: src/engine/codegen/shared/wrapper_thunk.zig (emitX8664SysV/Win64 — x86_64 FP-param marshalling is a later D-477 slice)
+    if (comptime builtin.cpu.arch != .aarch64) return;
+    const VT = @import("../../../ir/zir.zig").ValType;
+    const p = [_]VT{ .i32, .f32 };
+    const results = [_]VT{.f32};
+    const out = try emit(testing.allocator, .{ .sig = .{ .params = &p, .results = &results }, .body_offset = 256, .thunk_offset = 0 });
+    defer testing.allocator.free(out.bytes);
+    try testing.expectEqual(@as(usize, 32), out.bytes.len);
+    // p0 i32 → X1 (GPR bank), p1 f32 → S0 (FP bank, independent index).
+    try testing.expectEqual(@as(u32, 0xF9400041), std.mem.readInt(u32, out.bytes[4..8], .little)); // LDR X1,[X2,#0]
+    try testing.expectEqual(@as(u32, 0xBD400840), std.mem.readInt(u32, out.bytes[8..12], .little)); // LDR S0,[X2,#8] (imm12=2)
+    try testing.expectEqual(@as(u32, 0xBD000120), std.mem.readInt(u32, out.bytes[20..24], .little)); // STR S0,[X9] (f32 result)
 }
 
 test "wrapper_thunk: emit aarch64 3-int MEMORY-class (24 bytes)" {

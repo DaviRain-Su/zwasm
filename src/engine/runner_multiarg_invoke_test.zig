@@ -46,6 +46,16 @@ const sum4_i32 = [_]u8{
     0x20, 0x02, 0x6a, 0x20, 0x03, 0x6a, 0x0b,
 };
 
+// (module (func (export "addf") (param f64 f64) (result f64)
+//   local.get 0 local.get 1 f64.add))
+const addf_f64 = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x01, 0x07, 0x01, 0x60, 0x02, 0x7c, 0x7c, 0x01, 0x7c, // type: (f64 f64)->f64
+    0x03, 0x02, 0x01, 0x00,
+    0x07, 0x08, 0x01, 0x04, 0x61, 0x64, 0x64, 0x66, 0x00, 0x00, // export "addf"
+    0x0a, 0x09, 0x01, 0x07, 0x00, 0x20, 0x00, 0x20, 0x01, 0xa0, 0x0b, // f64.add
+};
+
 test "D-477 baseline: JitInstance.invoke 2×i32 add(2,3) → 5 (current working shape, durable)" {
     var inst = try JitInstance.init(testing.allocator, &add_i32i32);
     defer inst.deinit(testing.allocator);
@@ -70,6 +80,25 @@ test "D-477: JitInstance.invoke 4×i32 sum4(2,3,4,5) → 14 via buffer thunk (ar
         try testing.expectError(
             runner.Error.UnsupportedEntrySignature,
             inst.invoke(testing.allocator, "sum4", &.{ 2, 3, 4, 5 }),
+        );
+    }
+}
+
+test "D-477 FP: runWasiLenientArgs addf(2.5,1.5) → f64 4.0 via the V-bank thunk (arm64; x86_64 FP pending)" {
+    // FP params/result through the buffer-write thunk. arm64 emitAarch64 now
+    // marshals f64 args into V0/V1 and reads the D0 result; x86_64 SysV/Win64
+    // FP-param emit is a later slice (thunk still GPR-only there) → no thunk →
+    // reject. Runs natively on the arm64 Mac host. Gate cited to D-477 (§4).
+    var result: ?runner.ScalarResult = null;
+    const a: u64 = @bitCast(@as(f64, 2.5));
+    const b: u64 = @bitCast(@as(f64, 1.5));
+    if (builtin.cpu.arch == .aarch64) {
+        _ = try runner.runWasiLenientArgs(testing.allocator, &addf_f64, "addf", null, null, .{}, &result, &.{ a, b });
+        try testing.expectEqual(@as(f64, 4.0), result.?.f64);
+    } else {
+        try testing.expectError(
+            runner.Error.UnsupportedEntrySignature,
+            runner.runWasiLenientArgs(testing.allocator, &addf_f64, "addf", null, null, .{}, &result, &.{ a, b }),
         );
     }
 }
