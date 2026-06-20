@@ -44,11 +44,13 @@ array.len/struct.get_u null-ref → null_reference (@3f267ef14); array.new_data/
 `zig build test-fuzz-exec`): invokes 0-param/single-scalar smith exports under BOTH engines (fuel-bounded),
 compares value/trap. Needed a corpus regen (smith exported nothing → `smith_config.json` export-everything).
 **GATING + wired into test-all (3-host CI gate)** via a curated `test/fuzz/corpus/exec_seed` (7 hand-written
-value/trap/loop/call + **FP** modules, toolchain-free). **f32/f64 results now covered @8ee695876** (FP execution
-= prime divergence source; bit-compare sound under smith `canonicalize-nans`): campaign 122→**227 funcs, 0
-mismatch** — interp+JIT agree on FP too. Param-widening stays out (measured 0 coverage). 122/227 campaign = manual.
+value/trap/loop/call + **FP** + trap-kind modules, toolchain-free). f32/f64 results covered @8ee695876.
+**Now compares precise TRAP KINDS @8c9a1ff87** (both ABIs → `trap_surface.TrapKind`; lenient when either side is
+incomparable = interp binding_error / JIT generic-bucket) — closes the both-trap-OK blind spot that hid this
+session's 6 GC-trap-kind bugs. Seed = 9 funcs (div_by_zero/unreachable_/oob_memory kinds), 0 mismatch; **FUZZ_N=4000
+campaign 2163 modules / 315 funcs, 0 mismatch** (kind compare = 0 false-positive at scale). Param-widening stays out.
 **Sweep at the floor + nets broadened**: concrete known gaps = 0 (WASI/C-API/CLI/spec-skip/GC-traps); JIT
-codegen-fuzz + exec-fuzz both 0-finding. Remaining: D-456 host-stubs (test-harness), D-336 (blocked sort=value).
+codegen-fuzz + exec-fuzz (value+trap-kind) both 0-finding. Remaining: D-456 host-stubs (test-harness), D-336 (blocked).
 NEXT: periodic re-inventory / larger fuzz campaigns, or general 完成形 refinement / debt repayment.
 
 **Phase 17 完成形 plateau** (validated — do NOT re-walk): async COMPLETE; v128 spill (D-034/D-460/D-461) CLOSED;
