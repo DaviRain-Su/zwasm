@@ -155,8 +155,10 @@ pub const Table = struct {
     instance: ?*Instance,
     table_idx: u32 = 0,
     elem_type: zir.ValType,
-    min: u32,
-    max: ?u32,
+    // u64 to carry a table64 (i64-indexed) table's limits; the C-API
+    // getters (wasm_table_type / wasm_tabletype_limits) saturate to u32.
+    min: u64,
+    max: ?u64,
     /// Cached borrowed extern view (see `Func.extern_view`).
     extern_view: ?*Extern = null,
     /// Cached borrowed `wasm_ref_t` view (`wasm_table_as_ref`, ADR-0158;

@@ -332,8 +332,10 @@ pub const TableEntry = struct {
     /// table at this width.
     idx_type: IdxType = .i32,
     elem_type: ValType,
-    min: u32,
-    max: ?u32 = null,
+    // u64 limits: a table64 (idx_type == .i64) may declare min/max up to
+    // 2^64-1 (spec §5.3.5). i32 tables keep min/max ≤ u32 (decoder-enforced).
+    min: u64,
+    max: ?u64 = null,
     /// 10.G cycle 166 — Wasm 3.0 table-with-explicit-init-expr
     /// (`0x40 0x00 reftype limits constexpr`): raw const-expr bytes for
     /// the initial element value. Empty = default (null_ref) fill.

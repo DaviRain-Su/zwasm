@@ -730,12 +730,16 @@ pub const Linker = struct {
                             .table_alias => |t| t,
                             else => return error.ImportKindMismatch,
                         };
-                        bindings_list.append(scratch, .{ .table = .{
-                            .instance = alias.inst,
-                            .source_elem_type = alias.inst.elem_type,
-                            .source_min = @intCast(alias.inst.refs.len),
-                            .source_max = alias.inst.max,
-                        } }) catch return error.OutOfMemory;
+                        bindings_list.append(scratch, .{
+                            .table = .{
+                                .instance = alias.inst,
+                                .source_elem_type = alias.inst.elem_type,
+                                .source_min = @intCast(alias.inst.refs.len),
+                                // table64 source max (u64) narrowed to the u32 binding field
+                                // (saturate — cross-module i64-table import limit).
+                                .source_max = if (alias.inst.max) |m| (std.math.cast(u32, m) orelse std.math.maxInt(u32)) else null,
+                            },
+                        }) catch return error.OutOfMemory;
                     },
                     // EH tag import (10.E-xmodule-tags) — resolve against
                     // a `defineCrossModuleTag` entry. Param-count type

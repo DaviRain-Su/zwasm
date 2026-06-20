@@ -89,16 +89,21 @@ fn globaltypeExtern(valtype: zir.ValType, mutable: bool) ?*types.ExternType {
     return types.wasm_globaltype_as_externtype(gt);
 }
 
-fn tabletypeOf(elem_type: zir.ValType, min: u32, max: ?u32) ?*types.TableType {
+fn tabletypeOf(elem_type: zir.ValType, min: u64, max: ?u64) ?*types.TableType {
     const vt = types.wasm_valtype_new(valKindOf(elem_type)) orelse return null;
-    var lim: types.Limits = .{ .min = min, .max = max orelse 0xffff_ffff };
+    // table64 limits are u64; the wasm-c-api TableType is u32 — saturate a
+    // wider i64-table bound to u32-max (the closest expressible value).
+    var lim: types.Limits = .{
+        .min = std.math.cast(u32, min) orelse 0xffff_ffff,
+        .max = if (max) |mx| (std.math.cast(u32, mx) orelse 0xffff_ffff) else 0xffff_ffff,
+    };
     return types.wasm_tabletype_new(vt, &lim) orelse {
         types.wasm_valtype_delete(vt);
         return null;
     };
 }
 
-fn tabletypeExtern(elem_type: zir.ValType, min: u32, max: ?u32) ?*types.ExternType {
+fn tabletypeExtern(elem_type: zir.ValType, min: u64, max: ?u64) ?*types.ExternType {
     const tt = tabletypeOf(elem_type, min, max) orelse return null;
     return types.wasm_tabletype_as_externtype(tt);
 }
@@ -180,7 +185,7 @@ pub export fn wasm_module_imports(m: ?*const Module, out: ?*types.ImportTypeVec)
 // Index-space type descriptors (import prefix ++ defined section), used to
 // resolve an export's `idx` → its type.
 const GlobalInfo = struct { valtype: zir.ValType, mutable: bool };
-const TableInfo = struct { elem_type: zir.ValType, min: u32, max: ?u32 };
+const TableInfo = struct { elem_type: zir.ValType, min: u64, max: ?u64 };
 
 /// `wasm_module_exports(module, own exporttype_vec* out)` — decode the
 /// export section into one `wasm_exporttype_t` per export. Unlike imports,

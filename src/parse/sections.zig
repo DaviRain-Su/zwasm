@@ -649,7 +649,7 @@ pub const Import = struct {
 
 pub const ImportPayload = union(enum) {
     func_typeidx: u32,
-    table: struct { elem_type: ValType, min: u32, max: ?u32, idx_type: zir.IdxType = .i32 },
+    table: struct { elem_type: ValType, min: u64, max: ?u64, idx_type: zir.IdxType = .i32 },
     memory: MemoryEntry,
     global: struct { valtype: ValType, mutable: bool },
     // Wasm 3.0 EH tag import — the tag's type-section index (10.E).
@@ -753,7 +753,7 @@ fn readName(body: []const u8, pos: *usize) Error![]const u8 {
 /// memory64, ADR-0111 D1). min/max stay u32: a table with > 2^32
 /// cells is non-instantiable (each cell is a reference); the full
 /// u64 limit width is deferred (D-475 remaining scope).
-fn readLimits(body: []const u8, pos: *usize) Error!struct { idx_type: zir.IdxType, min: u32, max: ?u32 } {
+fn readLimits(body: []const u8, pos: *usize) Error!struct { idx_type: zir.IdxType, min: u64, max: ?u64 } {
     if (pos.* >= body.len) return Error.UnexpectedEnd;
     const flag = body[pos.*];
     pos.* += 1;
@@ -765,8 +765,14 @@ fn readLimits(body: []const u8, pos: *usize) Error!struct { idx_type: zir.IdxTyp
             return Error.Memory64Unsupported;
         }
     }
-    const min = try leb128.readUleb128(u32, body, pos);
-    const max: ?u32 = if (has_max) try leb128.readUleb128(u32, body, pos) else null;
+    // table64 limits are u64 (spec §5.3.5); a legacy i32 table's min/max must
+    // still fit u32 (the limits encoding for a 32-bit table) — reject wider.
+    const min = try leb128.readUleb128(u64, body, pos);
+    const max: ?u64 = if (has_max) try leb128.readUleb128(u64, body, pos) else null;
+    if (!is_i64) {
+        if (min > std.math.maxInt(u32)) return Error.InvalidFunctype;
+        if (max) |m| if (m > std.math.maxInt(u32)) return Error.InvalidFunctype;
+    }
     return .{ .idx_type = if (is_i64) .i64 else .i32, .min = min, .max = max };
 }
 
@@ -1732,8 +1738,8 @@ test "decodeTables: funcref with min only" {
     var t = try decodeTables(testing.allocator, &body);
     defer t.deinit();
     try testing.expectEqual(ValType.funcref, t.items[0].elem_type);
-    try testing.expectEqual(@as(u32, 10), t.items[0].min);
-    try testing.expectEqual(@as(?u32, null), t.items[0].max);
+    try testing.expectEqual(@as(u64, 10), t.items[0].min);
+    try testing.expectEqual(@as(?u64, null), t.items[0].max);
 }
 
 test "decodeTables: externref with min and max" {
@@ -1741,8 +1747,8 @@ test "decodeTables: externref with min and max" {
     var t = try decodeTables(testing.allocator, &body);
     defer t.deinit();
     try testing.expectEqual(ValType.externref, t.items[0].elem_type);
-    try testing.expectEqual(@as(u32, 5), t.items[0].min);
-    try testing.expectEqual(@as(?u32, 16), t.items[0].max);
+    try testing.expectEqual(@as(u64, 5), t.items[0].min);
+    try testing.expectEqual(@as(?u64, 16), t.items[0].max);
 }
 
 test "decodeTables: rejects unknown reftype byte" {
@@ -1760,7 +1766,7 @@ test "decodeTables: typed-ref (ref null 0) table (function-references)" {
     try testing.expectEqual(true, et.ref.nullable);
     try testing.expect(et.ref.heap_type == .concrete);
     try testing.expectEqual(@as(u32, 0), et.ref.heap_type.concrete);
-    try testing.expectEqual(@as(u32, 2), t.items[0].min);
+    try testing.expectEqual(@as(u64, 2), t.items[0].min);
 }
 
 // table64 (memory64 proposal's table extension, Wasm 3.0): the table
@@ -1774,8 +1780,8 @@ test "decodeTables: i64 table min only (table64)" {
     var t = try decodeTables(testing.allocator, &body);
     defer t.deinit();
     try testing.expectEqual(zir.IdxType.i64, t.items[0].idx_type);
-    try testing.expectEqual(@as(u32, 3), t.items[0].min);
-    try testing.expectEqual(@as(?u32, null), t.items[0].max);
+    try testing.expectEqual(@as(u64, 3), t.items[0].min);
+    try testing.expectEqual(@as(?u64, null), t.items[0].max);
 }
 
 test "decodeTables: i64 table min+max (table64)" {
@@ -1785,8 +1791,26 @@ test "decodeTables: i64 table min+max (table64)" {
     var t = try decodeTables(testing.allocator, &body);
     defer t.deinit();
     try testing.expectEqual(zir.IdxType.i64, t.items[0].idx_type);
-    try testing.expectEqual(@as(u32, 30), t.items[0].min);
-    try testing.expectEqual(@as(?u32, 30), t.items[0].max);
+    try testing.expectEqual(@as(u64, 30), t.items[0].min);
+    try testing.expectEqual(@as(?u64, 30), t.items[0].max);
+}
+
+test "decodeTables: i64 table with >u32 max (table64 u64 limits, memory64/raw/table.wast)" {
+    if (comptime @intFromEnum(build_options.wasm_level) < @intFromEnum(@TypeOf(build_options.wasm_level).v3_0)) return;
+    // `(table i64 0 4294967296 funcref)` — max = 2^32, exceeds u32. flag=0x05
+    // (i64, min+max); min=0; max=0x1_0000_0000 (uleb 0x80 0x80 0x80 0x80 0x10).
+    const body = [_]u8{ 0x01, 0x70, 0x05, 0x00, 0x80, 0x80, 0x80, 0x80, 0x10 };
+    var t = try decodeTables(testing.allocator, &body);
+    defer t.deinit();
+    try testing.expectEqual(zir.IdxType.i64, t.items[0].idx_type);
+    try testing.expectEqual(@as(u64, 0), t.items[0].min);
+    try testing.expectEqual(@as(?u64, 0x1_0000_0000), t.items[0].max);
+}
+
+test "decodeTables: i32 table rejects >u32 limit" {
+    // A legacy i32 table (flag 0x01) whose max exceeds u32 is malformed.
+    const body = [_]u8{ 0x01, 0x70, 0x01, 0x00, 0x80, 0x80, 0x80, 0x80, 0x10 };
+    try testing.expectError(Error.InvalidFunctype, decodeTables(testing.allocator, &body));
 }
 
 test "decodeTables: i32 table keeps idx_type i32" {

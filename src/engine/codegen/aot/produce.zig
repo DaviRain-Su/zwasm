@@ -316,7 +316,9 @@ fn collectTables(allocator: Allocator, wasm_bytes: []const u8, compiled: *const 
         defer tables.deinit();
         if (tables.items.len > 0) {
             st.has_table = true;
-            st.table0_size = tables.items[0].min;
+            // table64 min is u64; AOT table0_size is u32 (i64 tables are
+            // JIT/AOT-guarded) — saturate defensively.
+            st.table0_size = std.math.cast(u32, tables.items[0].min) orelse std.math.maxInt(u32);
         }
     }
     if (!st.has_table) return st;

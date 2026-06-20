@@ -214,7 +214,7 @@ pub export fn wasm_table_new(store: ?*instance.Store, tt: ?*const types.TableTyp
     const refs = alloc.alloc(runtime.Value, lim.min) catch return null;
     const payload: u64 = if (init) |r| r.ref else runtime.Value.null_ref;
     for (refs) |*slot| slot.* = .{ .ref = payload };
-    const max: ?u32 = if (lim.max == 0xffff_ffff) null else lim.max;
+    const max: ?u64 = if (lim.max == 0xffff_ffff) null else @as(u64, lim.max);
     const ti = alloc.create(runtime.TableInstance) catch {
         alloc.free(refs);
         return null;

@@ -1450,7 +1450,7 @@ pub fn extractTable0Min(allocator: std.mem.Allocator, wasm_bytes: []const u8) u3
     var tables = zwasm.parse.sections.decodeTables(allocator, sec.body) catch return 0;
     defer tables.deinit();
     if (tables.items.len == 0) return 0;
-    return tables.items[0].min;
+    return std.math.cast(u32, tables.items[0].min) orelse std.math.maxInt(u32);
 }
 
 /// §9.9-III (c)-2.3-β-2 per ADR-0066: walk an importer's import
@@ -1581,10 +1581,10 @@ pub fn effectiveTable0Min(
             // First table import = table-0.
             if (registered) |reg| {
                 if (reg.getPtr(imp.module)) |exp| {
-                    return extractExporterTableMin(allocator, exp.bytes_owned, imp.name) orelse imp.payload.table.min;
+                    return extractExporterTableMin(allocator, exp.bytes_owned, imp.name) orelse (std.math.cast(u32, imp.payload.table.min) orelse std.math.maxInt(u32));
                 }
             }
-            return imp.payload.table.min;
+            return std.math.cast(u32, imp.payload.table.min) orelse std.math.maxInt(u32);
         }
     }
     return runner_mod.declaredTableMin(allocator, importer_wasm, 0);
@@ -1762,7 +1762,7 @@ fn extractExporterTableMin(
         defer imports.deinit();
         for (imports.items) |imp| {
             if (imp.kind != .table) continue;
-            if (seen == tidx) return imp.payload.table.min;
+            if (seen == tidx) return std.math.cast(u32, imp.payload.table.min) orelse std.math.maxInt(u32);
             seen += 1;
         }
     }
@@ -1771,7 +1771,7 @@ fn extractExporterTableMin(
     defer tables.deinit();
     const defined_idx = tidx - seen;
     if (defined_idx >= tables.items.len) return null;
-    return tables.items[defined_idx].min;
+    return std.math.cast(u32, tables.items[defined_idx].min) orelse std.math.maxInt(u32);
 }
 
 /// Close-plan §6 (j) Step B cohort 1 — walk the importer's global
@@ -2166,7 +2166,9 @@ fn crossModuleNonFuncImportMismatch(
         },
         .table => {
             const want = imp.payload.table;
-            return crossModuleTableMismatch(allocator, &module, e.idx, want.elem_type, want.min, want.max);
+            const want_min = std.math.cast(u32, want.min) orelse std.math.maxInt(u32);
+            const want_max: ?u32 = if (want.max) |m| (std.math.cast(u32, m) orelse std.math.maxInt(u32)) else null;
+            return crossModuleTableMismatch(allocator, &module, e.idx, want.elem_type, want_min, want_max);
         },
         .memory => {
             const want = imp.payload.memory;
@@ -2230,7 +2232,7 @@ fn crossModuleTableMismatch(
             if (im.kind != .table) continue;
             if (imported_tables == table_idx) {
                 const t = im.payload.table;
-                return tableLimitsMismatch(t.elem_type, t.min, t.max, want_elem, want_min, want_max);
+                return tableLimitsMismatch(t.elem_type, std.math.cast(u32, t.min) orelse std.math.maxInt(u32), if (t.max) |m| (std.math.cast(u32, m) orelse std.math.maxInt(u32)) else null, want_elem, want_min, want_max);
             }
             imported_tables += 1;
         }
@@ -2241,7 +2243,7 @@ fn crossModuleTableMismatch(
     defer tables.deinit();
     if (defined_idx >= tables.items.len) return true;
     const t = tables.items[defined_idx];
-    return tableLimitsMismatch(t.elem_type, t.min, t.max, want_elem, want_min, want_max);
+    return tableLimitsMismatch(t.elem_type, std.math.cast(u32, t.min) orelse std.math.maxInt(u32), if (t.max) |m| (std.math.cast(u32, m) orelse std.math.maxInt(u32)) else null, want_elem, want_min, want_max);
 }
 
 fn tableLimitsMismatch(

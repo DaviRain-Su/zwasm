@@ -295,7 +295,9 @@ pub fn declaredTableMin(allocator: Allocator, wasm_bytes: []const u8, tableidx: 
     var tables = sections.decodeTables(ta, section.body) catch return 0;
     defer tables.deinit();
     if (tableidx >= tables.items.len) return 0;
-    return tables.items[tableidx].min;
+    // table64 min is u64; this JIT cap helper is u32 (i64 tables are
+    // JIT-guarded) — saturate defensively rather than truncate.
+    return std.math.cast(u32, tables.items[tableidx].min) orelse std.math.maxInt(u32);
 }
 
 /// §9.9 / 9.9-l-1b-d093-d48 (D-122/D-125): per-table declared
@@ -313,7 +315,8 @@ pub fn declaredTableMax(allocator: Allocator, wasm_bytes: []const u8, tableidx: 
     var tables = sections.decodeTables(ta, section.body) catch return null;
     defer tables.deinit();
     if (tableidx >= tables.items.len) return null;
-    return tables.items[tableidx].max;
+    const m = tables.items[tableidx].max orelse return null;
+    return std.math.cast(u32, m) orelse std.math.maxInt(u32);
 }
 
 /// Apply active data segments from `wasm_bytes` into `memory`

@@ -493,8 +493,9 @@ fn buildBindings(
                         .table = .{
                             .instance = ti.*, // value copy; refs slice aliased
                             .source_elem_type = ht.elem_type,
-                            .source_min = ht.min,
-                            .source_max = ht.max,
+                            // table64 handle limits (u64) narrowed to the u32 binding (saturate).
+                            .source_min = std.math.cast(u32, ht.min) orelse std.math.maxInt(u32),
+                            .source_max = if (ht.max) |m| (std.math.cast(u32, m) orelse std.math.maxInt(u32)) else null,
                         },
                     };
                 },
@@ -1579,7 +1580,7 @@ pub export fn wasm_instance_exports(i: ?*const Instance, out: ?*ExternVec) callc
                     .table_idx = exp.idx,
                     .elem_type = tt.elem_type,
                     .min = tt.min,
-                    .max = tt.max,
+                    .max = if (tt.max) |m| @as(u64, m) else null,
                 };
                 ext.table = th;
             },

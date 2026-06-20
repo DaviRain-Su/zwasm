@@ -497,10 +497,12 @@ pub fn setupRuntimeLinked(
         var tables_buf = try sections.decodeTables(ta, s.body);
         defer tables_buf.deinit();
         if (tables_buf.items.len > 0) {
-            table_size = tables_buf.items[0].min;
+            // table64 is rejected at compileWasm (Error.JitTable64Unsupported),
+            // so every table reaching the JIT setup is i32 (min/max ≤ u32).
+            table_size = @intCast(tables_buf.items[0].min);
             table_metas = try ta.alloc(TableMeta, tables_buf.items.len);
             for (tables_buf.items, 0..) |t, i| {
-                table_metas[i] = .{ .min = t.min, .max = t.max, .is_funcref = (t.elem_type.isFuncref()), .init_expr = t.init_expr };
+                table_metas[i] = .{ .min = @intCast(t.min), .max = if (t.max) |m| @as(u32, @intCast(m)) else null, .is_funcref = (t.elem_type.isFuncref()), .init_expr = t.init_expr };
             }
         }
     }
