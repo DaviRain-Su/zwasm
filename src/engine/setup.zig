@@ -661,7 +661,11 @@ pub fn setupRuntimeLinked(
         fn f(tm: anytype, cap: u32) u32 {
             if (tm.is_funcref) return tm.min;
             const m = tm.max orelse return tm.min;
-            return @min(m, cap);
+            // The arena MUST hold the table's INITIAL `min` slots — the init
+            // loop + `.len` write all of them. Capping max-headroom at `cap`
+            // must never undercut `min` (a non-funcref table with min > cap
+            // would otherwise alloc < min and OOB-write at setup → SEGV).
+            return @max(tm.min, @min(m, cap));
         }
     }.f;
     var total_table_refs: usize = 0;

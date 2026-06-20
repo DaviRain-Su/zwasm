@@ -2053,6 +2053,20 @@ test "runWasiLenient: declared table elements over max_table_elements → TableL
     _ = try runner.runWasiLenient(testing.allocator, &wasm, null, null, null, .{}, null);
 }
 
+test "setupRuntimeLinked: non-funcref table with min > grow_cap allocates min slots, no OOB (fuzz-found SEGV)" {
+    // (table 65537 65537 externref (ref.null extern)) — min=max=65537 > the
+    // 65536 grow-headroom cap. The arena MUST be sized to `min`, not the capped
+    // headroom: the table-init loop writes all `min` slots, so an under-sized
+    // arena OOB-wrote at setup → SEGV. The interp path allocates `min` correctly;
+    // the JIT setup must match. Instantiate-only (no func/export) exercises setup.
+    const wasm = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x04, 0x0e, 0x01, 0x40, 0x00, 0x6f, 0x01, 0x81,
+        0x80, 0x04, 0x81, 0x80, 0x04, 0xd0, 0x6f, 0x0b,
+    };
+    _ = try runner.runWasiLenient(testing.allocator, &wasm, null, null, null, .{}, null);
+}
+
 test "runWasiLenient: unsatisfied import → ImportUnsatisfied at instantiation, even if never called (D-451, Wasm spec §4.5.4)" {
     // Module imports `env.abort` (func []→[]) — no WASI handler, no exporter —
     // and exports an empty `_start` that NEVER calls it. The interp path
