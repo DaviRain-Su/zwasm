@@ -63,18 +63,22 @@ declare -a SMOKE=(
     "memory64/memory_fill"
     "memory64/memory_init"
     "memory64/float_memory64"
-    # D-475 — table64 (memory64's i64-indexed table extension). These 8
-    # pass under the interp (table64 validator + runtime, slices 1-3).
-    # The remaining table* dirs (call_indirect / table_copy / table_grow /
-    # table_init / table) revealed real gaps — i64-table active element
-    # segment offset (interp evalConstI32Expr is i32-only), cross-module
-    # i64-table import, runtime mismatches — tracked in D-475 for follow-on
-    # sweep cycles, NOT distilled until fixed.
+    # D-475 — table64 (memory64's i64-indexed table extension). 11 dirs pass
+    # under the interp (table64 validator + runtime, slices 1-3 + the i64
+    # active-element-segment-offset fix that routes an i64 table's elem offset
+    # through the i64 const-expr evaluator). The last 2 dirs (table_grow,
+    # table) still fail — table_grow.6 InstantiateFailed + 2 runtime mismatches,
+    # table.30/32 validator over-rejection + cross-module (register) imports
+    # (UnknownImport) — tracked in D-475 for follow-on sweep cycles, NOT
+    # distilled until fixed.
     "memory64/table_get"
     "memory64/table_set"
     "memory64/table_fill"
     "memory64/table_size"
+    "memory64/table_copy"
     "memory64/table_copy_mixed"
+    "memory64/table_init"
+    "memory64/call_indirect"
     "memory64/table-sub"
     "memory64/br_table"
     "memory64/return_call_indirect"

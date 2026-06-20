@@ -1,3 +1,4 @@
+// FILE-SIZE-EXEMPT: the single instantiation flow (imports → tables → memories → globals → element/data segments → start) plus the const-expr evaluators it drives, grown monotonically with Wasm 3.0 feature accretion (memory64, table64 D-475, multi-memory, GC heap init, CM marshalling) woven into one pass — NOT separable opcode handlers. NEXT cap pressure → extract the const-expr evaluator cluster (evalConstI32Expr / evalConstMemAddrExpr{,WithGlobals} / evalConstExprValue / evalGlobalInitGc + tests) to an `instantiate_const_expr.zig` sibling (pure byte→value helpers, no Runtime state — the validator_helpers.zig precedent). (per ADR-0099) (cap=2200)
 //! Module-bytes → instantiated Runtime helpers.
 //!
 //! Per ADR-0023 §7 item 5: extracts the binding-agnostic
@@ -1696,7 +1697,14 @@ pub fn instantiateRuntime(
                 seg_storage[idx] = refs;
                 if (seg.kind == .active) {
                     if (seg.tableidx >= rt.tables.len) return error.InvalidTableIndex;
-                    const offset = try evalConstI32Expr(seg.offset_expr);
+                    // table64 (D-475): an i64-indexed table's active element
+                    // offset is an i64 const-expr — route it through the
+                    // i64-capable evaluator (mirrors the data-segment path);
+                    // i32 tables keep the i32 evaluator unchanged.
+                    const offset: u64 = if (rt.tables[seg.tableidx].idx_type == .i64)
+                        try evalConstMemAddrExprWithGlobals(seg.offset_expr, .i64, rt.globals)
+                    else
+                        @as(u64, @intCast(@as(u32, @bitCast(try evalConstI32Expr(seg.offset_expr)))));
                     const off_usize: usize = @intCast(offset);
                     const dst_end = off_usize + refs.len;
                     if (dst_end > rt.tables[seg.tableidx].refs.len) return error.ElementSegmentOutOfRange;
