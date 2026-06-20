@@ -43,9 +43,10 @@ array.len/struct.get_u null-ref → null_reference (@3f267ef14); array.new_data/
 (win OK)**. **D-469 interp-vs-JIT EXECUTION differential fuzzer BUILT @fccbf61ce** (`test/fuzz/fuzz_exec.zig`,
 `zig build test-fuzz-exec`): invokes 0-param/single-scalar smith exports under BOTH engines (fuel-bounded),
 compares value/trap. Needed a corpus regen (smith exported nothing → `smith_config.json` export-everything).
-Campaign: 1626 mods / 122 funcs / **0 mismatch, 0 crash** — interp+JIT agree. **GATING + wired into test-all
-(3-host CI gate @8cfa66620)** via a curated `test/fuzz/corpus/exec_seed` (5 hand-written value/trap/loop/call
-modules, toolchain-free); the 122-func campaign stays a manual wide run.
+**GATING + wired into test-all (3-host CI gate)** via a curated `test/fuzz/corpus/exec_seed` (7 hand-written
+value/trap/loop/call + **FP** modules, toolchain-free). **f32/f64 results now covered @8ee695876** (FP execution
+= prime divergence source; bit-compare sound under smith `canonicalize-nans`): campaign 122→**227 funcs, 0
+mismatch** — interp+JIT agree on FP too. Param-widening stays out (measured 0 coverage). 122/227 campaign = manual.
 **Sweep at the floor + nets broadened**: concrete known gaps = 0 (WASI/C-API/CLI/spec-skip/GC-traps); JIT
 codegen-fuzz + exec-fuzz both 0-finding. Remaining: D-456 host-stubs (test-harness), D-336 (blocked sort=value).
 NEXT: periodic re-inventory / larger fuzz campaigns, or general 完成形 refinement / debt repayment.
