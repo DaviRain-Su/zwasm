@@ -359,6 +359,17 @@ pub const Instance = struct {
         var abuf: [16]u64 = undefined;
         for (args, 0..) |a, i| abuf[i] = jitArgBits(a);
 
+        // Multi-value results route through the ADR-0106 wrapper-thunk buffer
+        // (self-describing `TypedResult`); single/void use the scalar `invoke`.
+        if (sig.results.len > 1) {
+            if (results.len > 16) return error.UnsupportedEngineSignature;
+            var rbuf: [16]_runner.TypedResult = undefined;
+            jit.invokeMulti(alloc, name, abuf[0..args.len], rbuf[0..results.len]) catch |err|
+                return mapJitErr(err, jit);
+            for (results, 0..) |*r, i| r.* = typedResultToValue(rbuf[i]);
+            return;
+        }
+
         const got = jit.invoke(alloc, name, abuf[0..args.len]) catch |err|
             return mapJitErr(err, jit);
 
@@ -399,6 +410,19 @@ fn jitResultValue(vt: _zir.ValType, bits: u64) ?_zwasm.Value {
         .f64 => .{ .f64 = bits },
         .v128 => null,
         .ref => null,
+    };
+}
+
+/// ADR-0200 — decode a self-describing JIT `TypedResult` (multi-value path) to a
+/// facade `Value`. A zero ref carrier marshals to a null ref (per `value_conv`).
+fn typedResultToValue(tr: _runner.TypedResult) _zwasm.Value {
+    return switch (tr) {
+        .i32 => |x| .{ .i32 = @bitCast(x) },
+        .i64 => |x| .{ .i64 = @bitCast(x) },
+        .f32 => |x| .{ .f32 = x },
+        .f64 => |x| .{ .f64 = x },
+        .funcref => |x| .{ .funcref = if (x == 0) null else x },
+        .externref => |x| .{ .externref = if (x == 0) null else x },
     };
 }
 
@@ -540,6 +564,29 @@ test "facade engine=.jit: opt-in JIT instance invokes a no-import compute export
     var results = [_]_zwasm.Value{.{ .i32 = 0 }};
     try inst.invoke("add", &.{ .{ .i32 = 2 }, .{ .i32 = 3 } }, &results);
     try testing.expectEqual(@as(i32, 5), results[0].i32);
+}
+
+test "facade engine=.jit: multi-result scalar export via invokeMulti (ADR-0200)" {
+    // (module (func (export "swap2") (param i32 i32) (result i32 i32)
+    //   local.get 1 local.get 0))  — returns (b, a)
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x08, 0x01, 0x60, 0x02, 0x7f, 0x7f, 0x02, 0x7f, 0x7f, // (i32 i32)->(i32 i32)
+        0x03, 0x02, 0x01, 0x00,
+        0x07, 0x09, 0x01, 0x05, 0x73, 0x77, 0x61, 0x70, 0x32, 0x00, 0x00, // export "swap2"
+        0x0a, 0x08, 0x01, 0x06, 0x00, 0x20, 0x01, 0x20, 0x00, 0x0b, // local.get 1; local.get 0
+    };
+    var eng = try _zwasm.Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var mod = try eng.compile(&bytes);
+    defer mod.deinit();
+    var inst = try mod.instantiate(.{ .engine = .jit });
+    defer inst.deinit();
+
+    var results = [_]_zwasm.Value{ .{ .i32 = 0 }, .{ .i32 = 0 } };
+    try inst.invoke("swap2", &.{ .{ .i32 = 7 }, .{ .i32 = 9 } }, &results);
+    try testing.expectEqual(@as(i32, 9), results[0].i32);
+    try testing.expectEqual(@as(i32, 7), results[1].i32);
 }
 
 test "facade setMemoryPagesLimit: host cap refuses memory.grow past it (ADR-0179 #3c)" {
