@@ -2048,9 +2048,9 @@ test "runWasiLenient: declared table elements over max_table_elements → TableL
         0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b, // code: 1 body, 0 locals, end
     };
     // Cap of 2 < declared 5 → early-reject before setup's eager alloc.
-    try testing.expectError(runner.Error.TableLimitExceeded, runner.runWasiLenient(testing.allocator, &wasm, null, null, null, .{ .max_table_elements = 2 }));
+    try testing.expectError(runner.Error.TableLimitExceeded, runner.runWasiLenient(testing.allocator, &wasm, null, null, null, .{ .max_table_elements = 2 }, null));
     // Uncapped (null) → runs to completion (5-element table allocated, _start empty).
-    _ = try runner.runWasiLenient(testing.allocator, &wasm, null, null, null, .{});
+    _ = try runner.runWasiLenient(testing.allocator, &wasm, null, null, null, .{}, null);
 }
 
 test "runWasiLenient: unsatisfied import → ImportUnsatisfied at instantiation, even if never called (D-451, Wasm spec §4.5.4)" {
@@ -2067,7 +2067,7 @@ test "runWasiLenient: unsatisfied import → ImportUnsatisfied at instantiation,
         0x07, 0x0a, 0x01, 0x06, 0x5f, 0x73, 0x74, 0x61, 0x72, 0x74, 0x00, 0x01, // export "_start" func idx 1
         0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b, // code: 1 body, 0 locals, end
     };
-    try testing.expectError(runner.Error.ImportUnsatisfied, runner.runWasiLenient(testing.allocator, &wasm, null, null, null, .{}));
+    try testing.expectError(runner.Error.ImportUnsatisfied, runner.runWasiLenient(testing.allocator, &wasm, null, null, null, .{}, null));
 }
 
 test "jitTableGrow: store_table_elements_max refuses table.grow past host cap (D-314(b))" {

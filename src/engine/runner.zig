@@ -531,6 +531,27 @@ fn declaredTableElements(allocator: Allocator, wasm_bytes: []const u8) Error!u64
     return total;
 }
 
+/// A scalar `--invoke` result surfaced by `runWasiLenient` through its
+/// `result_out` channel. Kept Zone-2-local (no `api.wasm.Val`): the Zone-3 CLI
+/// maps it to the C-API val for `invoke_args.formatScalar`. Splitting this off
+/// the `u32` return (which stays the exit/instantiate flag) removes the latent
+/// dual-meaning where an i32-returning invoke overloaded the exit-code slot.
+pub const ScalarResult = union(enum) {
+    i32: i32,
+    i64: i64,
+    f32: f32,
+    f64: f64,
+};
+
+fn decodeScalarResult(t: zir.ValType, carrier: u64) ScalarResult {
+    return switch (scalarKey(t).?) {
+        0 => .{ .i32 = @bitCast(@as(u32, @truncate(carrier))) },
+        1 => .{ .i64 = @bitCast(carrier) },
+        2 => .{ .f32 = @bitCast(@as(u32, @truncate(carrier))) },
+        3 => .{ .f64 = @bitCast(carrier) },
+    };
+}
+
 pub fn runWasiLenient(
     allocator: Allocator,
     wasm_bytes: []const u8,
@@ -538,6 +559,7 @@ pub fn runWasiLenient(
     wasi_host: ?*anyopaque,
     trap_code_out: ?*u32,
     limits: RunLimits,
+    result_out: ?*?ScalarResult,
 ) Error!u32 {
     const entry_idx: ?u32 = if (invoke_name) |name|
         try findExportFunc(allocator, wasm_bytes, name)
@@ -590,8 +612,21 @@ pub fn runWasiLenient(
         };
         return owned.rt.jit_executed_flag;
     }
-    if (sig.params.len == 0 and sig.results.len == 1 and sig.results[0] == .i32) {
-        return entry.callI32NoArgs(compiled.module, idx, &owned.rt);
+    if (sig.params.len == 0 and sig.results.len == 1) {
+        if (scalarKey(sig.results[0])) |rk| {
+            const carrier = dispatchNoArg(compiled.module, idx, &owned.rt, rk) catch |err| {
+                if (err == Error.Trap) {
+                    if (trap_code_out) |p| p.* = owned.rt.trap_kind;
+                }
+                return err;
+            };
+            if (result_out) |ro| ro.* = decodeScalarResult(sig.results[0], carrier);
+            return owned.rt.jit_executed_flag;
+        }
+        // non-scalar single result (v128 / ref) — the named-invoke path rejects
+        // it; a default entry just instantiate-runs.
+        if (invoke_name != null) return Error.UnsupportedEntrySignature;
+        return owned.rt.jit_executed_flag;
     }
     if (invoke_name != null) return Error.UnsupportedEntrySignature;
     return owned.rt.jit_executed_flag; // unsupported default-entry shape → instantiate-only

@@ -132,12 +132,13 @@ pub fn runWasmJitCaptured(
     // the JIT trap mechanism (returns Error.Trap). Surface the guest's exit
     // code; a trap with NO exit_code is a genuine fault → propagate (exit 1).
     var trap_code: u32 = 0;
+    var scalar_result: ?runner.ScalarResult = null;
     _ = runner.runWasiLenient(alloc, bytes, invoke_name, &host, &trap_code, .{
         .fuel = limits.fuel,
         .max_memory_bytes = limits.max_memory_bytes,
         .max_table_elements = limits.max_table_elements,
         .interrupt_flag = if (limits.timeout_ms != null) &timeout_flag else null,
-    }) catch |err| {
+    }, &scalar_result) catch |err| {
         if (host.exit_code) |code| return @intCast(@min(code, std.math.maxInt(u8)));
         // A genuine trap (no recorded exit_code) surfaces its kind on stderr
         // then maps to exit 1 — interp-parity per ADR-0164 workstream A. A
@@ -151,8 +152,31 @@ pub fn runWasmJitCaptured(
         }
         return err;
     };
+    // A value-returning `--invoke <name>` surfaces its typed result on the
+    // guest-stdout channel like the interp path + wasmtime (gated on an explicit
+    // invoke — a `_start`/default entry stays exit-code-only). `void` exports
+    // leave `scalar_result` null → nothing extra printed.
+    if (invoke_name != null) {
+        if (scalar_result) |sr| {
+            var b: [80]u8 = undefined;
+            const bare = try invoke_args_mod.formatScalar(b[0 .. b.len - 1], scalarToVal(sr));
+            b[bare.len] = '\n';
+            try writeResultText(io, stdout_capture, alloc, b[0 .. bare.len + 1]);
+        }
+    }
     if (host.exit_code) |code| return @intCast(@min(code, std.math.maxInt(u8)));
     return 0;
+}
+
+/// Map the engine's Zone-2 `ScalarResult` to the C-API boundary `Val` so the
+/// shared `invoke_args.formatScalar` renders it identically to the interp path.
+fn scalarToVal(r: @import("../engine/runner.zig").ScalarResult) wasm_c_api.Val {
+    return switch (r) {
+        .i32 => |x| .{ .kind = .i32, .of = .{ .i32 = x } },
+        .i64 => |x| .{ .kind = .i64, .of = .{ .i64 = x } },
+        .f32 => |x| .{ .kind = .f32, .of = .{ .f32 = x } },
+        .f64 => |x| .{ .kind = .f64, .of = .{ .f64 = x } },
+    };
 }
 
 /// `zwasm run <component.wasm>` (CM campaign D1-2 / D-306): run a WASI Preview 2
@@ -736,6 +760,43 @@ test "runWasmCapturedOpts: --invoke add with a bad arg count is a loud binding_e
     try testing.expectError(error.ArgCountMismatch, result);
     const diag = diagnostic.lastDiagnostic().?;
     try testing.expectEqual(diagnostic.Kind.binding_error, diag.kind);
+}
+
+// (module (func (export "a") (result i32) i32.const 42)) — zero params,
+// value-returning. The JIT `--invoke` path must surface the typed result on the
+// guest-stdout channel like the interp path + wasmtime (it was silently dropped
+// for i32 and a hard `UnsupportedEntrySignature` for i64/f32/f64 before).
+const answer_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, 0x03,
+    0x02, 0x01, 0x00, 0x07, 0x05, 0x01, 0x01, 0x61,
+    0x00, 0x00, 0x0a, 0x06, 0x01, 0x04, 0x00, 0x41,
+    0x2a, 0x0b,
+};
+
+test "runWasmJitCaptured: --invoke a zero-arg i32 export prints the typed result (wasmtime/interp parity)" {
+    var capture: std.ArrayList(u8) = .empty;
+    defer capture.deinit(testing.allocator);
+    const code = try runWasmJitCaptured(testing.allocator, testing.io, &answer_wasm, "a", &.{}, &.{}, &.{}, &.{}, .{}, &capture);
+    try testing.expectEqual(@as(u8, 0), code);
+    try testing.expectEqualStrings("42\n", capture.items);
+}
+
+// (module (func (export "a") (result f64) f64.const 3.5)) — locks the 64-bit
+// float carrier decode arm (was a hard `UnsupportedEntrySignature` on the JIT
+// path before the typed-result wiring; i64/f32 ride the same machinery).
+const answer_f64_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60, 0x00, 0x01,
+    0x7c, 0x03, 0x02, 0x01, 0x00, 0x07, 0x05, 0x01, 0x01, 0x61, 0x00, 0x00, 0x0a, 0x0d,
+    0x01, 0x0b, 0x00, 0x44, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0c, 0x40, 0x0b,
+};
+
+test "runWasmJitCaptured: --invoke a zero-arg f64 export prints the typed result (64-bit carrier)" {
+    var capture: std.ArrayList(u8) = .empty;
+    defer capture.deinit(testing.allocator);
+    const code = try runWasmJitCaptured(testing.allocator, testing.io, &answer_f64_wasm, "a", &.{}, &.{}, &.{}, &.{}, .{}, &capture);
+    try testing.expectEqual(@as(u8, 0), code);
+    try testing.expectEqualStrings("3.5\n", capture.items);
 }
 
 // (module (func (export "_start") (loop (br 0)))) — infinite; only a
