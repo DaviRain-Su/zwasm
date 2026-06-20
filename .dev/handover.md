@@ -26,12 +26,14 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
   ADR-0200 (user-steered 2026-06-21)**: JIT-backed embedding API, **per-instance engine
   selection, JIT-default** (interp coexists — cljw dual-engine oracle req). Phase-I peer 裏取り
   DONE (ADR-0200 §"API shape": EngineKind{auto,jit,interp}, auto→JIT, interp-fallback on
-  JIT-less arch, C untyped + Zig typed sugar, caller-pre-sized multi-value). **NEXT**: instantiate-
-  fork survey DISPATCHED (Module.instantiate / wasm_instance_new: interp `Runtime` vs JitInstance;
-  the `runtime != null` accessor seam = blast radius; host-import→JIT `host_calls` bridge). Then:
-  EngineKind knob in `Engine.InitOpts` + C `zwasm_engine_kind`; smallest first increment = opt-in
-  JIT for one no-import compute export (wasm_func_call→JitInstance.invoke). Build substrate =
-  `JitInstance` (runner.zig:819, full invoke/invokeMulti/setFuel/limits surface).
+  JIT-less arch, C untyped + Zig typed sugar, caller-pre-sized multi-value). **Instantiate-fork
+  survey DONE → impl map `.dev/adr0200_api_impl_map.md`** (fork at `instantiateInternal`
+  api/instance.zig:716; add `Instance.jit: ?*anyopaque` slot — Zone-1 so anyopaque, NOT
+  overloading `runtime`; accessor blast radius enumerated; JIT export lookup via findExportFunc
+  = largest divergence). **NEXT = smallest first increment (4 files)**: (1) instance.zig `jit`
+  slot+deinit; (2) api/instance.zig fork in instantiateInternal (engine=jit→JitInstance.init) +
+  wasm_func_call JIT invoke arm + teardown; (3) zwasm/module.zig `engine` field on InstantiateOpts;
+  (4) zwasm/instance.zig invoke JIT arm. TDD: facade test `engine=.jit` add(2,3)→5 (native arm64).
 - **Exit-condition**: first-party mini-consumer (C via `include/zwasm.h` + Zig via `src/zwasm/*`)
   instantiates engine=jit, calls a multi-arg AND a v128/SIMD export, asserts results; engine-knob
   default documented; cljw readiness signal sent (`to_cljw_NN`). NOT cw — that's cw's responsibility.
