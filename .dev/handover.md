@@ -68,10 +68,13 @@ subscriptions @132cf5527 (decode 48B subscription, sleep to earliest deadline, w
 notsup). Sweep status: spec skip-impl=0, debt `now`=0, realworld JIT 56/56 gating, no UnsupportedOp runtime
 crash, fuzz 0-crash. **Net BROADENED @13ca72155**: fuzz_loader Path 4 now runs each smith module through the JIT
 codegen pipeline (was interp-only) — verified **1840 diverse modules JIT-compiled, 0 crashes** (FUZZ_N=3000
-campaign; gap-class #3 net now covers codegen where D-330/D-468-class bugs live). **NEXT (broaden further —
-concrete gaps remain 0)**, EASIEST-first: (a) extend fuzz to interp-vs-JIT EXECUTION differential (needs
-loop/fuel bounding — bigger, strongest gap-finder); (b) file-seek/poll end-to-end fixture via the gating diff-jit
-lane; (c) D-456 host-stub harness. D-336 blocked (sort=value).
+campaign; gap-class #3 net now covers codegen where D-330/D-468-class bugs live). **NEXT**: a WIDER
+gap-inventory was launched (lens: WASI surface beyond the 3 done stubs, C-API/CLI surface, trap-kind
+conformance, spec-edge) — **act on its verified findings next turn**; if it reports the surface complete, the
+known-gap sweep is genuinely done. The interp-vs-JIT EXECUTION differential fuzzer (strongest gap-finder but
+2-cycle complex: divergent invoke APIs + fuel-unit mismatch) is **deferred as D-469** (full design captured
+there; speculative-ROI since execution is already heavily validated). D-456 host-stub harness + D-336 (blocked
+sort=value) remain.
 
 **Phase 17 完成形 plateau** (validated — do NOT re-walk): async COMPLETE; v128 spill (D-034/D-460/D-461) CLOSED;
 surface audits clean 2026-06-18; fuzz 0-crash; realworld JIT run 56/56 byte-match wasmtime (gating). NOT-WORTH: D-294-R2 TrapKind.
