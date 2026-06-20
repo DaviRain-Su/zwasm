@@ -1201,12 +1201,30 @@ pub fn compileWasm(allocator: Allocator, wasm_bytes: []const u8) Error!CompiledW
             std.debug.print("\n", .{});
         }
     }
+    // D-477: a buffer-write thunk is also needed for EXPORTED multi-arg
+    // functions — `JitInstance.invoke` / `runWasiLenient --invoke` marshal N
+    // args through the wrapper when the shape-specific `callXxx` helpers cap
+    // out. Only exported funcs are host-invocable, so gate on the export set
+    // to avoid emitting a thunk per internal function. `emit` still returns
+    // UnsupportedOp for shapes it can't lower (FP, v128, >7 params); the
+    // linker skips those (NO_THUNK), so over-requesting here is harmless.
+    var exported_funcs: std.AutoHashMap(u32, void) = .init(allocator);
+    defer exported_funcs.deinit();
+    if (module.find(.@"export")) |es| {
+        var exports = try sections.decodeExports(allocator, es.body);
+        defer exports.deinit();
+        for (exports.items) |e| {
+            if (e.kind == .func) try exported_funcs.put(e.idx, {});
+        }
+    }
     var wrapper_specs_list: std.ArrayList(linker.WrapperSpec) = .empty;
     defer wrapper_specs_list.deinit(allocator);
     for (results, 0..) |_, i| {
         const wasm_idx = num_imports + @as(u32, @intCast(i));
         const sig = func_sigs[wasm_idx];
-        if (sig.results.len >= 2) {
+        const wants_thunk = sig.results.len >= 2 or
+            (sig.params.len >= 1 and exported_funcs.contains(wasm_idx));
+        if (wants_thunk) {
             try wrapper_specs_list.append(allocator, .{
                 .func_idx = wasm_idx,
                 .sig = sig,

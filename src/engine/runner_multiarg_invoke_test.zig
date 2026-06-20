@@ -19,6 +19,7 @@
 //! test runtime), mirroring `runner_test.zig`.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const testing = std.testing;
 
 const runner = @import("runner.zig");
@@ -52,15 +53,22 @@ test "D-477 baseline: JitInstance.invoke 2×i32 add(2,3) → 5 (current working 
     try testing.expectEqual(@as(?u64, 5), got);
 }
 
-test "D-477 GAP (flips in Phase IV): JitInstance.invoke 4×i32 → UnsupportedEntrySignature" {
-    // runner.zig:989 "4+ args: future cycle". When the generalized thunk
-    // lands, this flips to expectEqual(@as(?u64, 14), got) for sum4(2,3,4,5).
+test "D-477 arm64: JitInstance.invoke 4×i32 sum4(2,3,4,5) → 14 via buffer thunk (x86_64 pending)" {
+    // arm64: emitAarch64's N-GPR-param thunk landed → invoke routes the 4-arg
+    // shape through invokeViaBufferSingle → 2+3+4+5 = 14. x86_64 SysV/Win64
+    // N-param emit is a later D-477 slice (emitX8664* still caps params ≤1), so
+    // no thunk is produced there and the shape stays UnsupportedEntrySignature.
+    // Arch-split gate cited to D-477 per test_discipline §4.
     var inst = try JitInstance.init(testing.allocator, &sum4_i32);
     defer inst.deinit(testing.allocator);
-    try testing.expectError(
-        runner.Error.UnsupportedEntrySignature,
-        inst.invoke(testing.allocator, "sum4", &.{ 2, 3, 4, 5 }),
-    );
+    if (builtin.cpu.arch == .aarch64) {
+        try testing.expectEqual(@as(?u64, 14), try inst.invoke(testing.allocator, "sum4", &.{ 2, 3, 4, 5 }));
+    } else {
+        try testing.expectError(
+            runner.Error.UnsupportedEntrySignature,
+            inst.invoke(testing.allocator, "sum4", &.{ 2, 3, 4, 5 }),
+        );
+    }
 }
 
 test "D-477 GAP (flips in Phase IV): runWasiLenient --invoke of a 2-arg export → UnsupportedEntrySignature" {

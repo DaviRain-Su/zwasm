@@ -971,22 +971,44 @@ pub const JitInstance = struct {
             }
             return try dispatchScalar2(m, func_idx, r, (@as(u8, pk0) << 4) | (@as(u8, pk1) << 2) | scalarKey(sig.results[0]).?, args[0], args[1]);
         }
-        if (sig.params.len == 3) {
-            // The corpus exercises only (i32,i32,i32) -> {void, i32, ref} at
-            // arity 3; other 3-arg shapes stay enumerated skips (D-217).
-            if (!(sig.params[0] == .i32 and sig.params[1] == .i32 and sig.params[2] == .i32))
-                return Error.UnsupportedEntrySignature;
+        if (sig.params.len == 3 and sig.params[0] == .i32 and sig.params[1] == .i32 and sig.params[2] == .i32 and sig.results.len == 1 and sig.results[0] == .i32) {
+            // Fast path the corpus's common (i32,i32,i32)->i32 via the
+            // shape-specific helper; everything else at arity 3+ routes
+            // through the D-477 buffer-write thunk below.
             const a0: u32 = @truncate(args[0]);
             const a1: u32 = @truncate(args[1]);
             const a2: u32 = @truncate(args[2]);
-            if (run_as_void) {
-                try entry.callVoid_i32i32i32(m, func_idx, r, a0, a1, a2);
-                return null;
-            }
-            if (sig.results[0] != .i32) return Error.UnsupportedEntrySignature;
             return @as(u64, try entry.callI32_i32i32i32(m, func_idx, r, a0, a1, a2));
         }
-        return Error.UnsupportedEntrySignature; // 4+ args: future cycle
+        if (sig.params.len == 3 and sig.params[0] == .i32 and sig.params[1] == .i32 and sig.params[2] == .i32 and run_as_void) {
+            const a0: u32 = @truncate(args[0]);
+            const a1: u32 = @truncate(args[1]);
+            const a2: u32 = @truncate(args[2]);
+            try entry.callVoid_i32i32i32(m, func_idx, r, a0, a1, a2);
+            return null;
+        }
+        // D-477: any remaining multi-arg shape (3-arg non-(i32³), 4+ args)
+        // routes through the generalized buffer-write thunk when one exists
+        // (exported GPR-class, ≤7 params). FP/v128/>7-param shapes have no
+        // thunk and stay UnsupportedEntrySignature until their later slice.
+        return self.invokeViaBufferSingle(func_idx, sig, args, run_as_void);
+    }
+
+    /// D-477 — single-result (or void/ref) host invoke via the buffer-write
+    /// thunk. Packs `args` as u64 slots, calls the generalized wrapper, and
+    /// decodes the single result slot (i32/f32 masked to 32 bits, i64/f64/ref
+    /// full 64). `UnsupportedEntrySignature` when no thunk was emitted for the
+    /// shape (the gate that keeps FP/v128/>7-param off the still-partial emit).
+    fn invokeViaBufferSingle(self: *JitInstance, func_idx: u32, sig: zir.FuncType, args: []const u64, run_as_void: bool) Error!?u64 {
+        if (!self.compiled.module.hasThunk(func_idx)) return Error.UnsupportedEntrySignature;
+        var abuf: [8]u64 = undefined;
+        for (args, 0..) |a, j| abuf[j] = a;
+        var rbuf: [1]u64 = .{0};
+        const fnp = self.compiled.module.entry_buf(func_idx, buffer_write.BufferWriteFn);
+        try buffer_write.invokeBufferWrite(&self.owned.rt, fnp, &abuf, &rbuf);
+        if (run_as_void) return null;
+        const rk = scalarKey(sig.results[0]) orelse return Error.UnsupportedEntrySignature;
+        return if (rk == 0 or rk == 2) (rbuf[0] & 0xFFFFFFFF) else rbuf[0];
     }
 
     /// Multi-value invoke (results.len > 1), which `invoke` rejects. Routes
