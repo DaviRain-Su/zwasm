@@ -62,12 +62,12 @@ JIT global-validate + JIT data/elem offset) in ONE commit — both engines read 
 Unit tests + committed fuzz seed (extended_const_arith.wasm). **smith_v5 (func-refs/GC/EH) codegen-CLEAN (720
 JIT-compiled, 0 crashes) + exec-CLEAN (0 mismatch)** — but 924/1686 rejected reveals a **parse/validate ACCEPTANCE
 gap CLUSTER (D-476)**: zwasm rejects valid Wasm 3.0 GC/func-ref modules (concrete OPEN: `(elem funcref (global.get
-$g))` rejected while ref.func accepted). 2 cluster instances already fixed (@fae437597 reftype, @d258097e9
-ext-const). **D-476 now SCOPED NARROW** (enumeration done): the residual cluster is just 2 element-segment-item
-forms in `sections_element.zig` — (1) element item `global.get` and (2) element with a CONCRETE typed ref
-(`(elem (ref null $t) (ref.null $t))`); everything else (table/global typed-refs, data-offset global.get) is
-already accepted. NEXT: **fix the 2 element-item forms** (trace parse→validate→instantiate, mirror the const-expr
-readers, keep interp+JIT consistent) — bounded, fresh-context; OR D-475 i64-table feature. 7 gaps fixed this session.
+$g))`). **D-476 DONE @4b10c569c (8th gap)**: the residual parse-acceptance cluster was just 2 element-item forms —
+(1) element `global.get` (interp validator funcidx-loop missed the global.get-marker skip the JIT already had);
+(2) element concrete typed-ref `(ref.null $t)` (0xD0 reader used readValType = abstract-only → readTypedRef). Both
+fixed, both engines, parser test + fuzz seed; enumeration confirmed no other element-item gaps (rest of smith_v5's
+924 rejects = shared-everything-threads + i64-tables D-475 = out-of-scope/feature). NEXT: D-475 i64-table feature
+(memory64 table ext) OR more varied campaigns. **8 gaps fixed + 2 divergences + 2 disproven this session.**
 
 **Phase 17 完成形 plateau** (validated — do NOT re-walk): async COMPLETE; v128 spill (D-034/D-460/D-461) CLOSED;
 surface audits clean 2026-06-18; fuzz 0-crash; realworld JIT run 56/56 byte-match wasmtime (gating). NOT-WORTH: D-294-R2 TrapKind.

@@ -3,40 +3,6 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
-  - id: "D-476"
-    layer: "code"
-    status: "note"
-    description: |-
-      Wasm 3.0 parse/validate ACCEPTANCE gap CLUSTER (gap-class #2): zwasm rejects
-      several VALID Wasm 3.0 GC/func-references modules with "module decode/validate
-      failed" that wasm-tools accepts. NOT a crash — the smith_v5 campaign (func-refs
-      + GC + EH) is codegen-CLEAN (loader 720 JIT-compiled, 0 crashes) and
-      execution-CLEAN (exec-fuzz 0 mismatch); these are parse/validate-acceptance
-      misses only. Two instances of the cluster are already FIXED this session —
-      imported-table + element `ref.null` GC reftypes @fae437597, extended-const
-      arithmetic @d258097e9. CONCRETE OPEN instance: an element-segment item using
-      `global.get` is rejected (`(elem funcref (global.get $g))`, defined OR imported
-      global) while `(elem funcref (ref.func $a))` is accepted — wasm-tools validates
-      both. SCOPED 2026-06-20 (minimal-module enumeration across reftype/const-expr/
-      element/global/offset forms): the residual cluster is NARROW + concentrated in
-      ELEMENT-SEGMENT ITEM parsing/validation — only TWO open forms reject:
-        (1) element item `global.get` (`(elem funcref (global.get $g))`, defined OR
-            imported global) — ref.func items are accepted, global.get items are not;
-        (2) element with a CONCRETE typed ref — `(elem (ref null $t) (ref.null $t))`
-            (typed-ref element type + ref.null concrete-typeidx item).
-      EVERYTHING ELSE enumerated is ALREADY OK (accepted): table/global typed-ref
-      `(ref null $t)`, imported-table typed-ref, global `(ref.null $t)`, data-offset
-      `global.get` (imported). So this is NOT a broad cluster — it is `sections_element.
-      zig` element-item readers (readFuncrefInitExpr 0x23 global.get path + ref.null
-      concrete-typeidx). DISCHARGE (fast, narrow): make the element-item readers accept
-      global.get + concrete-typeidx ref.null (mirror the const-expr readers); keep
-      interp + JIT (runner_validate) consistent. The smith_v5 924/1686 rejections are
-      otherwise shared-everything-threads + i64-tables (D-475) = correct/out-of-scope.
-    first_raised: "2026-06-20"
-    last_reviewed: "2026-06-20"
-    refs: |-
-      src/parse/sections_element.zig (readFuncrefInitExpr / element item const-expr)
-      src/validate/validator.zig (element-segment + const-expr acceptance)
   - id: "D-475"
     layer: "code"
     status: "note"
