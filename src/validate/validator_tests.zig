@@ -727,6 +727,31 @@ test "validate: memory.size memidx=1 pushes the TARGET memory's i64 (D-324)" {
     try validateMixedMem(i64_result_sig, &body);
 }
 
+// memory64 SIMD load/store: the v128.load* / v128.store* address is the
+// memory's idx_type (i64 for memory64), NOT hardcoded i32. Found by a smith
+// memory64+SIMD fuzz axis (zwasm wrongly rejected valid wasm-tools modules).
+test "validate (memory64 SIMD): v128.load on i64 memory pops i64 address" {
+    // i64.const 0 ; v128.load (0xFD 0x00) memarg memidx=1 (align 0x40|0, idx 1,
+    // offset 0) ; drop ; end — mem 1 is i64-indexed.
+    const body = [_]u8{ 0x42, 0x00, 0xFD, 0x00, 0x40, 0x01, 0x00, 0x1A, 0x0B };
+    try validateMixedMem(empty_sig, &body);
+}
+
+test "validate (memory64 SIMD): v128.load on i64 memory rejects i32 address" {
+    // i32.const 0 ; v128.load memidx=1 — i32 addr where i64 required.
+    const body = [_]u8{ 0x41, 0x00, 0xFD, 0x00, 0x40, 0x01, 0x00, 0x1A, 0x0B };
+    try testing.expectError(Error.StackTypeMismatch, validateMixedMem(empty_sig, &body));
+}
+
+test "validate (memory64 SIMD): v128.store on i64 memory pops i64 address" {
+    // i64.const 0 ; v128.const 0 ; v128.store memidx=1 ; end
+    const body = [_]u8{
+        0x42, 0x00, 0xFD, 0x0C, 0,    0,    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0xFD, 0x0B, 0x40, 0x01, 0x00, 0x0B,
+    };
+    try validateMixedMem(empty_sig, &body);
+}
+
 test "validate: i32.load memarg memidx=1 pops an i64 address (D-324)" {
     // i64.const 0 ; i32.load align=2|bit6 memidx=1 offset=0 ; drop ; end
     const body = [_]u8{ 0x42, 0x00, 0x28, 0x42, 0x01, 0x00, 0x1A, 0x0B };

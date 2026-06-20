@@ -3125,7 +3125,7 @@ pub const Validator = struct {
 
     /// D-324 — address operand valtype for a SPECIFIC memidx
     /// (Wasm 3.0 §3.4.7 multi-memory × memory64 mixing).
-    fn memIdxTypeAt(self: *const Validator, memidx: u32) ValType {
+    pub fn memIdxTypeAt(self: *const Validator, memidx: u32) ValType {
         return switch (self.memEntryIdxType(memidx)) {
             .i32 => .i32,
             .i64 => .i64,

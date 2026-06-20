@@ -405,15 +405,17 @@ pub fn readLaneIdx(self: *Validator, lane_count: u8) Error!void {
 ///
 /// §9.12-E / B134: SIMD-only enforcement; non-SIMD opLoad /
 /// opStore still uses skipMemarg (separate workstream).
-pub fn readSimdMemarg(self: *Validator, max_align_log2: u8) Error!void {
+pub fn readSimdMemarg(self: *Validator, max_align_log2: u8) Error!u32 {
     const raw_align = try leb128.readUleb128(u32, self.body, &self.pos);
     const has_memidx = (raw_align & 0x40) != 0;
     const align_log2: u32 = if (has_memidx) (raw_align & 0x3F) else raw_align;
     if (align_log2 > max_align_log2) return Error.InvalidAlignment;
+    var memidx: u32 = 0;
     if (has_memidx) {
-        _ = try leb128.readUleb128(u32, self.body, &self.pos); // memidx (decoded-and-discarded; multi-memory rejected at instantiate)
+        memidx = try leb128.readUleb128(u32, self.body, &self.pos);
     }
     _ = try leb128.readUleb128(u32, self.body, &self.pos); // offset
+    return memidx;
 }
 
 /// SIMD v128.load family — natural alignment varies per op
@@ -421,18 +423,18 @@ pub fn readSimdMemarg(self: *Validator, max_align_log2: u8) Error!void {
 /// i32 addr, push v128.
 pub fn opSimdLoad(self: *Validator, max_align_log2: u8) Error!void {
     if (self.memory_count == 0) return Error.UnknownMemory;
-    try readSimdMemarg(self, max_align_log2);
-    try self.popExpect(.i32);
+    const memidx = try readSimdMemarg(self, max_align_log2);
+    try self.popExpect(self.memIdxTypeAt(memidx)); // address (i64 for memory64)
     try self.pushType(.v128);
 }
 
 /// SIMD v128.store — 16-byte natural alignment (max_align_log2=4).
-/// Pop v128 + i32 addr.
+/// Pop v128 + addr (i64 for memory64).
 pub fn opSimdStore(self: *Validator, max_align_log2: u8) Error!void {
     if (self.memory_count == 0) return Error.UnknownMemory;
-    try readSimdMemarg(self, max_align_log2);
+    const memidx = try readSimdMemarg(self, max_align_log2);
     try self.popExpect(.v128);
-    try self.popExpect(.i32);
+    try self.popExpect(self.memIdxTypeAt(memidx));
 }
 
 /// SIMD extract_lane (`i8x16.extract_lane_s`, `f32x4.extract_lane`,
@@ -457,20 +459,22 @@ pub fn opSimdReplaceLane(self: *Validator, src: ValType, lane_count: u8) Error!v
 /// `max_align_log2` enforces per-access-width natural alignment
 /// (load8=0, load16=1, load32=2, load64=3).
 pub fn opSimdLoadLane(self: *Validator, lane_count: u8, max_align_log2: u8) Error!void {
-    try readSimdMemarg(self, max_align_log2);
+    if (self.memory_count == 0) return Error.UnknownMemory;
+    const memidx = try readSimdMemarg(self, max_align_log2);
     try readLaneIdx(self, lane_count);
     try self.popExpect(.v128);
-    try self.popExpect(.i32);
+    try self.popExpect(self.memIdxTypeAt(memidx)); // address (i64 for memory64)
     try self.pushType(.v128);
 }
 
 /// SIMD store_lane: memarg + 1-byte lane immediate. Pop v128 +
-/// i32 idx; push nothing.
+/// addr (i64 for memory64); push nothing.
 pub fn opSimdStoreLane(self: *Validator, lane_count: u8, max_align_log2: u8) Error!void {
-    try readSimdMemarg(self, max_align_log2);
+    if (self.memory_count == 0) return Error.UnknownMemory;
+    const memidx = try readSimdMemarg(self, max_align_log2);
     try readLaneIdx(self, lane_count);
     try self.popExpect(.v128);
-    try self.popExpect(.i32);
+    try self.popExpect(self.memIdxTypeAt(memidx));
 }
 
 /// Generic v128 binop (and/or/xor, integer add/sub/mul, shifts,
