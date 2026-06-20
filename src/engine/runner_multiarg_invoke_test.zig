@@ -84,22 +84,12 @@ test "D-477: runWasiLenient (no args) of a 2-arg export → UnsupportedEntrySign
     );
 }
 
-test "D-477: runWasiLenientArgs add(2,3) → scalar i32 5 (arm64 + x86_64 SysV; Win64 2-param pending)" {
-    // The CLI `--invoke add=2,3 --engine jit` exit-condition at the engine
-    // boundary: typed args threaded through the buffer-write thunk. arm64 (≤7)
-    // and x86_64 SysV (≤5) emit a 2-param thunk; Win64 currently enumerates
-    // {0,1,3}-param shapes (2 unsupported) → no thunk → reject until its slice.
-    // Arch/OS-split gate cited to D-477 per test_discipline §4.
+test "D-477: runWasiLenientArgs add(2,3) → scalar i32 5 (all arches: arm64 ≤7 / x86_64 SysV ≤5 / Win64 ≤3)" {
+    // The `--invoke add=2,3 --engine jit` exit-condition at the engine boundary:
+    // typed args through the buffer-write thunk. 2-param GPR is now emitted on
+    // ALL three arches (arm64 emitAarch64, x86_64 SysV emitX8664SysV, Win64
+    // emitX8664Win64 generic ≤3-param). (sum4's 4 params stay Win64-deferred.)
     var result: ?runner.ScalarResult = null;
-    const supported = builtin.cpu.arch == .aarch64 or
-        (builtin.cpu.arch == .x86_64 and builtin.os.tag != .windows);
-    if (supported) {
-        _ = try runner.runWasiLenientArgs(testing.allocator, &add_i32i32, "add", null, null, .{}, &result, &.{ 2, 3 });
-        try testing.expectEqual(@as(i32, 5), result.?.i32);
-    } else {
-        try testing.expectError(
-            runner.Error.UnsupportedEntrySignature,
-            runner.runWasiLenientArgs(testing.allocator, &add_i32i32, "add", null, null, .{}, &result, &.{ 2, 3 }),
-        );
-    }
+    _ = try runner.runWasiLenientArgs(testing.allocator, &add_i32i32, "add", null, null, .{}, &result, &.{ 2, 3 });
+    try testing.expectEqual(@as(i32, 5), result.?.i32);
 }

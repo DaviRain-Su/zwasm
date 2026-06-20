@@ -871,23 +871,16 @@ const add2_wasm = [_]u8{
     0x0b,
 };
 
-test "runWasmJitCaptured: D-477 --invoke add=2,3 on the JIT engine prints 5 (arm64 + x86_64 SysV)" {
-    // The end-to-end bundle exit-condition: typed multi-arg `--invoke` on the
-    // JIT engine. arm64 (≤7 params) and x86_64 SysV (≤5) emit the 2-param
-    // buffer-write thunk; Win64 enumerates {0,1,3}-param shapes today (2 = a
-    // later slice), so there the call rejects. Arch/OS-split cited to D-477.
+test "runWasmJitCaptured: D-477 --invoke add=2,3 on the JIT engine prints 5 (arm64 + x86_64 SysV + Win64)" {
+    // The end-to-end bundle exit-condition: typed multi-arg `--invoke` on the JIT
+    // engine. 2-param GPR is emitted on all three arches (arm64 ≤7, x86_64 SysV
+    // ≤5, Win64 ≤3), so add=2,3 works everywhere. (sum4's 4 params stay
+    // Win64-deferred — see runner_multiarg_invoke_test.zig.)
     var capture: std.ArrayList(u8) = .empty;
     defer capture.deinit(testing.allocator);
-    const builtin = @import("builtin");
-    const supported = builtin.cpu.arch == .aarch64 or
-        (builtin.cpu.arch == .x86_64 and builtin.os.tag != .windows);
-    if (supported) {
-        const code = try runWasmJitCaptured(testing.allocator, testing.io, &add2_wasm, "add", &.{}, &.{}, &.{}, &.{}, .{}, &capture, "2,3");
-        try testing.expectEqual(@as(u8, 0), code);
-        try testing.expectEqualStrings("5\n", capture.items);
-    } else {
-        try testing.expectError(error.UnsupportedEntrySignature, runWasmJitCaptured(testing.allocator, testing.io, &add2_wasm, "add", &.{}, &.{}, &.{}, &.{}, .{}, &capture, "2,3"));
-    }
+    const code = try runWasmJitCaptured(testing.allocator, testing.io, &add2_wasm, "add", &.{}, &.{}, &.{}, &.{}, .{}, &capture, "2,3");
+    try testing.expectEqual(@as(u8, 0), code);
+    try testing.expectEqualStrings("5\n", capture.items);
 }
 
 // (module (func (export "_start") (loop (br 0)))) — infinite; only a

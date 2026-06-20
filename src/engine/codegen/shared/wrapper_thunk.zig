@@ -319,126 +319,44 @@ pub fn emitX8664Win64(
     params: EmitParams,
 ) Error!EmitOutput {
     const n_params = params.sig.params.len;
-    // D-167 spike: extend allowed param counts incrementally.
-    // Cycle 21-24's "land all shapes at once" approach
-    // regressed simd_assert (process death @ simd_bitwise.17);
-    // current cycle re-introduces shapes one at a time, each
-    // gated behind its own Mac byte test (see spike README §
-    // "Spike work order").
-    if (n_params != 0 and n_params != 1 and n_params != 3) return Error.UnsupportedOp;
+    const n_results = params.sig.results.len;
+    // FP params = a later D-477 slice (this thunk marshals GPR params only;
+    // GPR/XMM RESULTS are both handled below).
     if (n_params != 0 and !all_gpr_class(params.sig.params)) return Error.UnsupportedOp;
     const results_all_gpr = all_gpr_class(params.sig.results);
     const results_all_xmm = all_xmm_class(params.sig.results);
     if (!results_all_gpr and !results_all_xmm) return Error.UnsupportedOp;
-
-    const n_results = params.sig.results.len;
-    // Multi-arg shapes today: 2-int register-class (n_params ∈
-    // {1,3}) OR 3-int MEMORY-class (n_params == 1 only).
-    if (n_params != 0) {
-        const ok_2int = n_results == 2 and results_all_gpr;
-        const ok_3int_mem = n_params == 1 and n_results == 3 and results_all_gpr;
-        if (!ok_2int and !ok_3int_mem) return Error.UnsupportedOp;
-    }
+    // Win64 GPR arg registers after RCX=rt are RDX, R8, R9 → ≤3 register params.
+    // ≥4 params need stack args above the 32B shadow space (defer to a later slice).
+    if (n_params > 3) return Error.UnsupportedOp;
 
     var bytes: std.ArrayList(u8) = .empty;
     errdefer bytes.deinit(allocator);
 
-    if (n_params == 1 and n_results == 3 and results_all_gpr) {
-        // 1-arg + 3-int MEMORY-class shape (22 bytes; D-167
-        // shape 3/3). Mirrors the 0-arg 3-int arm below but
-        // prepends `MOV R8, [R8]` to load a0 from args[0]
-        // while R8 still holds the args ptr. Body view at
-        // entry (Win64 MEMORY-class): RCX = hidden results
-        // ptr, RDX = rt, R8 = a0.
-        //
-        // Body-side cycle 2c MEMORY-class Win64 emit landed
-        // at D-165 close (`75f96dee` / `99a047f6` 2026-05-23) —
-        // see emit_setup.zig:104 Win64 arm.
+    // 3-result MEMORY-class (GPR): body takes RCX=&results (hidden ptr), RDX=rt.
+    // Only 0-arg + 1-arg supported; 2/3-arg MEMORY deferred (X8 collides with
+    // param marshalling order — same deferral as arm64/SysV).
+    if (n_results == 3 and results_all_gpr) {
         try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xEC, 0x28 }); // SUB RSP, 0x28
-        try bytes.appendSlice(allocator, &.{ 0x4D, 0x8B, 0x00 }); // MOV R8, [R8]  (a0)
-        try bytes.appendSlice(allocator, &.{ 0x48, 0x87, 0xCA }); // XCHG RCX, RDX
-        try emitCallRel32(allocator, &bytes, params, 4 + 3 + 3);
+        if (n_params == 1) {
+            // 1-arg: load a0 into R8 (body's a0 slot) while R8 still = args ptr,
+            // then swap RCX↔RDX so body sees RCX=&results, RDX=rt.
+            try bytes.appendSlice(allocator, &.{ 0x4D, 0x8B, 0x00 }); // MOV R8, [R8]  (a0)
+            try bytes.appendSlice(allocator, &.{ 0x48, 0x87, 0xCA }); // XCHG RCX, RDX
+            try emitCallRel32(allocator, &bytes, params, 4 + 3 + 3);
+        } else if (n_params == 0) {
+            try bytes.appendSlice(allocator, &.{ 0x48, 0x87, 0xCA }); // XCHG RCX, RDX
+            try emitCallRel32(allocator, &bytes, params, 4 + 3);
+        } else return Error.UnsupportedOp;
         try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xC4, 0x28 }); // ADD RSP, 0x28
         try bytes.appendSlice(allocator, &.{ 0x31, 0xC0, 0xC3 }); // XOR EAX,EAX ; RET
         return .{ .bytes = try bytes.toOwnedSlice(allocator) };
     }
 
-    if (n_params == 3 and n_results == 2 and results_all_gpr) {
-        // 3-arg + 2-int register-class shape (44 bytes; D-167
-        // shape 2/3). Body view at entry: RCX=rt, RDX=a0,
-        // R8=a1, R9=a2 (standard Win64 GPR arg slots 0-3).
-        //
-        // Load order is critical because wrapper-entry R8
-        // holds args ptr and gets overwritten when loading a1:
-        //   1. Save results (RDX) to shadow [RSP+0x20].
-        //   2. MOV R9, [R8+0x10]  — a2 FIRST while R8=args ptr.
-        //   3. MOV RDX, [R8]      — a0; R8 still args ptr.
-        //   4. MOV R8, [R8+0x08]  — a1 LAST; R8 now consumed.
-        //   5. CALL body.
-        //   6. Restore results into R8 from shadow; write
-        //      RAX → [R8], RDX → [R8+8].
-        //   7. ADD RSP, 0x28; XOR EAX,EAX; RET.
-        try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xEC, 0x28 }); // SUB RSP, 0x28
-        try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x54, 0x24, 0x20 }); // MOV [RSP+0x20], RDX
-        try bytes.appendSlice(allocator, &.{ 0x4D, 0x8B, 0x48, 0x10 }); // MOV R9, [R8+0x10]
-        try bytes.appendSlice(allocator, &.{ 0x49, 0x8B, 0x10 }); // MOV RDX, [R8]
-        try bytes.appendSlice(allocator, &.{ 0x4D, 0x8B, 0x40, 0x08 }); // MOV R8, [R8+0x08]
-        try emitCallRel32(allocator, &bytes, params, 4 + 5 + 4 + 3 + 4);
-        try bytes.appendSlice(allocator, &.{ 0x4C, 0x8B, 0x44, 0x24, 0x20 }); // MOV R8, [RSP+0x20]
-        try bytes.appendSlice(allocator, &.{ 0x49, 0x89, 0x00 }); // MOV [R8], RAX
-        try bytes.appendSlice(allocator, &.{ 0x49, 0x89, 0x50, 0x08 }); // MOV [R8+8], RDX
-        try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xC4, 0x28 }); // ADD RSP, 0x28
-        try bytes.appendSlice(allocator, &.{ 0x31, 0xC0, 0xC3 }); // XOR EAX,EAX ; RET
-        return .{ .bytes = try bytes.toOwnedSlice(allocator) };
-    }
-
-    if (n_params == 1 and n_results == 2 and results_all_gpr) {
-        // 1-arg + 2-int register-class shape (36 bytes; D-167).
-        // Body expects RCX=rt, RDX=a0 (per ADR-0106 path (a)
-        // register-write convention); body writes RAX = result 0,
-        // RDX = result 1. Wrapper-entry has Win64 view:
-        // RCX=rt, RDX=results, R8=args. Steps:
-        //   1. Save results ptr (RDX) to shadow [RSP+0x20].
-        //   2. Load a0 from args[0] (= [R8]) into RDX so body sees
-        //      RDX=a0. RCX (= rt) is unchanged.
-        //   3. CALL body.
-        //   4. Restore results ptr into R8 from shadow.
-        //   5. Write RAX → [R8], RDX → [R8+8].
-        //   6. ADD RSP, 0x28 ; XOR EAX,EAX (ErrCode_OK) ; RET.
-        //
-        // Stack alignment: wrapper-entry RSP ≡ 8 (mod 16). SUB
-        // RSP, 0x28 → RSP ≡ 0 (mod 16). CALL pushes 8 → body
-        // sees ≡ 8 ✓.
-        try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xEC, 0x28 }); // SUB RSP, 0x28
-        try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x54, 0x24, 0x20 }); // MOV [RSP+0x20], RDX
-        try bytes.appendSlice(allocator, &.{ 0x49, 0x8B, 0x10 }); // MOV RDX, [R8]  (a0)
-        try emitCallRel32(allocator, &bytes, params, 4 + 5 + 3);
-        try bytes.appendSlice(allocator, &.{ 0x4C, 0x8B, 0x44, 0x24, 0x20 }); // MOV R8, [RSP+0x20]
-        try bytes.appendSlice(allocator, &.{ 0x49, 0x89, 0x00 }); // MOV [R8], RAX
-        try bytes.appendSlice(allocator, &.{ 0x49, 0x89, 0x50, 0x08 }); // MOV [R8+8], RDX
-        try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xC4, 0x28 }); // ADD RSP, 0x28
-        try bytes.appendSlice(allocator, &.{ 0x31, 0xC0, 0xC3 }); // XOR EAX,EAX ; RET
-        return .{ .bytes = try bytes.toOwnedSlice(allocator) };
-    }
-
-    if (n_results == 2 and results_all_gpr) {
-        // 2-int register-class shape (33 bytes); body uses
-        // register convention (result 0 in RAX, result 1 in RDX).
-        try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xEC, 0x28 }); // SUB RSP, 0x28
-        try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x54, 0x24, 0x20 }); // MOV [RSP+0x20], RDX
-        try emitCallRel32(allocator, &bytes, params, 4 + 5);
-        try bytes.appendSlice(allocator, &.{ 0x4C, 0x8B, 0x44, 0x24, 0x20 }); // MOV R8, [RSP+0x20]
-        try bytes.appendSlice(allocator, &.{ 0x49, 0x89, 0x00 }); // MOV [R8], RAX
-        try bytes.appendSlice(allocator, &.{ 0x49, 0x89, 0x50, 0x08 }); // MOV [R8+8], RDX
-        try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xC4, 0x28 }); // ADD RSP, 0x28
-        try bytes.appendSlice(allocator, &.{ 0x31, 0xC0, 0xC3 }); // XOR EAX,EAX ; RET
-    } else if (n_results == 2 and results_all_xmm) {
-        // R1 fix (2026-05-23): 2-XMM (f64, f64) register-class shape.
-        // Mirror of 2-int but stores XMM0/XMM1 via MOVQ. Body's
-        // marshalReturnRegs (with R1/R2 cap=2 fix) writes both
-        // XMM regs even on Win64.
-        // MOVQ [R8], XMM0   = 66 41 0F D6 00       (5 bytes)
-        // MOVQ [R8+8], XMM1 = 66 41 0F D6 48 08    (6 bytes)
+    // 2-XMM register-class (f64,f64): 0-arg only — FP-param marshalling is a
+    // later D-477 slice. Body writes XMM0/XMM1; store via MOVQ.
+    if (n_results == 2 and results_all_xmm) {
+        if (n_params != 0) return Error.UnsupportedOp;
         try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xEC, 0x28 }); // SUB RSP, 0x28
         try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x54, 0x24, 0x20 }); // MOV [RSP+0x20], RDX
         try emitCallRel32(allocator, &bytes, params, 4 + 5);
@@ -447,35 +365,42 @@ pub fn emitX8664Win64(
         try bytes.appendSlice(allocator, &.{ 0x66, 0x41, 0x0F, 0xD6, 0x48, 0x08 }); // MOVQ [R8+8], XMM1
         try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xC4, 0x28 }); // ADD RSP, 0x28
         try bytes.appendSlice(allocator, &.{ 0x31, 0xC0, 0xC3 }); // XOR EAX,EAX ; RET
-    } else if (n_results == 3 and results_all_gpr) {
-        // 3-int MEMORY-class shape (19 bytes); body uses Win64
-        // MEMORY-class convention: RCX = hidden ptr to results
-        // buffer, RDX = rt. Wrapper swaps RCX↔RDX so body's view
-        // matches what its prologue captures.
-        //
-        // ```text
-        //   SUB RSP, 0x28        ; 48 83 EC 28  — shadow + alignment
-        //   XCHG RCX, RDX        ; 48 87 CA     — swap rt ↔ results
-        //   CALL body             ; E8 + disp32 — body writes [RCX+i*8]
-        //   ADD RSP, 0x28        ; 48 83 C4 28
-        //   XOR EAX, EAX         ; 31 C0       — ErrCode_OK
-        //   RET                   ; C3
-        // ```
-        //
-        // Body-side cycle 2c Win64 MEMORY-class emit landed
-        // at D-165 close (2026-05-23): `emit_setup.zig:104`
-        // Win64 arm + `emit.zig:209` `return_is_memory_class`
-        // covers `.win64` alongside `.sysv`.
-        try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xEC, 0x28 }); // SUB RSP, 0x28
-        try bytes.appendSlice(allocator, &.{ 0x48, 0x87, 0xCA }); // XCHG RCX, RDX
-        try emitCallRel32(allocator, &bytes, params, 4 + 3);
-        try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xC4, 0x28 }); // ADD RSP, 0x28
-        try bytes.appendSlice(allocator, &.{ 0x31, 0xC0, 0xC3 }); // XOR EAX,EAX ; RET
-    } else {
-        return Error.UnsupportedOp;
+        return .{ .bytes = try bytes.toOwnedSlice(allocator) };
     }
 
-    return .{ .bytes = try bytes.toOwnedSlice(allocator) };
+    // D-477 generic GPR register-class: n_params ≤ 3, n_results ∈ {1,2} GPR.
+    // Body (register-write) takes RCX=rt, p0=RDX, p1=R8, p2=R9; returns r0=RAX,
+    // r1=RDX. Wrapper entry (Win64): RCX=rt, RDX=results_ptr, R8=args_ptr. Save
+    // results_ptr to the shadow slot, marshal args with the reorder (p2→R9 FIRST,
+    // p0→RDX, p1→R8 LAST — R8 is the args base so it is consumed last), CALL, then
+    // write results back. Reproduces the prior 0/1/3-arg 2-int shapes byte-for-byte
+    // and adds 2-param + n_results==1. Alignment: entry RSP≡8, SUB 0x28→≡0, CALL→≡8.
+    if ((n_results == 1 or n_results == 2) and results_all_gpr) {
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xEC, 0x28 }); // SUB RSP, 0x28
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x54, 0x24, 0x20 }); // MOV [RSP+0x20], RDX
+        var pre_len: u32 = 4 + 5;
+        if (n_params >= 3) {
+            try bytes.appendSlice(allocator, &.{ 0x4D, 0x8B, 0x48, 0x10 }); // MOV R9, [R8+0x10] (p2)
+            pre_len += 4;
+        }
+        if (n_params >= 1) {
+            try bytes.appendSlice(allocator, &.{ 0x49, 0x8B, 0x10 }); // MOV RDX, [R8] (p0)
+            pre_len += 3;
+        }
+        if (n_params >= 2) {
+            try bytes.appendSlice(allocator, &.{ 0x4D, 0x8B, 0x40, 0x08 }); // MOV R8, [R8+0x08] (p1, last)
+            pre_len += 4;
+        }
+        try emitCallRel32(allocator, &bytes, params, pre_len);
+        try bytes.appendSlice(allocator, &.{ 0x4C, 0x8B, 0x44, 0x24, 0x20 }); // MOV R8, [RSP+0x20]
+        try bytes.appendSlice(allocator, &.{ 0x49, 0x89, 0x00 }); // MOV [R8], RAX (r0)
+        if (n_results == 2) try bytes.appendSlice(allocator, &.{ 0x49, 0x89, 0x50, 0x08 }); // MOV [R8+8], RDX (r1)
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xC4, 0x28 }); // ADD RSP, 0x28
+        try bytes.appendSlice(allocator, &.{ 0x31, 0xC0, 0xC3 }); // XOR EAX,EAX ; RET
+        return .{ .bytes = try bytes.toOwnedSlice(allocator) };
+    }
+
+    return Error.UnsupportedOp;
 }
 
 /// arm64 AAPCS64 wrapper emit (Mac aarch64).
@@ -756,6 +681,56 @@ test "wrapper_thunk: emitX8664Win64 1-arg 2-int register-class (i32) -> (i32, i3
     try testing.expectEqualSlices(u8, &.{ 0x48, 0x83, 0xC4, 0x28 }, out.bytes[29..33]);
     // XOR EAX, EAX ; RET
     try testing.expectEqualSlices(u8, &.{ 0x31, 0xC0, 0xC3 }, out.bytes[33..36]);
+}
+
+test "wrapper_thunk: emitX8664Win64 D-477 2-param 1-result (i32,i32)->i32 (36 bytes)" {
+    // Pure byte test. Body: RCX=rt, RDX=p0, R8=p1; returns RAX. Wrapper saves
+    // results_ptr (RDX) to shadow, loads p0→RDX then p1→R8 (R8=args base, last).
+    const VT = @import("../../../ir/zir.zig").ValType;
+    const p = [_]VT{ .i32, .i32 };
+    const results = [_]VT{.i32};
+    const out = try emitX8664Win64(testing.allocator, .{ .sig = .{ .params = &p, .results = &results }, .body_offset = 100, .thunk_offset = 0 });
+    defer testing.allocator.free(out.bytes);
+    try testing.expectEqual(@as(usize, 36), out.bytes.len);
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x89, 0x54, 0x24, 0x20 }, out.bytes[4..9]); // MOV [RSP+0x20], RDX
+    try testing.expectEqualSlices(u8, &.{ 0x49, 0x8B, 0x10 }, out.bytes[9..12]); // MOV RDX, [R8] (p0)
+    try testing.expectEqualSlices(u8, &.{ 0x4D, 0x8B, 0x40, 0x08 }, out.bytes[12..16]); // MOV R8, [R8+8] (p1, last)
+    try testing.expectEqual(@as(u8, 0xE8), out.bytes[16]); // CALL
+    try testing.expectEqual(@as(i32, 79), std.mem.readInt(i32, out.bytes[17..21], .little)); // 100-(16+5)
+    try testing.expectEqualSlices(u8, &.{ 0x49, 0x89, 0x00 }, out.bytes[26..29]); // MOV [R8], RAX (single result)
+    try testing.expectEqualSlices(u8, &.{ 0x31, 0xC0, 0xC3 }, out.bytes[33..36]); // XOR EAX,EAX ; RET
+}
+
+test "wrapper_thunk: emitX8664Win64 D-477 2-param 2-result (40 bytes)" {
+    const VT = @import("../../../ir/zir.zig").ValType;
+    const p = [_]VT{ .i32, .i32 };
+    const results = [_]VT{ .i32, .i32 };
+    const out = try emitX8664Win64(testing.allocator, .{ .sig = .{ .params = &p, .results = &results }, .body_offset = 100, .thunk_offset = 0 });
+    defer testing.allocator.free(out.bytes);
+    try testing.expectEqual(@as(usize, 40), out.bytes.len);
+    try testing.expectEqualSlices(u8, &.{ 0x49, 0x8B, 0x10 }, out.bytes[9..12]); // p0→RDX
+    try testing.expectEqualSlices(u8, &.{ 0x4D, 0x8B, 0x40, 0x08 }, out.bytes[12..16]); // p1→R8 last
+    try testing.expectEqualSlices(u8, &.{ 0x49, 0x89, 0x00 }, out.bytes[26..29]); // MOV [R8], RAX
+    try testing.expectEqualSlices(u8, &.{ 0x49, 0x89, 0x50, 0x08 }, out.bytes[29..33]); // MOV [R8+8], RDX
+}
+
+test "wrapper_thunk: emitX8664Win64 D-477 1-param 1-result (32 bytes)" {
+    const VT = @import("../../../ir/zir.zig").ValType;
+    const p = [_]VT{.i32};
+    const results = [_]VT{.i32};
+    const out = try emitX8664Win64(testing.allocator, .{ .sig = .{ .params = &p, .results = &results }, .body_offset = 100, .thunk_offset = 0 });
+    defer testing.allocator.free(out.bytes);
+    try testing.expectEqual(@as(usize, 32), out.bytes.len);
+    try testing.expectEqualSlices(u8, &.{ 0x49, 0x8B, 0x10 }, out.bytes[9..12]); // p0→RDX
+    try testing.expectEqual(@as(i32, 83), std.mem.readInt(i32, out.bytes[13..17], .little)); // 100-(12+5)
+    try testing.expectEqualSlices(u8, &.{ 0x49, 0x89, 0x00 }, out.bytes[22..25]); // MOV [R8], RAX
+}
+
+test "wrapper_thunk: emitX8664Win64 D-477 4-param → UnsupportedOp (≥4 = stack-spill, deferred)" {
+    const VT = @import("../../../ir/zir.zig").ValType;
+    const p = [_]VT{ .i32, .i32, .i32, .i32 };
+    const results = [_]VT{.i32};
+    try testing.expectError(Error.UnsupportedOp, emitX8664Win64(testing.allocator, .{ .sig = .{ .params = &p, .results = &results }, .body_offset = 100, .thunk_offset = 0 }));
 }
 
 test "wrapper_thunk: emitX8664SysV 1-param 2-int register-class (i32) -> (i32, i32) (34 bytes, D-229)" {
