@@ -53,15 +53,18 @@ test "D-477 baseline: JitInstance.invoke 2×i32 add(2,3) → 5 (current working 
     try testing.expectEqual(@as(?u64, 5), got);
 }
 
-test "D-477 arm64: JitInstance.invoke 4×i32 sum4(2,3,4,5) → 14 via buffer thunk (x86_64 pending)" {
-    // arm64: emitAarch64's N-GPR-param thunk landed → invoke routes the 4-arg
-    // shape through invokeViaBufferSingle → 2+3+4+5 = 14. x86_64 SysV/Win64
-    // N-param emit is a later D-477 slice (emitX8664* still caps params ≤1), so
-    // no thunk is produced there and the shape stays UnsupportedEntrySignature.
-    // Arch-split gate cited to D-477 per test_discipline §4.
+test "D-477: JitInstance.invoke 4×i32 sum4(2,3,4,5) → 14 via buffer thunk (arm64 + x86_64 SysV)" {
+    // arm64 (emitAarch64, ≤7 params) and x86_64 SysV (emitX8664SysV, ≤5 params)
+    // both emit the N-GPR-param thunk → invoke routes the 4-arg shape through
+    // invokeViaBufferSingle → 2+3+4+5 = 14. Win64 caps register params at 3
+    // (RDX/R8/R9 after RCX=rt) and stack-spill emit is a later D-477 slice, so a
+    // 4-arg func has no thunk there and stays UnsupportedEntrySignature.
+    // Arch/OS-split gate cited to D-477 per test_discipline §4.
     var inst = try JitInstance.init(testing.allocator, &sum4_i32);
     defer inst.deinit(testing.allocator);
-    if (builtin.cpu.arch == .aarch64) {
+    const supported = builtin.cpu.arch == .aarch64 or
+        (builtin.cpu.arch == .x86_64 and builtin.os.tag != .windows);
+    if (supported) {
         try testing.expectEqual(@as(?u64, 14), try inst.invoke(testing.allocator, "sum4", &.{ 2, 3, 4, 5 }));
     } else {
         try testing.expectError(

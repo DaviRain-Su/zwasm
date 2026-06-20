@@ -182,10 +182,8 @@ pub fn emitX8664SysV(
     allocator: std.mem.Allocator,
     params: EmitParams,
 ) Error!EmitOutput {
-    // D-229: SysV supports 0 or 1 param (matches arm64's 1-param thunk);
-    // param0 is marshaled from args[0] (RDX) → the body's SysV param slot (RSI).
-    if (params.sig.params.len > 1) return Error.UnsupportedOp;
-    const has_param = params.sig.params.len == 1;
+    if (!all_gpr_class(params.sig.results)) return Error.UnsupportedOp;
+    if (!all_gpr_class(params.sig.params)) return Error.UnsupportedOp;
 
     var bytes: std.ArrayList(u8) = .empty;
     errdefer bytes.deinit(allocator);
@@ -193,60 +191,67 @@ pub fn emitX8664SysV(
     // Classify shape: MEMORY-class (≥3 GPR results) vs register-class
     // (1-2 results in RAX/RDX). Per SysV §3.2.3.
     const n_results = params.sig.results.len;
-    if (n_results == 3 and all_gpr_class(params.sig.results)) {
+    const n_params = params.sig.params.len;
+    if (n_results == 3) {
         // 3-int MEMORY-class: body expects RDI=&buf, RSI=rt.
         // Wrapper: XCHG RDI, RSI ; CALL body ; XOR EAX, EAX ; RET.
         // 3-int MEMORY + a param is out of scope (matches arm64).
-        if (has_param) return Error.UnsupportedOp;
+        if (n_params != 0) return Error.UnsupportedOp;
         try bytes.appendSlice(allocator, &.{ 0x48, 0x87, 0xFE });
         try emitCallRel32(allocator, &bytes, params, 3);
         try bytes.appendSlice(allocator, &.{ 0x31, 0xC0, 0xC3 });
-    } else if (n_results == 2 and all_gpr_class(params.sig.results)) {
-        // 2-int register-class: body writes results to RAX (result 0)
-        // and RDX (result 1). Save results-ptr (RSI) to STACK across
-        // the CALL — RBX is in `allocatable_callee_saved_gprs` per
-        // abi.zig, so the body's regalloc may use RBX as scratch.
-        // The body's prologue saves RBX *only if* its regalloc
-        // allocated RBX; for small functions that don't pressure
-        // callee-saved regs, RBX is silently clobbered without a
-        // save (surfaced by 2-int e2e test ubuntu fail at fault
-        // 0x77 = result 0 value, indicating RBX = old RAX after
-        // body's epilogue did MOV RAX, RBX without a paired POP).
-        //
-        // Stack-save shape (24 bytes):
-        //   SUB RSP, 8         ; 48 83 EC 08  — keep SysV alignment
-        //   MOV [RSP], RSI     ; 48 89 34 24  — save results ptr
-        //   CALL body          ; E8 + disp32
-        //   MOV RSI, [RSP]     ; 48 8B 34 24  — restore
-        //   ADD RSP, 8         ; 48 83 C4 08
-        //   MOV [RSI], RAX     ; 48 89 06     — result 0 → buf[0]
-        //   MOV [RSI+8], RDX   ; 48 89 56 08  — result 1 → buf[8]
-        //   XOR EAX, EAX       ; 31 C0
-        //   RET                ; C3
-        //
-        // Alignment: wrapper-entry RSP ≡ 8 (mod 16). SUB RSP, 8
-        // → RSP ≡ 0 (mod 16). CALL pushes 8 → body sees ≡ 8 (mod
-        // 16) ✓ per SysV.
-        try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xEC, 0x08 }); // SUB RSP, 8
-        try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x34, 0x24 }); // MOV [RSP], RSI
-        var pre_len: u32 = 4 + 4;
-        if (has_param) {
-            // D-229: param0 = args[0] (RDX) → body's SysV param slot (RSI).
-            // RDI=rt passes through untouched; body sees RDI=rt, RSI=param0.
-            try bytes.appendSlice(allocator, &.{ 0x48, 0x8B, 0x32 }); // MOV RSI, [RDX]
-            pre_len += 3;
-        }
-        try emitCallRel32(allocator, &bytes, params, pre_len);
-        try bytes.appendSlice(allocator, &.{ 0x48, 0x8B, 0x34, 0x24 }); // MOV RSI, [RSP]
-        try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xC4, 0x08 }); // ADD RSP, 8
-        try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x06 }); // MOV [RSI], RAX
-        try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x56, 0x08 }); // MOV [RSI+8], RDX
-        try bytes.appendSlice(allocator, &.{ 0x31, 0xC0, 0xC3 }); // XOR EAX,EAX ; RET
-    } else {
-        return Error.UnsupportedOp;
+        return .{ .bytes = try bytes.toOwnedSlice(allocator) };
     }
 
+    // D-477 generic GPR register-class path — n_results ∈ {1,2}, n_params ≤ 5
+    // (the SysV integer arg registers RSI,RDX,RCX,R8,R9 after RDI=rt; ≥6 params
+    // need stack spill, deferred). Body returns result 0 in RAX, result 1 in
+    // RDX. Save results_ptr (RSI) to STACK across the CALL (NOT a callee-saved
+    // GPR — the body's regalloc may clobber RBX without a paired save for small
+    // funcs; 2-int e2e ubuntu fault 0x77 history). Reproduces the prior 0/1-param
+    // 2-result shapes byte-for-byte.
+    if (n_results < 1 or n_results > 2 or n_params > 5) return Error.UnsupportedOp;
+
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xEC, 0x08 }); // SUB RSP, 8 (SysV align)
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x34, 0x24 }); // MOV [RSP], RSI (save results_ptr)
+    var pre_len: u32 = 4 + 4;
+    // Marshal args from [RDX + 8k] → SysV body slot. Param 1's dest is RDX
+    // (the args_ptr base), so emit every k != 1 first then k == 1 LAST.
+    var k: usize = 0;
+    while (k < n_params) : (k += 1) {
+        if (k == 1) continue;
+        const ins = movParamSysV(k);
+        try bytes.appendSlice(allocator, ins);
+        pre_len += @intCast(ins.len);
+    }
+    if (n_params >= 2) {
+        const ins = movParamSysV(1);
+        try bytes.appendSlice(allocator, ins);
+        pre_len += @intCast(ins.len);
+    }
+    try emitCallRel32(allocator, &bytes, params, pre_len);
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x8B, 0x34, 0x24 }); // MOV RSI, [RSP] (restore)
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xC4, 0x08 }); // ADD RSP, 8
+    try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x06 }); // MOV [RSI], RAX (result 0)
+    if (n_results == 2) try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x56, 0x08 }); // MOV [RSI+8], RDX
+    try bytes.appendSlice(allocator, &.{ 0x31, 0xC0, 0xC3 }); // XOR EAX,EAX ; RET
+
     return .{ .bytes = try bytes.toOwnedSlice(allocator) };
+}
+
+/// SysV `MOV <slot>, [RDX + 8*k]` — load arg `k` from the args buffer (base
+/// RDX) into the register_write body's param slot. SysV int arg order after
+/// RDI=rt: p0=RSI, p1=RDX, p2=RCX, p3=R8, p4=R9. k=0 uses disp-0 (mod=00,
+/// 3 bytes); k≥1 uses disp8 (mod=01, 4 bytes).
+fn movParamSysV(k: usize) []const u8 {
+    return switch (k) {
+        0 => &.{ 0x48, 0x8B, 0x32 }, // MOV RSI, [RDX]
+        1 => &.{ 0x48, 0x8B, 0x52, 0x08 }, // MOV RDX, [RDX+8]
+        2 => &.{ 0x48, 0x8B, 0x4A, 0x10 }, // MOV RCX, [RDX+16]
+        3 => &.{ 0x4C, 0x8B, 0x42, 0x18 }, // MOV R8,  [RDX+24]
+        4 => &.{ 0x4C, 0x8B, 0x4A, 0x20 }, // MOV R9,  [RDX+32]
+        else => unreachable, // n_params ≤ 5 guarded by caller
+    };
 }
 
 /// x86_64 Win64 wrapper emit. Public so byte-sequence unit
@@ -1245,6 +1250,57 @@ test "wrapper_thunk: emit x86_64 SysV 2-int register-class (i32, i64) (31 bytes)
     try testing.expectEqualSlices(u8, &.{ 0x48, 0x89, 0x56, 0x08 }, out.bytes[24..28]);
     // XOR EAX, EAX ; RET
     try testing.expectEqualSlices(u8, &.{ 0x31, 0xC0, 0xC3 }, out.bytes[28..31]);
+}
+
+test "wrapper_thunk: emit x86_64 SysV D-477 2-param 1-result (34 bytes)" {
+    // SIBLING-AT: src/engine/codegen/shared/wrapper_thunk.zig (emitAarch64 N-param)
+    if (comptime builtin.cpu.arch != .x86_64) return;
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    const VT = @TypeOf(@as(@import("../../../ir/zir.zig").ValType, .i32));
+    const p = [_]VT{ .i32, .i32 };
+    const results = [_]VT{.i32};
+    const out = try emit(testing.allocator, .{ .sig = .{ .params = &p, .results = &results }, .body_offset = 200, .thunk_offset = 100 });
+    defer testing.allocator.free(out.bytes);
+    try testing.expectEqual(@as(usize, 34), out.bytes.len);
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x83, 0xEC, 0x08 }, out.bytes[0..4]); // SUB RSP,8
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x89, 0x34, 0x24 }, out.bytes[4..8]); // MOV [RSP],RSI
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x8B, 0x32 }, out.bytes[8..11]); // MOV RSI,[RDX] (p0)
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x8B, 0x52, 0x08 }, out.bytes[11..15]); // MOV RDX,[RDX+8] (p1, last)
+    try testing.expectEqual(@as(u8, 0xE8), out.bytes[15]); // CALL
+    try testing.expectEqual(@as(i32, 80), std.mem.readInt(i32, out.bytes[16..20], .little)); // 200-(100+15+5)
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x8B, 0x34, 0x24 }, out.bytes[20..24]); // MOV RSI,[RSP]
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x83, 0xC4, 0x08 }, out.bytes[24..28]); // ADD RSP,8
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x89, 0x06 }, out.bytes[28..31]); // MOV [RSI],RAX
+    try testing.expectEqualSlices(u8, &.{ 0x31, 0xC0, 0xC3 }, out.bytes[31..34]); // XOR EAX,EAX ; RET
+}
+
+test "wrapper_thunk: emit x86_64 SysV D-477 4-param 1-result — load order p0,p2,p3,p1 (42 bytes)" {
+    // SIBLING-AT: src/engine/codegen/shared/wrapper_thunk.zig (emitAarch64 N-param)
+    if (comptime builtin.cpu.arch != .x86_64) return;
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    const VT = @TypeOf(@as(@import("../../../ir/zir.zig").ValType, .i32));
+    const p = [_]VT{ .i32, .i32, .i32, .i32 };
+    const results = [_]VT{.i32};
+    const out = try emit(testing.allocator, .{ .sig = .{ .params = &p, .results = &results }, .body_offset = 200, .thunk_offset = 100 });
+    defer testing.allocator.free(out.bytes);
+    try testing.expectEqual(@as(usize, 42), out.bytes.len);
+    // p0→RSI, p2→RCX, p3→R8 (skip p1), then p1→RDX LAST — RDX (args base) survives.
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x8B, 0x32 }, out.bytes[8..11]); // MOV RSI,[RDX]
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x8B, 0x4A, 0x10 }, out.bytes[11..15]); // MOV RCX,[RDX+16]
+    try testing.expectEqualSlices(u8, &.{ 0x4C, 0x8B, 0x42, 0x18 }, out.bytes[15..19]); // MOV R8,[RDX+24]
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x8B, 0x52, 0x08 }, out.bytes[19..23]); // MOV RDX,[RDX+8] (last)
+    try testing.expectEqual(@as(u8, 0xE8), out.bytes[23]); // CALL
+    try testing.expectEqual(@as(i32, 72), std.mem.readInt(i32, out.bytes[24..28], .little)); // 200-(100+23+5)
+}
+
+test "wrapper_thunk: emit x86_64 SysV D-477 6-param → UnsupportedOp (no stack-spill yet)" {
+    // SIBLING-AT: src/engine/codegen/shared/wrapper_thunk.zig (emitAarch64 8-param guard)
+    if (comptime builtin.cpu.arch != .x86_64) return;
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    const VT = @TypeOf(@as(@import("../../../ir/zir.zig").ValType, .i32));
+    const p = [_]VT{ .i32, .i32, .i32, .i32, .i32, .i32 };
+    const results = [_]VT{.i32};
+    try testing.expectError(Error.UnsupportedOp, emit(testing.allocator, .{ .sig = .{ .params = &p, .results = &results }, .body_offset = 200, .thunk_offset = 100 }));
 }
 
 test "wrapper_thunk: emit x86_64 SysV 3-int-result MEMORY-class (11 bytes)" {
