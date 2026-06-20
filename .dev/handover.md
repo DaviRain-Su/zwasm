@@ -18,23 +18,21 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
 ## Active bundle
 
 - **Bundle-ID**: ADR-0200-jit-backed-embedding-api
-- **Cycles-remaining**: ~5 (SIMD/v128 arm → accessors → host-import bridge → C-path + sandbox →
-  mini-consumer → cljw signal)
-- **Continuity-memo**: **First increment LANDED @7bfc49c8d** — `InstantiateOpts.engine:
-  EngineKind{auto,jit,interp}`; `.jit` forks `instantiateFacade`→heap-pinned `runner.JitInstance`
-  (new Zone-1 `Instance.jit: ?*anyopaque`, interp `runtime==null`); Zig-facade `invoke` JIT arm
-  (`JitInstance.exportFuncSig` + scalar arg→u64 marshal + `trap_kind`→facade `Trap` map); new
-  `InvokeError.UnsupportedEngineSignature` for uncovered shapes. Scope = no-import scalar exports;
-  `.auto` STILL→interp pending host-import bridge (TODO in `instantiateFacade`, defer-not-workaround).
-  Green @full unit suite. **Multi-result scalar arm LANDED @bc534de73** (`invokeMulti`/`TypedResult`,
-  swap2(7,9)→(9,7)). **NEXT slices (impl map `.dev/adr0200_api_impl_map.md` §"Accessor blast radius"/
-  §"Host imports")**: (a) **v128/SIMD invoke** — needs the D-477 v128-arg/result JIT substrate first
-  (currently build-on-demand debt, designs in `private/notes/`); the headline exit-condition export
-  (must be JIT per user constraint). (b) facade accessors `runtime==null` JIT arms (memory/global/
-  table/fuel/interrupt setters — replace the D-314-seam `assert(runtime!=null)`); (c) host-import→JIT
-  bridge + WASI (`func_import_targets` + `rt.wasi_host`), then flip `.auto`→JIT; (d) C-path
-  `wasm_func_call` JIT arm + `wasm_instance_new` engine knob; (e) D-314 sandbox sign-off; (f)
-  mini-consumer + cljw signal. **Easiest-next = (b) accessors** (no new JIT substrate needed).
+- **Cycles-remaining**: ~4 (host-import bridge → C-path → v128 substrate → sandbox → mini-consumer → cljw)
+- **Continuity-memo**: **LANDED (Zig-facade `engine=.jit`, no-import scalar; detail in git)**: engine fork
+  @7bfc49c8d (`InstantiateOpts.engine: EngineKind{auto,jit,interp}`; `.jit`→heap-pinned `runner.JitInstance`,
+  Zone-1 `Instance.jit: ?*anyopaque`, interp `runtime==null`; invoke arm + `UnsupportedEngineSignature` +
+  `trap_kind`→`Trap` map); multi-result @bc534de73 (`invokeMulti`/`TypedResult`); **mutator/budget arms
+  @441c24e77** (fuel/memory/table/interrupt route to JIT — discharged the D-314 `assert(runtime!=null)`
+  crash seam; `JitInstance` owns a heap-pinned `interrupt_flag` + `armSelfInterrupt`/`setTableElementsLimit`).
+  `.auto` STILL→interp pending host-import bridge (TODO in `instantiateFacade`). **NEXT (impl map
+  `.dev/adr0200_api_impl_map.md`)**: (a) **host-import→JIT bridge + WASI** (`buildBindings` resolution →
+  `initLinked` `func_import_targets` + set `rt.wasi_host`), THEN flip `.auto`→JIT — biggest unblocker
+  (real modules have imports); (b) C-path `wasm_func_call` JIT arm + `wasm_instance_new` engine knob
+  (mirror the facade arms); (c) accessor READS memory()/global()/table() JIT arms (return null today —
+  need JIT runtime layout access); (d) **v128/SIMD invoke** — needs D-477 v128-arg/result JIT substrate
+  (build-on-demand debt, designs `private/notes/`); the headline export (must be JIT); (e) D-314 sandbox
+  sign-off; (f) mini-consumer + cljw signal. **Next = (a) host-import bridge.**
 - **Exit-condition**: first-party mini-consumer (C via `include/zwasm.h` + Zig via `src/zwasm/*`)
   instantiates engine=jit, calls a multi-arg AND a v128/SIMD export, asserts results; engine-knob
   default documented; cljw readiness signal sent (`to_cljw_NN`). NOT cw — that's cw's responsibility.
