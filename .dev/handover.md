@@ -49,9 +49,15 @@ value/trap/loop/call + **FP** + trap-kind modules, toolchain-free). f32/f64 resu
 incomparable = interp binding_error / JIT generic-bucket) — closes the both-trap-OK blind spot that hid this
 session's 6 GC-trap-kind bugs. Seed = 9 funcs (div_by_zero/unreachable_/oob_memory kinds), 0 mismatch; **FUZZ_N=4000
 campaign 2163 modules / 315 funcs, 0 mismatch** (kind compare = 0 false-positive at scale). Param-widening stays out.
-**Sweep at the floor + nets broadened**: concrete known gaps = 0 (WASI/C-API/CLI/spec-skip/GC-traps); JIT
-codegen-fuzz + exec-fuzz (value+trap-kind) both 0-finding. Remaining: D-456 host-stubs (test-harness), D-336 (blocked).
-NEXT: periodic re-inventory / larger fuzz campaigns, or general 完成形 refinement / debt repayment.
+**wasmtime-differential spike FOUND a real gap-class-#1 bug @222a2e45b**: `zwasm run --engine jit --invoke
+<name>` on a value-returning zero-arg export silently dropped the i32 result + hard-errored i64/f32/f64, while
+interp + wasmtime print it. Root cause: runWasiLenient overloaded its u32 return (exit-flag AND i32 result);
+split onto a dedicated result_out channel (Zone-2 ScalarResult → CLI formatScalar), all 4 scalar types, latent
+single-slot-dual-meaning removed. e2e 42/42/4/3.5 = interp/wasmtime; i32+f64 regression tests. **Spike method
+(wasmtime `--invoke` vs zwasm `--engine jit --invoke`) is a productive sweep technique** — keep using it.
+**Sweep status**: concrete known gaps = 0; nets = JIT codegen-fuzz + exec-fuzz (value+trap-kind), both 0-finding.
+Remaining: D-456 host-stubs (test-harness), D-336 (blocked). NEXT: more wasmtime-diff spikes (CLI/arg-passing
+surfaces), periodic re-inventory / larger fuzz campaigns, or general 完成形 refinement / debt repayment.
 
 **Phase 17 完成形 plateau** (validated — do NOT re-walk): async COMPLETE; v128 spill (D-034/D-460/D-461) CLOSED;
 surface audits clean 2026-06-18; fuzz 0-crash; realworld JIT run 56/56 byte-match wasmtime (gating). NOT-WORTH: D-294-R2 TrapKind.
