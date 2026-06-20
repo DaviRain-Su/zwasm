@@ -57,13 +57,14 @@ campaign 2163 modules / 315 funcs, 0 mismatch** (kind compare = 0 false-positive
   try_table → its `end` popped an enclosing frame → `labels_depth_outer - label_idx` underflow. Both arches.
 - **@3daee4592 (D-472)** — `array.new` const-expr huge length×element_size u32-overflow PANIC. Fix: u64 size +
   OutOfHeap cap (mirrors object_alloc). Found by the **varied-config campaign** (gc + extended-const + deep nesting).
-Re-inventory found 0 runtime-reachable category-(a) gaps. **D-473 noted**: JIT setup global-init swallows
-evalGlobalInitGc errors → niche divergence. **D-474 noted**: a 2nd varied config (memory/4GiB-offsets/multi-table/
-3000-instr, smith_v2) found NO new crash/divergence but a LOW-severity JIT-compile memory accumulation (~7 GiB RSS
-over 3776 complex modules; no single-module blowup; graceful under a memory cap; possible CompiledWasm.deinit leak
-vs fragmentation — DebugAllocator leak test to discharge). NEXT: more varied smith-config campaigns (different
-knobs each time — memory/atomics/relaxed-simd/multi-table); the technique (regen config + exec+loader fuzz + fix)
-found 5 real bugs this session. Also consider the D-474 leak test (cheap, definitive) + D-473 (small JIT fix).
+Re-inventory found 0 runtime-reachable category-(a) gaps. **D-473 DONE @d9d3325db**: JIT setup global-init now
+propagates OutOfHeap (→ OutOfMemory, fail instantiation, interp parity) instead of swallowing to a 0 global. **3rd
+varied config (table/bulk-mem/atomics/relaxed-simd/multi-table, smith_v3) CLEAN** — 2500 mods 0-crash, exec 286
+funcs 0-mismatch. **2nd varied config (smith_v2) → D-474 noted** (low-sev JIT-compile mem accumulation ~7 GiB over
+3776 complex mods; no single-module blowup; graceful under cap; CompiledWasm.deinit leak vs fragmentation — needs
+a DebugAllocator leak test to discharge). NEXT: more varied smith-config campaigns (the technique found 5 bugs +
+fixed 2 divergences this session); the productive veins (gc/extended-const/dead-code/table-setup) are now fixed —
+remaining axes (v3 table/bulk) are clean, so try new axes (custom-page-sizes, shared-memory, deep multi-value).
 
 **Phase 17 完成形 plateau** (validated — do NOT re-walk): async COMPLETE; v128 spill (D-034/D-460/D-461) CLOSED;
 surface audits clean 2026-06-18; fuzz 0-crash; realworld JIT run 56/56 byte-match wasmtime (gating). NOT-WORTH: D-294-R2 TrapKind.
