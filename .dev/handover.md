@@ -33,6 +33,11 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
   via `invoke`/CLI (ScalarResult is single — invokeMulti already does ≥2 via thunk).
 - **Exit-condition**: MET (above). Extended close = the 4 completeness slices land →
   full wasmtime-parity host→guest JIT invoke → D-477 `note`; THEN ADR-0200 API-JIT phase.
+- **Pre-worked design (先読み)**: all 4 slices designed in `private/notes/d477-remaining-slices-design.md`
+  (Win64 register-only ≤3-param collapse + reorder, FP two-bank assignment, v128 16B-slot
+  ADR sub-decision, multi-result via invokeMulti). ADR-0200 §"API shape" now carries the
+  wasmtime/wasmer peer 裏取り (EngineKind{auto,jit,interp}, auto→JIT, interp-fallback on
+  JIT-less arch, C untyped + Zig typed sugar, caller-pre-sized multi-value).
 
 ## RESUME POINTER (2026-06-20) — for a fresh session
 

@@ -90,6 +90,34 @@ The post-D-477 implementation is a **prioritized, first-class phase**
 4. D-314 sandbox-parity sign-off at the API entry (largely closed; verify).
 5. Win64 native JIT (#6).
 
+## API shape (peer 裏取り 2026-06-20 — wasmtime / wasmer)
+
+Researched how senior runtimes expose engine choice + the call boundary (digest
+in session history; sources: wasmtime `config.rs`/`engine.rs`/`func.rs`/`c-api`,
+wasmer `backend/mod.rs`/`function/mod.rs`). Findings → concrete shape:
+
+1. **Enum knob, not a bool.** Mirror wasmtime `Strategy{Auto,Cranelift,Winch}`:
+   `EngineKind = enum { auto, jit, interp }` (Zig) / `zwasm_engine_kind`
+   (`AUTO=0, JIT, INTERP`) (C). Default `auto`, documented to currently resolve
+   to JIT — lets the default change later without an API break. Leave room
+   (non-exhaustive-equivalent) for a future baseline/optimizing split.
+2. **Bind to the Engine/InitOpts, NEVER per-call.** Both runtimes fix engine
+   choice at Engine construction; nothing leaks into the call boundary. Keep
+   `Instance.invoke` / `wasm_func_call` engine-agnostic.
+3. **Fallback posture — zwasm's one deliberate divergence.** Senior runtimes
+   fail-fast on an unsupported explicit strategy (no silent downgrade).
+   zwasm: `auto` = "JIT if this arch has a backend, else interp" (portability is
+   a zwasm goal — the place to exceed wasmtime); explicit `jit` on a JIT-less
+   arch ERRORS (no silent downgrade). Expose a read-back of the resolved kind.
+4. **Typed-vs-untyped stays at the binding layer.** C ABI stays untyped
+   (`Val[]` in / caller-pre-sized `Val[]` out, multi-value = longer vec —
+   wasmtime style). Typed ergonomics (comptime-generated, à la `Func::typed`)
+   live only in the Zig layer as zero-cost sugar over `Instance.invoke`.
+5. **Multi-value = caller-pre-sized results** (wasmtime `Func::call` /
+   `wasmtime_func_call` ptr+len), NOT callee-allocated (wasmer) — better C-ABI
+   fit, no ownership questions. zwasm's `invokeMulti` (TypedResult array) already
+   matches this; the C surface should take an explicit `nresults` in/out.
+
 ## Consequences
 
 - API embedders gain JIT speed **and** SIMD execution (the headline win).
