@@ -17,28 +17,24 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
 
 ## Active bundle
 
-- **Bundle-ID**: D-477-jit-multiarg-invoke
-- **Cycles-remaining**: ~1 (core done; residual = niche debt)
-- **Continuity-memo**: **D-477 CORE COMPLETE + runtime-verified ALL 3 ARCHES** (arm64
-  native / x86_64 SysV Rosetta / Win64 windows-gate OK). GPR + FP + ref multi-arg, single
-  result (`invoke`/`runWasiLenientArgs`) + MULTI result (`invokeMulti`, incl 2-arg×2-result
-  @6d750b5a9). Generic two-bank wrapper-thunk (emitAarch64 ≤7 / emitX8664SysV ≤5 /
-  emitX8664Win64 ≤3) replaced the shape helpers; CLI `--invoke add=2,3`→5 interp-parity.
-  All SHAs + designs in debt **D-477 (now `partial`)** + `private/notes/`. **CLI multi-RESULT print DONE
-  @eb573e13a** (swap2=7,9→"9\n7\n", arm64+SysV; runWasiLenientArgs multi_out + typedResultToVal).
-  **RESIDUAL = 2 NICHE slivers** (build on demand): (1) v128 args (model-A 2-slot decided,
-  Win64-by-ref gotcha — `private/notes/` §Slice 3) — **next sliver if continuing D-477**;
-  (2) Win64 ≥4-param stack-spill (rare).
-- **🔭 RECOMMENDATION (for user steer)**: D-477 core unblocks the **ADR-0200 API-JIT phase**
-  (the user's stated priority). The 3 slivers are niche + debt-tracked + do NOT gate the API.
-  Recommend PIVOT to the API phase now; build slivers on demand. (Honoring the literal "完遂
-  first" directive ⇒ default next = sliver (1) CLI multi-result-print; user may redirect to API.)
-- **Exit-condition**: MET (CLI add=2,3 = interp @b88435743) + core matrix runtime-verified.
-- **Pre-worked design (先読み)**: all 4 slices designed in `private/notes/d477-remaining-slices-design.md`
-  (Win64 register-only ≤3-param collapse + reorder, FP two-bank assignment, v128 16B-slot
-  ADR sub-decision, multi-result via invokeMulti). ADR-0200 §"API shape" now carries the
-  wasmtime/wasmer peer 裏取り (EngineKind{auto,jit,interp}, auto→JIT, interp-fallback on
-  JIT-less arch, C untyped + Zig typed sugar, caller-pre-sized multi-value).
+- **Bundle-ID**: ADR-0200-jit-backed-embedding-api
+- **Cycles-remaining**: ~5+ (design → instantiate fork → accessors → host-import bridge →
+  D-314 sandbox sign-off → mini-consumer → cljw signal)
+- **Continuity-memo**: **D-477 bundle CLOSED — core complete** (GPR+FP+ref multi-arg, single+
+  multi result, CLI, all 3 arches runtime-verified; debt D-477 `partial`; niche tails v128-args
+  + Win64-≥4-stackspill = build-on-demand debt, designs in `private/notes/`). **PIVOTED to
+  ADR-0200 (user-steered 2026-06-21)**: JIT-backed embedding API, **per-instance engine
+  selection, JIT-default** (interp coexists — cljw dual-engine oracle req). Phase-I peer 裏取り
+  DONE (ADR-0200 §"API shape": EngineKind{auto,jit,interp}, auto→JIT, interp-fallback on
+  JIT-less arch, C untyped + Zig typed sugar, caller-pre-sized multi-value). **NEXT**: instantiate-
+  fork survey DISPATCHED (Module.instantiate / wasm_instance_new: interp `Runtime` vs JitInstance;
+  the `runtime != null` accessor seam = blast radius; host-import→JIT `host_calls` bridge). Then:
+  EngineKind knob in `Engine.InitOpts` + C `zwasm_engine_kind`; smallest first increment = opt-in
+  JIT for one no-import compute export (wasm_func_call→JitInstance.invoke). Build substrate =
+  `JitInstance` (runner.zig:819, full invoke/invokeMulti/setFuel/limits surface).
+- **Exit-condition**: first-party mini-consumer (C via `include/zwasm.h` + Zig via `src/zwasm/*`)
+  instantiates engine=jit, calls a multi-arg AND a v128/SIMD export, asserts results; engine-knob
+  default documented; cljw readiness signal sent (`to_cljw_NN`). NOT cw — that's cw's responsibility.
 - **cljw dogfooding OBLIGATION (don't forget across sessions)**: when the ADR-0200 JIT-backed
   API is embedder-stable, send `private/dogfooding_handover/to_cljw_NN.md` = engine-selection
   shape + invoke arity/type matrix + embedder-contract deltas + pin SHA (from_cljw_01 CONSUMED,
@@ -46,16 +42,15 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
   `from_cljw_*` for `SENT` at unit boundaries (after a commit). Engine select = per-instance,
   interp MUST coexist (cljw dual-engine diff oracle).
 
-## RESUME POINTER (2026-06-20) — for a fresh session
+## RESUME POINTER (2026-06-21) — for a fresh session
 
-**🎯 D-477 (memory `feedback_ai_invented_by_design_not_sacred`)**: CORE COMPLETE — GPR+FP+ref multi-arg,
-single+multi result, all 3 arches runtime-verified (debt D-477 `partial`). 3 niche slivers remain (CLI
-multi-result-print / v128-args / Win64-≥4-stackspill). **RECOMMEND pivoting to the ADR-0200 API phase**
-(user priority; slivers don't gate it). Default-if-unsteered = sliver (1) CLI multi-result-print.
-**PARENT ARC = ADR-0200** (user 2026-06-20): D-477 is the gating #1 of "JIT-backed embedding API, JIT-DEFAULT,
-selectable" — interp-only-API was an UNRATIFIED AI deferral, now reversed (SIMD is JIT-only → unrunnable via API).
-After D-477: PRIORITIZED API-JIT phase = peer 裏取り (wasmtime Config/Strategy) → API design → impl → first-party
-mini-consumer test (C + Zig embedder calling multi-arg + v128 export; NOT cw — that's cw's responsibility).
+**🎯 ACTIVE = ADR-0200 JIT-backed embedding API** (user-steered pivot 2026-06-21; D-477 core DONE/closed,
+niche tails = build-on-demand debt). Per-instance engine selection, **JIT-default**, interp coexists.
+See `## Active bundle` + ADR-0200 (§"API shape" + §"Consuming requirements"). NEXT = instantiate-fork
+survey (dispatched) → `EngineKind{auto,jit,interp}` knob in `Engine.InitOpts`/C `zwasm_engine_kind` →
+smallest increment: opt-in JIT for one no-import compute export (`wasm_instance_new`/`Module.instantiate`
+forks to `JitInstance`, `wasm_func_call`→`invoke`). Then accessor `runtime==null` arms, host-import→JIT
+bridge, D-314 sandbox sign-off, mini-consumer, cljw readiness signal. D-477 invoke matrix is the substrate.
 
 **STANDING DIRECTIVE = CORRECTNESS SWEEP** (user 2026-06-20, memory `feedback_correctness_sweep_phase`): high-value
 bar OFF. Sweep toward 0% the 3 gap classes — (1) wasmtime-works-zwasm-doesn't, (2) wasm/wasi spec non-conformance,
