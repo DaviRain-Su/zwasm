@@ -30,9 +30,13 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
   positional XMM @3077f165b). addf(2.5,1.5)→4.0 e2e unconditional; GPR runtime ubuntu-green +
   Win64 GPR clean windows re-run OK @92b31a461 (prior FAIL was `.zig-cache file_hash` = user
   cache-deletion INFRA, NOT a bug). Win64 FP RUNTIME pending the next windows verdict.
-  **REMAINING slices** (extend bundle): (1) v128 args/results (16B
-  ≠ 8B u64 slot — 16B-slot buffer ADR sub-decision); (2) multi-result (>1) via `invoke`/CLI
-  (ScalarResult single — invokeMulti already does ≥2 via thunk); (3) Win64 ≥4-param stack-spill.
+  **REMAINING slices** (extend bundle, value-ordered): (1) **multi-result (>1) via
+  `invoke`/CLI** NEXT (invokeMulti drives the thunk; needs N-result MEMORY-class store
+  generalization + runWasiLenient→invokeMulti routing + multi-line print); (2) v128 args/
+  results — SURVEYED, model (A)=2 consecutive 16-aligned u64 slots decided (NOT a sig widen),
+  Win64-by-REFERENCE gotcha + shared cumulative-offset helper + CLI v128 literal — NICHE,
+  full design in `private/notes/d477-remaining-slices-design.md` §"Slice 3"; (3) Win64
+  ≥4-param stack-spill (rare). (2)+(3) are bounded niche tails — build on demand.
 - **Exit-condition**: MET (above). Extended close = the 3 remaining slices land →
   full wasmtime-parity host→guest JIT invoke → D-477 `note`; THEN ADR-0200 API-JIT phase.
 - **Pre-worked design (先読み)**: all 4 slices designed in `private/notes/d477-remaining-slices-design.md`
