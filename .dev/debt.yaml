@@ -3,6 +3,30 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
+  - id: "D-475"
+    layer: "code"
+    status: "note"
+    description: |-
+      i64-indexed TABLES (memory64's table extension) are rejected at parse
+      (gap-class #2: wasm-tools accepts `(table i64 0 funcref)`, zwasm → "module
+      decode/validate failed"). Found by the smith_v4 campaign (custom-page-sizes
+      + memory64 features); minimal repro `(module (table i64 0 funcref))`. zwasm
+      supports memory64 MEMORIES (D-209) but tables are modelled as i32-indexed
+      only — `TableType` carries no `idx_type` field, and the table-op runtime
+      (table.get/set/grow/size/fill/copy/init, call_indirect, elem-segment offset)
+      assumes i32 indices. So this is NOT a quick parse-acceptance fix (unlike the
+      GC-reftype gap @fae437597 where the runtime was already ready) — it needs
+      `TableType.idx_type` + i64-index threading through the table ops + the JIT
+      bounds-check codegen. DISCHARGE: a memory64-table feature slice (model the
+      idx_type, widen the table-op index path, JIT i64 table bounds). Niche
+      (i64 tables are rare); the runtime memory64 memory path (D-209) is the
+      precedent for the idx_type plumbing. Counterpart shared-everything-threads
+      smith modules are a SEPARATE out-of-scope proposal (correct to reject).
+    first_raised: "2026-06-20"
+    last_reviewed: "2026-06-20"
+    refs: |-
+      src/parse/sections.zig (.table import / defined-table readLimits — no idx_type)
+      src/runtime TableType (i32-indexed only)
   - id: "D-314"
     layer: "code"
     status: "note"

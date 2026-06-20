@@ -49,7 +49,11 @@ value/trap/loop/call + **FP** + trap-kind modules, toolchain-free). f32/f64 resu
 incomparable = interp binding_error / JIT generic-bucket) — closes the both-trap-OK blind spot that hid this
 session's 6 GC-trap-kind bugs. Seed = 9 funcs (div_by_zero/unreachable_/oob_memory kinds), 0 mismatch; **FUZZ_N=4000
 campaign 2163 modules / 315 funcs, 0 mismatch** (kind compare = 0 false-positive at scale). Param-widening stays out.
-**FUZZ campaigns PRODUCTIVE — 5 real bugs found + fixed this session** (sweep NOT at floor; detail in git):
+**FUZZ campaigns PRODUCTIVE — 6 real bugs found + fixed this session** (sweep NOT at floor; detail in git):
+- **@fae437597** — parse REJECTED valid GC modules: imported-table elem_type + element `ref.null <heaptype>` both
+  hardcoded funcref/externref, rejecting anyref/eqref/structref/arrayref/null… → route via shared reftype reader.
+  Found by smith_v4 (custom-page-sizes + GC). **D-475 noted**: i64-indexed TABLES (memory64 table ext) still
+  rejected — a real feature gap (TableType has no idx_type; needs runtime i64-index, not a quick parse fix).
 - **@222a2e45b** — `--engine jit --invoke` dropped/errored value results (runWasiLenient u32 dual-meaning → result_out).
 - **@66acaeee0** — JIT table arena `@min(max,65536)`<`min` → setup OOB SEGV. Fix `@max(tm.min,@min(max,cap))`.
 - **@9313c37a8** — exec-fuzz false-positive: interp has NO SIMD (JIT-only; lesson `2026-06-20-interp-is-non-simd-jit-only`).
