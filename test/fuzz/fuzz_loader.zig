@@ -28,6 +28,7 @@ const std = @import("std");
 
 const zwasm = @import("zwasm");
 const parser = zwasm.parse.parser;
+const engine_runner = zwasm.engine.runner;
 
 pub fn main(init: std.process.Init) !void {
     const io = init.io;
@@ -60,6 +61,7 @@ pub fn main(init: std.process.Init) !void {
     var compiled: u32 = 0;
     var rejected: u32 = 0;
     var instantiated: u32 = 0;
+    var jit_compiled: u32 = 0;
 
     var it = dir.iterate();
     while (try it.next(io)) |entry| {
@@ -103,6 +105,20 @@ pub fn main(init: std.process.Init) !void {
             } else |_| {
                 // Expected: unsatisfied imports / start trap / resource limit.
             }
+            // Path 4: JIT codegen. The smith corpus exercises unusual-but-valid
+            // module shapes the spec / realworld corpora don't (deep nesting,
+            // dense locals, odd control flow); a CRASH in the JIT pipeline
+            // (parse → IR → regalloc → emit → link) is a finding. `UnsupportedOp`
+            // (unimplemented op) + other compile errors are graceful — only a
+            // panic / unreachable / SEGV is caught (externally, by this process
+            // dying). Compile-only: imports get trap trampolines, no host needed.
+            if (engine_runner.compileWasm(gpa, bytes)) |jit_mod| {
+                var jc = jit_mod;
+                jc.deinit(gpa);
+                jit_compiled += 1;
+            } else |_| {
+                // Expected: UnsupportedOp / unsatisfiable import / resource limit.
+            }
             compiled_mod.deinit();
         } else |_| {
             rejected += 1;
@@ -112,8 +128,8 @@ pub fn main(init: std.process.Init) !void {
 
     // Reaching here means no input crashed a decode path.
     try stdout.print(
-        "\nfuzz_loader: {d} processed, {d} compiled ({d} instantiated), {d} rejected, 0 crashes\n",
-        .{ processed, compiled, instantiated, rejected },
+        "\nfuzz_loader: {d} processed, {d} compiled ({d} interp-instantiated, {d} JIT-compiled), {d} rejected, 0 crashes\n",
+        .{ processed, compiled, instantiated, jit_compiled, rejected },
     );
     try stdout.flush();
 
