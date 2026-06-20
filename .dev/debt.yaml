@@ -5,38 +5,40 @@
 entries:
   - id: "D-477"
     layer: "code"
-    status: "note"
+    status: "now"
     description: |-
-      JIT host-invoke SIGNATURE COMPLETENESS. The JIT `--invoke` entry path
-      (runWasiLenient) is the ZERO-ARG WASI model (D-273); it handles a subset of
-      ZERO-ARG export result shapes. NOT a correctness gap — the interp gives the
-      right answer for everything. Surfaced by the wasmtime-vs-JIT differential
-      (scripts/fuzz_wasmtime_diff.py). STATUS:
-      - v128-result single export: DONE @1d3dfdb25 (wired entry.callV128NoArgs +
-        ScalarResult.v128 + CLI u128-decimal; dual-arch verified).
-      - multi-param `--invoke NAME=ARGS`: NOT A GAP — interp-only BY DESIGN (D-273,
-        main.zig:253-258): the JIT entry runner is the zero-arg WASI model (argv
-        arrives via host args_get, NOT the entry's params); typed arg-passing +
-        result printing is a deliberate interp-path feature. So the differential
-        is FUNDAMENTALLY zero-arg-only under JIT — can't be "unblocked" for
-        multi-param funcs by a JIT change (would mean making the C-API/CLI
-        arg-path JIT-capable, which conflicts with the interp-only-facade security
-        decision, memory `project_security_hardening_campaign`).
-      - multi-RESULT zero-arg export (results.len ≥ 2): the ONE real remaining
-        JIT-zero-arg-path extension (like v128-result was) — wrapper_thunk
-        (ADR-0106) supports only a sig subset; extending the zero-arg dispatch +
-        wrapper for 2-result shapes is the niche follow-on.
-      - ref-result (funcref/externref) zero-arg: no scalar carrier; niche.
-      Net: v128-result DONE was the high-value one. The rest is niche
-      (multi-result/ref zero-arg) or by-design (multi-param). LOW-PRI; the
-      differential's JIT reach is inherently zero-arg by the D-273 design.
+      JIT host-invoke SIGNATURE COMPLETENESS — make the JIT entry path carry the
+      FULL host→guest invoke feature set (multi typed args + multi/v128/ref
+      results), matching wasmtime. USER DIRECTIVE 2026-06-20 (memory
+      `feedback_ai_invented_by_design_not_sacred`): the current "JIT --invoke is
+      zero-arg-only; typed args route to interp" (D-273, main.zig:253-258) is NOT
+      a user-sanctioned design — it is an AI-invented TRANSITIONAL limitation. The
+      user never restricted JIT + WASI multi-arg invoke; do NOT defer behind the
+      "by design" label. User's hard constraint: SIMD-requiring paths MUST be JIT
+      (interp call overhead exceeds JIT), so the JIT must NOT lack multi-arg
+      invoke. APPROACH (next clean session — research-driven あるべき論, NOT a
+      maxed-context cram): 裏取り first — web-search + reference clones (wasmtime,
+      wasmer, V8/wasm) for how a senior runtime does host→guest typed multi-arg
+      JIT invocation (array-call / native-call ABI, trampoline generation, the
+      Func::call boundary) AND how WASI arg-passing interacts with the JIT entry;
+      then design (likely a generic N-arg JIT entry trampoline + CLI invoke_args
+      → JIT dispatch, NOT the shape-specific callI32_i32i32 helpers). Note the
+      C-API-facade interp-only point is a SEPARATE, user-ratified SECURITY
+      decision (memory `project_security_hardening_campaign`) — the CLI `--invoke`
+      JIT path need not go through the C-API facade; reconcile the two. This
+      ALSO unblocks the wasmtime-vs-JIT differential (today zero-arg-only).
+      DONE so far: v128-result zero-arg @1d3dfdb25 (entry.callV128NoArgs +
+      ScalarResult.v128 + CLI u128-decimal; dual-arch). Sibling niche results:
+      multi-RESULT (≥2) + ref-result zero-arg fold into the same trampoline work.
     first_raised: "2026-06-20"
     last_reviewed: "2026-06-20"
     refs: |-
+      src/cli/main.zig:253-258 (the AI-invented "requires the interp engine" reject)
       src/engine/runner.zig (runWasiLenient entry path; 0-arg + v128-result)
-      src/engine/codegen/shared/wrapper_thunk.zig (ADR-0106 multi-result sig subset)
-      src/engine/codegen/shared/entry.zig (callV128NoArgs + N-arg call helpers)
-      scripts/fuzz_wasmtime_diff.py (the differential this would unblock)
+      src/cli/invoke_args.zig (parseArgsAlloc + invokeFormatted, the interp arg path)
+      src/engine/codegen/shared/entry.zig (callV128NoArgs + N-arg call helpers, the trampoline base)
+      ~/Documents/OSS (wasmtime/wasmer reference clones — array-call / Func::call ABI)
+      memory feedback_ai_invented_by_design_not_sacred (the user directive)
   - id: "D-475"
     layer: "code"
     status: "note"

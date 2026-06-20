@@ -17,6 +17,16 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
 
 ## RESUME POINTER (2026-06-20) — for a fresh session
 
+**🎯 NEXT-SESSION PRIORITY (user directive 2026-06-20, memory `feedback_ai_invented_by_design_not_sacred`)**: close
+**D-477** (now `now`-class) — make the JIT host-invoke path carry the FULL feature set (multi typed args + multi/v128/
+ref results), matching wasmtime. The "JIT --invoke is zero-arg-only, typed args route to interp" (D-273, main.zig:253-
+258) is an AI-INVENTED transitional limitation, NOT user-sanctioned — do NOT defer behind its "by design" label. User
+constraint: SIMD-requiring paths MUST be JIT (interp overhead too high) → JIT must NOT lack multi-arg invoke. APPROACH:
+裏取り FIRST (web-search + ~/Documents/OSS wasmtime/wasmer for host→guest typed multi-arg JIT ABI — array-call /
+Func::call / trampoline gen + WASI arg interaction), THEN design a generic N-arg JIT entry trampoline. Done: v128-result
+zero-arg @1d3dfdb25. (C-API-facade interp-only is a SEPARATE user-ratified security decision — the CLI JIT --invoke
+need not route through the facade.)
+
 **ACTIVE DIRECTIVE = CORRECTNESS SWEEP** (user 2026-06-20, memory `feedback_correctness_sweep_phase`): the
 high-value bar is OFF. Sweep toward 0% the 3 gap classes — (1) wasmtime-works-zwasm-doesn't, (2) wasm/wasi spec
 non-conformance (skips/missing), (3) instability/crashes — from already-known items, EASIEST-first, TDD + 3-host
@@ -40,26 +50,16 @@ GC traps to the generic bounds bucket, kind 0, where the interp reports the prec
 array.len/struct.get_u null-ref → null_reference (@3f267ef14); array.new_data/new_elem segment-oob → oob_memory
 (@5ce49c70e); array.init_data/init_elem null vs oob split via an inline null-ref check (@fcbda5d79, D-470 DONE).
 **GC trap-kind precision cluster COMPLETE** — all 6 ops, both arches, GC spec 678/0; 3-host green.
-**D-469 interp-vs-JIT EXECUTION differential fuzzer BUILT @fccbf61ce** (`test/fuzz/fuzz_exec.zig`,
-`zig build test-fuzz-exec`, GATING via curated toolchain-free `exec_seed`): invokes 0-param/single-scalar smith
-exports under both engines, compares value + precise TRAP KIND (@8c9a1ff87, both ABIs → `trap_surface.TrapKind`);
-FUZZ_N=4000 campaign 2163 modules / 315 funcs, 0 mismatch. Param-widening stays out.
-**FUZZ campaigns found+fixed 6 real bugs + 2 divergences this session** (sweep NOT at floor; ALL detail in git):
-JIT --invoke result-drop @222a2e45b · table-arena SEGV @66acaeee0 · exec-fuzz SIMD false-positive @9313c37a8 ·
-try_table dead-code panic @18df72ec1 (D-471) · array.new const-expr overflow @3daee4592 (D-472) · GC-reftype parse
-reject @fae437597 · D-473 JIT global-init OutOfHeap propagation @d9d3325db. Disproven: interp-non-SIMD + D-474
-(loader 7GiB = fragmentation not leak, lesson). **memory64+SIMD axis @06d0c2ea1**: v128.load*/store*/lane validators
-hardcoded popExpect(.i32) for the address — D-324 missed the SIMD memory ops; fixed (readSimdMemarg → memIdxTypeAt);
-simd_assert 25075/0 (lesson `index-width-audit-all-memory-op-families`).
-**Sweep at a FLOOR**: fresh axes (no-import-rich, maximal-features, mem64-enabled) all CLEAN (500/500 compile+JIT, 0
-crashes/rejections). **wasmtime-vs-JIT differential BUILT @9ba3f8c9f** (`scripts/fuzz_wasmtime_diff.py`, exec_seed 6/0)
-for the JIT-SIMD blind spot; raw smith → compared=0 (wrapper_thunk ADR-0106 sig limit fails whole module on f32/v128-
-result or 2/4+-param func). JIT SIMD body codegen VERIFIED CORRECT (lesson `wasmtime-jit-differential-wrapper-blocked`).
-**v128-RESULT host-invoke FIXED @1d3dfdb25** (gap-class-#1): `--invoke (result v128)` → wired entry.callV128NoArgs
-(matches wasmtime, dual-arch). **Remaining gap-classes (FRESH-CONTEXT, lower-pri, NOT correctness — interp is right)**:
-D-477 host-invoke sig completeness (multi-param `--invoke=ARGS` is interp-only BY DESIGN per D-273 zero-arg WASI model,
-NOT a gap; only niche zero-arg multi-result/ref-result remain), cross-module table harness (D-475), JIT table64 codegen
-(D-475 slice 4 structural ABI). Known-item correctness-sweep exhausted.
+**D-469 interp-vs-JIT EXECUTION differential fuzzer @fccbf61ce** (`test/fuzz/fuzz_exec.zig`, GATING via curated
+`exec_seed`): 0-param/single-scalar smith exports under both engines, value + precise TRAP KIND (@8c9a1ff87); FUZZ_N=4000
+2163 modules, 0 mismatch.
+**FUZZ campaigns: 8 real bugs + 2 divergences fixed this session** (ALL detail in git/lessons): incl. **memory64+SIMD
+validators @06d0c2ea1** (v128.load*/store*/lane hardcoded i32 addr — D-324 missed SIMD; readSimdMemarg → memIdxTypeAt;
+lesson `index-width-audit-all-memory-op-families`), JIT --invoke result-drop, table-arena SEGV, try_table/array.new/
+GC-reftype/global-init. **wasmtime-vs-JIT differential BUILT @9ba3f8c9f** (`scripts/fuzz_wasmtime_diff.py`); JIT SIMD
+body codegen VERIFIED CORRECT vs wasmtime (lesson `wasmtime-jit-differential-wrapper-blocked`). **v128-RESULT host-invoke
+FIXED @1d3dfdb25**. **OTHER remaining gap-classes** (after the 🎯 D-477 priority above): cross-module table harness
+(D-475 coverage), JIT table64 codegen (D-475 slice 4 structural ABI). Known-item correctness-sweep else exhausted.
 **extended-const @d258097e9** (i32/i64 add/sub/mul in const-exprs, 6 eval/validate sites) + **D-476 @4b10c569c**
 (element global.get + concrete typed-ref `(ref.null $t)` parse-acceptance) — both engines, closed. **8 gaps fixed +
 2 divergences + 2 disproven this session.**
