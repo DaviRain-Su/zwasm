@@ -58,9 +58,12 @@ campaign 2163 modules / 315 funcs, 0 mismatch** (kind compare = 0 false-positive
 - **@3daee4592 (D-472)** — `array.new` const-expr huge length×element_size u32-overflow PANIC. Fix: u64 size +
   OutOfHeap cap (mirrors object_alloc). Found by the **varied-config campaign** (gc + extended-const + deep nesting).
 Re-inventory found 0 runtime-reachable category-(a) gaps. **D-473 noted**: JIT setup global-init swallows
-evalGlobalInitGc errors (incl OutOfHeap) to a 0 global → niche interp-vs-JIT divergence (panic already fixed).
-NEXT: more varied smith-config campaigns (different knobs) — the varied config (deep nesting / all proposals /
-big funcs) finds bugs the default config misses. Productive technique: regen config + run exec+loader fuzz, fix, repeat.
+evalGlobalInitGc errors → niche divergence. **D-474 noted**: a 2nd varied config (memory/4GiB-offsets/multi-table/
+3000-instr, smith_v2) found NO new crash/divergence but a LOW-severity JIT-compile memory accumulation (~7 GiB RSS
+over 3776 complex modules; no single-module blowup; graceful under a memory cap; possible CompiledWasm.deinit leak
+vs fragmentation — DebugAllocator leak test to discharge). NEXT: more varied smith-config campaigns (different
+knobs each time — memory/atomics/relaxed-simd/multi-table); the technique (regen config + exec+loader fuzz + fix)
+found 5 real bugs this session. Also consider the D-474 leak test (cheap, definitive) + D-473 (small JIT fix).
 
 **Phase 17 完成形 plateau** (validated — do NOT re-walk): async COMPLETE; v128 spill (D-034/D-460/D-461) CLOSED;
 surface audits clean 2026-06-18; fuzz 0-crash; realworld JIT run 56/56 byte-match wasmtime (gating). NOT-WORTH: D-294-R2 TrapKind.
