@@ -101,9 +101,13 @@ wasmer `backend/mod.rs`/`function/mod.rs`). Findings → concrete shape:
    (`AUTO=0, JIT, INTERP`) (C). Default `auto`, documented to currently resolve
    to JIT — lets the default change later without an API break. Leave room
    (non-exhaustive-equivalent) for a future baseline/optimizing split.
-2. **Bind to the Engine/InitOpts, NEVER per-call.** Both runtimes fix engine
-   choice at Engine construction; nothing leaks into the call boundary. Keep
-   `Instance.invoke` / `wasm_func_call` engine-agnostic.
+2. **Per-INSTANCE selection at instantiate-time, NEVER per-call; both engines
+   coexist in ONE build.** Engine choice flows to `Module.instantiate` (forks to
+   interp `Runtime` or JIT `setupRuntime`), selectable per module/load — NOT a
+   comptime/global build flag (cljw `from_cljw_01` req 1: `{:engine :jit|:interp
+   |:auto}`). INTERP MUST stay available alongside JIT in the same binary — cljw
+   runs a dual-engine diff oracle (same module both engines, assert equal). The
+   call boundary (`Instance.invoke` / `wasm_func_call`) stays engine-agnostic.
 3. **Fallback posture — zwasm's one deliberate divergence.** Senior runtimes
    fail-fast on an unsupported explicit strategy (no silent downgrade).
    zwasm: `auto` = "JIT if this arch has a backend, else interp" (portability is
@@ -117,6 +121,29 @@ wasmer `backend/mod.rs`/`function/mod.rs`). Findings → concrete shape:
    `wasmtime_func_call` ptr+len), NOT callee-allocated (wasmer) — better C-ABI
    fit, no ownership questions. zwasm's `invokeMulti` (TypedResult array) already
    matches this; the C surface should take an explicit `nresults` in/out.
+
+## Consuming requirements (cljw dogfooding — `private/dogfooding_handover/from_cljw_01.md`)
+
+cljw (parallel dev, SHA-pins zwasm) pre-shared its consuming requirements (NOT
+blocking — cljw is on language-floor work, not yet adopting JIT; do NOT build a
+cljw-specific facade). Honour in the design:
+
+1. **Per-instance engine selection + interp coexistence** — folded into API shape
+   §2 above (the dual-engine diff oracle is cljw's F-012 correctness discipline).
+2. **Invoke contract identical across engines** — args/results marshalling (incl.
+   the ≤5/≤7-GPR multi-arg work) behaves the same interp vs JIT; **document the
+   arity limits + value types not yet JIT-supported** (cljw falls back to interp
+   for those) in the readiness signal's support matrix.
+3. **No embedder-contract regression** — if JIT changes store/instance lifecycle,
+   host-import registration, or WASI preopen handling, call the deltas out.
+
+**OBLIGATION (mechanical, must not be forgotten across sessions)**: when the
+JIT-backed embedding API is *embedder-stable*, write `to_cljw_NN.md` (the mailbox
+outbox) announcing (a) the engine-selection API shape, (b) the invoke arity/type
+support matrix, (c) embedder-contract deltas vs the current interp API, (d) **the
+SHA cljw should pin**. Tracked in handover residency + memory
+`project_cljw_dogfooding_mailbox`. Mailbox cadence (PROTOCOL.md): check
+`from_cljw_*` for `SENT` at unit boundaries (after a commit, before next task).
 
 ## Consequences
 

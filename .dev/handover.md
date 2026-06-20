@@ -38,6 +38,12 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
   ADR sub-decision, multi-result via invokeMulti). ADR-0200 §"API shape" now carries the
   wasmtime/wasmer peer 裏取り (EngineKind{auto,jit,interp}, auto→JIT, interp-fallback on
   JIT-less arch, C untyped + Zig typed sugar, caller-pre-sized multi-value).
+- **cljw dogfooding OBLIGATION (don't forget across sessions)**: when the ADR-0200 JIT-backed
+  API is embedder-stable, send `private/dogfooding_handover/to_cljw_NN.md` = engine-selection
+  shape + invoke arity/type matrix + embedder-contract deltas + pin SHA (from_cljw_01 CONSUMED,
+  reqs folded into ADR-0200; memory `project_cljw_dogfooding_mailbox`). Mailbox cadence: check
+  `from_cljw_*` for `SENT` at unit boundaries (after a commit). Engine select = per-instance,
+  interp MUST coexist (cljw dual-engine diff oracle).
 
 ## RESUME POINTER (2026-06-20) — for a fresh session
 
