@@ -42,9 +42,12 @@ entries:
       3-arg-non-(i32³)/4+ args via invokeViaBufferSingle→invokeBufferWrite (@14dfb8b57);
       sum4(2,3,4,5)→14 on arm64, test-spec-2.0-assert 25539/0 BOTH arches. X86_64 SysV
       SLICE DONE: emitX8664SysV generalized to ≤5 GPR params (@853299ad5), value-checked
-      on x86_64-macos Rosetta. REMAINING: CLI arg-threading for runWasiLenient (no args
-      param yet → drop main.zig:257 + runner.zig:657) = bundle exit-cond; Win64 N-param
-      (≤3 reg params); FP+v128.
+      on x86_64-macos Rosetta. CLI EXIT-COND MET @b88435743: `zwasm run --engine jit
+      --invoke add=2,3` prints 5 (runWasiLenientArgs + run.zig packJitInvokeArgs +
+      main.zig arg-threading; dropped the interp-only reject). REMAINING completeness:
+      Win64 emitX8664Win64 N-param (enumerates {0,1,3} today), FP-class args/results
+      (thunk GPR-only), v128 (16B≠8B slot), multi-result via invoke/CLI. Then D-477 note
+      + ADR-0200 API-JIT phase.
     first_raised: "2026-06-20"
     last_reviewed: "2026-06-20"
     refs: |-

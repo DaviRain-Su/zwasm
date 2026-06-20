@@ -18,27 +18,26 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
 ## Active bundle
 
 - **Bundle-ID**: D-477-jit-multiarg-invoke
-- **Cycles-remaining**: ~2-3
-- **Continuity-memo**: Phase I+II DONE (`.dev/d477_findings.md`). **arm64 + x86_64 SysV
-  GPR multi-arg invoke DONE**: `emitAarch64` (≤7 params, @50452a498) + `emitX8664SysV`
-  (≤5 params, @853299ad5) generalized, byte-tested; `compile.zig` requests thunks for
-  EXPORTED multi-arg; `JitInstance.invoke` routes 3-arg-non-(i32³)/4+ args via
-  `invokeViaBufferSingle`→`invokeBufferWrite` (@14dfb8b57). `sum4(2,3,4,5)→14` on arm64
-  AND x86_64 SysV; verified test-spec-2.0-assert 25539/0 on BOTH (Rosetta runtime).
-  **NEXT slices**: (1) CLI arg-threading = bundle EXIT-COND: `runWasiLenient` has NO
-  args param today (the `runWasiLenient 2-arg` test still rejects) — add args param,
-  thread main.zig→`cli/run.zig` runWasmJit→runWasiLenient + `invoke_args.parseArgsAlloc`,
-  route via the buffer path, drop `main.zig:257` + `runner.zig:657` rejects; (2) Win64
-  `emitX8664Win64` N-param (params RDX/R8/R9 after RCX=rt, +shadow space; ≤3 reg → 4th+
-  stack spill); (3) FP-class args/results (thunk GPR-only); (4) v128 (16B ≠ 8B slot).
-- **Exit-condition**: `zwasm run --engine jit --invoke add=2,3 <multi-arg.wasm>`
-  matches interp for i32/i64/f32/f64 multi-arg + multi-result shapes; CLI reject
-  gone; debt D-477 → `note`/closed.
+- **Cycles-remaining**: ~2
+- **Continuity-memo**: Phase I+II DONE. **EXIT-COND MET @b88435743**: `zwasm run
+  --engine jit --invoke add=2,3` prints 5 (matches interp), verified on the built
+  binary + e2e on arm64 AND x86_64-macos. Done so far: `emitAarch64` ≤7 params
+  (@50452a498) + `emitX8664SysV` ≤5 params (@853299ad5); `compile.zig` requests thunks
+  for EXPORTED multi-arg; `JitInstance.invoke`→`invokeViaBufferSingle` (@14dfb8b57);
+  `runWasiLenientArgs` + `run.zig packJitInvokeArgs` + main.zig JIT arg-threading
+  (@b88435743, dropped the interp-only reject). **REMAINING completeness slices** (extend
+  bundle): (1) Win64 `emitX8664Win64` N-param (today enumerates {0,1,3} params; need 2
+  + ≥4 stack-spill; params RDX/R8/R9 after RCX=rt + shadow space); (2) FP-class args/
+  results (thunk is GPR-only via `all_gpr_class` — add V/XMM load/store); (3) v128 (16B
+  ≠ 8B u64 slot — needs 16B-slot buffer variant or separate path); (4) multi-result (>1)
+  via `invoke`/CLI (ScalarResult is single — invokeMulti already does ≥2 via thunk).
+- **Exit-condition**: MET (above). Extended close = the 4 completeness slices land →
+  full wasmtime-parity host→guest JIT invoke → D-477 `note`; THEN ADR-0200 API-JIT phase.
 
 ## RESUME POINTER (2026-06-20) — for a fresh session
 
 **🎯 D-477 bundle (memory `feedback_ai_invented_by_design_not_sacred`)**: see `## Active bundle` + `.dev/d477_findings.md`.
-arm64 + x86_64 SysV multi-arg JIT invoke DONE; NEXT = CLI arg-threading (`runWasiLenient`), then Win64 + FP + v128.
+CLI multi-arg JIT invoke DONE (exit-cond met @b88435743); NEXT = completeness slices Win64 → FP → v128 → multi-result.
 **PARENT ARC = ADR-0200** (user 2026-06-20): D-477 is the gating #1 of "JIT-backed embedding API, JIT-DEFAULT,
 selectable" — interp-only-API was an UNRATIFIED AI deferral, now reversed (SIMD is JIT-only → unrunnable via API).
 After D-477: PRIORITIZED API-JIT phase = peer 裏取り (wasmtime Config/Strategy) → API design → impl → first-party
