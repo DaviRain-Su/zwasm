@@ -43,25 +43,14 @@ consolidate the duplicated spill helpers into a shared op_simd.zig pub set.
 **ACTIVE DIRECTIVE = CORRECTNESS SWEEP** (user 2026-06-20, memory `feedback_correctness_sweep_phase`): the
 high-value bar is OFF. Sweep toward 0% the 3 gap classes — (1) wasmtime-works-zwasm-doesn't, (2) wasm/wasi spec
 non-conformance (skips/missing), (3) instability/crashes — from already-known items, EASIEST-first, TDD + 3-host
-gate, repeat. Do NOT stop to ask "is this high-value." **Inventory DONE** (subagent): spec-skip front already ~0
-(only real skip-impl = simd `directive-register` = test-harness residue; #2/#3 validator-rejects already done, stale
-comments fixed @94f0b7122). **#9 DONE @97abd6887** (arm64 v128 zero-init large-frame). **D-330 + D-331A CLOSED @69a0953b1 (both arches)** —
-two liveness bugs (block-merge-vreg call survival + `br` drain-to-innermost). **VERIFICATION LESSON (cost 3
-reverts)**: a JIT-codegen fix MUST be checked with `test-spec-wasm-2.0-assert` on BOTH arm64 AND
-`-Dtarget=x86_64-macos` — NOT `test-spec`(interp)/`zig build test`(unit). Lesson filed.
-**D-209 memory64 >4GiB static offset CLOSED @b8cf64123**: lifted the artificial `readMemargOffset` u32 cap (the
-validator already gatekeeps per-memory offset width; zir payload is u64; 64-bit base+offset carry-trap codegen
-already on both arches). RED fixture `offset_ge_4gib_oob_trap` BadMemarg→OOB-trap; memory64 spec assert 9317/0.
-**D-468 CLOSED @1a629c5fe (ADR-0199) — go_* JIT-exit hang FIXED both arches.** Root cause: JIT trap_flag was
-sticky-flag + natural-return (proc_exit set trap_flag + returned; only the entry shim checked it after the body
-returned naturally — Go's scheduler loop never returns). Fix: post-call trap_flag check after every
-call/call_indirect/call_ref (both arches) → unwind to the clean epilogue (arm64 CBZ-skip→return_fixups; x86_64
-JE-skip→emitTrapExitStub(null), trap_kind/exit_code preserved). Verified: all 9 go_* rc=0 (was rc=124),
-test-spec-wasm-2.0-assert 25539/0 arm64 + x86_64-macos, test+lint green. Lesson + ADR filed.
-**MILESTONE: realworld JIT-vs-wasmtime differential now 56/56, lane FLIPPED REPORT-ONLY→GATING @3b6f8d5b5**
-(D-283 (A)+(B) cleared: D-330 miscompiles + D-468 go_* hangs). gap-class #1 (wasmtime-works/zwasm-doesn't) =
-0% for the realworld corpus; a future JIT-vs-wasmtime byte mismatch now fails the gate. Run the lane after
-JIT-codegen changes (`zig build test-realworld-diff-jit`, Mac-host, needs wasmtime).
+gate, repeat. Do NOT stop to ask "is this high-value." **This session's sweep CLOSURES (detail in git/lessons/
+ADRs — do NOT re-walk)**: D-330+D-331A liveness (@69a0953b1), D-209 memory64 >4GiB offset (@b8cf64123),
+**D-468 go_* JIT-exit hang / proc_exit non-termination (@1a629c5fe, ADR-0199 post-call trap_flag check, both
+arches)**, fd_seek/fd_tell (@571fb5176), poll_oneoff clock subs (@132cf5527). **MILESTONE: realworld
+JIT-vs-wasmtime 56/56, lane flipped REPORT-ONLY→GATING @3b6f8d5b5** (D-283 discharged) — gap-class #1 = 0% for
+the corpus + permanent regression gate (`zig build test-realworld-diff-jit`, Mac-host+wasmtime; run after
+JIT-codegen changes). **VERIFICATION LESSON**: a JIT-codegen fix MUST be checked with `test-spec-wasm-2.0-assert`
+on BOTH arm64 AND `-Dtarget=x86_64-macos` — NOT `test-spec`(interp)/`zig build test`(unit).
 **Sweep front — KNOWN gaps EXHAUSTED (2026-06-20)**: the gap-inventory's 3 verified WASI preview1 stubs are
 all DONE — fd_seek + fd_tell @571fb5176 (OpenFd gained a logical `pos` cursor; positional IO), poll_oneoff clock
 subscriptions @132cf5527 (decode 48B subscription, sleep to earliest deadline, write 1 clock event; fd subs stay
