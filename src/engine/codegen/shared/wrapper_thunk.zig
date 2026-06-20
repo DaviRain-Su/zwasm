@@ -182,8 +182,9 @@ pub fn emitX8664SysV(
     allocator: std.mem.Allocator,
     params: EmitParams,
 ) Error!EmitOutput {
-    if (!all_gpr_class(params.sig.results)) return Error.UnsupportedOp;
-    if (!all_gpr_class(params.sig.params)) return Error.UnsupportedOp;
+    // v128 params/results = a later D-477 slice (16B ≠ 8B slot). f32/f64 ARE
+    // handled below via the independent XMM bank.
+    if (contains_v128(params.sig.params) or contains_v128(params.sig.results)) return Error.UnsupportedOp;
 
     var bytes: std.ArrayList(u8) = .empty;
     errdefer bytes.deinit(allocator);
@@ -193,6 +194,8 @@ pub fn emitX8664SysV(
     const n_results = params.sig.results.len;
     const n_params = params.sig.params.len;
     if (n_results == 3) {
+        // 3-int MEMORY-class is GPR-only (FP-in-memory-result deferred).
+        if (!all_gpr_class(params.sig.results)) return Error.UnsupportedOp;
         // 3-int MEMORY-class: body expects RDI=&buf, RSI=rt.
         // Wrapper: XCHG RDI, RSI ; CALL body ; XOR EAX, EAX ; RET.
         // 3-int MEMORY + a param is out of scope (matches arm64).
@@ -203,55 +206,112 @@ pub fn emitX8664SysV(
         return .{ .bytes = try bytes.toOwnedSlice(allocator) };
     }
 
-    // D-477 generic GPR register-class path — n_results ∈ {1,2}, n_params ≤ 5
-    // (the SysV integer arg registers RSI,RDX,RCX,R8,R9 after RDI=rt; ≥6 params
-    // need stack spill, deferred). Body returns result 0 in RAX, result 1 in
-    // RDX. Save results_ptr (RSI) to STACK across the CALL (NOT a callee-saved
-    // GPR — the body's regalloc may clobber RBX without a paired save for small
-    // funcs; 2-int e2e ubuntu fault 0x77 history). Reproduces the prior 0/1-param
-    // 2-result shapes byte-for-byte.
+    // D-477 generic two-bank path — n_results ∈ {1,2}, n_params ≤ 5. SysV uses
+    // INDEPENDENT banks: int/ref params → RSI,RDX,RCX,R8,R9 (RDI=rt), f32/f64
+    // params → XMM0..XMM7. Save results_ptr (RSI) to STACK across the CALL (NOT a
+    // callee-saved GPR — the body's regalloc may clobber RBX without a paired save
+    // for small funcs; 2-int e2e ubuntu fault 0x77 history). The GPR param whose
+    // dest is RDX (the 2nd int param) overwrites the args base, so it is emitted
+    // LAST; FP loads read RDX (base) without writing it. n_results==2 stays
+    // GPR-only (mixed/FP multi-result deferred). GPR-only shapes reproduce the
+    // prior bytes exactly. (0-result deferred.)
     if (n_results < 1 or n_results > 2 or n_params > 5) return Error.UnsupportedOp;
+    if (n_results == 2 and !all_gpr_class(params.sig.results)) return Error.UnsupportedOp;
 
     try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xEC, 0x08 }); // SUB RSP, 8 (SysV align)
     try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x34, 0x24 }); // MOV [RSP], RSI (save results_ptr)
     var pre_len: u32 = 4 + 4;
-    // Marshal args from [RDX + 8k] → SysV body slot. Param 1's dest is RDX
-    // (the args_ptr base), so emit every k != 1 first then k == 1 LAST.
-    var k: usize = 0;
-    while (k < n_params) : (k += 1) {
-        if (k == 1) continue;
-        const ins = movParamSysV(k);
-        try bytes.appendSlice(allocator, ins);
-        pre_len += @intCast(ins.len);
+    // Marshal args two-bank. The single RDX-targeting GPR load (2nd int param)
+    // is stashed + emitted last; everything else (other GPR + all FP) first.
+    var base_buf: [8]u8 = undefined;
+    var base_len: usize = 0;
+    var gpr_g: u32 = 0;
+    var fp_x: u32 = 0;
+    for (params.sig.params, 0..) |pt, kk| {
+        var buf: [8]u8 = undefined;
+        var len: usize = undefined;
+        var is_base = false;
+        switch (pt) {
+            .i32, .i64, .ref => {
+                len = gprLoadSysV(&buf, gpr_g, @intCast(kk));
+                is_base = (gpr_g == 1); // dest == RDX (the args base)
+                gpr_g += 1;
+            },
+            .f32 => {
+                len = fpLoadSysV(&buf, false, fp_x, @intCast(kk));
+                fp_x += 1;
+            },
+            .f64 => {
+                len = fpLoadSysV(&buf, true, fp_x, @intCast(kk));
+                fp_x += 1;
+            },
+            .v128 => unreachable, // rejected above
+        }
+        if (is_base) {
+            @memcpy(base_buf[0..len], buf[0..len]);
+            base_len = len;
+        } else {
+            try bytes.appendSlice(allocator, buf[0..len]);
+            pre_len += @intCast(len);
+        }
     }
-    if (n_params >= 2) {
-        const ins = movParamSysV(1);
-        try bytes.appendSlice(allocator, ins);
-        pre_len += @intCast(ins.len);
+    if (base_len > 0) {
+        try bytes.appendSlice(allocator, base_buf[0..base_len]);
+        pre_len += @intCast(base_len);
     }
     try emitCallRel32(allocator, &bytes, params, pre_len);
     try bytes.appendSlice(allocator, &.{ 0x48, 0x8B, 0x34, 0x24 }); // MOV RSI, [RSP] (restore)
     try bytes.appendSlice(allocator, &.{ 0x48, 0x83, 0xC4, 0x08 }); // ADD RSP, 8
-    try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x06 }); // MOV [RSI], RAX (result 0)
-    if (n_results == 2) try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x56, 0x08 }); // MOV [RSI+8], RDX
+    if (n_results == 1) {
+        // Store result 0 → [RSI]: GPR from RAX, f32 from XMM0 (MOVSS), f64 (MOVSD).
+        switch (params.sig.results[0]) {
+            .i32, .i64, .ref => try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x06 }), // MOV [RSI], RAX
+            .f32 => try bytes.appendSlice(allocator, &.{ 0xF3, 0x0F, 0x11, 0x06 }), // MOVSS [RSI], XMM0
+            .f64 => try bytes.appendSlice(allocator, &.{ 0xF2, 0x0F, 0x11, 0x06 }), // MOVSD [RSI], XMM0
+            .v128 => unreachable,
+        }
+    } else {
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x06 }); // MOV [RSI], RAX
+        try bytes.appendSlice(allocator, &.{ 0x48, 0x89, 0x56, 0x08 }); // MOV [RSI+8], RDX
+    }
     try bytes.appendSlice(allocator, &.{ 0x31, 0xC0, 0xC3 }); // XOR EAX,EAX ; RET
 
     return .{ .bytes = try bytes.toOwnedSlice(allocator) };
 }
 
-/// SysV `MOV <slot>, [RDX + 8*k]` — load arg `k` from the args buffer (base
-/// RDX) into the register_write body's param slot. SysV int arg order after
-/// RDI=rt: p0=RSI, p1=RDX, p2=RCX, p3=R8, p4=R9. k=0 uses disp-0 (mod=00,
-/// 3 bytes); k≥1 uses disp8 (mod=01, 4 bytes).
-fn movParamSysV(k: usize) []const u8 {
-    return switch (k) {
-        0 => &.{ 0x48, 0x8B, 0x32 }, // MOV RSI, [RDX]
-        1 => &.{ 0x48, 0x8B, 0x52, 0x08 }, // MOV RDX, [RDX+8]
-        2 => &.{ 0x48, 0x8B, 0x4A, 0x10 }, // MOV RCX, [RDX+16]
-        3 => &.{ 0x4C, 0x8B, 0x42, 0x18 }, // MOV R8,  [RDX+24]
-        4 => &.{ 0x4C, 0x8B, 0x4A, 0x20 }, // MOV R9,  [RDX+32]
-        else => unreachable, // n_params ≤ 5 guarded by caller
-    };
+/// SysV: load int arg (byte off 8·`param_idx`) from [RDX] into the body's
+/// integer-arg register at position `g` (0=RSI,1=RDX,2=RCX,3=R8,4=R9). Writes
+/// `MOV r64, [RDX{+disp8}]` into `out`, returns its length (3 if off==0 else 4).
+fn gprLoadSysV(out: *[8]u8, g: u32, param_idx: u32) usize {
+    const gpr_rex = [_]u8{ 0x48, 0x48, 0x48, 0x4C, 0x4C };
+    const gpr_reg = [_]u8{ 6, 2, 1, 0, 1 }; // RSI, RDX, RCX, R8, R9 (low 3 bits)
+    const off: u32 = 8 * param_idx;
+    out[0] = gpr_rex[g];
+    out[1] = 0x8B;
+    if (off == 0) {
+        out[2] = (gpr_reg[g] << 3) | 2; // mod=00, rm=RDX
+        return 3;
+    }
+    out[2] = (@as(u8, 0b01) << 6) | (gpr_reg[g] << 3) | 2; // mod=01 disp8, rm=RDX
+    out[3] = @intCast(off);
+    return 4;
+}
+
+/// SysV: load FP arg (byte off 8·`param_idx`) from [RDX] into XMM`x`. `MOVSS`
+/// (F3) for f32 / `MOVSD` (F2) for f64, opcode 0F 10 /r. Returns length (4 if
+/// off==0 else 5). x ≤ 7 (no REX.R needed; n_params ≤ 5 bounds the FP bank).
+fn fpLoadSysV(out: *[8]u8, is_f64: bool, x: u32, param_idx: u32) usize {
+    const off: u32 = 8 * param_idx;
+    out[0] = if (is_f64) 0xF2 else 0xF3;
+    out[1] = 0x0F;
+    out[2] = 0x10;
+    if (off == 0) {
+        out[3] = (@as(u8, @intCast(x)) << 3) | 2; // mod=00, rm=RDX
+        return 4;
+    }
+    out[3] = (@as(u8, 0b01) << 6) | (@as(u8, @intCast(x)) << 3) | 2; // mod=01 disp8
+    out[4] = @intCast(off);
+    return 5;
 }
 
 /// x86_64 Win64 wrapper emit. Public so byte-sequence unit
@@ -791,6 +851,39 @@ test "wrapper_thunk: emitX8664SysV 1-param 2-int register-class (i32) -> (i32, i
     try testing.expectEqualSlices(u8, &.{ 0x48, 0x89, 0x06 }, out.bytes[24..27]); // MOV [RSI], RAX
     try testing.expectEqualSlices(u8, &.{ 0x48, 0x89, 0x56, 0x08 }, out.bytes[27..31]); // MOV [RSI+8], RDX
     try testing.expectEqualSlices(u8, &.{ 0x31, 0xC0, 0xC3 }, out.bytes[31..34]); // XOR EAX,EAX ; RET
+}
+
+test "wrapper_thunk: emitX8664SysV D-477 FP (f64,f64)->f64 — XMM-bank loads + MOVSD result (37 bytes)" {
+    // SIBLING-AT: src/engine/codegen/shared/wrapper_thunk.zig (emitAarch64 FP V-bank)
+    if (comptime builtin.cpu.arch != .x86_64) return;
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    const VT = @import("../../../ir/zir.zig").ValType;
+    const p = [_]VT{ .f64, .f64 };
+    const results = [_]VT{.f64};
+    const out = try emitX8664SysV(testing.allocator, .{ .sig = .{ .params = &p, .results = &results }, .body_offset = 100, .thunk_offset = 0 });
+    defer testing.allocator.free(out.bytes);
+    try testing.expectEqual(@as(usize, 37), out.bytes.len);
+    try testing.expectEqualSlices(u8, &.{ 0xF2, 0x0F, 0x10, 0x02 }, out.bytes[8..12]); // MOVSD XMM0,[RDX] (p0)
+    try testing.expectEqualSlices(u8, &.{ 0xF2, 0x0F, 0x10, 0x4A, 0x08 }, out.bytes[12..17]); // MOVSD XMM1,[RDX+8] (p1)
+    try testing.expectEqual(@as(u8, 0xE8), out.bytes[17]); // CALL
+    try testing.expectEqual(@as(i32, 78), std.mem.readInt(i32, out.bytes[18..22], .little)); // 100-(17+5)
+    try testing.expectEqualSlices(u8, &.{ 0xF2, 0x0F, 0x11, 0x06 }, out.bytes[30..34]); // MOVSD [RSI],XMM0 (result)
+    try testing.expectEqualSlices(u8, &.{ 0x31, 0xC0, 0xC3 }, out.bytes[34..37]); // XOR EAX,EAX ; RET
+}
+
+test "wrapper_thunk: emitX8664SysV D-477 mixed (i32,f32)->f32 — two banks independent (36 bytes)" {
+    // SIBLING-AT: src/engine/codegen/shared/wrapper_thunk.zig (emitAarch64 FP V-bank)
+    if (comptime builtin.cpu.arch != .x86_64) return;
+    if (builtin.os.tag == .windows) return skip.phaseEnd(.win64);
+    const VT = @import("../../../ir/zir.zig").ValType;
+    const p = [_]VT{ .i32, .f32 };
+    const results = [_]VT{.f32};
+    const out = try emitX8664SysV(testing.allocator, .{ .sig = .{ .params = &p, .results = &results }, .body_offset = 100, .thunk_offset = 0 });
+    defer testing.allocator.free(out.bytes);
+    try testing.expectEqual(@as(usize, 36), out.bytes.len);
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x8B, 0x32 }, out.bytes[8..11]); // MOV RSI,[RDX] (p0 i32 → GPR bank)
+    try testing.expectEqualSlices(u8, &.{ 0xF3, 0x0F, 0x10, 0x42, 0x08 }, out.bytes[11..16]); // MOVSS XMM0,[RDX+8] (p1 f32 → FP bank)
+    try testing.expectEqualSlices(u8, &.{ 0xF3, 0x0F, 0x11, 0x06 }, out.bytes[29..33]); // MOVSS [RSI],XMM0 (result)
 }
 
 test "wrapper_thunk: emitX8664Win64 3-arg 2-int register-class (i64, i64, i32) -> (i64, i32) (44 bytes)" {

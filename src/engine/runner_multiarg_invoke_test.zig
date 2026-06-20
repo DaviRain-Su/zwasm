@@ -84,15 +84,17 @@ test "D-477: JitInstance.invoke 4×i32 sum4(2,3,4,5) → 14 via buffer thunk (ar
     }
 }
 
-test "D-477 FP: runWasiLenientArgs addf(2.5,1.5) → f64 4.0 via the V-bank thunk (arm64; x86_64 FP pending)" {
-    // FP params/result through the buffer-write thunk. arm64 emitAarch64 now
-    // marshals f64 args into V0/V1 and reads the D0 result; x86_64 SysV/Win64
-    // FP-param emit is a later slice (thunk still GPR-only there) → no thunk →
-    // reject. Runs natively on the arm64 Mac host. Gate cited to D-477 (§4).
+test "D-477 FP: runWasiLenientArgs addf(2.5,1.5) → f64 4.0 via the FP-bank thunk (arm64 + x86_64 SysV; Win64 FP pending)" {
+    // FP params/result through the buffer-write thunk. arm64 (V0/V1→D0) and
+    // x86_64 SysV (XMM0/XMM1→MOVSD) marshal the f64 args two-bank. Win64 FP-param
+    // emit is a later slice (thunk still GPR-only there) → no thunk → reject.
+    // Runs natively on the arm64 Mac host + x86_64-macos (Rosetta). Gate cited D-477.
     var result: ?runner.ScalarResult = null;
     const a: u64 = @bitCast(@as(f64, 2.5));
     const b: u64 = @bitCast(@as(f64, 1.5));
-    if (builtin.cpu.arch == .aarch64) {
+    const supported = builtin.cpu.arch == .aarch64 or
+        (builtin.cpu.arch == .x86_64 and builtin.os.tag != .windows);
+    if (supported) {
         _ = try runner.runWasiLenientArgs(testing.allocator, &addf_f64, "addf", null, null, .{}, &result, &.{ a, b });
         try testing.expectEqual(@as(f64, 4.0), result.?.f64);
     } else {
