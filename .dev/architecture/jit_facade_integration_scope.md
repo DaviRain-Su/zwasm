@@ -6,9 +6,12 @@
 **Subject**: What it would take to let the public Zig facade (`src/zwasm/*`) and
 the C API (`src/api/instance.zig` + `include/`) run modules on the **JIT** engine,
 not only the interpreter.
-**Status**: ASSESSMENT (no decision to build yet). Scopes the effort behind
-debt **D-314**. Not v0.1-blocking — the interp (default) carries every
-embedder-facing guarantee today.
+**Status**: DECISION TO BUILD — **ADR-0200** (user directive 2026-06-20).
+This doc was the ASSESSMENT; the interp-only posture it scoped was an
+AI/campaign transitional deferral, NOT a ratified decision, and is now
+reversed: build a JIT-backed embedding API with opt-in engine selection.
+Scopes the effort behind debt **D-314(d)**. The gating blocker (#1, the
+generic argument-ABI trampoline) is being built as **D-477**.
 
 ## Why JIT is API-unreachable today (structural)
 

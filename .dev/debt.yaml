@@ -172,10 +172,15 @@ entries:
           leg now cross-engine. JitRuntime gained a trailing `store_table_elements_max` (maxInt=unlimited).
       (c) .cwasm + component CLI limits threading (today the CLI REFUSES the
           flags there loudly rather than running unsandboxed).
-      (d) facade/C-API JIT-backed instances (the SEAM asserts in
-          zwasm/instance.zig stay; rides
-          .dev/architecture/jit_facade_integration_scope.md — the gating spike
-          is the generic argument-ABI trampoline).
+      (d) facade/C-API JIT-backed instances — DECISION TO BUILD (ADR-0200,
+          user 2026-06-20): the interp-only API was an AI/campaign transitional
+          deferral, NOT ratified; reversed → build opt-in JIT-backed embedding
+          API (headline: SIMD is JIT-only, so SIMD modules are unrunnable via
+          the interp-only API). Gating blocker #1 = generic argument-ABI
+          trampoline = D-477 (arm64 ✓, x86_64 SysV ✓; Win64/CLI/FP/v128 left).
+          Then #2 Module.instantiate JIT fork + #3 accessor runtime==null
+          branches + #4 host-import JIT bridge + D-314 sandbox sign-off + #6 Win64.
+          Rides .dev/architecture/jit_facade_integration_scope.md.
       (e) JIT poll code-size: prologue ~60 B + per-back-edge 48 B (arm64) /
           62 B (x86_64) + stubs, unconditional per fn — MEASURE on a realworld
           corpus, consider an opt-in compile flag (perf-measure-first).
