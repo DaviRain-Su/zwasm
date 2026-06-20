@@ -27,12 +27,14 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
   `runWasiLenientArgs` + `run.zig packJitInvokeArgs` + main.zig JIT arg-threading
   (@b88435743, dropped the interp-only reject). **Win64 GPR ≤3-param DONE @6db14695d**
   (emitX8664Win64 collapsed to generic register-class; add=2,3 now all 3 arches;
-  byte-verified Mac + x86_64-macos, Win64 RUNTIME pending windows-gate verdict).
-  **REMAINING completeness slices** (extend bundle): (1) Win64 ≥4-param stack-spill
-  (deferred); (2) FP-class args/results (thunk GPR-only via `all_gpr_class` — add V/XMM
-  load/store, two-bank GPR/FP arg assignment per `private/notes/`); (3) v128 (16B ≠ 8B u64
-  slot — 16B-slot buffer ADR sub-decision); (4) multi-result (>1) via `invoke`/CLI
-  (ScalarResult single — invokeMulti already does ≥2 via thunk).
+  byte-verified Mac + x86_64-macos). **arm64 FP DONE @d791dc6b9** (emitAarch64 two-bank:
+  f32/f64 params→V0-7, S0/D0 result; runtime-verified native arm64 addf(2.5,1.5)→4.0).
+  **Win64 GPR runtime verdict PENDING a CLEAN re-run** — the prior windows run hit
+  `.zig-cache file_hash FileNotFound` (user deleted windowsmini .zig-cache mid-run = INFRA,
+  NOT a Win64 bug); re-kicked this turn. **REMAINING slices** (extend bundle): (1) x86_64
+  SysV + Win64 FP-param marshal (still GPR-only there → FP funcs arm64-only); (2) v128 (16B
+  ≠ 8B u64 slot — 16B-slot buffer ADR sub-decision); (3) multi-result (>1) via `invoke`/CLI
+  (ScalarResult single — invokeMulti already does ≥2 via thunk); (4) Win64 ≥4-param stack-spill.
 - **Exit-condition**: MET (above). Extended close = the 4 completeness slices land →
   full wasmtime-parity host→guest JIT invoke → D-477 `note`; THEN ADR-0200 API-JIT phase.
 - **Pre-worked design (先読み)**: all 4 slices designed in `private/notes/d477-remaining-slices-design.md`
@@ -50,7 +52,7 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
 ## RESUME POINTER (2026-06-20) — for a fresh session
 
 **🎯 D-477 bundle (memory `feedback_ai_invented_by_design_not_sacred`)**: see `## Active bundle` + `.dev/d477_findings.md`.
-CLI multi-arg JIT invoke DONE (exit-cond met @b88435743); NEXT = completeness slices Win64 → FP → v128 → multi-result.
+CLI multi-arg JIT invoke + arm64 FP + Win64/x86_64-SysV GPR DONE; NEXT = x86_64-SysV/Win64 FP-param → v128 → multi-result.
 **PARENT ARC = ADR-0200** (user 2026-06-20): D-477 is the gating #1 of "JIT-backed embedding API, JIT-DEFAULT,
 selectable" — interp-only-API was an UNRATIFIED AI deferral, now reversed (SIMD is JIT-only → unrunnable via API).
 After D-477: PRIORITIZED API-JIT phase = peer 裏取り (wasmtime Config/Strategy) → API design → impl → first-party
