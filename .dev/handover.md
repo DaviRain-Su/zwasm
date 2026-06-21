@@ -27,15 +27,16 @@ test-all) run engine=jit + multi-arg `add`→5 + SIMD-body `lane0`→42. Engine 
 (`private/dogfooding_handover/to_cljw_02.md` — engine shape + arity/type matrix + contract deltas + pin
 `zwasm@025b1f2cb`); cljw obligation DISCHARGED. ADR-0200 ACCEPTED+delivered; commit-chain in git.
 
-**NEXT FRONT = D-478 (ADR-0200 completeness tail)** — use `.interp` for these meanwhile (documented in
-to_cljw_02): (1) **host-import + WASI dispatch under JIT facade** — `jit.owned.rt.wasi_host =
-store.wasi_host` in `instantiateJit` + preopens (survey done: setupRuntime plants WASI thunks; e2e =
-clock_time_get→memory→i64.load nonzero, cf. jit_dispatch.zig:688; proc_exit exit-code INCOMPLETE
-jit_dispatch.zig:313); then non-WASI host-func dispatch. (2) `.auto`→JIT flip once (1) lands. (3) WASI
-via the Linker (holds OWN wasi_host, linker.zig:95). (4) accessor READS memory/global/table JIT arms.
-(5) v128-at-boundary + Win64 ≥4-param stack-spill = D-477 niche slivers. This tail is likely a new
-bundle (host-import/WASI JIT = multi-cycle, Linker-entangled) — bundle it if it proves so.
-**OR** fall back to the STANDING CORRECTNESS-SWEEP directive (below) if the tail is deferred.
+**NEXT FRONT = D-478 (ADR-0200 completeness tail)** — use `.interp` for not-yet-covered modules
+(documented in to_cljw_02). **WASI host-fn dispatch under JIT DONE @b29606b17** (`jit.owned.rt.wasi_host
+= store.wasi_host` + preopens in `instantiateJit`; `jit_wasi` conformance: clock_time_get→i64.load
+nonzero, gated). Remaining: (1b) non-WASI host-func (`wasm_func_new` callback) dispatch under JIT +
+proc_exit exit-code (jit_dispatch.zig:313). (2) `.auto`→JIT flip once host-imports fully covered. (3)
+WASI via the Linker (holds OWN wasi_host, linker.zig:95 — facade `Module.instantiate` + store.wasi_host
+path works now; Linker path is separate). (4) accessor READS memory/global/table JIT arms (return null
+today). (5) v128-at-boundary + Win64 ≥4-param stack-spill = D-477 niche slivers. Likely bundle the
+host-import/Linker work if it proves multi-cycle. **OR** fall back to the STANDING CORRECTNESS-SWEEP
+directive (below).
 
 **STANDING DIRECTIVE = CORRECTNESS SWEEP** (user 2026-06-20, memory `feedback_correctness_sweep_phase`): high-value
 bar OFF. Sweep toward 0% the 3 gap classes — (1) wasmtime-works-zwasm-doesn't, (2) wasm/wasi spec non-conformance,

@@ -14,12 +14,11 @@ entries:
       discovery, D-451 import-reject — all landed + gated (mini-consumers
       examples/{c_host,zig_host}/jit_engine.*). REMAINING (deferred, NOT exit-cond
       blockers; use `.interp` for these modules meanwhile — documented in to_cljw_02):
-      (1) **host-import + WASI dispatch under JIT facade** — set
-      `jit.owned.rt.wasi_host = store.wasi_host` in `instantiateJit` + materialize
-      preopens (survey done: setupRuntime already plants WASI thunks; e2e test =
-      clock_time_get→memory→i64.load nonzero, cf. jit_dispatch.zig:688). proc_exit
-      exit-code surfacing INCOMPLETE in JIT (jit_dispatch.zig:313). Then non-WASI
-      host-func dispatch. (2) **`.auto`→JIT flip** once (1) lands (today `.auto`=interp;
+      (1) **WASI host-fn dispatch under JIT facade DONE @b29606b17** —
+      `jit.owned.rt.wasi_host = store.wasi_host` + preopen materialization in
+      `instantiateJit`; `jit_wasi` conformance case (clock_time_get→memory→i64.load
+      nonzero) gated. REMAINING in (1): non-WASI host-func (`wasm_func_new` callback)
+      dispatch under JIT; proc_exit exit-code surfacing INCOMPLETE (jit_dispatch.zig:313). (2) **`.auto`→JIT flip** once (1) lands (today `.auto`=interp;
       the default's meaning is documented so the flip is not an API break). (3) **WASI
       via the Linker** (holds its OWN wasi_host, linker.zig:95 — not store's) — engine
       selection on the Linker path. (4) **accessor READS** memory()/global()/table()
