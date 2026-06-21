@@ -91,6 +91,18 @@ entries:
       perfect). NEXT (campaign step 2): trace the guest fn building printf#2's varargs slice /
       running the fmt verb-scan — diff its computed slice-LENGTH / loop-counter jit-vs-interp
       (a wrong scalar makes fmt see extra args). See lesson 2026-06-21-d489-localized-to-second-printf.
+      STEP 2 (2026-06-21, CONTROLLABLE REPRO): minimized to private/spikes/d489-minimal-repro/
+      main.go → min.wasm (struct + json.Marshal + 2 printfs + Unmarshal/roundtrip). Bisection:
+      2 printfs w/ LITERAL args = NO repro (→ NOT pure fmt.doPrintf codegen); +json.Marshal+field-arg
+      printf = NO repro; +Unmarshal/roundtrip if-cmp = REPRO. iovec on min.wasm: x86_64-jit write#1
+      len=7 (`json: \n`, data EMPTY) vs interp len=47 → the `[]byte` from `json.Marshal(p)` (a
+      MULTI-VALUE `([]byte,error)` return = slice ptr/len/cap + error, 5 words) has **len=0**. The
+      victim shifts with fn layout (tinygo_json: printf#2; min.wasm: printf#1/data) = ONE common
+      mechanism hit differently. NEW HYPOTHESIS (supersedes verb-scan): x86_64 codegen for receiving
+      a MULTI-VALUE FUNCTION RETURN miscompiles the slice LENGTH (→0) under spill pressure. Corrob:
+      a json-free `([]byte,error)`+append repro (mv.wasm) HANGS on x86_64-jit (murky, set aside).
+      STEP 3 = inspect x86_64 multi-value-return result-marshalling codegen (entry.zig / op_call /
+      wrapper_thunk multi-result path) + craft a clean json-free multi-value-slice-return repro.
     first_raised: "2026-06-21"
     last_reviewed: "2026-06-21"
     refs: |-

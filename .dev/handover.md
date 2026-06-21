@@ -18,17 +18,19 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
 ## Active bundle
 
 - **Bundle-ID**: D-489-x86_64-miscompile-campaign (user-directed 2026-06-21, anti-先回しロック)
-- **Cycles-remaining**: ~3-4
-- **Continuity-memo**: LOCALIZED @ce0ce3f46 via `ZWASM_DEBUG=wasi.iovec` — x86_64-jit makes
-  EXACTLY 1 fd_write (printf#1, byte-perfect) then diverges; printf#2 (`name=%s age=%d city=%s`,
-  3 verbs) miscompiled → Go fmt `%!(EXTRA)` (arg vals/types CORRECT, verb-scan/arg-count wrong).
-  Delta = arg count 1→3 (varargs slice + fmt loop) = spill-pressure. Build-mode-independent.
-- **Next step**: trace the guest fn building printf#2's varargs slice / fmt verb-scan — diff its
-  computed slice-LENGTH / loop-counter jit-vs-interp (wrong scalar → fmt sees extra args). Repro:
-  `zig build -Dtarget=x86_64-macos && ZWASM_DEBUG=wasi.iovec ./zig-out/bin/zwasm run --engine jit
-  test/realworld/wasm/tinygo_json.wasm`. Lesson 2026-06-21-d489-localized-to-second-printf.
-- **Exit-condition**: miscompiled instruction/value identified + fixed (interp==jit on tinygo_json
-  x86_64) OR a proven root-cause class with a targeted fixture. Unblocks the `.auto`→JIT flip re-land.
+- **Cycles-remaining**: ~3
+- **Continuity-memo**: STEP 2 DONE — controllable repro `private/spikes/d489-minimal-repro/main.go`
+  → min.wasm (struct + json.Marshal + 2 printf + Unmarshal/roundtrip). iovec diff: x86_64-jit
+  write#1 EMPTY (`json: ` len=7) vs interp len=47 → the `[]byte` from `json.Marshal` (MULTI-VALUE
+  `([]byte,error)` return = slice ptr/len/cap+error) has **len=0**. HYPOTHESIS (supersedes verb-scan):
+  x86_64 multi-value-return result-marshalling miscompiles the slice LENGTH→0 under spill pressure;
+  victim shifts with fn layout. Corrob: json-free `([]byte,error)`+append (mv.wasm) HANGS on jit.
+- **Next step (STEP 3)**: inspect x86_64 multi-value-return result codegen (entry.zig multi-result /
+  op_call result-pop / wrapper_thunk multi-result path) for a spill bug in the slice-len register;
+  craft a CLEAN json-free multi-value-slice-return repro. Repro now: `zig build -Dtarget=x86_64-macos
+  && ZWASM_DEBUG=wasi.iovec ./zig-out/bin/zwasm run --engine jit private/spikes/d489-minimal-repro/min.wasm`.
+- **Exit-condition**: miscompiled instruction/value identified + fixed (interp==jit on min.wasm +
+  tinygo_json x86_64) OR proven root-cause class with a targeted fixture. Unblocks `.auto`→JIT flip.
 
 ## RESUME POINTER (2026-06-21) — D-489 ACTIVE CAMPAIGN (flip blocker); D-491 CLOSED; D-492/493 filed
 
