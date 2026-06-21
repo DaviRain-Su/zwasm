@@ -57,16 +57,23 @@ entries:
       not a fix). AUDIT round 2 (subagent a1e55763) found a real spill collision in
       `emitV128Select` (was D-490, FIXED @eddd74941 — x86_64-only, verified red→green) but
       **tinygo_json uses NO v128 select → that was NOT D-489's cause**. So the bug is in a
-      GPR handler the audit "cleared" (scalar select / div-rem / wide-mul / ALU / patchRel32 /
-      gpr.zig disp) — i.e. one of those clears is WRONG, OR a path not audited. STILL OPEN.
-      DRIVE (next, FRESH focused session — this is a deep multi-cycle x86_64 spill debug, do
-      NOT let it stall the loop): value-trace (Recipe 18) the guest func issuing fmt write #2
-      (the wrong-iovec computation), bisect to the first spilled-operand op with a wrong value;
-      re-examine the audit's "cleared" GPR handlers under a REAL >16-slot frame (not by-eye).
-      Construct a minimal high-spill GPR fixture (spans_call to force spills) reproducing a
-      wrong scalar value. Also a GATE gap: x86_64 JIT realworld run-stage should join the
-      standard gate (once green). NOTE: cljw works via explicit `.jit` on arm64 + `.interp`,
-      so this does NOT block cljw — it blocks only the `.auto`-flip re-land (not urgent).
+      GPR handler. AUDIT round 3 (subagent ac9841b, 2026-06-21, armed with D-490's exact
+      stage-alias pattern) systematically traced EVERY gprLoadSpilled site in op_alu_int /
+      op_memory / op_convert / op_globals / op_control / op_locals / op_call: **NO D-490-class
+      stage-alias bug** — the codebase follows a uniform load→consume→reload discipline
+      (emitSelectCtx already TESTs-first; multi-operand handlers capture each load into a
+      private reg before the next stage reload). So D-489 is NOT a stage-alias bug. **TOP
+      SUSPECT (narrowed) = `op_memory.zig:emitMemOp` effective-address arithmetic**
+      (lines ~185-211: `MOV RAX,vm_base; MOV EDX,idx; ADD RDX,offset; LEA RCX,[RDX+size]`) —
+      an off-by-constant address matches the off-by-416 iovec symptom. Specifically check the
+      **spilled `idx` zero-extension width (`.d` at ~line 186)** + the `offset` u32 handling
+      under a heavy frame. 2nd suspect: `emitBrTable` (op_control) JNE-skip disp covering the
+      merge-MOVs. DRIVE (FRESH focused session — needs DYNAMIC instrumentation, not more static
+      reads; 3 subagents have read the code): instrument emitMemOp's computed idx/offset/addr
+      under the heavy-spill tinygo trace; OR a >16-live-local fixture doing a spilled-idx load
+      at a nonzero offset. Also a GATE gap: x86_64 JIT realworld run-stage should join the
+      standard gate (once green). Does NOT block cljw (explicit `.jit` works) — only the
+      `.auto`-flip re-land (not urgent). NOT-A-STAGE-ALIAS confirmed.
     first_raised: "2026-06-21"
     last_reviewed: "2026-06-21"
     refs: |-
