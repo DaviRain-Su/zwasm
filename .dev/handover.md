@@ -25,7 +25,11 @@ Exhaustively investigated this session (built jit.callcount/jit.calledge profile
   main.safe (dfr2.wasm) jit-vs-interp — a dedicated heavy effort. Full detail: debt D-489/D-494 + lessons.
 PAUSED (not 妥協): after a long single-area deep-dive, rotating to drive OTHER fronts per "drive all fronts"+breadth.
 
-## RESUME POINTER (2026-06-21) — STANDING CORRECTNESS SWEEP (JIT-asyncify campaign paused→debt); D-491 + D-492(abstract-reftypes) + D-493 CLOSED; D-494 + D-492(typed-ref residual) open
+## RESUME POINTER (2026-06-21) — STANDING CORRECTNESS SWEEP; D-491/492(abstract)/493 CLOSED; D-495 v128-array-fill host-PANIC GUARDED; D-489/494(asyncify) paused, D-492(typed-ref)/D-495(proper v128-fill) open
+
+**v128-GC class swept this session**: select-v128 (D-491), select-GC-reftype (D-492), array.new_data-v128 (D-493) all
+FIXED. struct.new v128-field + array.get-v128 (D-460) already worked. array.fill/new with a v128 VALUE crash-GUARDED
+(D-495 — was a guest-triggerable host panic; proper pointer-marshal impl deferred). No more v128-GC host panics.
 
 **JIT-execution sweep (interp-vs-jit diff over all 56 realworld fixtures)**: arm64 = **ZERO divergences** (corpus
 JIT-correct on arm64; D-494's defer-deadlock pattern isn't in the corpus). x86_64 sweep RUNNING (will catalog
