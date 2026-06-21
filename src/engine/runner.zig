@@ -862,15 +862,27 @@ fn dispatchVoid2(m: linker.JitModule, func_idx: u32, r: *entry.JitRuntime, key: 
 fn dispatchScalar2(m: linker.JitModule, func_idx: u32, r: *entry.JitRuntime, key: u8, a0: u64, a1: u64) Error!u64 {
     const x0_u32: u32 = @truncate(a0);
     const x1_u32: u32 = @truncate(a1);
+    const x0_f32: f32 = @bitCast(x0_u32);
     const x1_f32: f32 = @bitCast(x1_u32);
+    const x0_f64: f64 = @bitCast(a0);
+    const x1_f64: f64 = @bitCast(a1);
     return switch (key) {
         0x00 => @as(u64, try entry.callI32_i32i32(m, func_idx, r, x0_u32, x1_u32)), // (i32,i32)->i32
         0x01 => try entry.callI64_i32i32(m, func_idx, r, x0_u32, x1_u32), // (i32,i32)->i64
         0x02 => @as(u64, @as(u32, @bitCast(try entry.callF32_i32i32(m, func_idx, r, x0_u32, x1_u32)))), // (i32,i32)->f32
+        0x03 => @bitCast(try entry.callF64_i32i32(m, func_idx, r, x0_u32, x1_u32)), // (i32,i32)->f64
         0x05 => try entry.callI64_i32i64(m, func_idx, r, x0_u32, a1), // (i32,i64)->i64
         0x0a => @as(u64, @as(u32, @bitCast(try entry.callF32_i32f32(m, func_idx, r, x0_u32, x1_f32)))), // (i32,f32)->f32
         0x14 => @as(u64, try entry.callI32_i64i64(m, func_idx, r, a0, a1)), // (i64,i64)->i32
         0x15 => try entry.callI64_i64i64(m, func_idx, r, a0, a1), // (i64,i64)->i64
+        // FP-bank 2-arg combos (cljw from_cljw_03: f64 export-invoke trapped because
+        // these keys were absent → UnsupportedEntrySignature). Entry helpers existed.
+        0x28 => @as(u64, try entry.callI32_f32f32(m, func_idx, r, x0_f32, x1_f32)), // (f32,f32)->i32
+        0x2a => @as(u64, @as(u32, @bitCast(try entry.callF32_f32f32(m, func_idx, r, x0_f32, x1_f32)))), // (f32,f32)->f32
+        0x2e => @as(u64, @as(u32, @bitCast(try entry.callF32_f32f64(m, func_idx, r, x0_f32, x1_f64)))), // (f32,f64)->f32
+        0x3a => @as(u64, @as(u32, @bitCast(try entry.callF32_f64f32(m, func_idx, r, x0_f64, x1_f32)))), // (f64,f32)->f32
+        0x3c => @as(u64, try entry.callI32_f64f64(m, func_idx, r, x0_f64, x1_f64)), // (f64,f64)->i32
+        0x3f => @bitCast(try entry.callF64_f64f64(m, func_idx, r, x0_f64, x1_f64)), // (f64,f64)->f64
         else => Error.UnsupportedEntrySignature,
     };
 }

@@ -606,6 +606,29 @@ test "facade Instance.interrupt(): a pending interrupt traps the next invoke; cl
     try testing.expectEqual(@as(i32, 42), results[0].i32);
 }
 
+test "facade engine=.jit: f64 (FP-bank) param+result export invoke (cljw from_cljw_03)" {
+    // (module (func (export "addf") (param f64 f64) (result f64) local.get 0 local.get 1 f64.add))
+    // cljw reported f64 export-invoke TRAPS on JIT (interp returns 3.75) — the FP-bank
+    // arg placement / f64-result retrieval in the host→guest entry trampoline.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x07, 0x01, 0x60, 0x02, 0x7c, 0x7c, 0x01, 0x7c, // type: (f64 f64)->f64
+        0x03, 0x02, 0x01, 0x00,
+        0x07, 0x08, 0x01, 0x04, 0x61, 0x64, 0x64, 0x66, 0x00, 0x00, // export "addf"
+        0x0a, 0x09, 0x01, 0x07, 0x00, 0x20, 0x00, 0x20, 0x01, 0xa0, 0x0b, // local.get 0/1; f64.add
+    };
+    var eng = try _zwasm.Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var mod = try eng.compile(&bytes);
+    defer mod.deinit();
+    var inst = try mod.instantiate(.{ .engine = .jit });
+    defer inst.deinit();
+
+    var results = [_]_zwasm.Value{.{ .f64 = 0 }};
+    try inst.invoke("addf", &.{ .{ .f64 = @bitCast(@as(f64, 1.5)) }, .{ .f64 = @bitCast(@as(f64, 2.25)) } }, &results);
+    try testing.expectEqual(@as(f64, 3.75), @as(f64, @bitCast(results[0].f64)));
+}
+
 test "facade engine=.jit: opt-in JIT instance invokes a no-import compute export (ADR-0200)" {
     // (module (func (export "add") (param i32 i32) (result i32)
     //   local.get 0 local.get 1 i32.add))
