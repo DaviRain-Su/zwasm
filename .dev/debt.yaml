@@ -74,6 +74,23 @@ entries:
       won't reproduce on arm64 at ANY pressure. CONSEQUENCE: debug ON x86_64 — gdb on ubuntu
       NATIVE x86_64 (not Rosetta) OR an x86_64 interp-vs-jit value-trace differential. The arm64
       lldb harness is NOT applicable. See lesson 2026-06-21-d489-arm64-pressure-repro-blocked.
+      BUILD-MODE-INDEPENDENT (2026-06-21): reproduces on x86_64-macos in BOTH Debug AND
+      ReleaseFast (mangled `%!(EXTRA ...)` + roundtrip FAIL) → DETERMINISTIC x86_64 codegen
+      defect, NOT a Zig-optimizer-mode interaction / UB heisenbug. NOW AN ACTIVE CAMPAIGN
+      (user-directed 2026-06-21, anti-先回しロック): build interp(correct)-vs-x86_64-jit(wrong)
+      differential to pinpoint the miscompiled instruction. First step = trace the fd_write
+      iovec (ptr+len) the host receives under each engine to lock the divergence, then a
+      guest-memory store-watch backward from the wrong iovec address.
+      LOCALIZED (2026-06-21, @ce0ce3f46, ZWASM_DEBUG=wasi.iovec primitive): interp makes 3
+      fd_writes (47/29/14B); x86_64-jit makes EXACTLY 1 (first, byte-PERFECT) then diverges
+      → printf#1 (1 verb %s) CORRECT, printf#2 (3 verbs name=%s age=%d city=%s) MISCOMPILED.
+      Go fmt emits %!(EXTRA string=Alice,int=30,string=Tokyo) = fewer verbs than args; arg
+      VALUES+TYPES correct → the bug corrupts the format-verb-SCAN / arg-COUNT, NOT the arg
+      values. printf#1→#2 delta = arg count 1→3 (bigger []interface{} varargs slice + fmt
+      iteration) → fits x86_64 spill-pressure. Basic mem/string/print codegen is FINE (write#1
+      perfect). NEXT (campaign step 2): trace the guest fn building printf#2's varargs slice /
+      running the fmt verb-scan — diff its computed slice-LENGTH / loop-counter jit-vs-interp
+      (a wrong scalar makes fmt see extra args). See lesson 2026-06-21-d489-localized-to-second-printf.
     first_raised: "2026-06-21"
     last_reviewed: "2026-06-21"
     refs: |-

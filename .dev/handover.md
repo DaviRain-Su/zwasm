@@ -15,7 +15,22 @@ D-463 handle isolation (ADR-0197); D-034 SIMD spill-completeness CLOSED @411dd1e
 marshalling, C-API Windows-export. Residual long-tails (debt-tracked, do NOT grind): D-464 async adversarial,
 D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate duplicated SIMD spill helpers.
 
-## RESUME POINTER (2026-06-21) — ADR-0200 JIT API DELIVERED; dispatch-matrix bundle CLOSED; `.auto`=interp (debt-gated)
+## Active bundle
+
+- **Bundle-ID**: D-489-x86_64-miscompile-campaign (user-directed 2026-06-21, anti-先回しロック)
+- **Cycles-remaining**: ~3-4
+- **Continuity-memo**: LOCALIZED @ce0ce3f46 via `ZWASM_DEBUG=wasi.iovec` — x86_64-jit makes
+  EXACTLY 1 fd_write (printf#1, byte-perfect) then diverges; printf#2 (`name=%s age=%d city=%s`,
+  3 verbs) miscompiled → Go fmt `%!(EXTRA)` (arg vals/types CORRECT, verb-scan/arg-count wrong).
+  Delta = arg count 1→3 (varargs slice + fmt loop) = spill-pressure. Build-mode-independent.
+- **Next step**: trace the guest fn building printf#2's varargs slice / fmt verb-scan — diff its
+  computed slice-LENGTH / loop-counter jit-vs-interp (wrong scalar → fmt sees extra args). Repro:
+  `zig build -Dtarget=x86_64-macos && ZWASM_DEBUG=wasi.iovec ./zig-out/bin/zwasm run --engine jit
+  test/realworld/wasm/tinygo_json.wasm`. Lesson 2026-06-21-d489-localized-to-second-printf.
+- **Exit-condition**: miscompiled instruction/value identified + fixed (interp==jit on tinygo_json
+  x86_64) OR a proven root-cause class with a targeted fixture. Unblocks the `.auto`→JIT flip re-land.
+
+## RESUME POINTER (2026-06-21) — D-489 ACTIVE CAMPAIGN (flip blocker); D-491 CLOSED; D-492/493 filed
 
 **ADR-0200 JIT embedding API delivered + explicit `.jit` SOLID** (cljw actively dogfooding, 4 reported bugs fixed):
 dual-engine accessors @3d701ddaf, exportFuncSig @5b6449779, export_types-on-JIT @f68532e44, FP/mixed 1-2arg invoke
@@ -23,17 +38,14 @@ dual-engine accessors @3d701ddaf, exportFuncSig @5b6449779, export_types-on-JIT 
 COMPLETE (veneer→buffer-path fall-through); 3-arg+ ride the generic buffer-write path (`invokeViaBufferSingle` →
 `wrapper_thunk.emit`, ADR-0106). cljw all-consumed (to_cljw_05; default `.interp`, agreed).
 
-**`.auto`→JIT flip = DEBT-GATED, NOT active, NOT urgent.** Twice-reverted (last @7dbdb973c; origin green). It's a
-FORCING FUNCTION that exposed real x86_64 JIT bugs Mac-arm64 masks. Re-land is gated on: **(a) D-489** — an x86_64
-SPILL-PRESSURE miscompile in tinygo_json (wrong scalar value / iovec under heavy frame; deep multi-session debug).
-**emitMemOp-ISOLATED RULED OUT @d856f89ef** — two bounded fixtures (spilled-idx load + store, 20-22 locals, nonzero
-offset) reproduce CLEAN on x86_64; the defect needs the real fmt body's multi-value pressure → NEXT PROBE = dynamic
-instrumentation of the actual tinygo_json trace (dump every computed store-addr, diff jit-vs-interp), NOT more synthetic
-fixtures (3 subagents + 2 fixtures have exhausted static/synthetic angles). Its v128-select candidate D-490 FIXED
-@eddd74941 (separate bug); **(b)** pin the interp-conformance runners (`wast_runtime_runner`) to `.interp`; **(c)** wide-shape
-`wrapper_thunk.emit` (D-477, Win64>3/v128/>2-result — only the EXTREME wasmtime conformance corpus needs it, no real
-consumer). Debt-tracked (D-489/D-477/D-478). **This does NOT block cljw** (explicit `.jit` works) → do NOT let the D-489 deep-debug
-stall the loop; pick it up as a focused campaign or alongside other sweep work. **NEXT = STANDING CORRECTNESS SWEEP.**
+**`.auto`→JIT flip = blocked on D-489, now an ACTIVE CAMPAIGN** (see `## Active bundle` above — user-directed
+2026-06-21, NOT a 妥協/defer). Twice-reverted (last @7dbdb973c; origin green). The flip is a FORCING FUNCTION that
+exposed the D-489 x86_64 spill-pressure miscompile Mac-arm64 masks. Ruled out this session: emitMemOp-isolated
+(@d856f89ef, 2 bounded fixtures clean), arm64-pressure-repro (@5f1f08db1, ADR-0077 blocks pool-shrink → x86_64-only),
+Zig-optimizer-mode (Debug+ReleaseFast both repro → deterministic). NOW localized to printf#2 (see bundle). D-490 was a
+SEPARATE bug (FIXED @eddd74941). Other flip prereqs (post-D-489): **(b)** pin interp-conformance runners
+(`wast_runtime_runner`) to `.interp`; **(c)** wide-shape `wrapper_thunk.emit` (D-477). **cljw NOT blocked** (explicit
+`.jit` works). Adjacent sweep this session: D-491 CLOSED, D-492/D-493 filed (v128-in-GC-type niche gaps).
 
 **D-491 CLOSED @56fcc53cd**: typed `select (result v128)` (0x1c/0x7B) now validates (validator.zig:3046) + lowers
 (lower.zig:355) + JIT-executes on both arches (codegen already dispatched v128 via value shape-tag). Interp traps
