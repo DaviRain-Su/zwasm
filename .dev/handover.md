@@ -26,7 +26,13 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
   both engines do) and BEFORE the encode dispatch. So the x86_64 miscompile is a WRONG BRANCH/VALUE in
   run$1 between the IsNil call site and the reflectValue call site. (2nd bail: stateBeginValue(360)→
   pushParseState(359), decode-side — likely same root.)
-- **Next step (STEP 6)**: find the wrong instruction in that region. (a) Disassemble `IsNil`(65) FIRST
+- **STEP 6 IN PROGRESS**: forked subagent disassembling IsNil(65)+run$1(136) x86_64-vs-arm64 (read-only,
+  reports suspect instruction). Side-lead found: a minimal `defer`+`recover` TinyGo program
+  (`private/spikes/d489-minimal-repro/dfr.go`→dfr.wasm) DEADLOCKS under JIT ("deadlocked: no event source")
+  on BOTH arches (interp correct) — a SEPARATE coroutine/scheduler JIT bug (not x86_64-only like D-489), but
+  same TinyGo async-transform area (IsNil has the `global1==2` rewind + shadow-stack-via-global-2 transform);
+  may share root with D-489. Verify+file if the fork's IsNil finding implicates the coroutine transform.
+- **Next step (STEP 6 detail)**: find the wrong instruction in that region. (a) Disassemble `IsNil`(65) FIRST
   (small fn — if its x86_64 return value is miscompiled, that's it): `ZWASM_DEBUG=jit.dump … | grep 'func=65 '`
   → llvm-mc disasm, diff arm64-vs-x86_64. (b) If IsNil clean, the branch-on-IsNil-result in run$1(136) is
   miscompiled — disassemble run$1's region, use min.wasm's DWARF `.debug_line` to map offsets→Go source.
