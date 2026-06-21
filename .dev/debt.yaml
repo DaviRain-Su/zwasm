@@ -133,6 +133,19 @@ entries:
       cause). STEP 6 = disassemble IsNil(65) first (small; if its x86_64 return is wrong, that's the bug)
       via `ZWASM_DEBUG=jit.dump | grep 'func=65 '` → llvm-mc, diff arm64-vs-x86_64; else disassemble
       run$1(136) branch region + DWARF .debug_line offset→source map.
+      STEP 6 DONE (2026-06-21) — STATIC EXHAUSTED. Fork disassembled IsNil(65)=CLEAN (gateway, no spill
+      alias, globals-base reload correct) + run$1(136)=8253-instr coroutine fn untractable by eyeball;
+      divergence is a TAKEN-vs-NOT-TAKEN branch. EXACT BAIL REGION pinned in run$1 wasm lines 1539-1551:
+      nested scalar `select(global.get 1, local 1, (local1&1)==0)` → tee → `select(global.get 1, 1,
+      local1)` → `if` gating reflectValue, + coroutine-rewind br_ifs (`global.get 1; i32.eq 1; br_if @1`).
+      emitSelectCtx (op_alu_int.zig:1093) inspected = structurally CORRECT (cond/val1/result stage0 R10,
+      val2 stage1 R11; cond dead after TEST, MOV/loads preserve flags → no alias) → suspects narrow to
+      global.get 1 codegen OR br_if-rewind condition under deep spill. 3 synthetic fixtures + mv2 FAILED
+      to reproduce (bug bound to run$1's real deep frame). Side-lead: dfr.wasm (defer/recover) DEADLOCKS
+      under JIT BOTH arches (interp ok) = SEPARATE coroutine/scheduler bug, same transform area.
+      STEP 7 = instruction-level DYNAMIC value trace for func 136 ONLY (interp vs x86_64-jit) at 1539-1551:
+      per-ZIR-op operand-stack value dump, first divergent = bug. Interp easy; JIT = per-op value-store
+      emit (heavy) OR gdb on ubuntu native x86_64. See lesson 2026-06-21-d489-static-exhausted-run1-select-region.
     first_raised: "2026-06-21"
     last_reviewed: "2026-06-21"
     refs: |-

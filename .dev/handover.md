@@ -26,18 +26,20 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
   both engines do) and BEFORE the encode dispatch. So the x86_64 miscompile is a WRONG BRANCH/VALUE in
   run$1 between the IsNil call site and the reflectValue call site. (2nd bail: stateBeginValue(360)→
   pushParseState(359), decode-side — likely same root.)
-- **STEP 6 IN PROGRESS**: forked subagent disassembling IsNil(65)+run$1(136) x86_64-vs-arm64 (read-only,
-  reports suspect instruction). Side-lead found: a minimal `defer`+`recover` TinyGo program
-  (`private/spikes/d489-minimal-repro/dfr.go`→dfr.wasm) DEADLOCKS under JIT ("deadlocked: no event source")
-  on BOTH arches (interp correct) — a SEPARATE coroutine/scheduler JIT bug (not x86_64-only like D-489), but
-  same TinyGo async-transform area (IsNil has the `global1==2` rewind + shadow-stack-via-global-2 transform);
-  may share root with D-489. Verify+file if the fork's IsNil finding implicates the coroutine transform.
-- **Next step (STEP 6 detail)**: find the wrong instruction in that region. (a) Disassemble `IsNil`(65) FIRST
-  (small fn — if its x86_64 return value is miscompiled, that's it): `ZWASM_DEBUG=jit.dump … | grep 'func=65 '`
-  → llvm-mc disasm, diff arm64-vs-x86_64. (b) If IsNil clean, the branch-on-IsNil-result in run$1(136) is
-  miscompiled — disassemble run$1's region, use min.wasm's DWARF `.debug_line` to map offsets→Go source.
-  Tools: jit.callcount/jit.calledge, idx→name `/tmp/fullnames.py` pattern. Repro: `zig build
-  -Dtarget=x86_64-macos && ./zig-out/bin/zwasm run --engine jit .../min.wasm` (jit: empty `json: `).
+- **STEP 6 DONE — STATIC EXHAUSTED**. Fork disassembled IsNil(65)=CLEAN (gateway, no spill alias, globals
+  correct) + run$1(136)=8253-instr coroutine fn untractable by eyeball; divergence is a TAKEN-vs-NOT-TAKEN
+  branch. EXACT BAIL REGION pinned in run$1 WASM lines 1539-1551: nested scalar `select(global.get 1, local 1,
+  (local1&1)==0)` → tee → `select(global.get 1, 1, local1)` → `if` gating reflectValue, + coroutine-rewind
+  br_ifs (`global.get 1; i32.const 1; i32.eq; br_if @1`). emitSelectCtx (op_alu_int.zig:1093) inspected =
+  structurally CORRECT (no stage alias) → suspects narrow to **global.get 1 codegen OR br_if-rewind condition
+  under deep spill**. 3 synthetic fixtures + mv2 failed to reproduce (bound to real frame). Side-lead:
+  dfr.wasm (defer/recover) DEADLOCKS under JIT both arches = SEPARATE coroutine/scheduler bug, same transform area.
+- **Next step (STEP 7)**: instruction-level DYNAMIC value trace for **func 136 ONLY** (interp=correct vs
+  x86_64-jit=wrong) at the 1539-1551 region — dump each ZIR op's operand-stack values, first divergent = bug.
+  Interp side easy (dispatch loop); JIT side = per-op value-store emit (heavy) OR gdb on ubuntu native x86_64.
+  Lesson 2026-06-21-d489-static-exhausted-run1-select-region. Tools: jit.callcount/jit.calledge,
+  idx→name `/tmp/fullnames.py`, run$1 wasm `/tmp/run1.wat`. Repro: `zig build -Dtarget=x86_64-macos &&
+  ./zig-out/bin/zwasm run --engine jit private/spikes/d489-minimal-repro/min.wasm` (jit: empty `json: `).
 - **Exit-condition**: miscompiled instruction/value identified + fixed (interp==jit on min.wasm +
   tinygo_json x86_64) OR proven root-cause class with a targeted fixture. Unblocks `.auto`→JIT flip.
 
