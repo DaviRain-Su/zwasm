@@ -15,31 +15,36 @@ D-463 handle isolation (ADR-0197); D-034 SIMD spill-completeness CLOSED @411dd1e
 marshalling, C-API Windows-export. Residual long-tails (debt-tracked, do NOT grind): D-464 async adversarial,
 D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate duplicated SIMD spill helpers.
 
-## RESUME POINTER (2026-06-21) — ADR-0200 JIT API delivered; `.auto`-flip REVERTED (re-land pending C-path surface)
+## RESUME POINTER (2026-06-21) — ADR-0200 JIT API delivered; `.auto`=interp (flip twice-reverted; dispatch matrix incomplete)
 
-**ADR-0200 JIT-backed embedding API delivered (explicit `.jit` solid)**; dual-engine facade accessors @3d701ddaf
-(`Memory`/`Global`/`Table` read/write/grow off live JIT runtime) + **exportFuncSig JIT arm @5b6449779** (cljw
-from_cljw_02 / D-488 — incr 5 missed it; was null for every export on `.jit`). JIT covers no-import compute,
-SIMD-body, WASI (@b29606b17), covered host-func sigs (`jit_host_bridge.zig`).
+**ADR-0200 JIT-backed embedding API delivered; explicit `.jit` solid + completing.** Dual-engine facade accessors
+@3d701ddaf + exportFuncSig @5b6449779 + export_types-on-JIT @f68532e44 (C-ABI by-name discovery/invoke works on
+`.jit`) + **f64/f32 2-arg FP export-invoke @d7da97e04** (cljw from_cljw_03). cap api/instance.zig→3800 (user-auth).
 
-**`.auto`→JIT FLIP REVERTED @1e01e6797** (was @9fcf9fb5b) — routing `.auto`→JIT exposed a wider gap (C-ABI invoke
-path read interp-only `func_ptrs_storage`/empty `export_types` on JIT); `wast_runtime_runner` broke on ubuntu x86_64
-(Mac arm64 fell back to interp — 3-host gate caught it). Revert restored green (ubuntu OK @1e01e679/@3baad9fb2).
+**`.auto`→JIT FLIP TWICE-REVERTED** (@1e01e6797, then re-landed @f62e08bac, **re-reverted @7dbdb973c**; origin green
+ubuntu OK @7dbdb973). Each re-land's 3-host ubuntu gate surfaced MORE JIT export-invoke gaps on x86_64 that Mac
+masks (arm64 `.auto` falls back to interp for modules x86_64 JIT-builds). The flip is the FORCING FUNCTION exposing
+an incomplete **JIT export-invoke dispatch matrix** — see Active bundle. cljw aligned (to_cljw_04; default `.interp`).
 
-**C-PATH JIT SURFACE NOW COMPLETE** (re-land prereq met): exportFuncSig JIT arm @5b6449779 + **export_types populated
-on JIT instances @f68532e44** (instantiateJit builds it parallel to exports_storage from `compiled.func_sigs/
-func_typeidxs` → `lookupSourceExportType`/by-name discovery + C `wasm_func_call` now resolve on `.jit`; unit-proven:
-discover via `wasm_instance_exports` + invoke → add(2,3)=5). Cap api/instance.zig 3700→3800 (ADR-0099 amend, user-auth).
+## Active bundle
 
-**`.auto` FLIP RE-LANDED @f62e08bac** (atop the C-path fixes) — Mac `zig build test` green incl the
-`engine=.auto`→JIT facade test. **AWAITING THE DECISIVE ubuntu x86_64 GATE** (the ONLY host that exercises the
-`wast_runtime_runner`-under-JIT path; Mac falls back to interp, can't repro). **Step 0.7 NEXT-TURN DECISION**:
-ubuntu @f62e08bac OK → flip COMPLETE (then: update to_cljw with `.auto`=JIT-first-again + pin; verify windows; sweep
-on). ubuntu @f62e08bac **FAIL → the C-path fixes did NOT fully cover the x86_64 path: `git revert` the flip
-(f62e08bac) ONLY (keep exportFuncSig+export_types), then deep-investigate which other interp-only field the JIT
-wast path reads** (candidates beyond export_types: the func-handle `wasm_func_type` sig source, or an arm64-JIT-build
-divergence that masks it on Mac). Residual JIT gaps (auto-fallback): funcref `Table.set` @panic + v128/wider host-func
-sigs (D-478/D-477). cljw aligned (to_cljw_03 consumed; default `.interp`).
+- **Bundle-ID**: jit-export-invoke-dispatch-matrix
+- **Cycles-remaining**: ~3 (fill dispatch gaps → wast_runtime_runner passes under JIT → re-land flip + verify)
+- **Continuity-memo**: The host→guest entry dispatch (`runner.zig` `dispatchScalar1/2`, `dispatchVoid2`,
+  `invokeMulti`, 3+arg dispatchers) only has KEYS for the type-combos the spec corpus historically exercised;
+  real-consumer shapes fall to `else => UnsupportedEntrySignature` → surface as TRAP. `dispatchScalar1` (1-arg) is
+  COMPLETE (all 16). **DONE: dispatchScalar2 FP 2-arg @d7da97e04** (keys 0x03/0x28/0x2a/0x2e/0x3a/0x3c/0x3f; entry
+  helpers `callF64_f64f64` etc. pre-existed — only keys were missing). **REMAINING (from the @f62e08bac ubuntu flip
+  run, `^FAIL` list)**: (1) multi-result FP via `invokeMulti` (`many-results/f` binding_error); (2) 3+arg shapes
+  (`func--params/x`, `issue/f` binding_error) — check the 3/4-arg dispatchers for FP/key gaps; (3) `divbyzero`
+  binding_error (a (i32,i32)→i32 div traps as binding_error not DivByZero — investigate the trap-kind mapping under
+  JIT invoke); (4) `imported-memory-copy InstanceAllocFailed` (memory-IMPORT module: `.auto` should fall back to
+  interp — check why fallback fails / the runner's import binding). **Method**: for each, add a facade `.jit` unit
+  test reproducing (like the addf test, instance.zig), confirm RED, add the dispatch key / fix, verify arm64 +
+  x86_64-macos. Entry helpers usually already exist (grep `entry.zig`).
+- **Exit-condition**: re-land the `.auto` flip (re-apply git @9fcf9fb5b code; the revert of it is @7dbdb973c — so
+  `git revert 7dbdb973c`) and the **ubuntu x86_64 gate is GREEN** (wast_runtime_runner + wasmtime_misc_runtime pass
+  under `.auto`→JIT). Until then `.auto` stays interp. Residual non-blocking: funcref `Table.set` @panic + v128 (D-478/D-477).
 
 **STANDING DIRECTIVE = CORRECTNESS SWEEP** (user 2026-06-20, memory `feedback_correctness_sweep_phase`): high-value
 bar OFF. Sweep toward 0% the 3 gap classes — (1) wasmtime-works-zwasm-doesn't, (2) wasm/wasi spec non-conformance,
