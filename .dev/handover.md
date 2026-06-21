@@ -15,20 +15,22 @@ D-463 handle isolation (ADR-0197); D-034 SIMD spill-completeness CLOSED @411dd1e
 marshalling, C-API Windows-export. Residual long-tails (debt-tracked, do NOT grind): D-464 async adversarial,
 D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate duplicated SIMD spill helpers.
 
-## RESUME POINTER (2026-06-21) — bundle D-478 CLOSED @<this-commit>
+## RESUME POINTER (2026-06-21) — ADR-0200 JIT API delivered; `.auto`-flip REVERTED (re-land pending C-path surface)
 
-**ADR-0200 JIT-backed embedding API — DELIVERED + `.auto` FLIPPED TO JIT-FIRST.** Both surfaces (Zig
-`Module.instantiate(.{})` + C `wasm_instance_new`/`_ex`) default `.auto` now attempt JIT and transparently
-fall back to interp on a pre-`(start)` build reject (`fallback_ok` out-param; `instantiateInternal`/`instantiateJit`,
-@9fcf9fb5b). Linker path pinned `.interp` (spec runner routes via it). JIT covers: no-import compute, SIMD-body,
-WASI imports (w/ wasi_host @b29606b17), covered host-func sigs (all-GP 0..4 / ≤2 mixed-FP × scalar result,
-`jit_host_bridge.zig`), AND full dual-engine facade accessors (@3d701ddaf incr 5: `Memory`/`Global`/`Table`
-read/write/grow off live JIT runtime). test-all green (realworld 56/56, C-API conformance, fuzz 0-crash).
-**cljw signal OVERWRITTEN** with post-flip truth (`private/dogfooding_handover/to_cljw_02.md`, pin `zwasm@9fcf9fb5b`,
-user directive 2026-06-21). Residual JIT gaps (bounded debt, fall back to `.interp` via `.auto`): funcref
-`Table.set` (@panic, ADR-0068 funcptrs mirror — D-478); v128/wider host-func sigs at the call boundary (D-477);
-proc_exit exit-code partial. File-size cap api/instance.zig 3700→3750 (ADR-0099 amend, user-authorized; D-171
-split is the real fix). **NEXT = STANDING CORRECTNESS-SWEEP** (below) — no live bundle.
+**ADR-0200 JIT-backed embedding API delivered (explicit `.jit` solid)**; dual-engine facade accessors @3d701ddaf
+(`Memory`/`Global`/`Table` read/write/grow off live JIT runtime) + **exportFuncSig JIT arm @5b6449779** (cljw
+from_cljw_02 / D-488 — incr 5 missed it; was null for every export on `.jit`). JIT covers no-import compute,
+SIMD-body, WASI (@b29606b17), covered host-func sigs (`jit_host_bridge.zig`).
+
+**`.auto`→JIT FLIP REVERTED @1e01e6797** (was @9fcf9fb5b). WHY: routing `.auto`→JIT exposed a WIDER gap than the
+Zig facade — the **C-ABI invoke path** (`wasm_func_call` export-discovery / func-handle) also reads the interp-only
+`func_ptrs_storage`, so the `wast_runtime_runner` (wasmtime_misc_runtime, `wasm_instance_new`=`.auto`) broke on
+**ubuntu x86_64** (Mac arm64 didn't exercise it — the 3-host gate caught it; ubuntu RED @25a06523c). Revert restored
+green (ubuntu OK @1e01e679). **RE-LAND requires: complete the C-side export/func-handle JIT surface (mirror the
+exportFuncSig fix into the C `wasm_func_*` path) OR pin the interp-conformance runners (`wast_runtime_runner`) to
+`.interp`, THEN re-apply the flip (`fallback_ok` design preserved in git @9fcf9fb5b) + verify the wasmtime_misc_runtime
+corpus passes under JIT on all 3 hosts.** Tracked in D-478. cljw replied via to_cljw_03 (default stays `.interp`/`.auto`=interp; explicit `.jit` works incl exportFuncSig). Residual JIT gaps: funcref `Table.set` @panic (D-478),
+v128/wider host-func sigs (D-477). **NEXT = complete C-path JIT surface (re-land prep) OR standing correctness-sweep.**
 
 **STANDING DIRECTIVE = CORRECTNESS SWEEP** (user 2026-06-20, memory `feedback_correctness_sweep_phase`): high-value
 bar OFF. Sweep toward 0% the 3 gap classes — (1) wasmtime-works-zwasm-doesn't, (2) wasm/wasi spec non-conformance,

@@ -37,17 +37,25 @@ entries:
       reg→`Val[]`→`WasmFuncCallback`→trap_flag; plant via `func_import_targets` + relax
       `assertWasiImportsSatisfied`). Multi-cycle codegen bundle, build on demand; safe state
       for UNCOVERED sigs = reject at JIT instantiate, embedder uses `.interp` (no silent
-      wrong answer). (2) **`.auto`→JIT flip** once (1) lands (today `.auto`=interp;
-      the default's meaning is documented so the flip is not an API break). (3) **WASI
-      via the Linker** (holds its OWN wasi_host, linker.zig:95 — not store's) — engine
-      selection on the Linker path. (4) **accessor reads/mutators DONE (incr 5)** —
-      facade memory()/global()/table() now dual-engine (union backing `interp:*Runtime |
-      jit:*JitInstance`): memory read/write/slice/grow off live `vm_base`/`mem_limit`;
-      global get/set off `globals_base`; table get/size/grow off `tables_ptr` + externref
-      set. ONE residual sliver: JIT funcref `Table.set` @panics — needs the ADR-0068
-      `funcptrs[]` native-entry mirror the host cannot synthesise from an encoded funcref
-      (externref set + all reads + grow are complete). Resolvers `JitInstance.export{Global,
-      Table}` re-decode the section (JIT keeps no `export_types`). (5) v128-at-boundary
+      wrong answer). (2) **`.auto`→JIT flip — ATTEMPTED @9fcf9fb5b, REVERTED @1e01e6797.**
+      The flip (`fallback_ok`-threaded JIT-first + interp fallback in instantiateInternal/
+      instantiateJit; Linker pinned `.interp`) routed `.auto` to JIT and EXPOSED a wider
+      surface gap: the **C-ABI invoke path** (`wasm_func_call` export-discovery / func-handle
+      sig) reads the interp-only `func_ptrs_storage`, so `wast_runtime_runner` (wasmtime_misc_
+      runtime, instantiates via `wasm_instance_new`=`.auto`) broke on ubuntu x86_64 (Mac arm64
+      didn't exercise it; 3-host gate caught it). **RE-LAND PREREQ**: complete the C-side
+      export/func-handle JIT surface (mirror the @5b6449779 exportFuncSig fix into the C
+      `wasm_func_*`/`wasm_instance_exports` path) OR pin interp-conformance runners to `.interp`;
+      THEN re-apply the flip + verify wasmtime_misc_runtime under JIT on 3 hosts. Flip code
+      preserved in git @9fcf9fb5b. (3) **WASI via the Linker** (holds its OWN wasi_host,
+      linker.zig:95 — not store's) — engine selection on the Linker path. (4) **accessor
+      reads/mutators DONE (incr 5) + exportFuncSig DONE @5b6449779** — facade memory()/global()/
+      table() dual-engine (union backing `interp:*Runtime | jit:*JitInstance`); exportFuncSig
+      JIT arm added (incr 5 MISSED it → null for every export on `.jit`, cljw from_cljw_02/D-488).
+      ONE residual sliver: JIT funcref `Table.set` @panics — needs the ADR-0068 `funcptrs[]`
+      native-entry mirror (survey: SMALL ~30 LOC via `FuncEntity.funcptr` deref, not yet impl'd).
+      Resolvers `JitInstance.export{FuncSig,Global,Table}` re-decode the section (JIT keeps no
+      `export_types`/`func_ptrs_storage`). (5) v128-at-boundary
       + Win64 ≥4-param stack-spill = the D-477 niche slivers (tracked there). Build on
       demand as cljw/real consumers exercise them.
     first_raised: "2026-06-21"
