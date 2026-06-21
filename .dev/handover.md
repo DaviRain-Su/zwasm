@@ -23,81 +23,37 @@ D-463 handle isolation (ADR-0197); D-034 SIMD spill-completeness CLOSED @411dd1e
 marshalling, C-API Windows-export. Residual long-tails (debt-tracked, do NOT grind): D-464 async adversarial,
 D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate duplicated SIMD spill helpers.
 
-## JIT FLIP CAMPAIGN (D-489) — BREAKTHROUGH: NOT a codegen bug; it's the JIT stdout-CAPTURE path (2026-06-21)
+## Active bundle
 
-**D-489 is NOT a JIT miscompile.** Direct CLI `zwasm run tinygo_json.wasm --engine jit` on ubuntu x86_64-linux is
-**CORRECT (90B, genuine JIT — 45 callcounts)**. The 130B failure reproduces ONLY through the stdout-**CAPTURE** path
-(`host.stdout_buffer` set) under JIT, x86_64-linux only (arm64 + Rosetta mask it). **Minimal repro committed:
-`zig build d489-repro`** (`test/realworld/d489_repro.zig`) — scenario (1) jit-alone (fresh process, nothing before
-it) = 130 DIVERGED. **RULED OUT**: in-process ripple (1-alone fails), buffer realloc (scenario 3 pre-sized still
-130), argv-len (probe3), limits/preopen/env (all match interp which is correct). **Isolated to** `src/wasi/fd.zig`
-`writeSlice` (~157): the ONLY diff between correct/broken is `buffer.appendSlice(...)` vs `std_stream.writeStreamingAll`
-— yet the buffer branch corrupts GUEST linear memory (fmt format-string → spaces, roundtrip OK→FAIL) under JIT on
-x86_64-linux. Shared interp/JIT code, so the corruption is an interaction (memory layout / io-context / Zig
-memory-model — user's hypothesis open). **IMPLICATION: the `.auto`→JIT flip is NOT blocked by a codegen bug** —
-direct JIT exec is correct; the diff-jit GATE gives a FALSE failure (it uses the capture path). The capture bug is
-real (hits any stdout-capturing embedder) but narrow. **NEXT = dynamic trace on ubuntu** (remote, the only place it
-manifests): why does appendSlice-to-buffer vs real-fd-write corrupt guest memory under JIT x86_64-linux? Then fix →
-re-run diff-jit (should go green) → flip is clear.
-- **D-494** (dfr2 defer/recover): arm64-correct at HEAD; the "both-arch arm64-reproducible" claim was DOUBTFUL —
-  likely the same capture-path artifact. Verify via d489-repro-style harness if needed.
-- diff-jit lane is OPT-IN (not in `test-all`) → not a test-all regression. SSH iterate on ubuntu (`nix develop
-  --command zig build d489-repro`); pull-to-experiment per user.
+- **Bundle-ID**: D-489-capture-path-rr
+- **Cycles-remaining**: ~3 (until d489-repro scenario1 = 90)
+- **Continuity-memo**: D-489 = the JIT stdout-CAPTURE path corrupts a guest VALUE (the fmt format-slice) on
+  **x86_64-linux ONLY** (arm64/Rosetta mask it). **NOT a codegen miscompile** — direct `zwasm run … --engine jit` =
+  90B CORRECT; the diff-jit gate's tinygo_json MISMATCH(130B) IS this capture bug; the `.auto`→JIT flip is NOT blocked
+  by a miscompile. Registers (unconditional caller-saved clobber), red-zone (+4096 pad), heap-layout (pre-size/8MB),
+  rodata (fmtwatch INTACT), build-env (Mac-cross==ubuntu) ALL ruled out → pure heap-write(appendSlice) vs
+  syscall(writeStreamingAll) data effect in `src/wasi/fd.zig:writeSlice`. **Full investigation + hard-won TIPS (FAST
+  LOOP = Mac cross-build `-Dtarget=x86_64-linux-gnu` + `scp` to ubuntu; tools gdb-native + rr via `nix-shell -p rr`;
+  dbg-gate is OFF in the `zwasm run` CLI; SSH outer/inner script pattern) → lesson
+  `.dev/lessons/2026-06-22-d489-capture-path-investigation.md` + debt D-489.** NEXT = rr/gdb reverse-debug the
+  corrupted format-slice on ubuntu. (D-494 dfr2 is arm64-correct at HEAD — likely the same artifact; verify later.)
+- **Exit-condition**: `zig build d489-repro` scenario(1) prints `len=90 OK` (= diff-jit tinygo_json MATCHes).
 
 **WINDOWS GATE — 3-host GREEN @ed9332294** (2026-06-21): earlier host-example file-create failure was an ENV FLAKE,
 cleared on re-run (Win64 spec 25539/0, simd 25075/0, wasi 3/0). Recorded via `--record`. Intermittent
 host-embedding-example file-create stays debt-tracked (`windows-host-example-filecreate`), NOT a code regression.
 
-## D-489 NEXT-STEP (lldb on ubuntu) + closed arcs
+## Closed arcs (do NOT re-walk)
 
-**fmtwatch RULED OUT memory-overwrite (2026-06-22)**: `ZWASM_DEBUG=fmtwatch` (committed in jit_dispatch.fd_write) shows
-the "name=%s age=%d city=%s" rodata @guest-off 86586 is INTACT at ALL 9 fd_writes — yet output is 130/`%!(EXTRA)`. So
-the format-string BYTES are NOT corrupted; a guest VALUE (the fmt format-slice ptr/len passed to fmt) is wrong. TinyGo
-fmt writes incrementally (9 fd_writes) → a value live across a capture-path fd_write gets clobbered. **REFINED
-HYPOTHESIS**: NOT a register clobber — the JIT calls one C fn (`jit_dispatch.fd_write`, callconv .c) that preserves
-callee-saved in BOTH cases; capture-vs-realfd differs only INSIDE that boundary (invisible to JIT). So it's a
-STACK/MEMORY data effect: the JIT reads a wasm value (the fmt format-slice ptr/len) from a STALE native-stack spill
-slot AFTER the call — it failed to spill-or-reload it — and the slot's stale contents depend on the host call's stack
-usage (appendSlice shallow vs writeStreamingAll deep differ on x86_64-linux). Fits all: linux-only, optimize-indep,
-heap-indep (stack), ReleaseSafe-silent (valid addr, stale data). **RED-ZONE / frame-under-alloc FALSIFIED** (2026-06-22): +4096 prologue frame pad did NOT fix (still 130) — spills are
-RBP-relative within the SUB-RSP frame, not below RSP. **BUILD-ENV INDEPENDENT**: a Mac-CROSS-built x86_64-linux-gnu
-binary on ubuntu = identical (CLI 90, capture 130) → not a toolchain artifact. 🚀 **FAST LOOP**: edit on Mac →
-`zig build [d489-repro] -Dtarget=x86_64-linux-gnu` → `scp` the ELF to ubuntu → run (no slow nix build). **PARADOX**:
-both host paths are the SAME callconv(.c) call (`jit_dispatch.fd_write`) with identical ABI (callee-saved preserved,
-caller-saved clobbered) — so the JIT must rely on BEYOND-ABI state (a specific caller-saved reg VALUE or a stack/mem
-content the appendSlice vs writeStreamingAll paths leave differently). **REGISTERS DEFINITIVELY FALSIFIED (2026-06-22)**:
-an UNCONDITIONAL asm clobber of ALL caller-saved GPRs (r10/r11/rcx/rdx/rsi/rdi/r8/r9) at fd_write return leaves the
-non-capture CLI CORRECT (90) → JIT relies on NO caller-saved value; callee-saved are host-preserved. So it's purely a
-MEMORY/DATA effect of heap-write(appendSlice) vs syscall(writeStreamingAll). **NEXT = rr/gdb reverse-debug** (efficient,
-user-OK'd tools): ubuntu has `gdb 15.1` native + `rr 5.9` via `nix-shell -p rr`. Record d489-repro, find the wrong
-guest value (the fmt format-slice the guest passes to fmt — rodata is INTACT per fmtwatch, so it's the ptr/len VALUE),
-reverse-continue to the write. **TOOL NOTES**: (1) FAST LOOP = edit on Mac → `zig build [d489-repro]
--Dtarget=x86_64-linux-gnu [-Doptimize=Debug]` → `scp` ELF → ubuntu run (no nix build); (2) `dbg.on(...)` is OFF in
-Release AND the CLI never inits the dbg whitelist — for CLI instrumentation use UNCONDITIONAL code or build the
-d489-repro exe (which works) in Debug; (3) lldb has NO Zig type plugin (raw regs/mem only) → prefer gdb. **Closed
-arcs** (do NOT re-walk): v128-GC sweep (D-491/492/493 fixed, D-495 guarded); arm64 JIT-exec ZERO divergences;
-ADR-0200 JIT embedding API + cljw to_cljw_06. Flip is NOT blocked by a codegen miscompile (direct JIT correct); the
-diff-jit gate's tinygo_json failure is this capture-path bug. cljw unblocked (explicit `.jit`).
+v128-GC sweep (D-491/492/493 fixed, D-495 guarded); arm64 JIT-exec ZERO divergences; ADR-0200 JIT embedding API +
+cljw consumed `to_cljw_06`. Tag-cut PENDED (release notes drafted `.dev/release_notes/v2.0.0-alpha.3.md`; last tag
+`v2.0.0-alpha.2`). cljw dogfooding PAUSED both sides. D-489 full detail → the `## Active bundle` above + its lesson.
 
-**D-491 CLOSED @56fcc53cd**: typed `select (result v128)` (0x1c/0x7B) now validates (validator.zig:3046) + lowers
-(lower.zig:355) + JIT-executes on both arches (codegen already dispatched v128 via value shape-tag). Interp traps
-(SIMD-JIT-only, by design). Fixture `test/edge_cases/p17/select_typed_v128` (=111). test-spec-simd 25075/0 +
-wasm-2.0-assert 25539/0 both arm64 + x86_64-macos.
-
-**STANDING DIRECTIVE = CORRECTNESS SWEEP** (user 2026-06-20, memory `feedback_correctness_sweep_phase`): high-value
-bar OFF. Sweep toward 0% the 3 gap classes — (1) wasmtime-works-zwasm-doesn't, (2) wasm/wasi spec non-conformance,
-(3) instability/crashes — easiest-first, TDD + 3-host, repeat; don't ask "is this high-value." Status: spec
-skip-impl=0, realworld JIT 56/56 GATING (`test-realworld-diff-jit`), no UnsupportedOp crash, fuzz 0-crash.
-ADR-0200 (JIT embedding API) + D-477 (JIT host-invoke) were the live fronts — both delivered/closed; the
-ADR-0200 tail = D-478. Prior sweep closures (D-468/D-469/D-470/D-475/D-476/extended-const/GC trap-kind/
-memory64+SIMD/fuzz exec-differential) are in git/lessons — do NOT re-walk.
-**VERIFICATION LESSON (operationally live)**: a JIT-codegen fix MUST be checked with `test-spec-wasm-2.0-assert`
-on BOTH arm64 AND `-Dtarget=x86_64-macos` — NOT `test-spec`(interp)/`zig build test`(unit).
-**D-475 table64 slice 4 (JIT table64 codegen) PARKED** (structural u32→u64 descriptor widening, Win64-risk; bounded
-4-cycle bundle in debt row, PERF not correctness). Self-contained table64 interp-conformance DONE.
-
-**Phase 17 完成形 plateau** (validated — do NOT re-walk): async COMPLETE; v128 spill (D-034/D-460/D-461) CLOSED;
-surface audits clean 2026-06-18; fuzz 0-crash; realworld JIT run 56/56 byte-match wasmtime (gating). NOT-WORTH: D-294-R2 TrapKind.
+**Operational notes**: a JIT-codegen fix → verify on BOTH arm64 AND `-Dtarget=x86_64-macos` (NOT interp `test-spec`);
+but **D-489-class x86_64-LINUX bugs need the Mac-cross+ubuntu loop — Rosetta x86_64-macos MASKS them**. Phase 17
+完成形 plateau holds (spec 100%, fuzz 0-crash, surface audits clean 2026-06-18, realworld JIT 56/56 byte-match wasmtime
+GATING via `test-realworld-diff-jit`). D-475 table64-JIT PARKED (perf, Win64-risk). The prior 2026-06-20 "correctness
+sweep" standing directive is SUPERSEDED by the `.auto`→JIT flip-campaign priority (POSTURE above).
 
 **Step-0.7 NOTE**: `failed command: test…--listen=-` is COSMETIC (exits 0); trust `[run_remote_*] OK/FAIL` + `N
 passed, 0 failed`, not that line.

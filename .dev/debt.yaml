@@ -7,6 +7,16 @@ entries:
     layer: "code"
     status: "now"
     description: |-
+      CORRECTED 2026-06-22 (lesson 2026-06-22-d489-capture-path-investigation): NOT a codegen
+      MISCOMPILE — direct `zwasm run … --engine jit` is CORRECT (90B). The 130B failure reproduces
+      ONLY via the stdout-CAPTURE path (`writeSlice` appendSlice vs writeStreamingAll), x86_64-linux
+      only (arm64/Rosetta mask). A guest VALUE (fmt format-slice) is corrupted; rodata INTACT
+      (fmtwatch). RULED OUT: registers (unconditional caller-saved clobber → CLI still 90), red-zone
+      (+4096 frame pad), heap-layout (pre-size/8MB), build-env (Mac-cross==ubuntu). The diff-jit
+      gate's tinygo_json MISMATCH IS this capture bug; the `.auto`→JIT flip is NOT blocked by a
+      miscompile (direct JIT correct). Repro `zig build d489-repro` (scenario1). NEXT = rr/gdb
+      reverse-debug (ubuntu gdb-native + rr via nix-shell). FAST LOOP: Mac cross-build + scp.
+      ---- original (pre-correction, now-superseded) investigation notes below ----
       x86_64 JIT MISCOMPILE in a realworld Go program (tinygo_json.wasm). Under JIT on
       x86_64 the program's fmt output is mangled — `name=Alice age=30 city=Tokyo` becomes
       `%!(EXTRA string=Alice, int=30, string=Tokyo)` + `roundtrip: FAIL` (Go's fmt detects
