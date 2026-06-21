@@ -1161,6 +1161,24 @@ pub fn build(b: *std.Build) void {
     const run_zig_host_step = b.step("run-zig-host", "Build + run the native Zig host example");
     run_zig_host_step.dependOn(&run_zig_host.step);
 
+    // `zig build run-zig-host-jit` (ADR-0200) — the JIT-backed mini-consumer:
+    // `Module.instantiate(.{ .engine = .jit })` calling a multi-arg + a SIMD-body
+    // export. Counterpart to `examples/c_host/jit_engine.c`. Run in test-all.
+    const zig_host_jit_mod = createSanitizedModule(b, sanitize_opts, .{
+        .root_source_file = b.path("examples/zig_host/jit_engine.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    zig_host_jit_mod.addImport("zwasm", core);
+    const zig_host_jit_exe = b.addExecutable(.{
+        .name = "zwasm-zig-host-jit",
+        .root_module = zig_host_jit_mod,
+    });
+    const run_zig_host_jit = b.addRunArtifact(zig_host_jit_exe);
+    run_zig_host_jit.expectExitCode(0);
+    const run_zig_host_jit_step = b.step("run-zig-host-jit", "Build + run the JIT-backed Zig host example (ADR-0200)");
+    run_zig_host_jit_step.dependOn(&run_zig_host_jit.step);
+
     // `zig build run-rust-host` — §13.5. A third, independent embedding-
     // ABI consumer: `examples/rust_host/hello.rs` declares the wasm-c-api
     // surface via `extern "C"` and links the same `libzwasm.a` the C host
@@ -1259,6 +1277,7 @@ pub fn build(b: *std.Build) void {
     test_all_step.dependOn(&run_c_host.step);
     test_all_step.dependOn(conformance_step); // §13.4 C-API conformance
     test_all_step.dependOn(&run_zig_host.step); // §13.5 zig_host example
+    test_all_step.dependOn(&run_zig_host_jit.step); // ADR-0200 JIT zig_host mini-consumer
     test_all_step.dependOn(&run_fuzz.step); // §14.3 / D-256 fuzz smoke (seed corpus)
     test_all_step.dependOn(&run_fuzz_exec.step); // D-469 interp-vs-JIT exec differential (exec_seed; toolchain-free, 3-host)
     test_all_step.dependOn(&run_wasi_p1.step);

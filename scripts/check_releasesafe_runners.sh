@@ -23,7 +23,10 @@ fail=0
 
 # (a) Modules importing the Debug `core` module (exact `core`, not core_rs /
 #     core_comp / core_releasesafe). Allowlist = Debug-by-design consumers.
-allow='^(core|exe_mod|spec_assert_base_test_mod|wasm_3_0_assert_unit_mod|wasm_3_0_manifest_unit_mod|zig_host_mod)$'
+# `zig_host_jit_mod` (ADR-0200): trivial 2-func JIT mini-consumer — JIT-emitted
+# code runs at native speed regardless of core's build mode, so the Debug-core
+# penalty is only the negligible compile of 2 tiny funcs (NOT a corpus runner).
+allow='^(core|exe_mod|spec_assert_base_test_mod|wasm_3_0_assert_unit_mod|wasm_3_0_manifest_unit_mod|zig_host_mod|zig_host_jit_mod)$'
 while IFS= read -r mod; do
   if ! [[ "$mod" =~ $allow ]]; then
     echo "[check_releasesafe_runners] BLOCK — '$mod' imports the Debug \`core\` module as zwasm."
