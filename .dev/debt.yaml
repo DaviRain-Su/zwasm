@@ -3,6 +3,30 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
+  - id: "D-490"
+    layer: "code"
+    status: "now"
+    description: |-
+      x86_64 `emitV128Select` (op_simd.zig:953-959) spill-stage REGISTER COLLISION (found
+      during D-489 audit; a REAL latent bug but NOT the D-489 cause — see below). When the
+      v128 `select`'s i32 cond is register-spilled, `gprLoadSpilled(cond_v, 0)` returns
+      `spill_stage_gprs[0]` == the SAME reg as `r_mask`; the code then does `XOR r_mask,r_mask`
+      BEFORE `TEST cond_r,cond_r`, zeroing cond before testing → ZF always set → CMOV never
+      fires → lane mask stays 0 → v128 select returns val2 for every lane (x86_64-only,
+      spilled-cond-only). arm64 reads cond via CMP-immediately-after-load + transient mask reg
+      (correct). This handler predates the D-330 "TEST-first" fix that emitInt/FpSelect got.
+      READY FIX (mirrors D-330): replace L956-959 with TEST cond_r,cond_r → SETNE r_neg1 →
+      MOVZX r_neg1,r_neg1 → XOR r_mask,r_mask → SUB r_mask,r_neg1 (captures cond into r_neg1
+      ≠ cond_r BEFORE clobbering r_mask; builds 0/-1 mask). All encoders exist (encSetccR,
+      encMovzxR32R8, encSubRR). BLOCKER TO VERIFY: a v128 `select_typed` (0x1c) fixture is
+      REJECTED by zwasm's validator (`BadValType at op 0x1c`) — so STEP 0 is to confirm
+      whether v128 `select` is even reachable (possible validator gap, OR emitV128Select is
+      only reached another way) + build a spill-pressure fixture that triggers it before
+      committing the (untested) codegen fix. Do NOT commit the fix without a red→green test.
+    first_raised: "2026-06-21"
+    last_reviewed: "2026-06-21"
+    refs: |-
+      src/engine/codegen/x86_64/op_simd.zig:941-959 (emitV128Select) ; arm64 sibling op_simd.zig:484-488 ; pattern: op_alu_int.zig:1093 / op_alu_float.zig:616 (TEST-first scalar selects)
   - id: "D-489"
     layer: "code"
     status: "now"
@@ -36,12 +60,19 @@ entries:
       spill frame (~65KB fmt body). Passing tinygo_{hello,fib,sort} share the IDENTICAL
       op-set (opcode diff empty) yet pass → NOT an op-family bug → a spill-staging /
       large-frame defect. memory.copy ruled out (byte-only experiment gave a fatal signal,
-      not a fix). DRIVE (next): value-trace (Recipe 18) the guest func issuing write #2, walk
-      back to the first SPILLED-operand op producing a wrong value; focus the audit on
-      multi-spilled-operand handlers under >16-slot frames (`emitSelectCtx`, div/rem,
-      wide-mul) + `patchRel32` branch-target fixups that may go wrong only past a spill-frame
-      size threshold (`codegen/x86_64/gpr.zig` spill staging). Also a GATE gap: x86_64 JIT
-      realworld run-stage should join the standard gate. Blocks the `.auto`-flip re-land.
+      not a fix). AUDIT round 2 (subagent a1e55763) found a real spill collision in
+      `emitV128Select` (now D-490) but **tinygo_json uses NO v128 select (0 bitselect; 0x1c
+      select_typed is validator-rejected) → D-490 is NOT D-489's cause**. So the bug is in a
+      GPR handler the audit "cleared" (scalar select / div-rem / wide-mul / ALU / patchRel32 /
+      gpr.zig disp) — i.e. one of those clears is WRONG, OR a path not audited. STILL OPEN.
+      DRIVE (next, FRESH focused session — this is a deep multi-cycle x86_64 spill debug, do
+      NOT let it stall the loop): value-trace (Recipe 18) the guest func issuing fmt write #2
+      (the wrong-iovec computation), bisect to the first spilled-operand op with a wrong value;
+      re-examine the audit's "cleared" GPR handlers under a REAL >16-slot frame (not by-eye).
+      Construct a minimal high-spill GPR fixture (spans_call to force spills) reproducing a
+      wrong scalar value. Also a GATE gap: x86_64 JIT realworld run-stage should join the
+      standard gate (once green). NOTE: cljw works via explicit `.jit` on arm64 + `.interp`,
+      so this does NOT block cljw — it blocks only the `.auto`-flip re-land (not urgent).
     first_raised: "2026-06-21"
     last_reviewed: "2026-06-21"
     refs: |-
