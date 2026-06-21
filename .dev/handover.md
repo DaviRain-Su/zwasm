@@ -25,13 +25,20 @@ COMPLETE (veneer→buffer-path fall-through); 3-arg+ ride the generic buffer-wri
 
 **`.auto`→JIT flip = DEBT-GATED, NOT active, NOT urgent.** Twice-reverted (last @7dbdb973c; origin green). It's a
 FORCING FUNCTION that exposed real x86_64 JIT bugs Mac-arm64 masks. Re-land is gated on: **(a) D-489** — an x86_64
-SPILL-PRESSURE miscompile in tinygo_json (wrong scalar value / iovec under heavy frame; deep multi-session debug,
-2 subagents narrowed the class but not the line — its v128-select candidate **D-490 was a SEPARATE bug, now
-FIXED @eddd74941** with a gated regression fixture: x86_64 `emitV128Select` spill-stage alias, verified red→green);
-**(b)** pin the interp-conformance runners (`wast_runtime_runner`) to `.interp`; **(c)** wide-shape
+SPILL-PRESSURE miscompile in tinygo_json (wrong scalar value / iovec under heavy frame; deep multi-session debug).
+**emitMemOp-ISOLATED RULED OUT @d856f89ef** — two bounded fixtures (spilled-idx load + store, 20-22 locals, nonzero
+offset) reproduce CLEAN on x86_64; the defect needs the real fmt body's multi-value pressure → NEXT PROBE = dynamic
+instrumentation of the actual tinygo_json trace (dump every computed store-addr, diff jit-vs-interp), NOT more synthetic
+fixtures (3 subagents + 2 fixtures have exhausted static/synthetic angles). Its v128-select candidate D-490 FIXED
+@eddd74941 (separate bug); **(b)** pin the interp-conformance runners (`wast_runtime_runner`) to `.interp`; **(c)** wide-shape
 `wrapper_thunk.emit` (D-477, Win64>3/v128/>2-result — only the EXTREME wasmtime conformance corpus needs it, no real
-consumer). Debt-tracked (D-489/D-477/D-478/D-491). **This does NOT block cljw** (explicit `.jit` works) → do NOT let the D-489 deep-debug
+consumer). Debt-tracked (D-489/D-477/D-478). **This does NOT block cljw** (explicit `.jit` works) → do NOT let the D-489 deep-debug
 stall the loop; pick it up as a focused campaign or alongside other sweep work. **NEXT = STANDING CORRECTNESS SWEEP.**
+
+**D-491 CLOSED @56fcc53cd**: typed `select (result v128)` (0x1c/0x7B) now validates (validator.zig:3046) + lowers
+(lower.zig:355) + JIT-executes on both arches (codegen already dispatched v128 via value shape-tag). Interp traps
+(SIMD-JIT-only, by design). Fixture `test/edge_cases/p17/select_typed_v128` (=111). test-spec-simd 25075/0 +
+wasm-2.0-assert 25539/0 both arm64 + x86_64-macos.
 
 **STANDING DIRECTIVE = CORRECTNESS SWEEP** (user 2026-06-20, memory `feedback_correctness_sweep_phase`): high-value
 bar OFF. Sweep toward 0% the 3 gap classes — (1) wasmtime-works-zwasm-doesn't, (2) wasm/wasi spec non-conformance,

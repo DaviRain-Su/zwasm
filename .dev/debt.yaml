@@ -3,24 +3,6 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
-  - id: "D-491"
-    layer: "code"
-    status: "note"
-    description: |-
-      TYPED `select t` (0x1c) with v128 (0x7B) is INCOMPLETE end-to-end in zwasm (spec
-      non-conformance, gap-class-2, but NICHE/low-pri). `opSelectTyped` (validator.zig ~3046)
-      maps 0x7F/7E/7D/7C/70/6F but OMITS `0x7B => .v128` → a valid `select (result v128)`
-      fails validation with `BadValType`. READY validator fix = add `0x7B => .v128` to that
-      switch (verified it removes the BadValType). BUT even then instantiation FAILS (a
-      lowering/decoder gap for typed-v128-select) → MULTI-LAYER fix (validator + lower +
-      codegen + a 0x1c-v128 fixture). LOW PRIORITY: toolchains emit UNTYPED `select` (0x1b)
-      for v128 (v128 is a number type; spec simd_select uses 0x1b), so 0x1c-v128 is rarely
-      produced. Do the full multi-layer fix in one focused pass (don't ship validator-only =
-      validate-then-instantiate-fail).
-    first_raised: "2026-06-21"
-    last_reviewed: "2026-06-21"
-    refs: |-
-      src/validate/validator.zig (opSelectTyped, ~3041-3049) ; untyped 0x1b v128-select works (test/spec/wasm-2.0-simd-assert/simd_select)
   - id: "D-489"
     layer: "code"
     status: "now"
