@@ -86,14 +86,9 @@ surface audits clean 2026-06-18; fuzz 0-crash; realworld JIT run 56/56 byte-matc
 **Step-0.7 NOTE**: `failed command: test…--listen=-` is COSMETIC (exits 0); trust `[run_remote_*] OK/FAIL` + `N
 passed, 0 failed`, not that line.
 
-**PARKED / gated (do NOT speculatively grind)**: D-305 long-tail (list<record>/variant/multi-param — niche, +
-`component_graph.zig` 1895/2000 file-split first); D-464 async; 21 `blocked-by` (upstream/proposal/time-gate/corpus).
-
-## Closed arcs (detail in ADRs/git/debt)
-
-- D-305 STRING (@4cceeb1e, ADR-0196) · ADR-0192 wasmtime differential (9+6 bugs fixed; D-209/D-456 parked) ·
-  async-maturity (ROI-rejected D-450, GC corpus 6 bugs) · WASI 0.3 core (D-335, ADR-0187-0191). **validator.zig at
-  3449/3450 cap — NEXT validator edit MUST extract per the file's marker plan.**
+**PARKED / gated (do NOT speculatively grind)**: D-305 long-tail (niche, + `component_graph.zig` 1895/2000
+file-split first); D-464 async; 21 `blocked-by`. **validator.zig at 3449/3450 cap — NEXT validator edit MUST
+extract per the file's marker plan.** Closed-arc detail (D-305/ADR-0192/async/WASI-0.3) is in git/ADRs/debt.
 
 ## Long-tail (debt-tracked / parked — NOT active; see debt.yaml)
 
