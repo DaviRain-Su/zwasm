@@ -17,33 +17,24 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
 
 ## Active bundle
 
-- **Bundle-ID**: D-489-x86_64-miscompile-campaign (user-directed 2026-06-21, anti-先回しロック)
+- **Bundle-ID**: JIT-asyncify/coroutine-correctness (was D-489-x86_64; PIVOTED to the tractable entry)
 - **Cycles-remaining**: ~3
-- **Continuity-memo**: STEPS 2-5 DONE. Repro `private/spikes/d489-minimal-repro/min.wasm`. Built
-  `ZWASM_DEBUG=jit.callcount` profiler + `jit.calledge` edge-logging (call_profile.zig @2cda0771c,
-  mvp.zig @9ee6d9736). BAIL FUNCTION PINNED: **idx=136 `runtime.run$1`** (TinyGo inlined main+json.Marshal)
-  runs in jit but fails to call `reflectValue`(147) → bails AFTER calling `(reflectlite.Value).IsNil`(65,
-  both engines do) and BEFORE the encode dispatch. So the x86_64 miscompile is a WRONG BRANCH/VALUE in
-  run$1 between the IsNil call site and the reflectValue call site. (2nd bail: stateBeginValue(360)→
-  pushParseState(359), decode-side — likely same root.)
-- **STEP 6 DONE — STATIC EXHAUSTED**. Fork disassembled IsNil(65)=CLEAN (gateway, no spill alias, globals
-  correct) + run$1(136)=8253-instr coroutine fn untractable by eyeball; divergence is a TAKEN-vs-NOT-TAKEN
-  branch. EXACT BAIL REGION pinned in run$1 WASM lines 1539-1551: nested scalar `select(global.get 1, local 1,
-  (local1&1)==0)` → tee → `select(global.get 1, 1, local1)` → `if` gating reflectValue, + coroutine-rewind
-  br_ifs (`global.get 1; i32.const 1; i32.eq; br_if @1`). emitSelectCtx (op_alu_int.zig:1093) inspected =
-  structurally CORRECT (no stage alias) → suspects narrow to **global.get 1 codegen OR br_if-rewind condition
-  under deep spill**. 3 synthetic fixtures + mv2 failed to reproduce (bound to real frame). Side-lead:
-  dfr.wasm (defer/recover) DEADLOCKS under JIT both arches = SEPARATE coroutine/scheduler bug, same transform area.
-- **Next step (STEP 7)**: instruction-level DYNAMIC value trace for **func 136 ONLY** (interp=correct vs
-  x86_64-jit=wrong) at the 1539-1551 region — dump each ZIR op's operand-stack values, first divergent = bug.
-  Interp side easy (dispatch loop); JIT side = per-op value-store emit (heavy) OR gdb on ubuntu native x86_64.
-  Lesson 2026-06-21-d489-static-exhausted-run1-select-region. Tools: jit.callcount/jit.calledge,
-  idx→name `/tmp/fullnames.py`, run$1 wasm `/tmp/run1.wat`. Repro: `zig build -Dtarget=x86_64-macos &&
-  ./zig-out/bin/zwasm run --engine jit private/spikes/d489-minimal-repro/min.wasm` (jit: empty `json: `).
-- **Exit-condition**: miscompiled instruction/value identified + fixed (interp==jit on min.wasm +
-  tinygo_json x86_64) OR proven root-cause class with a targeted fixture. Unblocks `.auto`→JIT flip.
+- **Continuity-memo**: ACTIVE = **D-494** (new, higher-value, arm64-DEBUGGABLE) — ANY `defer`/`recover` TinyGo program DEADLOCKS
+  under JIT on BOTH arches (interp correct). Minimal repro `private/spikes/d489-minimal-repro/dfr2.go`. jit.callcount
+  (x86_64) localized: JIT skips the asyncify YIELD `deadlock(98)→task.Pause(71)→tinygo_unwind(8)` and instead hits
+  `nilPanic(39)→runtimePanicAt→putchar`. Root = JIT mishandles ASYNCIFY suspend/resume (`tinygo_unwind`, global 1=task
+  state, global 2=shadow-stack ptr) — the SAME transform as D-489's run$1. **D-494 is arm64-reproducible → use the
+  lldb value-trace harness (jit_value_trace.sh), unlike x86_64-only D-489.** Likely SHARED ROOT.
+- **Next step**: trace the asyncify unwind (tinygo_unwind / the global1/global2 + unwind control-flow in the yielding
+  fn) interp-vs-jit on dfr2 to find the miscompiled op (global.get/set or unwind branch under the transform). Fixing
+  D-494 plausibly fixes D-489. Profiler now dumps on traps (@d869f0b58). Tools: jit.callcount/jit.calledge.
+- **D-489 PAUSED (static exhausted)**: x86_64 silent-wrong-value in run$1 wasm 1539-1551 (nested-select/rewind-br_if;
+  IsNil clean, emitSelectCtx correct). Needs heavy x86_64 dynamic per-op trace OR the D-494 fix. Full detail in debt
+  D-489 + lesson 2026-06-21-d489-static-exhausted-run1-select-region.
+- **Exit-condition**: D-494 fixed (dfr2.wasm interp==jit, no JIT deadlock on defer/recover) — and check whether it
+  also fixes D-489 (min.wasm + tinygo_json x86_64). Unblocks `.auto`→JIT flip + broad defer/recover JIT support.
 
-## RESUME POINTER (2026-06-21) — D-489 ACTIVE CAMPAIGN (flip blocker); D-491 CLOSED; D-492/493 filed
+## RESUME POINTER (2026-06-21) — ACTIVE = D-494 (defer/recover JIT deadlock, arm64-debuggable, likely D-489's root); D-489 paused; D-491 CLOSED; D-492/493/494 filed
 
 **ADR-0200 JIT embedding API delivered + explicit `.jit` SOLID** (cljw actively dogfooding, 4 reported bugs fixed):
 dual-engine accessors @3d701ddaf, exportFuncSig @5b6449779, export_types-on-JIT @f68532e44, FP/mixed 1-2arg invoke

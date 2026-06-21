@@ -152,6 +152,35 @@ entries:
       test/realworld/wasm/tinygo_json.wasm (fixture) + test/realworld/run_runner_jit.zig:235 (opt-in run gate)
       src/engine/codegen/x86_64/abi.zig:160 (4-GPR pool) + src/engine/codegen/x86_64/gpr.zig (spill staging) + src/wasi/fd.zig:81 (fdWrite — where the iovec trace was taken)
       .claude/skills/debug_jit_auto/SKILL.md (Recipe 18 value-trace) ; relates to the jit-export-invoke-dispatch-matrix bundle (flip re-land)
+  - id: "D-494"
+    layer: "code"
+    status: "now"
+    description: |-
+      JIT MISCOMPILE of TinyGo's asyncify suspend/resume → ANY `defer`/`recover` (or
+      scheduler-yielding) program DEADLOCKS under JIT on BOTH arches (interp correct).
+      gap-class-1 (interp-works-jit-doesn't) + gap-class-3 (crash) + potentially HIGH-VALUE
+      (defer/recover is ubiquitous in Go; many real programs would fail under JIT). Minimal
+      repro `private/spikes/d489-minimal-repro/dfr2.go` → dfr2.wasm (one fn: `defer
+      func(){recover()}()` + `return n*2`): interp prints `result=42`; JIT prints `panic:
+      runtime error: deadlocked: no event source` + trap unreachable (no `result=42`).
+      tinygo_hello (no defer) works under JIT → defer/asyncify-specific. LOCALIZED via
+      jit.callcount (x86_64): interp runs the asyncify YIELD `runtime.deadlock(98)→
+      internal/task.Pause(71)→tinygo_unwind(8)` (scheduler suspends via asyncify, waits, resumes,
+      prints result); JIT runs NEITHER Pause NOR tinygo_unwind — instead hits `runtime.nilPanic(39)
+      →runtimePanicAt(77)→printstring/putchar` (the panic-print path). So the JIT mishandles the
+      ASYNCIFY suspend/resume (tinygo_unwind = Binaryen asyncify unwind; uses global 1 = task state,
+      global 2 = asyncify shadow-stack ptr — the SAME `global1==2` rewind + shadow-stack transform as
+      D-489's run$1). SHARED-ROOT CANDIDATE with D-489 (x86_64 silent-wrong-value), but D-494 is
+      BOTH-arch + arm64-REPRODUCIBLE → debuggable with the arm64 lldb value-trace harness
+      (jit_value_trace.sh), unlike x86_64-only D-489. NEXT: trace the asyncify unwind path
+      (tinygo_unwind / the global1/global2 manipulation in the yielding fn) interp-vs-jit on dfr2 to
+      find the miscompiled op; likely a global.get/set or the unwind control-flow under the transform.
+    first_raised: "2026-06-21"
+    last_reviewed: "2026-06-21"
+    refs: |-
+      private/spikes/d489-minimal-repro/dfr2.go (minimal repro) ; jit.callcount/jit.calledge profiler
+      src/engine/codegen/ (asyncify suspend/resume / global.get-set + unwind control-flow under TinyGo transform)
+      RELATED D-489 (x86_64 silent-wrong-value, same global1/global2 asyncify transform area)
   - id: "D-493"
     layer: "code"
     status: "note"
