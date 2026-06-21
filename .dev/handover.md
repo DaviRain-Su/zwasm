@@ -15,28 +15,17 @@ D-463 handle isolation (ADR-0197); D-034 SIMD spill-completeness CLOSED @411dd1e
 marshalling, C-API Windows-export. Residual long-tails (debt-tracked, do NOT grind): D-464 async adversarial,
 D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate duplicated SIMD spill helpers.
 
-## Active bundle
+## JIT-asyncify/coroutine campaign — PAUSED for breadth (debt-tracked D-489 + D-494)
 
-- **Bundle-ID**: JIT-asyncify/coroutine-correctness (was D-489-x86_64; PIVOTED to the tractable entry)
-- **Cycles-remaining**: ~3
-- **Continuity-memo**: ACTIVE = **D-494** (new, higher-value, arm64-DEBUGGABLE) — ANY `defer`/`recover` TinyGo program DEADLOCKS
-  under JIT on BOTH arches (interp correct). Minimal repro `private/spikes/d489-minimal-repro/dfr2.go`. jit.callcount
-  (x86_64) localized: JIT skips the asyncify YIELD `deadlock(98)→task.Pause(71)→tinygo_unwind(8)` and instead hits
-  `nilPanic(39)→runtimePanicAt→putchar`. Root = JIT mishandles ASYNCIFY suspend/resume (`tinygo_unwind`, global 1=task
-  state, global 2=shadow-stack ptr) — the SAME transform as D-489's run$1. **D-494 is arm64-reproducible → use the
-  lldb value-trace harness (jit_value_trace.sh), unlike x86_64-only D-489.** Likely SHARED ROOT.
-- **NARROWED**: `-scheduler=none` dfr2 ALSO fails under JIT but SILENTLY (= D-489's signature, not deadlock) → bug is
-  defer/recover's UNWIND mechanism, NOT purely the asyncify scheduler. Both-arch. Reinforces shared root w/ D-489.
-- **Next step**: arm64 lldb value-trace (`scripts/jit_value_trace.sh`) on dfr2.wasm (arm64-reproducible) — trace
-  global 1 (task state) + global 2 (shadow-stack ptr) + the local-save at the post-call unwind-check; find where the
-  jit value diverges from interp. Fixing D-494 plausibly fixes D-489. Profiler dumps on traps now (@d869f0b58).
-- **D-489 PAUSED (static exhausted)**: x86_64 silent-wrong-value in run$1 wasm 1539-1551 (nested-select/rewind-br_if;
-  IsNil clean, emitSelectCtx correct). Needs heavy x86_64 dynamic per-op trace OR the D-494 fix. Full detail in debt
-  D-489 + lesson 2026-06-21-d489-static-exhausted-run1-select-region.
-- **Exit-condition**: D-494 fixed (dfr2.wasm interp==jit, no JIT deadlock on defer/recover) — and check whether it
-  also fixes D-489 (min.wasm + tinygo_json x86_64). Unblocks `.auto`→JIT flip + broad defer/recover JIT support.
+Exhaustively investigated this session (built jit.callcount/jit.calledge profilers + trap-dump; 2 bugs localized):
+- **D-489** (x86_64-only silent-wrong-value): run$1 wasm 1539-1551 nested-select/rewind-br_if region; static exhausted.
+- **D-494** (`now`; both-arch defer/recover JIT deadlock/silent): localized to the asyncify global-state-machine
+  (globals 0=__stack_pointer / 1=state / 2=data-ptr; unwind/rewind logic in main.safe-class fns). arm64-reproducible.
+- Likely SHARED ROOT (asyncify unwind/global-state codegen). Resume = lldb/global value-trace of globals 0/1/2 in
+  main.safe (dfr2.wasm) jit-vs-interp — a dedicated heavy effort. Full detail: debt D-489/D-494 + lessons.
+PAUSED (not 妥協): after a long single-area deep-dive, rotating to drive OTHER fronts per "drive all fronts"+breadth.
 
-## RESUME POINTER (2026-06-21) — ACTIVE = D-494 (defer/recover JIT deadlock, arm64-debuggable, likely D-489's root); D-489 paused; D-491 CLOSED; D-492/493/494 filed
+## RESUME POINTER (2026-06-21) — STANDING CORRECTNESS SWEEP (JIT-asyncify campaign paused→debt); D-491 CLOSED; D-492/493/494 filed
 
 **ADR-0200 JIT embedding API delivered + explicit `.jit` SOLID** (cljw actively dogfooding, 4 reported bugs fixed):
 dual-engine accessors @3d701ddaf, exportFuncSig @5b6449779, export_types-on-JIT @f68532e44, FP/mixed 1-2arg invoke

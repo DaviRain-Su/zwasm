@@ -183,6 +183,13 @@ entries:
       shared "defer/recover/unwind JIT-codegen" root with D-489. NOT-YET-PINPOINTED: needs a dedicated
       value-trace (arm64 lldb harness on dfr2, since arm64-reproducible) of the global1/global2 +
       local-save-to-shadow-stack at the post-call unwind-check — a focused future campaign, not a quick fix.
+      main.safe(107) wasm read (2026-06-21): the asyncify state machine uses global 0=`$__stack_pointer`,
+      global 1=asyncify-state (0 normal / 1 unwind / 2 rewind), global 2=asyncify-data ptr. Pattern:
+      entry `if global1==2` rewind-restore locals from [global2]; `if global1==0` do work (set __stack_pointer,
+      store state, call); after each call `if global1==1` (unwind) br out. So the bug is in this GLOBAL-STATE-
+      MACHINE codegen (both arches, non-spill → a FUNDAMENTAL global.get/set or control-flow miscompile, NOT
+      spill-pressure). PAUSED for breadth after exhaustive single-area session; debt-tracked. Resume = lldb/global
+      value-trace of globals 0/1/2 in main.safe under jit-vs-interp. RELATED D-489 (same asyncify area, x86_64-only).
     first_raised: "2026-06-21"
     last_reviewed: "2026-06-21"
     refs: |-
