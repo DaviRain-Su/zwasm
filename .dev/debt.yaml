@@ -21,10 +21,19 @@ entries:
       gate — so x86_64 JIT *execution* of realworld programs is under-tested vs arm64.
       REPRO (Mac): `zig build -Dtarget=x86_64-macos && ./zig-out/bin/zwasm run --engine jit
       test/realworld/wasm/tinygo_json.wasm` → mangled; `--engine interp` → `roundtrip: OK`.
-      DRIVE: debug_jit_auto — isolate via a minimal tinygo/hand-wat fixture reproducing the
-      same op on x86_64; bisect the miscompiled op (jit.dump + value-trace, Recipe 18). Also
-      a GATE gap: x86_64 JIT realworld run-stage should join the standard gate so these are
-      caught. Blocks the `.auto`-flip re-land (the flip needs x86_64 JIT realworld-correct).
+      BLAST RADIUS NARROWED (2026-06-21): a full interp-vs-jit diff over ALL 56 realworld
+      fixtures on x86_64 found **ONLY tinygo_json diverges** (c_large_memory was a FALSE
+      positive — interp just timed out at 30s; completes `result: OK` at 120s). So the bug
+      is NARROW, not a broad x86_64 JIT regression — most programs (incl. other tinygo/go/
+      rust) run x86_64-JIT-correct. SYMPTOM ANALYSIS: `%!(EXTRA ...)` = Go fmt saw FEWER
+      format verbs than args → the FORMAT STRING `"name=%s age=%d city=%s\n"` is read wrong
+      (truncated/empty) → points to **string-constant / slice-header / data-segment load
+      corruption** on x86_64 (a memory load reading wrong ptr/len/bytes), NOT arg marshalling
+      (the args survive — they show as EXTRA). DRIVE (next, fresh context): debug_jit_auto
+      differential value-trace (Recipe 18) to find the first x86_64-jit-vs-interp memory/reg
+      divergence; OR craft a minimal wat doing a data-segment string load + a fmt-like verb
+      scan to repro the bad load. Also a GATE gap: x86_64 JIT realworld run-stage should join
+      the standard gate. Blocks the `.auto`-flip re-land (needs x86_64 JIT realworld-correct).
     first_raised: "2026-06-21"
     last_reviewed: "2026-06-21"
     refs: |-
