@@ -948,15 +948,23 @@ pub fn emitV128Select(
     val2_v: u32,
     result_vreg: u32,
 ) Error!void {
-    // Stage the two scratch GPR values FIRST (XOR / MOV-imm both
-    // clobber EFLAGS) so the TEST → CMOVcc pair sees a clean ZF.
+    // D-490: when `cond_v` is register-spilled, `gprLoadSpilled(cond_v, 0)` returns
+    // `spill_stage_gprs[0]` — the SAME physical reg as `r_mask`. The old order
+    // (`XOR r_mask,r_mask` then `TEST cond_r`) zeroed cond BEFORE testing it, so ZF was
+    // always set, the CMOV never fired, the lane mask stayed 0, and v128 `select` silently
+    // returned val2 for every lane (x86_64-only, heavy-spill-only — arm64 reads cond via
+    // CMP-immediately + a transient mask reg, so it was correct). Fix mirrors the D-330
+    // TEST-first discipline of emitInt/FpSelect: TEST cond FIRST, capture (cond!=0) into
+    // `r_neg1` (≠ cond_r) via SETNE, THEN build the 0/-1 lane mask in r_mask — cond is fully
+    // consumed before r_mask is clobbered. (No second stage-reg / -1 source needed.)
     const r_mask = abi.spill_stage_gprs[0];
     const r_neg1 = abi.spill_stage_gprs[1];
     const cond_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, cond_v, 0);
-    try buf.appendSlice(allocator, inst.encXorRR(.q, r_mask, r_mask).slice());
-    try buf.appendSlice(allocator, inst.encMovImm32W(r_neg1, 0xFFFFFFFF).slice());
     try buf.appendSlice(allocator, inst.encTestRR(.d, cond_r, cond_r).slice());
-    try buf.appendSlice(allocator, inst.encCmovccRR(.q, .ne, r_mask, r_neg1).slice());
+    try buf.appendSlice(allocator, inst.encSetccR(.ne, r_neg1).slice());
+    try buf.appendSlice(allocator, inst.encMovzxR32R8(r_neg1, r_neg1).slice());
+    try buf.appendSlice(allocator, inst.encXorRR(.q, r_mask, r_mask).slice());
+    try buf.appendSlice(allocator, inst.encSubRR(.q, r_mask, r_neg1).slice());
 
     const xmm_mask: inst.Xmm = .xmm7;
     try buf.appendSlice(allocator, inst.encMovqXmmFromR64(xmm_mask, r_mask).slice());
