@@ -28,9 +28,28 @@ const abi = @import("abi.zig");
 const gpr = @import("gpr.zig");
 const jit_abi = @import("../shared/jit_abi.zig");
 const types = @import("types.zig");
+const dbg = @import("../../../support/dbg.zig");
+const call_profile = @import("../../../support/call_profile.zig");
 
 const Allocator = std.mem.Allocator;
 const Error = types.Error;
+
+/// D-494/D-489 global.trace (`ZWASM_DEBUG=global.trace`): record the just-set i32
+/// value of a low global into `g_last[idx]` + bump `g_count[idx]`, so an x86_64
+/// JIT run captures the asyncify-state finals the same way the arm64 mirror does
+/// (op_globals.zig:emitI32GlobalSet). Without this the x86_64 JIT — the ONLY arch
+/// where D-489 reproduces — emitted no global trace at all. RAX is dead after the
+/// preceding globals_base store; `src_r` (alloc-pool / R10-R11) is never RAX, so it
+/// stays live across the absolute-address scratch use.
+fn emitGlobalTraceI32(allocator: Allocator, buf: *std.ArrayList(u8), idx: u32, src_r: abi.Gpr) Error!void {
+    if (!(dbg.on("global.trace") and idx < call_profile.max_globals)) return;
+    const last_addr: u64 = @intFromPtr(&call_profile.g_last[idx]);
+    try buf.appendSlice(allocator, inst.encMovImm64Q(.rax, last_addr).slice());
+    try buf.appendSlice(allocator, inst.encStoreR32MemDisp32(src_r, .rax, 0).slice());
+    const count_addr: u64 = @intFromPtr(&call_profile.g_count[idx]);
+    try buf.appendSlice(allocator, inst.encMovImm64Q(.rax, count_addr).slice());
+    try buf.appendSlice(allocator, &.{ 0x48, 0xFF, 0x00 }); // INC qword ptr [RAX]
+}
 
 /// §9.12-B / B62 (ADR-0075) — `(ctx, ins)` adapters for the
 /// globals cohort (`global.get`, `global.set`). Two distinct
@@ -160,6 +179,7 @@ fn emitI32GlobalSet(
 
     try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.globals_base_off).slice());
     try buf.appendSlice(allocator, inst.encStoreR32MemDisp32(src_r, .rax, disp).slice());
+    try emitGlobalTraceI32(allocator, buf, idx, src_r);
 }
 
 /// i64 lowering — same shape as i32 but full 8-byte load/store

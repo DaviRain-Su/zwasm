@@ -77,7 +77,7 @@ pub fn fd_write(
     // guest-mem corruption to a specific host-call boundary (rodata = random_get-free).
     if (dbg.on("fmtwatch")) {
         const gm = memOf(rt);
-        if (std.mem.indexOf(u8, gm, "name=%s age=%d")) |off| {
+        if (std.mem.find(u8, gm, "name=%s age=%d")) |off| {
             std.debug.print("[fmtwatch] fd={d} fmt@{d} INTACT\n", .{ fd, off });
         } else {
             std.debug.print("[fmtwatch] fd={d} fmt CORRUPTED (name=%s gone)\n", .{fd});
