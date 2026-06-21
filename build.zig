@@ -1114,6 +1114,7 @@ pub fn build(b: *std.Build) void {
         .{ .src = "test/c_api_conformance/funcref_result_call.c", .name = "funcref_result_call" },
         .{ .src = "test/c_api_conformance/data_active_drop.c", .name = "data_active_drop" },
         .{ .src = "test/c_api_conformance/instance_get_func.c", .name = "instance_get_func" },
+        .{ .src = "test/c_api_conformance/jit_engine.c", .name = "jit_engine" }, // ADR-0200 JIT mini-consumer
         .{
             .src = "test/c_api_conformance/wasi_preopen.c",
             .name = "wasi_preopen",
