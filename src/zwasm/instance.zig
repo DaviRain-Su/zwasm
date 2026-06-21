@@ -150,6 +150,17 @@ pub const Instance = struct {
     /// arity check doesn't trip before the function actually
     /// runs).
     pub fn exportFuncSig(self: *Instance, name: []const u8) ?_zir.FuncType {
+        // ADR-0200 — a JIT instance populates no `func_ptrs_storage` (interp-only);
+        // resolve the export signature via the JIT path over the module bytes.
+        // Closes the dual-engine-facade gap incr 5 missed (cljw from_cljw_02 / D-488):
+        // without this, `exportFuncSig` returned null for EVERY export on a `.jit`
+        // instance, so an embedder sizing buffers before `invoke` saw ExportNotFound.
+        if (self.handle.runtime == null) {
+            const jit = self.jitHandle() orelse return null;
+            const store = self.handle.store orelse return null;
+            const alloc = _api_instance.storeAllocator(store) orelse return null;
+            return jit.exportFuncSig(alloc, name);
+        }
         for (self.handle.exports_storage) |exp| {
             if (!std.mem.eql(u8, exp.name, name)) continue;
             if (exp.kind != .func) return null;
@@ -617,6 +628,34 @@ test "facade engine=.jit: opt-in JIT instance invokes a no-import compute export
     var results = [_]_zwasm.Value{.{ .i32 = 0 }};
     try inst.invoke("add", &.{ .{ .i32 = 2 }, .{ .i32 = 3 } }, &results);
     try testing.expectEqual(@as(i32, 5), results[0].i32);
+}
+
+test "facade engine=.jit: exportFuncSig resolves an export signature (cljw from_cljw_02 / D-488)" {
+    // (module (func (export "add") (param i32 i32) (result i32) local.get 0 local.get 1 i32.add))
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x07, 0x01, 0x60, 0x02, 0x7f, 0x7f, 0x01,
+        0x7f, 0x03, 0x02, 0x01, 0x00, 0x07, 0x07, 0x01,
+        0x03, 0x61, 0x64, 0x64, 0x00, 0x00, 0x0a, 0x09,
+        0x01, 0x07, 0x00, 0x20, 0x00, 0x20, 0x01, 0x6a,
+        0x0b,
+    };
+    var eng = try _zwasm.Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var mod = try eng.compile(&bytes);
+    defer mod.deinit();
+    var inst = try mod.instantiate(.{ .engine = .jit });
+    defer inst.deinit();
+    try testing.expect(inst.handle.runtime == null); // JIT-backed
+
+    // exportFuncSig must resolve on a JIT instance (func_ptrs_storage is empty there).
+    const sig = inst.exportFuncSig("add") orelse return error.TestUnexpectedResult;
+    try testing.expectEqual(@as(usize, 2), sig.params.len);
+    try testing.expectEqual(@as(usize, 1), sig.results.len);
+    try testing.expect(sig.results[0] == .i32);
+    try testing.expect(sig.params[0] == .i32);
+    // a name that is not an exported function → null (not a crash).
+    try testing.expect(inst.exportFuncSig("nope") == null);
 }
 
 test "facade engine=.jit: a SIMD-body export executes on the JIT (scalar boundary) (ADR-0200)" {
