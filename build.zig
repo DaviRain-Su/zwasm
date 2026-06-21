@@ -1116,6 +1116,7 @@ pub fn build(b: *std.Build) void {
         .{ .src = "test/c_api_conformance/instance_get_func.c", .name = "instance_get_func" },
         .{ .src = "test/c_api_conformance/jit_engine.c", .name = "jit_engine" }, // ADR-0200 JIT mini-consumer
         .{ .src = "test/c_api_conformance/jit_callback.c", .name = "jit_callback" }, // D-478 host-func under JIT
+        .{ .src = "test/c_api_conformance/jit_callback_args.c", .name = "jit_callback_args" }, // D-478 N-scalar-arg
         .{ .src = "test/c_api_conformance/jit_wasi.c", .name = "jit_wasi" }, // ADR-0200/D-478 WASI host-fn under JIT
         .{
             .src = "test/c_api_conformance/wasi_preopen.c",
