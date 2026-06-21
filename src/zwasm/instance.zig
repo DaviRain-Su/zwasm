@@ -606,6 +606,29 @@ test "facade Instance.interrupt(): a pending interrupt traps the next invoke; cl
     try testing.expectEqual(@as(i32, 42), results[0].i32);
 }
 
+test "facade engine=.jit: i32.div_s by zero traps DivByZero (not a binding error) — wast misc_traps/divbyzero" {
+    // (module (func (export "div") (param i32 i32) (result i32) local.get 0 local.get 1 i32.div_s))
+    // (i32,i32)->i32 is a covered dispatch key, so the JIT body runs + traps; the facade
+    // must surface the SPECIFIC DivByZero trap (the .auto-flip ubuntu run showed a
+    // 'binding_error' here — probing whether basic JIT trap-kind mapping is correct).
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x07, 0x01, 0x60, 0x02, 0x7f, 0x7f, 0x01, 0x7f, // type: (i32 i32)->i32
+        0x03, 0x02, 0x01, 0x00,
+        0x07, 0x07, 0x01, 0x03, 0x64, 0x69, 0x76, 0x00, 0x00, // export "div"
+        0x0a, 0x09, 0x01, 0x07, 0x00, 0x20, 0x00, 0x20, 0x01, 0x6d, 0x0b, // local.get 0/1; i32.div_s
+    };
+    var eng = try _zwasm.Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var mod = try eng.compile(&bytes);
+    defer mod.deinit();
+    var inst = try mod.instantiate(.{ .engine = .jit });
+    defer inst.deinit();
+
+    var results = [_]_zwasm.Value{.{ .i32 = 0 }};
+    try testing.expectError(error.DivByZero, inst.invoke("div", &.{ .{ .i32 = 1 }, .{ .i32 = 0 } }, &results));
+}
+
 test "facade engine=.jit: f64 (FP-bank) param+result export invoke (cljw from_cljw_03)" {
     // (module (func (export "addf") (param f64 f64) (result f64) local.get 0 local.get 1 f64.add))
     // cljw reported f64 export-invoke TRAPS on JIT (interp returns 3.75) — the FP-bank
