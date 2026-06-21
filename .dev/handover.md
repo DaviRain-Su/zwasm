@@ -28,16 +28,20 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
   (`capi.jitOf`; killed silent-no-op footgun); **C engine knob @fbdbd3523** — `zwasm_instance_new_ex` +
   `ZWASM_ENGINE_{AUTO=0,JIT,INTERP}` in zwasm.h (`instanceNewWithEngine` shared body). Both surfaces now
   instantiate+call JIT scalar/multi-result exports. api/instance.zig cap 3700. `.auto` STILL→interp.
-  **NEXT**: (a) **v128/SIMD invoke** = THE exit-condition headline blocker + user constraint (SIMD must be
-  JIT) — needs the D-477 v128-arg/result JIT substrate (build-on-demand debt, designs `private/notes/`;
-  `JitInstance.invoke` rejects v128 params via paramScalarKey==null, v128 results unsupported). (b) **WASI
-  host-fn** — `jit.owned.rt.wasi_host = store.wasi_host` in `instantiateJit` + preopens; e2e clock_time_get
-  →memory→i64.load nonzero (cf. jit_dispatch.zig:688); proc_exit exit-code INCOMPLETE (jit_dispatch.zig:313).
-  (c) WASI/Linker engine sel → flip `.auto`→JIT. (d) accessor READS memory/global/table. (e) D-314 sign-off;
-  (f) mini-consumer (C + Zig) + cljw readiness signal. **Next = (a) v128/SIMD substrate.**
+  **SIMD-body on JIT PROVEN @a82d54af0** (facade engine=.jit runs v128.const+extract_lane body → i32 42):
+  the user's "SIMD must be JIT" constraint = met by JIT-executed SIMD bodies at a scalar boundary; v128 AS a
+  host-call arg/result is NICHE bounded-debt (D-477 tail, design `private/notes/d477-remaining-slices-design.md`
+  §Slice-3), NOT an exit-condition blocker. Both exit-condition call capabilities (multi-arg + SIMD-body) now
+  proven. **NEXT (toward bundle close)**: (a) **mini-consumer** — first-party C (`include/zwasm.h` +
+  `zwasm_instance_new_ex`) + Zig (`src/zwasm/*` `Module.instantiate(.{.engine=.jit})`) example programs under
+  `examples/` that instantiate engine=jit, call a multi-arg AND a SIMD-body export, assert results. (b)
+  engine-knob default documented (`docs/zig_api_design.md` + zwasm.h already has the ZWASM_ENGINE_* doc). (c)
+  cljw readiness signal `to_cljw_NN.md`. THEN close bundle. Deferred (debt, NOT exit-cond): WASI host-fn
+  `rt.wasi_host` wiring; WASI/Linker engine sel + `.auto`→JIT flip; accessor READS; D-314 sign-off; v128-boundary.
+  **Next = (a) mini-consumer example programs.**
 - **Exit-condition**: first-party mini-consumer (C via `include/zwasm.h` + Zig via `src/zwasm/*`)
-  instantiates engine=jit, calls a multi-arg AND a v128/SIMD export, asserts results; engine-knob
-  default documented; cljw readiness signal sent (`to_cljw_NN`). NOT cw — that's cw's responsibility.
+  instantiates engine=jit, calls a multi-arg AND a SIMD-body export (v128-at-boundary = niche debt, not
+  required), asserts results; engine-knob default documented; cljw readiness signal sent (`to_cljw_NN`). NOT cw.
 - **cljw dogfooding OBLIGATION (don't forget across sessions)**: when the ADR-0200 JIT-backed
   API is embedder-stable, send `private/dogfooding_handover/to_cljw_NN.md` = engine-selection
   shape + invoke arity/type matrix + embedder-contract deltas + pin SHA (from_cljw_01 CONSUMED,
