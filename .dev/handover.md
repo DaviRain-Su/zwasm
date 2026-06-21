@@ -29,9 +29,13 @@ an incomplete **JIT export-invoke dispatch matrix** — see Active bundle. cljw 
 ## Active bundle
 
 - **Bundle-ID**: jit-export-invoke-dispatch-matrix
-- **Cycles-remaining**: ~3 (fill dispatch gaps → wast_runtime_runner passes under JIT → re-land flip + verify)
+- **Cycles-remaining**: ~3. **1/2-arg invoke matrix now COMPLETE** (@3cf40a573 — the veneer falls through to the
+  generic buffer-write path on any uncovered combo; cljw mixed-2-arg fixed). **TOP REMAINING BLOCKER = D-489**
+  (x86_64 JIT realworld miscompile, tinygo_json) — needs debug_jit_auto isolation; gates the flip re-land. Then
+  conformance-harness pinning + wide-shape `wrapper_thunk.emit` (D-477). cljw exchanges to_cljw_05 (all consumed).
 - **Continuity-memo**: (survey-informed @a73ab393) 1-2 arg invoke uses the per-combo `dispatchScalar1/2`
-  fast-path veneer (`runner.zig`): `dispatchScalar1` COMPLETE; **dispatchScalar2 FP DONE @d7da97e04**
+  fast-path veneer (`runner.zig`); **uncovered combos now FALL THROUGH to `invokeViaBufferSingle` @3cf40a573**
+  (cljw mixed (i32,f64)→f64 fixed). `dispatchScalar1` COMPLETE; **dispatchScalar2 FP DONE @d7da97e04**
   (0x03/0x28/0x2a/0x2e/0x3a/0x3c/0x3f). 3+arg/4+/multi-result fall through to the GENERIC path
   `invokeViaBufferSingle`/`invokeMulti` → `entry_buffer_write.invokeBufferWrite`, backed by per-arch ASM
   `wrapper_thunk.emit` (ADR-0106, `codegen/shared/wrapper_thunk.zig`) that marshals a `u64[]` buffer into
