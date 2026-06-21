@@ -202,33 +202,6 @@ entries:
       private/spikes/d489-minimal-repro/dfr2.go (minimal repro) ; jit.callcount/jit.calledge profiler
       src/engine/codegen/ (asyncify suspend/resume / global.get-set + unwind control-flow under TinyGo transform)
       RELATED D-489 (x86_64 silent-wrong-value, same global1/global2 asyncify transform area)
-  - id: "D-493"
-    layer: "code"
-    status: "note"
-    description: |-
-      `array.new_data` / `array.init_data` with a v128 element type is unsupported
-      (spec non-conformance, gap-class-1, NICHE). `(array (mut v128))` + array.new_data
-      from a data segment is spec-VALID (Wasm GC §array.new_data admits numtype OR vectype;
-      v128 packs into 16 data bytes) and wasm-tools accepts it, but zwasm traps (interp
-      NullReference / jit OOB). The size constant is the SMALL part: `dataElemNaturalSize`
-      (array_ops.zig:196) + the two jit_abi mirrors (jitGcArrayNewData:1093, jitGcArrayInitData:1186)
-      omit `0x7B => 16`. But adding it alone CRASHES (verified 2026-06-21): the byte-packing
-      loop `raw |= seg.ptr[..] << (b*8)` (jit_abi.zig:1116, mirrored in interp arrayNewData)
-      packs the element into a **u64 scalar** — for nat=16 the shift hits >=64 → `@intCast`
-      panic. v128 needs a 16-byte @memcpy path, NOT u64-packing. ALSO v128 array element
-      get/set must be wired: interp is SIMD-JIT-only (no v128 operands) so interp array.get
-      of a v128 element must trap CLEANLY (not crash); JIT needs array.get/set v128 codegen.
-      VERY LOW PRIORITY: no toolchain emits v128 GC-array-from-data (GC + SIMD + data-init
-      triple combo). Interim = the existing clean trap (safe, non-conformant). Discharge:
-      `(array v128)` via array.new_data → array.get → i32x4.extract_lane = correct on JIT;
-      interp traps cleanly. Same v128-in-GC-type-position family as D-492 (typed-select-v128
-      sibling) + D-491 (CLOSED).
-    first_raised: "2026-06-21"
-    last_reviewed: "2026-06-21"
-    refs: |-
-      src/instruction/wasm_3_0/array_ops.zig:196 (dataElemNaturalSize) + arrayNewData/arrayInitData u64-pack loops
-      src/engine/codegen/shared/jit_abi.zig:1093 (jitGcArrayNewData) + :1186 (jitGcArrayInitData) + :1116 (u64-pack overflow)
-      sibling D-492 (typed-select GC reftypes) ; closed D-491 (typed-select-v128)
   - id: "D-492"
     layer: "code"
     status: "note"
