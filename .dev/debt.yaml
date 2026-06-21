@@ -28,9 +28,19 @@ entries:
       Unreachable by design). VERIFY ATTEMPT: an untyped-v128-select fixture with cond spilled
       via a SINGLE `(call)` did NOT trigger (cond stayed in a real reg, not the stage reg) —
       arm64 + x86_64 jit both gave the correct 170. TRIGGER NEEDS the subagent's >16-live-locals
-      heavy frame so regalloc forces cond into `spill_stage_gprs[0]`. NICHE (v128 select with a
-      spilled i32 cond under heavy pressure) + not cljw-blocking → low-pri; verify arm64-jit vs
-      `-Dtarget=x86_64-macos` jit when built.
+      heavy frame so regalloc forces the operands to spill. **VERIFIED + RE-SCOPED 2026-06-21:
+      it's MULTI-ARCH, not x86_64-only.** Repro (24 i32 locals all live across the select +
+      untyped v128 `select`, cond via local; `i32x4.extract_lane 0`): v128 select returns val2
+      REGARDLESS of cond on BOTH arm64 AND x86_64 jit (cond=0 and cond=2 both → val2). A SCALAR
+      i32 select in the identical heavy frame is CORRECT (interp==jit, respects cond) → proves
+      it's v128-select-specific, not cond/local-spill. ROOTS DIFFER per arch: x86_64 = the
+      cond/r_mask alias (above); ARM64 = a known SPILL-EXEMPT V-reg gap — `emitV128Select`
+      (arm64/op_simd.zig:490) loads only stages 0/1 of the 3 V operands (mask/val1/val2); val2
+      at "stage 2" is unsupported, so under a heavy frame the BSL operands are wrong. FULL FIX =
+      multi-arch SIMD-spill completion (D-034-class; arm64 needs the 3rd V spill stage,
+      `qLoadSpilled` stage-2 + the x86_64 alias fix). NICHE (v128 select with all operands
+      spilled under heavy register pressure — rare) + NOT cljw-blocking → low-pri. Gen the repro
+      with a 24-local wat (see git log @<this commit> note) when working it.
     first_raised: "2026-06-21"
     last_reviewed: "2026-06-21"
     refs: |-
