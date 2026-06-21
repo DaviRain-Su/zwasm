@@ -22,15 +22,21 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
 from_cljw_02 / D-488 — incr 5 missed it; was null for every export on `.jit`). JIT covers no-import compute,
 SIMD-body, WASI (@b29606b17), covered host-func sigs (`jit_host_bridge.zig`).
 
-**`.auto`→JIT FLIP REVERTED @1e01e6797** (was @9fcf9fb5b). WHY: routing `.auto`→JIT exposed a WIDER gap than the
-Zig facade — the **C-ABI invoke path** (`wasm_func_call` export-discovery / func-handle) also reads the interp-only
-`func_ptrs_storage`, so the `wast_runtime_runner` (wasmtime_misc_runtime, `wasm_instance_new`=`.auto`) broke on
-**ubuntu x86_64** (Mac arm64 didn't exercise it — the 3-host gate caught it; ubuntu RED @25a06523c). Revert restored
-green (ubuntu OK @1e01e679). **RE-LAND requires: complete the C-side export/func-handle JIT surface (mirror the
-exportFuncSig fix into the C `wasm_func_*` path) OR pin the interp-conformance runners (`wast_runtime_runner`) to
-`.interp`, THEN re-apply the flip (`fallback_ok` design preserved in git @9fcf9fb5b) + verify the wasmtime_misc_runtime
-corpus passes under JIT on all 3 hosts.** Tracked in D-478. cljw replied via to_cljw_03 (default stays `.interp`/`.auto`=interp; explicit `.jit` works incl exportFuncSig). Residual JIT gaps: funcref `Table.set` @panic (D-478),
-v128/wider host-func sigs (D-477). **NEXT = complete C-path JIT surface (re-land prep) OR standing correctness-sweep.**
+**`.auto`→JIT FLIP REVERTED @1e01e6797** (was @9fcf9fb5b) — routing `.auto`→JIT exposed a wider gap (C-ABI invoke
+path read interp-only `func_ptrs_storage`/empty `export_types` on JIT); `wast_runtime_runner` broke on ubuntu x86_64
+(Mac arm64 fell back to interp — 3-host gate caught it). Revert restored green (ubuntu OK @1e01e679/@3baad9fb2).
+
+**C-PATH JIT SURFACE NOW COMPLETE** (re-land prereq met): exportFuncSig JIT arm @5b6449779 + **export_types populated
+on JIT instances @f68532e44** (instantiateJit builds it parallel to exports_storage from `compiled.func_sigs/
+func_typeidxs` → `lookupSourceExportType`/by-name discovery + C `wasm_func_call` now resolve on `.jit`; unit-proven:
+discover via `wasm_instance_exports` + invoke → add(2,3)=5). Cap api/instance.zig 3700→3800 (ADR-0099 amend, user-auth).
+
+**NEXT = RE-LAND the `.auto` flip + VERIFY.** Re-apply 9fcf9fb5b's CODE (the `fallback_ok`-threaded `.auto` branch in
+instantiateInternal + instantiateJit `fallback_ok` param + linker.zig `.interp` pin + module.zig doc + the
+`engine=.auto`→JIT facade test) — NOT the cap bump (already 3800). Then `zig build test` + push + **kick ubuntu (the
+ONLY verification of the x86_64 wast_runtime_runner-under-JIT path — Mac can't repro, it falls back to interp).**
+ubuntu green → flip re-landed; red → revert + deeper investigate. Residual JIT gaps (auto-fallback): funcref
+`Table.set` @panic + v128/wider host-func sigs (D-478/D-477). cljw aligned (to_cljw_03 consumed; default `.interp`).
 
 **STANDING DIRECTIVE = CORRECTNESS SWEEP** (user 2026-06-20, memory `feedback_correctness_sweep_phase`): high-value
 bar OFF. Sweep toward 0% the 3 gap classes — (1) wasmtime-works-zwasm-doesn't, (2) wasm/wasi spec non-conformance,
