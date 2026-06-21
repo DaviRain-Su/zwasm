@@ -3043,6 +3043,7 @@ pub const Validator = struct {
             0x7E => .i64,
             0x7D => .f32,
             0x7C => .f64,
+            0x7B => .v128,
             0x70 => .funcref,
             0x6F => .externref,
             else => return Error.BadValType,
