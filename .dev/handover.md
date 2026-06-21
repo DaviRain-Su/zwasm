@@ -31,11 +31,11 @@ Localized this session, paused per the next-tag posture. Resume pointer (debt D-
 - **D-489** (x86_64-only): run$1 wasm 1539-1551 nested-select/rewind-br_if; static exhausted; may share D-494's root.
 - Reusable diagnostics kept: `jit.callcount` / `jit.calledge` / `global.trace` primitives + trap-dump.
 
-**WINDOWS GATE (D-495 batch @c3c4e8447) — ENV FLAKE, not a code regression** (2026-06-21): build summary 5736/6030
-passed; ALL suites green on Win64 (wasm-3.0-assert 86/0, memory64/gc/multi-memory, realworld 56 PASS, component 170/0,
-wasi 3/0). The 1 failed step = a host-embedding EXAMPLE (`zwasm-zig-host-hello.exe` + rust `main.rs`) panicking
-`failed to create file: NotFound (code 44 = missing parent dir)` — a Windows path/harness issue, NOT my GC-array changes
-(those are exercised by the green GC asserts). NOT reverted; tracked (windows-host-example-filecreate). Re-verify next windows gate.
+**WINDOWS GATE — RE-VERIFIED GREEN @ed9332294 (2026-06-21)**: the earlier host-example file-create failure was an
+ENV FLAKE — cleared on re-run. Now **3-host GREEN** (Mac + ubuntu + windows): Win64 spec asserts 25539/0, simd 25075/0,
+wasi 3/0, all suites pass. Recorded via `should_gate_windows.sh --record`. The intermittent host-embedding-example
+file-create (missing-parent-dir) remains debt-tracked (`windows-host-example-filecreate`) as a pre-tag polish item,
+NOT a code regression. Codebase is CI-clean across all hosts for the next tag (modulo the cljw-dogfooding gate).
 
 ## RESUME POINTER (2026-06-21) — STANDING CORRECTNESS SWEEP; D-491/492(abstract)/493 CLOSED; D-495 v128-array-fill host-PANIC GUARDED; D-489/494(asyncify) paused, D-492(typed-ref)/D-495(proper v128-fill) open
 
