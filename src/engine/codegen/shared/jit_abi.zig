@@ -552,6 +552,14 @@ pub const JitRuntime = extern struct {
     /// `@offsetOf` field offsets are unchanged. Set by `runWasiLenient` from
     /// `RunLimits.max_table_elements`.
     store_table_elements_max: u64 = std.math.maxInt(u64),
+    /// D-478 — base of the host-import payload array (parallel to
+    /// `host_dispatch_base`, indexed by func-import idx). Each entry is
+    /// `@intFromPtr(*api.HostFuncPayload)`. Only the Zig comptime host-bridge
+    /// thunks (`src/api/jit_host_bridge.zig`) planted into `host_dispatch_base`
+    /// read it — the JIT body never does, so this trailing field leaves every
+    /// codegen `@offsetOf` unchanged. Null when the module has no host-func
+    /// imports the bridge covers (WASI-only / no-import modules).
+    host_payloads_base: ?[*]const usize = null,
 };
 
 /// Host-side context for `reifyExnref` (ADR-0120 D6 / D-327). Owns the
@@ -1618,7 +1626,8 @@ test "JitRuntime: total size = 464 bytes (post-10.E tag_ids tail)" {
     // D-327 (ADR-0120 D6) appends `reify_exnref_fn` (+8) + `eh_reify_ctx` (+8) +
     // `eh_thrown_tag_idx` (u32 +4) + `_pad_reify` (+4) → 568 + 24 = 592.
     // D-314(b) appends `store_table_elements_max` (u64 +8, trailing) → 592 + 8 = 600.
-    try testing.expectEqual(@as(u32, 600), head_size);
+    // D-478 appends `host_payloads_base` (?[*]const usize +8 B, trailing) → 600 + 8 = 608.
+    try testing.expectEqual(@as(u32, 608), head_size);
 }
 
 test "jitGcAlloc: allocates struct{i32} via the *JitRuntime bridge (10.G A-2a)" {

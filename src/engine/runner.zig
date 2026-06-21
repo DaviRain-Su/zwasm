@@ -890,7 +890,7 @@ pub const JitInstance = struct {
     interrupt_flag: std.atomic.Value(u32) = .init(0),
 
     pub fn init(allocator: Allocator, wasm_bytes: []const u8) Error!JitInstance {
-        return initLinked(allocator, wasm_bytes, &.{}, &.{}, &.{});
+        return initLinked(allocator, wasm_bytes, &.{}, &.{}, &.{}, &.{});
     }
 
     /// D-225 — `init` + cross-module import resolution. The caller (spec
@@ -907,10 +907,11 @@ pub const JitInstance = struct {
         imported_global_vals: []const u64,
         func_import_targets: []const setup_mod.FuncImportTarget,
         tag_import_targets: []const setup_mod.TagImportTarget,
+        host_func_targets: []const setup_mod.HostFuncTarget,
     ) Error!JitInstance {
         var compiled = try compileWasm(allocator, wasm_bytes);
         errdefer compiled.deinit(allocator);
-        const owned = try setup_mod.setupRuntimeLinked(allocator, &compiled, wasm_bytes, imported_global_vals, func_import_targets, tag_import_targets);
+        const owned = try setup_mod.setupRuntimeLinked(allocator, &compiled, wasm_bytes, imported_global_vals, func_import_targets, tag_import_targets, host_func_targets);
         return .{ .compiled = compiled, .owned = owned, .wasm_bytes = wasm_bytes };
     }
 

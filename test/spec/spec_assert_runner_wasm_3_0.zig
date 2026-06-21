@@ -763,7 +763,7 @@ pub fn main(init: std.process.Init) !void {
                             const ttargets = jitResolveTagImports(gpa, cur_module_bytes.?, &jit_exporters) catch &.{};
                             defer if (ttargets.len > 0) gpa.free(ttargets);
                             cur_jit = blk: {
-                                const built = JitInstanceT.initLinked(gpa, cur_module_bytes.?, gvals, ftargets, ttargets) catch |e| {
+                                const built = JitInstanceT.initLinked(gpa, cur_module_bytes.?, gvals, ftargets, ttargets, &.{}) catch |e| {
                                     if (fail_detail) try stdout.print("  JITmodrej [{s}/{s}] err={s}\n", .{ proposal, d.module_path, @errorName(e) });
                                     break :blk null;
                                 };

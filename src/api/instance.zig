@@ -64,6 +64,9 @@ const leb128 = @import("../support/leb128.zig");
 const zir = @import("../ir/zir.zig");
 const dispatch_table_mod = @import("../ir/dispatch_table.zig");
 const handles = @import("handles.zig");
+const jit_dispatch = @import("../wasi/jit_dispatch.zig"); // D-478 — WASI dispatch lookup
+const jit_host_bridge = @import("jit_host_bridge.zig"); // D-478 — host-func JIT bridge
+const setup_mod = @import("../engine/setup.zig"); // D-478 — HostFuncTarget
 
 const ByteVec = vec.ByteVec;
 const ValVec = vec.ValVec;
@@ -656,6 +659,57 @@ pub fn instantiateFacade(store: *Store, module: *const Module, trap_out: ?*?*Tra
     return instantiateInternal(store, module, BuildBindingsCApi{ .imports_array = null }, trap_out, limits, engine);
 }
 
+/// D-478 — resolve embedder host-func imports for the JIT path into
+/// `HostFuncTarget`s (func-import order). Returns `error.Unsupported` for any
+/// import the JIT cannot satisfy (caller rejects → `.interp`). An empty slice
+/// means "all imports are WASI / none" — those are planted by setup via
+/// `jit_dispatch`, so the embedder binder is NOT consulted (no regression on
+/// the WASI-only JIT path, which needs no `store.wasi_host` at bind time).
+fn collectHostFuncTargets(
+    ta: std.mem.Allocator,
+    bytes: []const u8,
+    builder_state: anytype,
+    store: *Store,
+) error{ Unsupported, OutOfMemory }![]setup_mod.HostFuncTarget {
+    var mod = parser.parse(ta, bytes) catch return error.Unsupported;
+    const imp_section = mod.find(.import) orelse return &.{};
+    var imports = sections.decodeImports(ta, imp_section.body) catch return error.Unsupported;
+    defer imports.deinit();
+
+    // First pass: only func imports are JIT-satisfiable; detect whether any
+    // needs the embedder binder (a non-WASI func import).
+    var needs_host = false;
+    for (imports.items) |it| {
+        if (it.kind != .func) return error.Unsupported;
+        if (jit_dispatch.lookup(it.module, it.name) == null) needs_host = true;
+    }
+    if (!needs_host) return &.{};
+
+    // Resolve embedder bindings only now (a host func needs them). buildBindings
+    // wires each host-func import's `host_call.ctx` to its `*HostFuncPayload`.
+    var local_state = builder_state;
+    const builder: BindingsBuilder = if (@TypeOf(builder_state) == BindingsBuilder)
+        builder_state
+    else
+        local_state.asBuilder();
+    const bindings_opt = builder.build(builder.ctx, ta, bytes, store) catch return error.Unsupported;
+    const bindings = bindings_opt orelse return error.Unsupported;
+
+    var out: std.ArrayList(setup_mod.HostFuncTarget) = .empty;
+    var func_idx: u32 = 0;
+    for (imports.items, 0..) |it, i| {
+        defer func_idx += 1; // every import is a func (checked above)
+        if (jit_dispatch.lookup(it.module, it.name) != null) continue; // WASI → setup plants it
+        if (i >= bindings.len or bindings[i] != .func) return error.Unsupported;
+        const hc = bindings[i].func.host_call;
+        if (hc.fn_ptr != hostFuncThunk) return error.Unsupported; // cross-module / non-embedder
+        const payload: *HostFuncPayload = @ptrCast(@alignCast(hc.ctx));
+        const dp = jit_host_bridge.dispatchPtrFor(payload.params, payload.results, func_idx) orelse return error.Unsupported;
+        try out.append(ta, .{ .idx = func_idx, .dispatch_ptr = dp, .payload = @intFromPtr(payload) });
+    }
+    return out.toOwnedSlice(ta);
+}
+
 /// ADR-0200 — build a JIT-backed `Instance` (`runtime == null`, `jit` set).
 /// The smallest increment: a no-import compute module compiled to native code
 /// via `engine/runner.zig::JitInstance`. Host imports + WASI are a later slice
@@ -663,22 +717,27 @@ pub fn instantiateFacade(store: *Store, module: *const Module, trap_out: ?*?*Tra
 /// borrowed `wasm_bytes` live in the owning `Module`, which outlives the
 /// instance, and the `JitInstance` is heap-pinned so `exportedFuncTarget`'s
 /// `&owned.rt` stays stable.
-fn instantiateJit(store: *Store, module: *const Module, limits: InstantiateLimits) ?*Instance {
+fn instantiateJit(store: *Store, module: *const Module, builder_state: anytype, limits: InstantiateLimits) ?*Instance {
     const alloc = storeAllocator(store) orelse return null;
     const bytes_ptr = module.bytes_ptr orelse return null;
     const bytes = bytes_ptr[0..module.bytes_len];
 
-    // ADR-0200 / D-451 — reject any import the JIT WASI path cannot satisfy AT
-    // INSTANTIATION (mirrors the interp linker's UnknownImport + the
-    // `runWasiLenient*` CLI path). `JitInstance.init` alone leaves an
-    // unsatisfiable import as a trap-on-call stub that only faults if reached;
-    // an unsatisfied import MUST fail instantiation regardless. Satisfiable WASI
-    // imports (resolved by `jit_dispatch.lookup`) pass; their dispatch thunks are
-    // planted by `setupRuntime`. (Host-fn `rt.wasi_host` wiring = next slice.)
-    runner.assertWasiImportsSatisfied(alloc, bytes) catch return null;
+    // ADR-0200 / D-451 / D-478 — every import must be JIT-satisfiable AT
+    // INSTANTIATION (mirrors the interp linker's UnknownImport): a WASI func
+    // (`jit_dispatch.lookup`, planted by setup) OR an embedder host func
+    // (`wasm_func_new`) whose signature the comptime bridge covers. Anything
+    // else — non-func import, cross-module func, uncovered host-func signature,
+    // unsatisfied import — rejects here so the caller's `.interp` path handles
+    // it (no silent wrong answer; uncovered shapes never reach the JIT body).
+    // The resolved host-func targets are arena-scoped: setup copies their
+    // (idx, dispatch_ptr, payload) into the heap-owned `host_payloads`, so the
+    // arena can be reclaimed once `initLinked` returns.
+    var ht_arena = std.heap.ArenaAllocator.init(alloc);
+    defer ht_arena.deinit();
+    const host_targets = collectHostFuncTargets(ht_arena.allocator(), bytes, builder_state, store) catch return null;
 
     const jit = alloc.create(runner.JitInstance) catch return null;
-    jit.* = runner.JitInstance.init(alloc, bytes) catch {
+    jit.* = runner.JitInstance.initLinked(alloc, bytes, &.{}, &.{}, &.{}, host_targets) catch {
         alloc.destroy(jit);
         return null;
     };
@@ -838,7 +897,7 @@ pub fn instantiateInternal(store: *Store, module: *const Module, builder_state: 
     // interp setup below. TODO(ADR-0200): route `.auto` → JIT once the JIT path
     // covers host imports + WASI (defer, not workaround — JIT is no-import-only
     // this increment, so `.auto` stays interp to keep import-using modules working).
-    if (engine == .jit) return instantiateJit(store, module, limits);
+    if (engine == .jit) return instantiateJit(store, module, builder_state, limits);
 
     // ADR-0184: open any preopen requests queued by the io-free
     // config builder (`zwasm_wasi_config_preopen_dir`) via the

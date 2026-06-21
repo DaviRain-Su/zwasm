@@ -1044,7 +1044,7 @@ test "JitInstance.initLinked: cross-module FUNC import dispatches to exporter (D
     var b_inst = try JitInstance.init(gpa, &b_bytes);
     defer b_inst.deinit(gpa);
     const target = b_inst.exportedFuncTarget(gpa, "get") orelse return error.TestUnexpectedResult;
-    var a_inst = try JitInstance.initLinked(gpa, &a_bytes, &.{}, &.{target}, &.{});
+    var a_inst = try JitInstance.initLinked(gpa, &a_bytes, &.{}, &.{target}, &.{}, &.{});
     defer a_inst.deinit(gpa);
     try testing.expectEqual(@as(?u64, 42), try a_inst.invoke(gpa, "test", &.{}));
 }
@@ -1080,7 +1080,7 @@ test "JitInstance: cross-module TAG identity resolves to the exporter's id (ADR-
     try testing.expectEqual(@as(?runner.TagImportTarget, null), b_inst.exportedTagTarget(gpa, "throw"));
     try testing.expectEqual(@as(?runner.TagImportTarget, null), b_inst.exportedTagTarget(gpa, "absent"));
 
-    var a_inst = try JitInstance.initLinked(gpa, &a_bytes, &.{}, &.{}, &.{ tgt, tgt });
+    var a_inst = try JitInstance.initLinked(gpa, &a_bytes, &.{}, &.{}, &.{ tgt, tgt }, &.{});
     defer a_inst.deinit(gpa);
     // Both imported tags inherit the EXPORTER's identity → equal to each
     // other (alias) AND to the source (cross-module). This is what makes a

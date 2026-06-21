@@ -37,6 +37,19 @@ pub const FuncImportTarget = struct {
     callee_entry: usize = 0,
 };
 
+/// D-478 — a resolved EMBEDDER host-func import (`wasm_func_new`), in
+/// func-import order. `dispatch_ptr` is the comptime host-bridge thunk
+/// (`api/jit_host_bridge.zig`) for this slot+signature; `payload` is
+/// `@intFromPtr(*api.HostFuncPayload)` planted into `host_payloads[idx]` for the
+/// thunk to read. Both are opaque `usize` to setup (Zone 2) — the Zone-3 caller
+/// resolves coverage. A zero `dispatch_ptr` = uncovered (handled by the caller
+/// rejecting the JIT instantiate, so it never reaches here).
+pub const HostFuncTarget = struct {
+    idx: u32,
+    dispatch_ptr: usize,
+    payload: usize,
+};
+
 /// ADR-0134 D3 — resolved identity for a cross-module TAG import, in
 /// tag-import order. `source_id` is the EXPORTER instance's
 /// globally-comparable tag identity for the imported tag (its
@@ -119,6 +132,11 @@ pub const RuntimeOwned = struct {
     // tracker). Heap-allocated so the by-value RuntimeOwned move (D-215)
     // doesn't dangle the self-referential pointer in `rt.eh_reify_ctx`.
     eh_reify_ctx: ?*entry.EhReifyCtx = null,
+    // D-478 — per-func-import `*HostFuncPayload` backing array (each entry an
+    // `@intFromPtr`), aliased by `rt.host_payloads_base`. Heap-owned so the ptr
+    // stays valid across the by-value RuntimeOwned move (like `dispatch`). Empty
+    // when the module has no embedder host-func imports.
+    host_payloads: []usize = &.{},
 
     pub fn deinit(self: *RuntimeOwned, allocator: Allocator) void {
         if (self.eh_reify_ctx) |c| {
@@ -153,6 +171,7 @@ pub const RuntimeOwned = struct {
         if (self.extra_typeidxs.len > 0) allocator.free(self.extra_typeidxs);
         if (self.tag_ids.len > 0) allocator.free(self.tag_ids);
         if (self.tag_tokens.len > 0) allocator.free(self.tag_tokens);
+        if (self.host_payloads.len > 0) allocator.free(self.host_payloads);
     }
 };
 
@@ -237,7 +256,7 @@ pub fn setupRuntime(
     compiled: *const CompiledWasm,
     wasm_bytes: []const u8,
 ) Error!RuntimeOwned {
-    return setupRuntimeLinked(allocator, compiled, wasm_bytes, &.{}, &.{}, &.{});
+    return setupRuntimeLinked(allocator, compiled, wasm_bytes, &.{}, &.{}, &.{}, &.{});
 }
 
 /// D-225 — `setupRuntime` + cross-module imported-global resolution. The
@@ -255,6 +274,7 @@ pub fn setupRuntimeLinked(
     imported_global_vals: []const u64,
     func_import_targets: []const FuncImportTarget,
     tag_import_targets: []const TagImportTarget,
+    host_func_targets: []const HostFuncTarget,
 ) Error!RuntimeOwned {
     const dispatch = try allocator.alloc(usize, compiled.num_imports);
     errdefer allocator.free(dispatch);
@@ -407,6 +427,24 @@ pub fn setupRuntimeLinked(
             }
             try shared_thunk.finalizeArena(arena);
         }
+    }
+
+    // D-478 — plant embedder host-func dispatch. Each target's `dispatch_ptr`
+    // is the comptime host-bridge thunk (resolved + coverage-checked by the
+    // Zone-3 caller); `host_payloads[idx]` carries the `*HostFuncPayload` the
+    // thunk reads via `rt.host_payloads_base`. Heap-owned (freed at deinit) so
+    // the base ptr survives the by-value RuntimeOwned move (D-215).
+    var host_payloads: []usize = &.{};
+    errdefer if (host_payloads.len > 0) allocator.free(host_payloads);
+    if (host_func_targets.len > 0 and compiled.num_imports > 0) {
+        const payloads = try allocator.alloc(usize, compiled.num_imports);
+        @memset(payloads, 0);
+        for (host_func_targets) |t| {
+            if (t.idx >= compiled.num_imports or t.dispatch_ptr == 0) continue;
+            dispatch[t.idx] = t.dispatch_ptr;
+            payloads[t.idx] = t.payload;
+        }
+        host_payloads = payloads;
     }
 
     if (module.find(.memory)) |s| {
@@ -1063,6 +1101,9 @@ pub fn setupRuntimeLinked(
             .globals_count = globals_total,
             .host_dispatch_base = dispatch.ptr,
             .host_dispatch_count = compiled.num_imports,
+            // D-478 — host-func payload array base (null when no embedder
+            // host-func imports); read only by the planted Zig bridge thunks.
+            .host_payloads_base = if (host_payloads.len > 0) host_payloads.ptr else null,
             .func_entities_ptr = @ptrCast(func_entities.ptr),
             .func_entities_count = @intCast(total_funcs),
             .data_dropped_ptr = data_dropped.ptr,
@@ -1122,6 +1163,7 @@ pub fn setupRuntimeLinked(
         .thunk_arena = thunk_arena,
         .tag_ids = tag_ids,
         .tag_tokens = tag_tokens,
+        .host_payloads = host_payloads,
     };
 }
 
