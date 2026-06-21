@@ -1,3 +1,19 @@
+# D-489 — x86_64 JIT miscompile = regalloc dual-counter spill collision (RESOLVED @462ea1e57)
+
+**RESOLUTION**: the LSRA had two independent spill-slot mint counters — the
+spans_call path minted `force_spill_threshold + n_spill_minted` while the normal
+path minted `n_slots`, which reaches the same `threshold + k` ids once registers
+are exhausted. A call-spanning vreg and a normal-path spilled vreg got the same
+spill slot while both live → clobber. x86_64-only because its 4-GPR pool makes
+normal-path spilling routine; arm64's 8 rarely spill via the normal path. Fix =
+unify both spill mints on `n_spill_minted`. Resolved BOTH D-489 (tinygo_json
+130→90) AND D-494 (dfr2 defer/recover deadlock → result=42) — shared root.
+Diagnostic oracle: `ZWASM_DEBUG=regverify` (overlap verifier in the prod compile
+path) + `regalloc.dblassign`/`noreuse` experiments (now removed). Method note
+below kept as the investigation audit trail.
+
+---
+
 # D-489 — x86_64 JIT miscompile (the "capture-path" theory is FALSIFIED)
 
 **Symptom**: `tinygo_json.wasm` under JIT on **any x86_64** prints CORRUPT (130B,
