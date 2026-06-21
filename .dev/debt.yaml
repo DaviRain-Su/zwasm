@@ -103,6 +103,17 @@ entries:
       a json-free `([]byte,error)`+append repro (mv.wasm) HANGS on x86_64-jit (murky, set aside).
       STEP 3 = inspect x86_64 multi-value-return result-marshalling codegen (entry.zig / op_call /
       wrapper_thunk multi-result path) + craft a clean json-free multi-value-slice-return repro.
+      STEP 3 DONE (2026-06-21): multi-value-return-capture hypothesis REFUTED. (1) mv2.go (explicit
+      `func two() ([]byte, int)` + 24-local pressure, no loop) → NO repro (len=5 correct). (2)
+      x86_64 captureCallResult (op_call.zig:1006, memory-class >2 + register-class ≤2 paths) inspected
+      — correct sequential R10-staged read-back, no clobber. So a clean multi-value slice return is
+      NOT the trigger. The bug needs the json/REFLECT machinery's specific pressure (mv.go append-loop
+      HANGS, mv2.go clean FINE, min.wasm json reproduces) → likely a COUNT/LENGTH computed→0 under
+      x86_64 spill pressure in reflect field-iteration / json encoder (same "count→0" shape as the
+      earlier fmt verb-scan symptom). Minimal-repro track EXHAUSTED; min.wasm is the floor. STEP 4 =
+      GUEST-VALUE differential trace (instruction- or function-boundary level, interp-vs-x86_64-jit)
+      to pinpoint the miscompiled instruction — a codegen-instrumentation build (multi-cycle) OR
+      x86_64-native gdb on ubuntu. This is the remaining path; not a quick win.
     first_raised: "2026-06-21"
     last_reviewed: "2026-06-21"
     refs: |-

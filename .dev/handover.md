@@ -19,16 +19,18 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
 
 - **Bundle-ID**: D-489-x86_64-miscompile-campaign (user-directed 2026-06-21, anti-先回しロック)
 - **Cycles-remaining**: ~3
-- **Continuity-memo**: STEP 2 DONE — controllable repro `private/spikes/d489-minimal-repro/main.go`
-  → min.wasm (struct + json.Marshal + 2 printf + Unmarshal/roundtrip). iovec diff: x86_64-jit
-  write#1 EMPTY (`json: ` len=7) vs interp len=47 → the `[]byte` from `json.Marshal` (MULTI-VALUE
-  `([]byte,error)` return = slice ptr/len/cap+error) has **len=0**. HYPOTHESIS (supersedes verb-scan):
-  x86_64 multi-value-return result-marshalling miscompiles the slice LENGTH→0 under spill pressure;
-  victim shifts with fn layout. Corrob: json-free `([]byte,error)`+append (mv.wasm) HANGS on jit.
-- **Next step (STEP 3)**: inspect x86_64 multi-value-return result codegen (entry.zig multi-result /
-  op_call result-pop / wrapper_thunk multi-result path) for a spill bug in the slice-len register;
-  craft a CLEAN json-free multi-value-slice-return repro. Repro now: `zig build -Dtarget=x86_64-macos
-  && ZWASM_DEBUG=wasi.iovec ./zig-out/bin/zwasm run --engine jit private/spikes/d489-minimal-repro/min.wasm`.
+- **Continuity-memo**: STEPS 2-3 DONE. Controllable repro `private/spikes/d489-minimal-repro/`
+  (min.wasm json = floor; main.go source there). iovec diff: x86_64-jit `data` slice from
+  `json.Marshal` has len=0. Hypotheses RULED OUT: pure-fmt-codegen (literal printf fine),
+  multi-value-return-capture (mv2.go clean `([]byte,int)`+pressure FINE; captureCallResult
+  op_call.zig:1006 inspected = correct R10-staged read-back). Bug needs json/REFLECT-specific
+  pressure → likely a COUNT/LENGTH computed→0 under x86_64 spill in reflect field-iter / encoder.
+  Minimal-repro track EXHAUSTED.
+- **Next step (STEP 4)**: GUEST-VALUE differential trace (instruction- or function-boundary level,
+  interp-vs-x86_64-jit) to pinpoint the miscompiled instruction — needs a codegen-instrumentation
+  build (multi-cycle) OR x86_64-native gdb on ubuntu. NOT a quick win. Repro: `zig build
+  -Dtarget=x86_64-macos && ./zig-out/bin/zwasm run --engine jit private/spikes/d489-minimal-repro/min.wasm`
+  (x86_64-jit: `json: ` empty + roundtrip FAIL; interp correct).
 - **Exit-condition**: miscompiled instruction/value identified + fixed (interp==jit on min.wasm +
   tinygo_json x86_64) OR proven root-cause class with a targeted fixture. Unblocks `.auto`→JIT flip.
 
