@@ -17,14 +17,11 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
 
 ## RESUME POINTER (2026-06-21) — ADR-0200 JIT API delivered; `.auto`=interp (flip twice-reverted; dispatch matrix incomplete)
 
-**ADR-0200 JIT-backed embedding API delivered; explicit `.jit` solid + completing.** Dual-engine facade accessors
-@3d701ddaf + exportFuncSig @5b6449779 + export_types-on-JIT @f68532e44 (C-ABI by-name discovery/invoke works on
-`.jit`) + **f64/f32 2-arg FP export-invoke @d7da97e04** (cljw from_cljw_03). cap api/instance.zig→3800 (user-auth).
-
-**`.auto`→JIT FLIP TWICE-REVERTED** (@1e01e6797, then re-landed @f62e08bac, **re-reverted @7dbdb973c**; origin green
-ubuntu OK @7dbdb973). Each re-land's 3-host ubuntu gate surfaced MORE JIT export-invoke gaps on x86_64 that Mac
-masks (arm64 `.auto` falls back to interp for modules x86_64 JIT-builds). The flip is the FORCING FUNCTION exposing
-an incomplete **JIT export-invoke dispatch matrix** — see Active bundle. cljw aligned (to_cljw_04; default `.interp`).
+**ADR-0200 JIT API delivered; explicit `.jit` solid.** Dual-engine accessors @3d701ddaf + exportFuncSig @5b6449779
++ export_types-on-JIT @f68532e44 + FP/mixed 1-2arg invoke @d7da97e04/@3cf40a573 (cljw from_cljw_03/04). cap
+api/instance.zig→3800. **`.auto` FLIP TWICE-REVERTED** (last @7dbdb973c; origin green) — each re-land's 3-host ubuntu
+gate exposed x86_64 JIT gaps Mac masks (arm64 `.auto` falls back to interp). The flip = FORCING FUNCTION for x86_64
+JIT hardening; see Active bundle. cljw aligned (to_cljw_05; default `.interp`).
 
 ## Active bundle
 
