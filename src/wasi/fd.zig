@@ -31,6 +31,7 @@ const std = @import("std");
 
 const p1 = @import("preview1.zig");
 const host_mod = @import("host.zig");
+const dbg = @import("../support/dbg.zig");
 
 const Host = host_mod.Host;
 
@@ -92,12 +93,21 @@ pub fn fdWrite(
     const guard = writeSlice(host, fd, &.{});
     if (guard != .success) return guard;
 
+    if (dbg.on("wasi.iovec")) {
+        std.debug.print("[wasi.iovec] ENTER fd={d} ciovec_ptr={d} ciovec_count={d}\n", .{ fd, ciovec_ptr, ciovec_count });
+    }
+
     var total: u32 = 0;
     var i: u32 = 0;
     while (i < ciovec_count) : (i += 1) {
         const entry_off = ciovec_ptr + i * 8;
         const buf = readU32LE(mem, entry_off) orelse return .fault;
         const buf_len = readU32LE(mem, entry_off + 4) orelse return .fault;
+        // D-489 differential primitive: the iovec the host receives is engine-
+        // independent ground truth — diff interp vs x86_64-jit to lock the miscompile.
+        if (dbg.on("wasi.iovec")) {
+            std.debug.print("[wasi.iovec] fd={d} i={d} ciovec_ptr={d} buf={d} len={d}\n", .{ fd, i, ciovec_ptr, buf, buf_len });
+        }
         const slice = sliceMemConst(mem, buf, buf_len) orelse return .fault;
         const e = writeSlice(host, fd, slice);
         if (e != .success) return e;
