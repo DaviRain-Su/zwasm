@@ -690,6 +690,19 @@ fn instantiateJit(store: *Store, module: *const Module, limits: InstantiateLimit
     // ADR-0200 — point the JIT interrupt poll at the now-heap-pinned own flag so
     // the facade `interrupt()` can cooperatively cancel a running guest.
     jit.armSelfInterrupt();
+    // ADR-0200 / D-478 — attach the store's WASI host so the JIT's planted WASI
+    // dispatch thunks do real syscalls (null → compute-only stub: clock/random/
+    // fd_write silently no-op). Both fields are `?*anyopaque`. Materialize any
+    // queued preopens first (mirrors the interp `instantiateInternal` path).
+    if (store.wasi_host) |host_opaque| {
+        const host: *wasi_host.Host = @ptrCast(@alignCast(host_opaque));
+        host.materializePendingPreopens() catch {
+            jit.deinit(alloc);
+            alloc.destroy(jit);
+            return null;
+        };
+    }
+    jit.owned.rt.wasi_host = store.wasi_host;
 
     const inst = alloc.create(Instance) catch {
         jit.deinit(alloc);
