@@ -1,4 +1,4 @@
-// FILE-SIZE-EXEMPT: (cap=3400) C ABI translation catalog (Zone 3 boundary layer); no separable subsystem per ADR-0099 §D2 P3 evaluation (see .dev/architecture/api_instance_audit.md, §9.12-G (c)). 10.F D-173/D-172 accessor surfaces extended exempt cap 2500→2800→3000; cyc174 raised 3000→3200 (ADR-0099 amend) for the Wasm start-section execution feature (a runtime-feature add in instantiateInternal, NOT accessor bloat) — consistent with the non-separable P3 eval + the validator.zig cyc158 precedent. P13 §13.2 raised 3200→3300 (ADR-0099 amend) for the runtime-entity host-creation surface — standalone-entity (instance==null) branches in the global/table/memory accessors + the buildBindings host-import arm; the `_new` CONSTRUCTORS are already split to extern_new.zig, this is the irreducible accessor/binding half coupled to the entity structs. ADR-0184 raised 3300→3400 (ADR-0099 amend 2026-06-13) for the engine-owned io plumbing (Threaded ownership + Host.io wiring + preopen materialization), same runtime-feature-add class. D-171 restructure remains for a genuine separable subsystem.
+// FILE-SIZE-EXEMPT: (cap=3500) C ABI translation catalog (Zone 3 boundary layer); no separable subsystem per ADR-0099 §D2 P3 evaluation (see .dev/architecture/api_instance_audit.md, §9.12-G (c)). 10.F D-173/D-172 accessor surfaces extended exempt cap 2500→2800→3000; cyc174 raised 3000→3200 (ADR-0099 amend) for the Wasm start-section execution feature (a runtime-feature add in instantiateInternal, NOT accessor bloat) — consistent with the non-separable P3 eval + the validator.zig cyc158 precedent. P13 §13.2 raised 3200→3300 (ADR-0099 amend) for the runtime-entity host-creation surface — standalone-entity (instance==null) branches in the global/table/memory accessors + the buildBindings host-import arm; the `_new` CONSTRUCTORS are already split to extern_new.zig, this is the irreducible accessor/binding half coupled to the entity structs. ADR-0184 raised 3300→3400 (ADR-0099 amend 2026-06-13) for the engine-owned io plumbing (Threaded ownership + Host.io wiring + preopen materialization), same runtime-feature-add class. ADR-0200 raised 3400→3500 (ADR-0099 amend 2026-06-21) for the JIT-backed engine fork (EngineKind + instantiateJit + the per-instance engine branch in instantiateInternal), same runtime-feature-add class. D-171 restructure remains for a genuine separable subsystem.
 //! Engine / Store / Module / Instance / Func / Extern surface of
 //! the C ABI binding (§9.5 / 5.0 chunk d carve-out from
 //! `wasm.zig` per ADR-0007).
@@ -652,6 +652,15 @@ fn instantiateJit(store: *Store, module: *const Module, limits: InstantiateLimit
     const alloc = storeAllocator(store) orelse return null;
     const bytes_ptr = module.bytes_ptr orelse return null;
     const bytes = bytes_ptr[0..module.bytes_len];
+
+    // ADR-0200 / D-451 — reject any import the JIT WASI path cannot satisfy AT
+    // INSTANTIATION (mirrors the interp linker's UnknownImport + the
+    // `runWasiLenient*` CLI path). `JitInstance.init` alone leaves an
+    // unsatisfiable import as a trap-on-call stub that only faults if reached;
+    // an unsatisfied import MUST fail instantiation regardless. Satisfiable WASI
+    // imports (resolved by `jit_dispatch.lookup`) pass; their dispatch thunks are
+    // planted by `setupRuntime`. (Host-fn `rt.wasi_host` wiring = next slice.)
+    runner.assertWasiImportsSatisfied(alloc, bytes) catch return null;
 
     const jit = alloc.create(runner.JitInstance) catch return null;
     jit.* = runner.JitInstance.init(alloc, bytes) catch {

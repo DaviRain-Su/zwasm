@@ -510,7 +510,7 @@ pub const RunLimits = struct {
 /// (memory/table/global/tag) are never satisfiable through the WASI host, so
 /// any such import is unsatisfied here too (the interp WASI path rejects them
 /// identically). Modules with no import section pass trivially.
-fn assertWasiImportsSatisfied(allocator: Allocator, wasm_bytes: []const u8) Error!void {
+pub fn assertWasiImportsSatisfied(allocator: Allocator, wasm_bytes: []const u8) Error!void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const ta = arena.allocator();

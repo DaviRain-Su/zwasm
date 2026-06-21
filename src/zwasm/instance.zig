@@ -604,6 +604,53 @@ test "facade engine=.jit: multi-result scalar export via invokeMulti (ADR-0200)"
     try testing.expectEqual(@as(i32, 7), results[1].i32);
 }
 
+test "facade engine=.jit: a satisfiable WASI import dispatches (sched_yield → 0) (ADR-0200 / D-451)" {
+    // (module (import "wasi_snapshot_preview1" "sched_yield" (func (result i32)))
+    //         (func (export "f") (result i32) call 0))  — f returns the errno (0).
+    // sched_yield needs no host/memory; proves a WASI import resolves to its JIT
+    // dispatch thunk (not a trap-on-call stub) under the facade JIT path.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, // type: ()->i32
+        0x02, 0x26, 0x01, // import section
+        0x16, 0x77, 0x61, 0x73, 0x69, 0x5f, 0x73, 0x6e, 0x61, 0x70, 0x73, 0x68, 0x6f, 0x74, 0x5f, 0x70, 0x72, 0x65, 0x76, 0x69, 0x65, 0x77, 0x31, // "wasi_snapshot_preview1"
+        0x0b, 0x73, 0x63, 0x68, 0x65, 0x64, 0x5f, 0x79, 0x69, 0x65, 0x6c, 0x64, // "sched_yield"
+        0x00, 0x00, // func, typeidx 0
+        0x03, 0x02, 0x01, 0x00, // func: 1× type 0
+        0x07, 0x05, 0x01, 0x01, 0x66, 0x00, 0x01, // export "f" = func 1
+        0x0a, 0x06, 0x01, 0x04, 0x00, 0x10, 0x00, 0x0b, // code: call 0; end
+    };
+    var eng = try _zwasm.Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var mod = try eng.compile(&bytes);
+    defer mod.deinit();
+    var inst = try mod.instantiate(.{ .engine = .jit });
+    defer inst.deinit();
+
+    var results = [_]_zwasm.Value{.{ .i32 = -1 }};
+    try inst.invoke("f", &.{}, &results);
+    try testing.expectEqual(@as(i32, 0), results[0].i32); // Errno.success
+}
+
+test "facade engine=.jit: an unsatisfiable import fails instantiation (ADR-0200 / D-451)" {
+    // (module (import "env" "foo" (func)))  — "env.foo" is not a WASI export, so
+    // the JIT path rejects it at instantiate (not a trap-on-call stub), mirroring
+    // the interp linker's UnknownImport.
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x04, 0x01, 0x60, 0x00, 0x00, // type: ()->()
+        0x02, 0x0b, 0x01, // import section
+        0x03, 0x65, 0x6e, 0x76, // "env"
+        0x03, 0x66, 0x6f, 0x6f, // "foo"
+        0x00, 0x00, // func, typeidx 0
+    };
+    var eng = try _zwasm.Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var mod = try eng.compile(&bytes);
+    defer mod.deinit();
+    try testing.expectError(error.InstantiateFailed, mod.instantiate(.{ .engine = .jit }));
+}
+
 test "facade engine=.jit: interrupt traps the next invoke; clear re-enables (ADR-0200 / D-314)" {
     // f calls g → the calling fn pins the runtime ptr so the prologue interrupt
     // poll is emitted on BOTH arches (a no-call fn has no poll on x86_64).
