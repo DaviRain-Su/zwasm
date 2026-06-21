@@ -1772,10 +1772,7 @@ pub export fn wasm_func_call(
     // DIVERGENCE from the interp funcidx-keyed `func_ptrs_storage` path; a
     // func_idx with no export name is unreachable through the C handle anyway).
     if (inst.runtime == null) {
-        if (inst.jit) |jp| {
-            const jit: *runner.JitInstance = @ptrCast(@alignCast(jp));
-            return wasmFuncCallJit(jit, inst, store, alloc, handle.func_idx, args, results);
-        }
+        if (jitOf(inst)) |jit| return wasmFuncCallJit(jit, inst, store, alloc, handle.func_idx, args, results);
         return null;
     }
     const rt = inst.runtime orelse return null;
@@ -1833,6 +1830,14 @@ pub export fn wasm_func_call(
     };
     rt.operand_len = op_base;
     return null;
+}
+
+/// ADR-0200 — cast the Zone-1 `Instance.jit` opaque slot to the engine type at
+/// the Zone-3 boundary. Null for an interp-backed (or empty) instance. Shared by
+/// `wasm_func_call` + the `zwasm_ext.zig` budget setters' JIT arms.
+pub fn jitOf(inst: *Instance) ?*runner.JitInstance {
+    const jp = inst.jit orelse return null;
+    return @ptrCast(@alignCast(jp));
 }
 
 /// ADR-0200 — `wasm_func_call` JIT arm. Resolve func_idx→export name, get the

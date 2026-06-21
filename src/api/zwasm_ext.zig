@@ -11,9 +11,11 @@
 //! These mirror the Zig facade's post-instantiate budget mutators (v1
 //! exposed CONFIG-level `zwasm_config_set_*`; v2 deliberately chose
 //! per-instance, mid-workload-mutable setters — ADR-0179 rev 2026-06-12).
-//! The C API only creates INTERP instances (live security posture; JIT
-//! budgets are the CLI surface), so `runtime` is always present today;
-//! null instance/runtime = no-op, matching wasm.h's null-tolerant style.
+//! ADR-0200: the C API can now create JIT instances (`zwasm_instance_new_ex`),
+//! so each setter routes to the active engine — interp `runtime` OR the JIT
+//! instance (`capi.jitOf`); a setter that silently no-op'd on a JIT instance
+//! would be a sandbox-bypass footgun (set_fuel doing nothing). Null
+//! instance/no-engine = no-op, matching wasm.h's null-tolerant style.
 //!
 //! Zone 3 (`src/api/`).
 
@@ -30,21 +32,33 @@ const Instance = capi.Instance;
 /// Interp fuel units = instructions executed.
 pub export fn zwasm_instance_set_fuel(i: ?*Instance, fuel: u64) callconv(.c) void {
     const inst = i orelse return;
-    if (inst.runtime) |rt| rt.fuel = fuel;
+    if (inst.runtime) |rt| {
+        rt.fuel = fuel;
+    } else if (capi.jitOf(inst)) |jit| {
+        jit.setFuel(fuel);
+    }
 }
 
 /// Remove the fuel budget (unmetered).
 pub export fn zwasm_instance_disable_fuel(i: ?*Instance) callconv(.c) void {
     const inst = i orelse return;
-    if (inst.runtime) |rt| rt.fuel = null;
+    if (inst.runtime) |rt| {
+        rt.fuel = null;
+    } else if (capi.jitOf(inst)) |jit| {
+        jit.setFuel(null);
+    }
 }
 
 /// Read the remaining fuel into `out`; returns false when unmetered
 /// (out untouched).
 pub export fn zwasm_instance_fuel_remaining(i: ?*const Instance, out: ?*u64) callconv(.c) bool {
     const inst = i orelse return false;
-    const rt = inst.runtime orelse return false;
-    const f = rt.fuel orelse return false;
+    const f = if (inst.runtime) |rt|
+        (rt.fuel orelse return false)
+    else if (capi.jitOf(@constCast(inst))) |jit|
+        (jit.fuelRemaining() orelse return false)
+    else
+        return false;
     if (out) |p| p.* = f;
     return true;
 }
@@ -54,13 +68,21 @@ pub export fn zwasm_instance_fuel_remaining(i: ?*const Instance, out: ?*u64) cal
 /// it returns the spec grow-failure (-1), not a trap.
 pub export fn zwasm_instance_set_memory_pages_limit(i: ?*Instance, max_pages: u64) callconv(.c) void {
     const inst = i orelse return;
-    if (inst.runtime) |rt| rt.store_memory_pages_max = max_pages;
+    if (inst.runtime) |rt| {
+        rt.store_memory_pages_max = max_pages;
+    } else if (capi.jitOf(inst)) |jit| {
+        jit.setMemoryPagesLimit(max_pages);
+    }
 }
 
 /// Clear the host memory cap (only the declared/spec max remains).
 pub export fn zwasm_instance_clear_memory_pages_limit(i: ?*Instance) callconv(.c) void {
     const inst = i orelse return;
-    if (inst.runtime) |rt| rt.store_memory_pages_max = null;
+    if (inst.runtime) |rt| {
+        rt.store_memory_pages_max = null;
+    } else if (capi.jitOf(inst)) |jit| {
+        jit.setMemoryPagesLimit(null);
+    }
 }
 
 /// Request cooperative interruption from any thread (timeout / host
@@ -69,13 +91,21 @@ pub export fn zwasm_instance_clear_memory_pages_limit(i: ?*Instance) callconv(.c
 /// before re-invoking.
 pub export fn zwasm_instance_interrupt(i: ?*Instance) callconv(.c) void {
     const inst = i orelse return;
-    if (inst.runtime) |rt| rt.interrupt_flag_storage.store(1, .monotonic);
+    if (inst.runtime) |rt| {
+        rt.interrupt_flag_storage.store(1, .monotonic);
+    } else if (capi.jitOf(inst)) |jit| {
+        jit.requestInterrupt();
+    }
 }
 
 /// Clear a prior `zwasm_instance_interrupt` so the instance runs again.
 pub export fn zwasm_instance_clear_interrupt(i: ?*Instance) callconv(.c) void {
     const inst = i orelse return;
-    if (inst.runtime) |rt| rt.interrupt_flag_storage.store(0, .monotonic);
+    if (inst.runtime) |rt| {
+        rt.interrupt_flag_storage.store(0, .monotonic);
+    } else if (capi.jitOf(inst)) |jit| {
+        jit.clearInterrupt();
+    }
 }
 
 // ============================================================
@@ -193,4 +223,25 @@ test "zwasm_instance_set_memory_pages_limit: caps grow; clear lifts the cap (ADR
     try testing.expect(trap2 != null);
     try testing.expectEqual(TrapKind.unreachable_, trap2.?.kind);
     trap_surface.wasm_trap_delete(trap2);
+}
+
+test "ADR-0200: C budget setters route to a JIT instance (set_fuel / fuel_remaining / disable)" {
+    const e = capi.wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer capi.wasm_engine_delete(e);
+    const s = capi.wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer capi.wasm_store_delete(s);
+    const bv: ByteVec = .{ .size = spin_loop_wasm.len, .data = @constCast(&spin_loop_wasm) };
+    const m = capi.wasm_module_new(s, &bv) orelse return error.ModuleAllocFailed;
+    defer capi.wasm_module_delete(m);
+    // Force a JIT instance; pre-ADR-0200 these setters silently no-op'd on it.
+    const inst = capi.instantiateFacade(s, m, null, .{}, .jit) orelse return error.InstanceAllocFailed;
+    defer capi.wasm_instance_delete(inst);
+
+    var out: u64 = 0;
+    try testing.expect(!zwasm_instance_fuel_remaining(inst, &out)); // unmetered by default
+    zwasm_instance_set_fuel(inst, 12345);
+    try testing.expect(zwasm_instance_fuel_remaining(inst, &out));
+    try testing.expectEqual(@as(u64, 12345), out);
+    zwasm_instance_disable_fuel(inst);
+    try testing.expect(!zwasm_instance_fuel_remaining(inst, &out));
 }
