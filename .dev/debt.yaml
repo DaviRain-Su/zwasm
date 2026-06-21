@@ -190,6 +190,12 @@ entries:
       MACHINE codegen (both arches, non-spill → a FUNDAMENTAL global.get/set or control-flow miscompile, NOT
       spill-pressure). PAUSED for breadth after exhaustive single-area session; debt-tracked. Resume = lldb/global
       value-trace of globals 0/1/2 in main.safe under jit-vs-interp. RELATED D-489 (same asyncify area, x86_64-only).
+      RULED OUT (2026-06-21): "JIT caches a global's value across a call → reads stale state" — a synthetic wat
+      (`$yield` sets global=1 then caller reads it post-call; expect 99) returns 99 correctly on BOTH interp+jit.
+      So the JIT correctly re-reads globals after calls; the bug is in the deeper asyncify machinery (memory
+      shadow-stack load/store via global2 + nested rewind/unwind control flow), not simple global-caching.
+      JIT-EXEC SWEEP (2026-06-21): interp-vs-jit diff over all 56 realworld fixtures = arm64 0 divergences,
+      x86_64 only tinygo_json(=D-489). So D-494's defer-pattern is NOT in the corpus; JIT is broadly correct.
     first_raised: "2026-06-21"
     last_reviewed: "2026-06-21"
     refs: |-
