@@ -1242,11 +1242,22 @@ pub const JitInstance = struct {
         if (sig.params.len == 2) {
             const pk0 = paramScalarKey(sig.params[0]) orelse return Error.UnsupportedEntrySignature;
             const pk1 = paramScalarKey(sig.params[1]) orelse return Error.UnsupportedEntrySignature;
+            // The per-combo `dispatchScalar2/Void2` are a fast-path VENEER; a combo the
+            // veneer lacks (e.g. mixed (i32,f64)→f64, cljw from_cljw_04) must FALL THROUGH
+            // to the generalized buffer-write thunk, NOT error — else it traps the caller.
+            // `UnsupportedEntrySignature` = shape-not-in-veneer (a real func trap is a
+            // different error and propagates). The buffer path runs when a thunk exists.
             if (run_as_void) {
-                try dispatchVoid2(m, func_idx, r, (@as(u8, pk0) << 4) | pk1, args[0], args[1]);
+                dispatchVoid2(m, func_idx, r, (@as(u8, pk0) << 4) | pk1, args[0], args[1]) catch |e| {
+                    if (e != Error.UnsupportedEntrySignature) return e;
+                    return self.invokeViaBufferSingle(func_idx, sig, args, run_as_void);
+                };
                 return null;
             }
-            return try dispatchScalar2(m, func_idx, r, (@as(u8, pk0) << 4) | (@as(u8, pk1) << 2) | scalarKey(sig.results[0]).?, args[0], args[1]);
+            return dispatchScalar2(m, func_idx, r, (@as(u8, pk0) << 4) | (@as(u8, pk1) << 2) | scalarKey(sig.results[0]).?, args[0], args[1]) catch |e| {
+                if (e != Error.UnsupportedEntrySignature) return e;
+                return self.invokeViaBufferSingle(func_idx, sig, args, run_as_void);
+            };
         }
         if (sig.params.len == 3 and sig.params[0] == .i32 and sig.params[1] == .i32 and sig.params[2] == .i32 and sig.results.len == 1 and sig.results[0] == .i32) {
             // Fast path the corpus's common (i32,i32,i32)->i32 via the

@@ -606,6 +606,31 @@ test "facade Instance.interrupt(): a pending interrupt traps the next invoke; cl
     try testing.expectEqual(@as(i32, 42), results[0].i32);
 }
 
+test "facade engine=.jit: MIXED 2-arg (i32,f64)->f64 export invoke (cljw from_cljw_04 — veneer falls through to buffer path)" {
+    // (module (func (export "mix") (param i32 f64) (result f64)
+    //   local.get 1 local.get 0 f64.convert_i32_s f64.add))  ;; f64param + (f64)i32param
+    // The 2-arg veneer (dispatchScalar2) lacks the mixed (i32,f64)→f64 key; it must fall
+    // through to the buffer-write thunk instead of trapping (cljw from_cljw_04).
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x07, 0x01, 0x60, 0x02, 0x7f, 0x7c, 0x01, 0x7c, // (i32 f64)->f64
+        0x03, 0x02, 0x01, 0x00,
+        0x07, 0x07, 0x01, 0x03, 0x6d, 0x69, 0x78, 0x00, 0x00, // export "mix"
+        0x0a, 0x0a, 0x01, 0x08, 0x00, 0x20, 0x01, 0x20, 0x00,
+        0xb7, 0xa0, 0x0b,
+    };
+    var eng = try _zwasm.Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var mod = try eng.compile(&bytes);
+    defer mod.deinit();
+    var inst = try mod.instantiate(.{ .engine = .jit });
+    defer inst.deinit();
+
+    var results = [_]_zwasm.Value{.{ .f64 = 0 }};
+    try inst.invoke("mix", &.{ .{ .i32 = 3 }, .{ .f64 = @bitCast(@as(f64, 1.5)) } }, &results);
+    try testing.expectEqual(@as(f64, 4.5), @as(f64, @bitCast(results[0].f64))); // 1.5 + 3.0
+}
+
 test "facade engine=.jit: 3-arg f64 export invoke via the buffer-write path (D-477 — typical wide shape)" {
     // (module (func (export "add3") (param f64 f64 f64) (result f64)
     //   local.get 0 local.get 1 f64.add local.get 2 f64.add))
