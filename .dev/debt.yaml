@@ -66,6 +66,14 @@ entries:
       live range interacting with the merge-MOVs) — minimal fixtures won't trigger it; the
       next probe is DYNAMIC instrumentation of the actual tinygo_json trace (dump every
       computed store-addr, diff jit-vs-interp), NOT another synthetic fixture.
+      ~~ARM64-REPRO RULED OUT (2026-06-21)~~: tried shrinking arm64 allocatable GPR pool
+      to x86_64's count (to reproduce under the arm64-only lldb harness jit_value_trace.sh)
+      — BLOCKED at comptime (ADR-0077 op_scratch_reservation_table requires >=7-8 allocatable;
+      op_memory/op_table index [0]). arm64's deterministic reservation model is structurally
+      distinct from x86_64's 4-alloc+2-spill-stage (R10/R11), so an x86_64 spill-staging defect
+      won't reproduce on arm64 at ANY pressure. CONSEQUENCE: debug ON x86_64 — gdb on ubuntu
+      NATIVE x86_64 (not Rosetta) OR an x86_64 interp-vs-jit value-trace differential. The arm64
+      lldb harness is NOT applicable. See lesson 2026-06-21-d489-arm64-pressure-repro-blocked.
     first_raised: "2026-06-21"
     last_reviewed: "2026-06-21"
     refs: |-
