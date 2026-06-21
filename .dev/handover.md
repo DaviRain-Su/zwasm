@@ -44,12 +44,21 @@ an incomplete **JIT export-invoke dispatch matrix** — see Active bundle. cljw 
   — VERIFICATION LESSON applies)**: widen `wrapper_thunk.emit` per-arch (emitAarch64:554 / emitX8664SysV:181 /
   emitX8664Win64:427) one shape at a time — Win64 >3 params, then multi-result FP, then v128 (D-477). Each: a `.jit`
   facade test reproducing (like addf), RED, widen emit + paired byte test, verify arm64 + `-Dtarget=x86_64-macos` +
-  ubuntu. Caveat to confirm: thunk emission is gated per-EXPORT (compile.zig:1178/1208), so wide-func coverage needs
-  both `emit` shape support AND the emission gate firing. (imported-memory-copy InstanceAllocFailed = separate:
-  `.auto` fallback for a memory-IMPORT module under the flip — re-check at flip re-land.)
-- **Exit-condition**: re-land the `.auto` flip (re-apply git @9fcf9fb5b code; the revert of it is @7dbdb973c — so
-  `git revert 7dbdb973c`) and the **ubuntu x86_64 gate is GREEN** (wast_runtime_runner + wasmtime_misc_runtime pass
-  under `.auto`→JIT). Until then `.auto` stays interp. Residual non-blocking: funcref `Table.set` @panic + v128 (D-478/D-477).
+  ubuntu. **RE-FRAMED @a5c281862**: 3-arg f64 invoke PROVEN to work on BOTH arches (committed test) → typical
+  real-program shapes already ride the buffer path. The flip's ubuntu `^FAIL`s are NOT typical dispatch: (a)
+  `many-results` = wasmtime's EXTREME stress (`f` returns **17 i32**, `f2` 17-param+17-result) — needs stack-spill +
+  sret emit, the genuine hard D-477 slice, but ONLY appears in the conformance corpus; (b) `func--params` similar
+  extreme; (c) `tinygo_json` realworld self-verify FAIL under `.auto`→JIT while `test-realworld-diff-jit` (direct JIT)
+  is 56/56 — a real `.auto`/facade-WASI-`_start`-invoke-path bug to investigate separately. **SO THE FLIP RE-LAND PATH
+  IS LIKELY NOT "implement 17-value emit"**: it's (1) **pin the interp-conformance harnesses** (`wast_runtime_runner`/
+  wasmtime_misc_runtime — they test SPEC semantics; JIT conformance has its OWN runner `test-spec-wasm-2.0-assert`) to
+  `.interp` by threading an engine param (the memo always said "pin interp-internal harnesses to .interp"); (2) fix the
+  realworld_run `.auto` tinygo_json bug; (3) wide-shape emit stays D-477 debt until a REAL consumer needs >2 results /
+  >register-count args (cljw doesn't). Next cycle: START with (1) — survey `wast_runtime_runner.zig` + realworld_run
+  for how to pin engine, since that likely clears most ubuntu `^FAIL`s at once.
+- **Exit-condition**: `.auto` flip re-landed (`git revert 7dbdb973c`) + interp-conformance harnesses pinned `.interp`
+  + realworld `.auto` bug fixed, with **ubuntu x86_64 GREEN**. Until then `.auto`=interp. Wide-shape emit (17-value) +
+  funcref `Table.set` @panic = non-blocking D-477/D-478 debt (no real consumer yet).
 
 **STANDING DIRECTIVE = CORRECTNESS SWEEP** (user 2026-06-20, memory `feedback_correctness_sweep_phase`): high-value
 bar OFF. Sweep toward 0% the 3 gap classes — (1) wasmtime-works-zwasm-doesn't, (2) wasm/wasi spec non-conformance,
