@@ -74,6 +74,16 @@ entries:
       at a nonzero offset. Also a GATE gap: x86_64 JIT realworld run-stage should join the
       standard gate (once green). Does NOT block cljw (explicit `.jit` works) — only the
       `.auto`-flip re-land (not urgent). NOT-A-STAGE-ALIAS confirmed.
+      ~~EMITMEMOP-ISOLATED RULED OUT (2026-06-21, @647f5b67c+1)~~: two bounded fixtures —
+      (1) 20-local frame, spilled idx, `i32.load offset=4`; (2) 22-local frame, spilled idx
+      AND spilled value, `i32.store offset=8` — BOTH reproduce CLEAN on x86_64-macos JIT
+      (load 305420103, store 305420143; byte-match arm64 jit + interp). So an ISOLATED
+      spilled-idx effective-address access is correct on both load+store paths → emitMemOp
+      alone is NOT the locus. REDIRECT: the defect needs the multi-value pressure of the real
+      fmt body (a spilled value feeding BOTH an address AND adjacent data, OR a call-spanning
+      live range interacting with the merge-MOVs) — minimal fixtures won't trigger it; the
+      next probe is DYNAMIC instrumentation of the actual tinygo_json trace (dump every
+      computed store-addr, diff jit-vs-interp), NOT another synthetic fixture.
     first_raised: "2026-06-21"
     last_reviewed: "2026-06-21"
     refs: |-
