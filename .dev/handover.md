@@ -65,22 +65,19 @@ binary on ubuntu = identical (CLI 90, capture 130) → not a toolchain artifact.
 `zig build [d489-repro] -Dtarget=x86_64-linux-gnu` → `scp` the ELF to ubuntu → run (no slow nix build). **PARADOX**:
 both host paths are the SAME callconv(.c) call (`jit_dispatch.fd_write`) with identical ABI (callee-saved preserved,
 caller-saved clobbered) — so the JIT must rely on BEYOND-ABI state (a specific caller-saved reg VALUE or a stack/mem
-content the appendSlice vs writeStreamingAll paths leave differently). **NEXT**: with the fast loop, either (a) inline-asm
-clobber caller-saved regs at fd_write return + see if CLI breaks (isolates which reg the JIT wrongly relies on), or (b)
-lldb register/value compare across the call. Search agent precedent: Jato JIT #40 (red-zone, but pad falsified it here). (ubuntu, by NAME not addr — PIE; outer/inner script pattern + `nix develop --command lldb`, command-file via
-`-s`). Diagnostics in tree: `ZWASM_DEBUG=fmtwatch` / `mem.cksum` (mem.cksum CONFOUNDED by random_get). Repro: `zig
-build d489-repro` (scenario1 jit-alone=130 on ubuntu only). **Closed arcs** (do NOT re-walk): v128-GC sweep
-(D-491/492/493 fixed, D-495 guarded); arm64 JIT-exec ZERO divergences; ADR-0200 JIT embedding API + cljw to_cljw_06.
-
-
-**`.auto`→JIT flip = blocked on D-489, now an ACTIVE CAMPAIGN** (see `## Active bundle` above — user-directed
-2026-06-21, NOT a 妥協/defer). Twice-reverted (last @7dbdb973c; origin green). The flip is a FORCING FUNCTION that
-exposed the D-489 x86_64 spill-pressure miscompile Mac-arm64 masks. Ruled out this session: emitMemOp-isolated
-(@d856f89ef, 2 bounded fixtures clean), arm64-pressure-repro (@5f1f08db1, ADR-0077 blocks pool-shrink → x86_64-only),
-Zig-optimizer-mode (Debug+ReleaseFast both repro → deterministic). NOW localized to printf#2 (see bundle). D-490 was a
-SEPARATE bug (FIXED @eddd74941). Other flip prereqs (post-D-489): **(b)** pin interp-conformance runners
-(`wast_runtime_runner`) to `.interp`; **(c)** wide-shape `wrapper_thunk.emit` (D-477). **cljw NOT blocked** (explicit
-`.jit` works). Adjacent sweep this session: D-491 CLOSED, D-492/D-493 filed (v128-in-GC-type niche gaps).
+content the appendSlice vs writeStreamingAll paths leave differently). **REGISTERS DEFINITIVELY FALSIFIED (2026-06-22)**:
+an UNCONDITIONAL asm clobber of ALL caller-saved GPRs (r10/r11/rcx/rdx/rsi/rdi/r8/r9) at fd_write return leaves the
+non-capture CLI CORRECT (90) → JIT relies on NO caller-saved value; callee-saved are host-preserved. So it's purely a
+MEMORY/DATA effect of heap-write(appendSlice) vs syscall(writeStreamingAll). **NEXT = rr/gdb reverse-debug** (efficient,
+user-OK'd tools): ubuntu has `gdb 15.1` native + `rr 5.9` via `nix-shell -p rr`. Record d489-repro, find the wrong
+guest value (the fmt format-slice the guest passes to fmt — rodata is INTACT per fmtwatch, so it's the ptr/len VALUE),
+reverse-continue to the write. **TOOL NOTES**: (1) FAST LOOP = edit on Mac → `zig build [d489-repro]
+-Dtarget=x86_64-linux-gnu [-Doptimize=Debug]` → `scp` ELF → ubuntu run (no nix build); (2) `dbg.on(...)` is OFF in
+Release AND the CLI never inits the dbg whitelist — for CLI instrumentation use UNCONDITIONAL code or build the
+d489-repro exe (which works) in Debug; (3) lldb has NO Zig type plugin (raw regs/mem only) → prefer gdb. **Closed
+arcs** (do NOT re-walk): v128-GC sweep (D-491/492/493 fixed, D-495 guarded); arm64 JIT-exec ZERO divergences;
+ADR-0200 JIT embedding API + cljw to_cljw_06. Flip is NOT blocked by a codegen miscompile (direct JIT correct); the
+diff-jit gate's tinygo_json failure is this capture-path bug. cljw unblocked (explicit `.jit`).
 
 **D-491 CLOSED @56fcc53cd**: typed `select (result v128)` (0x1c/0x7B) now validates (validator.zig:3046) + lowers
 (lower.zig:355) + JIT-executes on both arches (codegen already dispatched v128 via value shape-tag). Interp traps
