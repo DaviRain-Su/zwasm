@@ -34,8 +34,14 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
   still 130; no memory.grow happens). **"Rosetta masks D-489" is FALSE → FAST LOOP = Rosetta on Mac (NO scp):**
   `zig build -Dtarget=x86_64-macos && <x86-bin> run --engine jit test/realworld/wasm/tinygo_json.wasm | wc -c`
   (cross-check arm64 native = 90). Symptom = wrong guest SCALAR → wrong iovec ptr (Δ416) + len (orig analysis stands).
-  Class = x86_64 spill-pressure (4 GPRs vs arm64 8); NOT stage-alias (D-490), emitMemOp-isolated ruled out. **NEXT =
-  DYNAMIC value-trace of the REAL tinygo_json run (diff jit-vs-interp store addrs / stack), now on Rosetta.** Detail:
+  Class = x86_64 spill-pressure (4 GPRs vs arm64 8); NOT stage-alias (D-490), emitMemOp-isolated ruled out. NEW
+  (779b80d8a): ported global.trace to x86_64 JIT (was arm64-only). Differential on real fixture (Rosetta): JIT g0
+  sets=465 vs interp 397 (+68), final MATCHES (only g0/shadow-SP used) ⇒ **persisted-global miscompile RULED OUT;
+  wrong branch driven by a TRANSIENT value (operand-stack/local/compare), not a global**. callcount diff: JIT runs 8
+  EXTRA reflect-stringify funcs (reflect.TypeOf/toType/RawType.String = the %!(EXTRA) consequence) + interfaceTypeAssert
+  +3, sliceAppend +7; func 136 = `slices.insertionSortCmpFunc[fmtsort.KeyValue]` entered EQUALLY (wrong internal
+  branch). **NEXT = trace the transient condition: per-ZIR-op operand-stack value diff (interp vs x86_64-jit) around
+  interfaceTypeAssert / the fmt verb-scan branch; OR check select/br_if compare codegen under deep spill.** Detail:
   lesson `.dev/lessons/2026-06-22-d489-capture-path-investigation.md` + debt D-489. (D-494 dfr2 likely shares root.)
 - **Exit-condition**: `<x86_64 bin> run --engine jit tinygo_json.wasm | wc -c` = 90 (also `d489-repro` scenario1 = 90 OK).
 

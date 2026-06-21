@@ -16,6 +16,15 @@ entries:
       instrumentation (no memory.grow happens). The "Rosetta masks D-489" claim is FALSE —
       Rosetta REPRODUCES it ⇒ FAST LOOP is Rosetta on Mac (no scp): `zig build
       -Dtarget=x86_64-macos && <x86-bin> run --engine jit …/tinygo_json.wasm | wc -c`.
+      NEW 2026-06-22 (779b80d8a): ported global.trace to x86_64 JIT (was arm64-only → blind on the
+      only repro arch). Differential on real tinygo_json (Rosetta): JIT g0 sets=465 vs interp 397
+      (+68) but FINAL value matches (64992); only g0/shadow-SP used. ⇒ persisted-global miscompile
+      RULED OUT; the wrong branch is driven by a TRANSIENT value (operand-stack/local/compare), not a
+      global. jit.callcount diff (real fixture): JIT runs 8 EXTRA reflect-stringify funcs
+      (reflect.TypeOf/toType/RawType.String/Kind.String = the %!(EXTRA) consequence) + interfaceTypeAssert
+      +3, sliceAppend +7; func 136 = slices.insertionSortCmpFunc[fmtsort.KeyValue] entered EQUALLY (wrong
+      INTERNAL branch). NEXT = per-ZIR-op operand-stack value diff (interp vs x86_64-jit) around
+      interfaceTypeAssert / fmt verb-scan; OR select/br_if compare codegen under deep spill.
       ---- original (NON-superseded) miscompile investigation below ----
       x86_64 JIT MISCOMPILE in a realworld Go program (tinygo_json.wasm). Under JIT on
       x86_64 the program's fmt output is mangled — `name=Alice age=30 city=Tokyo` becomes
