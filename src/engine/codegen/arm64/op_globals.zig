@@ -22,6 +22,7 @@
 //! Zone 2 (`src/engine/codegen/arm64/`).
 
 const dbg = @import("../../../support/dbg.zig");
+const call_profile = @import("../../../support/call_profile.zig");
 
 const zir = @import("../../../ir/zir.zig");
 const inst = @import("inst.zig");
@@ -110,6 +111,28 @@ fn emitI32GlobalSet(ctx: *EmitCtx, idx: u32, byte_off: u32) Error!void {
     const ws = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_v, 0);
 
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(ws, abi.globals_base_save_gpr, @intCast(byte_off)));
+
+    // D-494 global.trace (ZWASM_DEBUG=global.trace): record the just-set value of
+    // a low global into the process-global `g_last[idx]` so a JIT run captures the
+    // FINAL asyncify-state values. X16 (IP0) is a short-lived scratch — safe here
+    // (global.set is not mid-call_indirect). `ws` is still live (just stored).
+    if (dbg.on("global.trace") and idx < call_profile.max_globals) {
+        const addr: u64 = @intFromPtr(&call_profile.g_last[idx]);
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovzImm16(16, @truncate(addr)));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovkImm16(16, @truncate(addr >> 16), 1));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovkImm16(16, @truncate(addr >> 32), 2));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovkImm16(16, @truncate(addr >> 48), 3));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImmW(ws, 16, 0));
+        // bump g_count[idx] (X16=addr, X17=loaded count); both IP regs, short-lived.
+        const caddr: u64 = @intFromPtr(&call_profile.g_count[idx]);
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovzImm16(16, @truncate(caddr)));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovkImm16(16, @truncate(caddr >> 16), 1));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovkImm16(16, @truncate(caddr >> 32), 2));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovkImm16(16, @truncate(caddr >> 48), 3));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImm(17, 16, 0));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encAddImm12(17, 17, 1));
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encStrImm(17, 16, 0));
+    }
 }
 
 /// i64 global.get — X-form `LDR Xd, [X23, #byte_off]`. The X-form

@@ -111,6 +111,8 @@ pub fn runWasmJitCaptured(
     const runner = @import("../engine/runner.zig");
     if (dbg.on("jit.callcount")) call_profile.reset();
     defer if (dbg.on("jit.callcount")) call_profile.dump();
+    if (dbg.on("global.trace")) call_profile.greset();
+    defer if (dbg.on("global.trace")) call_profile.gdump();
     var host = try wasi_host.Host.init(alloc);
     defer host.deinit();
     host.io = io;
@@ -181,6 +183,7 @@ pub fn runWasmJitCaptured(
             // `defer call_profile.dump()` — dump explicitly here so the
             // profiler works for trapping/crashing programs (D-494).
             if (dbg.on("jit.callcount")) call_profile.dump();
+            if (dbg.on("global.trace")) call_profile.gdump();
             surfaceJitTrap(io, trap_code);
             return 1;
         }

@@ -45,6 +45,28 @@ pub fn reset() void {
     @memset(&counts, 0);
 }
 
+// --- D-494 global.trace: last-value-per-global + set-count (low global indices) ---
+// The asyncify state machine lives in globals 0/1/2 (i32). The JIT global.set
+// emit stores the just-set value to `&g_last[idx]` (8-byte slots for simple
+// absolute addressing) and bumps `&g_count[idx]`, so a `ZWASM_DEBUG=global.trace`
+// JIT run records the FINAL value + total sets of each low global. Diff against
+// the interp's per-set trace (g1: 0→1→0) to see if the asyncify globals diverge.
+pub const max_globals: usize = 8;
+pub var g_last: [max_globals]i64 = [_]i64{0} ** max_globals;
+pub var g_count: [max_globals]u64 = [_]u64{0} ** max_globals;
+
+/// Print each touched low global as `[glast] g<N> last=<V> sets=<C>`.
+pub fn gdump() void {
+    for (g_count, 0..) |c, idx| {
+        if (c != 0) std.debug.print("[glast] g{d} last={d} sets={d}\n", .{ idx, g_last[idx], c });
+    }
+}
+
+pub fn greset() void {
+    @memset(&g_last, 0);
+    @memset(&g_count, 0);
+}
+
 test "bump increments per-index; reset clears; out-of-range is a no-op" {
     const testing = @import("std").testing;
     reset();
