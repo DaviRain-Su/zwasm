@@ -7,16 +7,16 @@ entries:
     layer: "code"
     status: "now"
     description: |-
-      CORRECTED 2026-06-22 (lesson 2026-06-22-d489-capture-path-investigation): NOT a codegen
-      MISCOMPILE — direct `zwasm run … --engine jit` is CORRECT (90B). The 130B failure reproduces
-      ONLY via the stdout-CAPTURE path (`writeSlice` appendSlice vs writeStreamingAll), x86_64-linux
-      only (arm64/Rosetta mask). A guest VALUE (fmt format-slice) is corrupted; rodata INTACT
-      (fmtwatch). RULED OUT: registers (unconditional caller-saved clobber → CLI still 90), red-zone
-      (+4096 frame pad), heap-layout (pre-size/8MB), build-env (Mac-cross==ubuntu). The diff-jit
-      gate's tinygo_json MISMATCH IS this capture bug; the `.auto`→JIT flip is NOT blocked by a
-      miscompile (direct JIT correct). Repro `zig build d489-repro` (scenario1). NEXT = rr/gdb
-      reverse-debug (ubuntu gdb-native + rr via nix-shell). FAST LOOP: Mac cross-build + scp.
-      ---- original (pre-correction, now-superseded) investigation notes below ----
+      RE-CORRECTED 2026-06-22 (lesson 2026-06-22-d489-capture-path-investigation): the
+      earlier-same-day "capture-path, NOT a miscompile" correction is FALSIFIED. Direct
+      `zwasm run --engine jit tinygo_json.wasm` is CORRUPT (130B) on BOTH Rosetta x86_64-macos
+      AND x86_64-linux; CORRECT (90B) on arm64 native + interp. So D-489 IS a genuine x86_64
+      codegen MISCOMPILE and DOES block the `.auto`→JIT flip. Capture-theory killed by 3 repro
+      experiments (A/B add-syscall→still 130; C pure-syscall-no-appendSlice→still 130) + grow
+      instrumentation (no memory.grow happens). The "Rosetta masks D-489" claim is FALSE —
+      Rosetta REPRODUCES it ⇒ FAST LOOP is Rosetta on Mac (no scp): `zig build
+      -Dtarget=x86_64-macos && <x86-bin> run --engine jit …/tinygo_json.wasm | wc -c`.
+      ---- original (NON-superseded) miscompile investigation below ----
       x86_64 JIT MISCOMPILE in a realworld Go program (tinygo_json.wasm). Under JIT on
       x86_64 the program's fmt output is mangled — `name=Alice age=30 city=Tokyo` becomes
       `%!(EXTRA string=Alice, int=30, string=Tokyo)` + `roundtrip: FAIL` (Go's fmt detects
@@ -157,7 +157,7 @@ entries:
       per-ZIR-op operand-stack value dump, first divergent = bug. Interp easy; JIT = per-op value-store
       emit (heavy) OR gdb on ubuntu native x86_64. See lesson 2026-06-21-d489-static-exhausted-run1-select-region.
     first_raised: "2026-06-21"
-    last_reviewed: "2026-06-21"
+    last_reviewed: "2026-06-22"
     refs: |-
       test/realworld/wasm/tinygo_json.wasm (fixture) + test/realworld/run_runner_jit.zig:235 (opt-in run gate)
       src/engine/codegen/x86_64/abi.zig:160 (4-GPR pool) + src/engine/codegen/x86_64/gpr.zig (spill staging) + src/wasi/fd.zig:81 (fdWrite — where the iovec trace was taken)

@@ -1,53 +1,50 @@
-# D-489 — JIT stdout-capture path corrupts a guest value (x86_64-linux only)
+# D-489 — x86_64 JIT miscompile (the "capture-path" theory is FALSIFIED)
 
-**Symptom**: `tinygo_json.wasm` under JIT prints CORRECT (90B) via the direct CLI
-(`zwasm run … --engine jit`, real-fd stdout) but CORRUPT (130B, Go fmt
-`%!(EXTRA …)` + `roundtrip: FAIL`) when stdout is CAPTURED to a buffer
-(`runWasmJitCaptured` with `host.stdout_buffer` set). The only code diff is in
-`src/wasi/fd.zig:writeSlice` (~157): `buffer.appendSlice(…)` (capture) vs
-`std_stream.writeStreamingAll(io)` (real-fd). **This is what the diff-jit gate's
-tinygo_json MISMATCH actually is — NOT a codegen miscompile** (direct JIT is
-correct, so the `.auto`→JIT flip is NOT blocked by a real miscompile; the gate
-gives a false signal via the capture path). x86_64-LINUX ONLY (arm64 + Rosetta
-x86_64-macos both MASK it). Deterministic, optimize-INDEPENDENT (Debug/ReleaseSafe/
-ReleaseFast all 130; ReleaseSafe does NOT panic).
+**Symptom**: `tinygo_json.wasm` under JIT on **any x86_64** prints CORRUPT (130B,
+Go fmt `name=%s age=%d city=%s` collapses to 23 NUL bytes + `%!(EXTRA …)` +
+`roundtrip: FAIL`). CORRECT (90B) on arm64 JIT and on interp (both arches). It is
+a **genuine x86_64 codegen MISCOMPILE** — the guest computes a wrong scalar that
+becomes a wrong iovec pointer/length (orig analysis: interp issues 3 writes
+`#2 off=90512 len=29` + `#3 len=14`; x86_64-JIT issues 2, `#2 off=90928 len=67`
+= pointer off by Δ416 + wrong length, leading bytes zero).
 
-**Minimal repro (committed)**: `zig build d489-repro` (`test/realworld/d489_repro.zig`)
-— scenario(1) "jit-alone" = 130 on x86_64-linux only.
+## The 2026-06-22 "capture-path correction" was WRONG — re-falsified same day
+The prior note claimed direct `zwasm run --engine jit` was correct (90) and only
+the stdout-CAPTURE path (`writeSlice` appendSlice) corrupted. **Disproven by
+direct measurement at HEAD**:
+- arm64 macos native CLI `--engine jit`: **90 ✓**
+- Rosetta x86_64-macos CLI `--engine jit`: **130 ✗**
+- x86_64-linux (Mac-cross) CLI `--engine jit`: **130 ✗**
 
-## Hypotheses DEFINITIVELY ruled out (do NOT re-walk)
-- **Registers** — an UNCONDITIONAL asm clobber of ALL caller-saved GPRs
-  (r10/r11/rcx/rdx/rsi/rdi/r8/r9) at `jit_dispatch.fd_write` return left the
-  non-capture CLI CORRECT (90). Callee-saved are host-preserved (callconv .c).
-  → JIT relies on NO register value across the host call.
-- **JIT frame / SysV red zone** — a +4096 prologue frame pad (`emit.zig:297`)
-  did NOT fix it. Spills are RBP-relative within the SUB-RSP frame, not below RSP.
-- **Heap layout** — pre-sized capture buffer (no realloc) AND an 8 MB heap pad
-  both still 130. Not allocation/adjacency.
-- **rodata overwrite** — `ZWASM_DEBUG=fmtwatch` shows the fmt format string
-  ("name=%s age=%d city=%s" @guest-off 86586) INTACT at all 9 fd_writes. So the
-  corrupted thing is a guest VALUE (the format-slice ptr/len fmt receives), not
-  the bytes.
-- **Build env** — a Mac-CROSS-built x86_64-linux-gnu binary on ubuntu = identical.
+Three experiments on `d489-repro` killed the capture theory:
+- **A/B** add a syscall to the capture path → still 130 (syscall does not correct).
+- **C** make the capture path byte-identical to real-fd (pure syscall, NO
+  appendSlice) → STILL 130. So `appendSlice` is NOT the corruptor.
+- **memory.grow instrumentation**: stderr empty — **no grow happens** during the
+  run → the realloc/stale-vm_base theory is also dead.
 
-**Remaining**: a pure MEMORY/DATA effect of heap-write(appendSlice) vs
-syscall(writeStreamingAll). NEXT = rr/gdb reverse-debug the wrong guest value.
+The capture vs real-fd "divergence" the prior session saw was an artifact of
+comparing a **Rosetta-masked** baseline (it believed Rosetta hid the bug) against
+the linux gate. **Rosetta x86_64-macos REPRODUCES it** — the handover's
+"Rosetta masks D-489-class bugs" claim is false for D-489.
 
-## TIPS (hard-won — for the next session)
-- **FAST LOOP**: edit on Mac → `zig build [d489-repro] -Dtarget=x86_64-linux-gnu
-  [-Doptimize=Debug]` → `scp` the ELF to `ubuntunote:/tmp/` → run on ubuntu. NO
-  slow remote nix build. (Cross-build runs the run-step on Mac which fails for
-  the d489-repro exe — ignore; the ELF is already in `.zig-cache`, `find` it.)
-- **TOOLS on ubuntu**: `gdb 15.1` native (`/usr/bin/gdb`); `rr 5.9` via
-  `nix-shell -p rr --run '…'`. lldb (in `nix develop`) has NO Zig type plugin —
-  raw regs/mem only; prefer gdb.
-- **dbg-gate caveat**: `dbg.on(ch)` is compiled OUT in ReleaseFast/Small AND the
-  CLI never calls `dbg.initFromEnv` (only `cli/main.zig`/`wasm_engine_new` do, and
-  the d489-repro exe path does) → `ZWASM_DEBUG=…` is a NO-OP in the `zwasm run`
-  CLI. For CLI instrumentation use UNCONDITIONAL code, or instrument via the
-  d489-repro exe (Debug) where the gate works (`fmtwatch` worked there).
-- **random_get confounds mem.cksum**: tinygo seeds a map via random_get, so raw
-  linear-memory fingerprints differ run-to-run regardless of the bug.
-- **SSH quoting**: use the outer/inner script pattern (`cd $HOME/repo && exec nix
-  develop --command bash /tmp/inner.sh`); `ssh host 'cd X && nix …'` re-parses the
-  `&&` in the login shell → nix runs in the wrong dir. PIE → break by NAME not addr.
+## What this unlocks
+- **FAST LOOP = Rosetta on Mac, no scp**: `zig build -Dtarget=x86_64-macos &&
+  <x86-bin> run --engine jit test/realworld/wasm/tinygo_json.wasm | wc -c`
+  (90 = fixed, 130 = bug). Cross-check arm64 native = 90.
+- Simplest repro is the plain CLI, not `d489-repro` (which still works as the
+  scenario-1 exit gate).
+
+## Standing root-cause narrowing (from the original, NOT superseded)
+Wrong scalar VALUE upstream in Go's fmt/reflect, x86_64-only → spill-pressure
+class (x86_64 has 4 allocatable GPRs vs arm64's 8). NOT a D-490 stage-alias bug
+(audited). emitMemOp EA in ISOLATION ruled out (bounded fixtures clean). Needs
+**dynamic value trace of the real tinygo_json run** (diff jit-vs-interp store
+addrs / stack values), not more synthetic fixtures — now runnable on Rosetta.
+
+## TIPS (still valid)
+- gdb 15.1 native on ubuntu; rr via `nix-shell -p rr`. lldb has no Zig plugin.
+- `ZWASM_DEBUG` is a NO-OP in the `zwasm run` CLI (gate not init'd there); works
+  in the `d489-repro` exe (Debug). `wasi.iovec` channel = host-received iovec
+  ground truth (engine-independent), already wired in `fd.zig:fdWrite`.
+- tinygo seeds a map via random_get → raw linear-mem fingerprints differ run-to-run.

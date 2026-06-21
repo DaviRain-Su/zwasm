@@ -25,19 +25,19 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
 
 ## Active bundle
 
-- **Bundle-ID**: D-489-capture-path-rr
-- **Cycles-remaining**: ~3 (until d489-repro scenario1 = 90)
-- **Continuity-memo**: D-489 = the JIT stdout-CAPTURE path corrupts a guest VALUE (the fmt format-slice) on
-  **x86_64-linux ONLY** (arm64/Rosetta mask it). **NOT a codegen miscompile** — direct `zwasm run … --engine jit` =
-  90B CORRECT; the diff-jit gate's tinygo_json MISMATCH(130B) IS this capture bug; the `.auto`→JIT flip is NOT blocked
-  by a miscompile. Registers (unconditional caller-saved clobber), red-zone (+4096 pad), heap-layout (pre-size/8MB),
-  rodata (fmtwatch INTACT), build-env (Mac-cross==ubuntu) ALL ruled out → pure heap-write(appendSlice) vs
-  syscall(writeStreamingAll) data effect in `src/wasi/fd.zig:writeSlice`. **Full investigation + hard-won TIPS (FAST
-  LOOP = Mac cross-build `-Dtarget=x86_64-linux-gnu` + `scp` to ubuntu; tools gdb-native + rr via `nix-shell -p rr`;
-  dbg-gate is OFF in the `zwasm run` CLI; SSH outer/inner script pattern) → lesson
-  `.dev/lessons/2026-06-22-d489-capture-path-investigation.md` + debt D-489.** NEXT = rr/gdb reverse-debug the
-  corrupted format-slice on ubuntu. (D-494 dfr2 is arm64-correct at HEAD — likely the same artifact; verify later.)
-- **Exit-condition**: `zig build d489-repro` scenario(1) prints `len=90 OK` (= diff-jit tinygo_json MATCHes).
+- **Bundle-ID**: D-489-x86_64-miscompile-trace
+- **Cycles-remaining**: ~4 (until CLI jit tinygo_json = 90)
+- **Continuity-memo**: D-489 = a GENUINE x86_64 JIT MISCOMPILE (the earlier-same-day "capture-path / NOT a
+  miscompile" correction is FALSIFIED — re-falsified by direct measurement). Direct `zwasm run --engine jit
+  tinygo_json.wasm` = **130 CORRUPT on BOTH Rosetta x86_64-macos AND x86_64-linux**; 90 OK on arm64 native + interp.
+  So it DOES block the `.auto`→JIT flip. Capture theory killed (3 repro experiments: add-syscall + pure-syscall both
+  still 130; no memory.grow happens). **"Rosetta masks D-489" is FALSE → FAST LOOP = Rosetta on Mac (NO scp):**
+  `zig build -Dtarget=x86_64-macos && <x86-bin> run --engine jit test/realworld/wasm/tinygo_json.wasm | wc -c`
+  (cross-check arm64 native = 90). Symptom = wrong guest SCALAR → wrong iovec ptr (Δ416) + len (orig analysis stands).
+  Class = x86_64 spill-pressure (4 GPRs vs arm64 8); NOT stage-alias (D-490), emitMemOp-isolated ruled out. **NEXT =
+  DYNAMIC value-trace of the REAL tinygo_json run (diff jit-vs-interp store addrs / stack), now on Rosetta.** Detail:
+  lesson `.dev/lessons/2026-06-22-d489-capture-path-investigation.md` + debt D-489. (D-494 dfr2 likely shares root.)
+- **Exit-condition**: `<x86_64 bin> run --engine jit tinygo_json.wasm | wc -c` = 90 (also `d489-repro` scenario1 = 90 OK).
 
 **WINDOWS GATE — 3-host GREEN @ed9332294** (2026-06-21): earlier host-example file-create failure was an ENV FLAKE,
 cleared on re-run (Win64 spec 25539/0, simd 25075/0, wasi 3/0). Recorded via `--record`. Intermittent
@@ -49,8 +49,8 @@ v128-GC sweep (D-491/492/493 fixed, D-495 guarded); arm64 JIT-exec ZERO divergen
 cljw consumed `to_cljw_06`. Tag-cut PENDED (release notes drafted `.dev/release_notes/v2.0.0-alpha.3.md`; last tag
 `v2.0.0-alpha.2`). cljw dogfooding PAUSED both sides. D-489 full detail → the `## Active bundle` above + its lesson.
 
-**Operational notes**: a JIT-codegen fix → verify on BOTH arm64 AND `-Dtarget=x86_64-macos` (NOT interp `test-spec`);
-but **D-489-class x86_64-LINUX bugs need the Mac-cross+ubuntu loop — Rosetta x86_64-macos MASKS them**. Phase 17
+**Operational notes**: a JIT-codegen fix → verify on BOTH arm64 AND `-Dtarget=x86_64-macos` (NOT interp `test-spec`).
+**Rosetta x86_64-macos reproduces D-489** (the prior "Rosetta MASKS x86_64 bugs" claim is FALSE — corrected). Phase 17
 完成形 plateau holds (spec 100%, fuzz 0-crash, surface audits clean 2026-06-18, realworld JIT 56/56 byte-match wasmtime
 GATING via `test-realworld-diff-jit`). D-475 table64-JIT PARKED (perf, Win64-risk). The prior 2026-06-20 "correctness
 sweep" standing directive is SUPERSEDED by the `.auto`→JIT flip-campaign priority (POSTURE above).
