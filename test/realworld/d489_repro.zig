@@ -51,5 +51,19 @@ pub fn main(init: std.process.Init) !void {
         if (jbuf.items.len != 90) try out.print("    [jit output]\n{s}\n", .{jbuf.items});
     }
 
+    // (3) JIT-captured with a PRE-SIZED buffer — if no in-run realloc fixes it,
+    // the bug is a cached pointer invalidated when the capture ArrayList grows.
+    {
+        var buf: std.ArrayList(u8) = .empty;
+        defer buf.deinit(gpa);
+        try buf.ensureTotalCapacity(gpa, 1 << 16);
+        const exit = cli_run.runWasmJitCaptured(gpa, io, bytes, null, &ARGV, &.{}, &.{}, &.{}, .{}, &buf, null) catch |e| {
+            try out.print("(3) jit pre-sized ERR {s}\n", .{@errorName(e)});
+            try out.flush();
+            return;
+        };
+        try out.print("(3) jit pre-sized buf: exit={d} len={d} {s}\n", .{ exit, buf.items.len, if (buf.items.len == 90) "OK" else "DIVERGED" });
+    }
+
     try out.flush();
 }
