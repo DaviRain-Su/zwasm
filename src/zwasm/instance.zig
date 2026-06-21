@@ -581,6 +581,34 @@ test "facade engine=.jit: opt-in JIT instance invokes a no-import compute export
     try testing.expectEqual(@as(i32, 5), results[0].i32);
 }
 
+test "facade engine=.jit: a SIMD-body export executes on the JIT (scalar boundary) (ADR-0200)" {
+    // (module (func (export "lane0") (result i32)
+    //   (i32x4.extract_lane 0 (v128.const i32x4 42 0 0 0))))
+    // SIMD ops run in the JIT-compiled body; the i32 result returns via the
+    // scalar thunk. This is the user's "SIMD must be JIT" constraint met through
+    // the embedding API — v128 AT the host-call boundary stays niche debt (D-477).
+    const bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, // type ()->i32
+        0x03, 0x02, 0x01, 0x00, // func type 0
+        0x07, 0x09, 0x01, 0x05, 0x6c, 0x61, 0x6e, 0x65, 0x30, 0x00, 0x00, // export "lane0"
+        0x0a, 0x19, 0x01, 0x17, 0x00, // code: size 0x17, 0 locals
+        0xfd, 0x0c, 0x2a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // v128.const i32x4 42,0,0,0
+        0xfd, 0x1b, 0x00, // i32x4.extract_lane 0
+        0x0b, // end
+    };
+    var eng = try _zwasm.Engine.init(testing.allocator, .{});
+    defer eng.deinit();
+    var mod = try eng.compile(&bytes);
+    defer mod.deinit();
+    var inst = try mod.instantiate(.{ .engine = .jit });
+    defer inst.deinit();
+
+    var results = [_]_zwasm.Value{.{ .i32 = 0 }};
+    try inst.invoke("lane0", &.{}, &results);
+    try testing.expectEqual(@as(i32, 42), results[0].i32);
+}
+
 test "facade engine=.jit: multi-result scalar export via invokeMulti (ADR-0200)" {
     // (module (func (export "swap2") (param i32 i32) (result i32 i32)
     //   local.get 1 local.get 0))  — returns (b, a)
