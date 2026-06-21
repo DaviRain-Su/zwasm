@@ -18,20 +18,17 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
 ## Active bundle
 
 - **Bundle-ID**: D-478-host-func-jit-bridge
-- **Cycles-remaining**: ~3 (5: facade accessor-read JIT arms → 6: `.auto`→JIT flip → 7: close)
-- **Continuity-memo**: INCREMENTS 1-4 DONE (@a83b28849 0-arg; @e001514d9 GP N-arg; @4675c345c FP; @195ba57ff
-  `(start)` runs under JIT). Host-func callbacks dispatch under JIT for **all-GP (i32/i64) args 0..4, OR ≤2 scalar
-  args with ≥1 FP (f32/f64), × result {void,i32,i64,f32,f64}** (`src/api/jit_host_bridge.zig`, arch-INDEPENDENT
-  comptime thunk-table). `instantiateJit` runs `(start)` via `JitInstance.runStart`. Gated `jit_callback{,_args,_fp}.c`
-  + `jit_start.c`. **USER DIRECTIVE 2026-06-21 (memory `project_auto_jit_flip_strategy`)**: the `.auto`→JIT flip was
-  attempted + REVERTED — premature, because facade accessor READS `inst.memory()/global()/table()` are interp-only
-  (`runtime orelse return null`, `src/zwasm/instance.zig:166/177/198`) → null on JIT. User: cljw breakage is NOT a
-  blocker (self-dev, no release, no users); proceed **あるべき論** — make JIT facade COMPLETE first, then flip; keep
-  interp tests AND add JIT-mode tests (dual-engine). **NEXT = increment 5: facade accessor-read JIT arms** — teach
-  `_zwasm.Memory`/`Global`/`Table` (each currently `{ rt: *Runtime }`, `src/zwasm/{memory,global,table}.zig`) to read
-  the JitRuntime instead (memory: `jit.owned.rt.vm_base`/`mem_limit` + `mem_ctx` for grow; globals: `globals_base`;
-  tables: `tables_ptr`). Make `instance.zig` `memory()/global()/table()` branch on `handle.jit`. Add `.jit`-engine
-  facade tests for each; keep the existing `.{}` (interp) tests. THEN increment 6 = the flip (fallback design below).
+- **Cycles-remaining**: ~2 (6: `.auto`→JIT flip → 7: close)
+- **Continuity-memo**: INCREMENTS 1-5 DONE (@a83b28849 0-arg; @e001514d9 GP N-arg; @4675c345c FP; @195ba57ff
+  `(start)`; **@3d701ddaf incr 5 = dual-engine facade accessors**). Host-func callbacks dispatch under JIT for
+  **all-GP (i32/i64) args 0..4, OR ≤2 scalar args with ≥1 FP, × result {void,i32,i64,f32,f64}**
+  (`src/api/jit_host_bridge.zig`). **Incr 5**: `Memory`/`Global`/`Table` now carry a union backing
+  (`interp:*Runtime | jit:*JitInstance`, `src/zwasm/{memory,global,table}.zig`) — memory read/write/slice/grow,
+  global get/set, table get/size/grow + externref set all work under JIT; `instance.zig` `memory()/global()/table()`
+  branch on `jitHandle()`; `runner.zig` adds `export{Global,Table}`/`growMemory`/`growTable`. ONE residual: JIT
+  funcref `Table.set` @panics (ADR-0068 funcptrs mirror, folded into D-478). Dual-engine tests added per facade.
+  **NEXT = increment 6: the `.auto`→JIT flip** (fallback design below) — facade reads no longer return null on JIT,
+  so the blocker that reverted the prior flip attempt is cleared. Keep interp tests AND `.jit` tests (dual-engine).
   **Flip fallback design (for incr 6)**: instantiateJit has NO host-observable side effect before `(start)`, so any
   pre-start null is interp-fall-back-eligible; only a start that RAN+trapped (`Error.Trap`) must not re-run → signal
   via `fallback_ok` out-param. Linker (`linker.zig:795`) stays `.interp` (separate engine-selection slice). Pin
@@ -59,8 +56,8 @@ nonzero, gated). (1b) non-WASI host-func dispatch under JIT — INCREMENT 1 LAND
 0-arg→{void,i32} now dispatches, N-scalar-arg next. + proc_exit exit-code (jit_dispatch.zig:313). (2)
 `.auto`→JIT flip once host-func arities are good-enough. (3)
 WASI via the Linker (holds OWN wasi_host, linker.zig:95 — facade `Module.instantiate` + store.wasi_host
-path works now; Linker path is separate). (4) accessor READS memory/global/table JIT arms (return null
-today). (5) v128-at-boundary + Win64 ≥4-param stack-spill = D-477 niche slivers. Likely bundle the
+path works now; Linker path is separate). (4) accessor reads/mutators **DONE @3d701ddaf incr 5** (dual-engine
+facade; funcref Table.set residual in D-478). (5) v128-at-boundary + Win64 ≥4-param stack-spill = D-477 niche slivers. Likely bundle the
 host-import/Linker work if it proves multi-cycle. **OR** fall back to the STANDING CORRECTNESS-SWEEP
 directive (below).
 
