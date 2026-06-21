@@ -31,12 +31,15 @@ on JIT instances @f68532e44** (instantiateJit builds it parallel to exports_stor
 func_typeidxs` → `lookupSourceExportType`/by-name discovery + C `wasm_func_call` now resolve on `.jit`; unit-proven:
 discover via `wasm_instance_exports` + invoke → add(2,3)=5). Cap api/instance.zig 3700→3800 (ADR-0099 amend, user-auth).
 
-**NEXT = RE-LAND the `.auto` flip + VERIFY.** Re-apply 9fcf9fb5b's CODE (the `fallback_ok`-threaded `.auto` branch in
-instantiateInternal + instantiateJit `fallback_ok` param + linker.zig `.interp` pin + module.zig doc + the
-`engine=.auto`→JIT facade test) — NOT the cap bump (already 3800). Then `zig build test` + push + **kick ubuntu (the
-ONLY verification of the x86_64 wast_runtime_runner-under-JIT path — Mac can't repro, it falls back to interp).**
-ubuntu green → flip re-landed; red → revert + deeper investigate. Residual JIT gaps (auto-fallback): funcref
-`Table.set` @panic + v128/wider host-func sigs (D-478/D-477). cljw aligned (to_cljw_03 consumed; default `.interp`).
+**`.auto` FLIP RE-LANDED @f62e08bac** (atop the C-path fixes) — Mac `zig build test` green incl the
+`engine=.auto`→JIT facade test. **AWAITING THE DECISIVE ubuntu x86_64 GATE** (the ONLY host that exercises the
+`wast_runtime_runner`-under-JIT path; Mac falls back to interp, can't repro). **Step 0.7 NEXT-TURN DECISION**:
+ubuntu @f62e08bac OK → flip COMPLETE (then: update to_cljw with `.auto`=JIT-first-again + pin; verify windows; sweep
+on). ubuntu @f62e08bac **FAIL → the C-path fixes did NOT fully cover the x86_64 path: `git revert` the flip
+(f62e08bac) ONLY (keep exportFuncSig+export_types), then deep-investigate which other interp-only field the JIT
+wast path reads** (candidates beyond export_types: the func-handle `wasm_func_type` sig source, or an arm64-JIT-build
+divergence that masks it on Mac). Residual JIT gaps (auto-fallback): funcref `Table.set` @panic + v128/wider host-func
+sigs (D-478/D-477). cljw aligned (to_cljw_03 consumed; default `.interp`).
 
 **STANDING DIRECTIVE = CORRECTNESS SWEEP** (user 2026-06-20, memory `feedback_correctness_sweep_phase`): high-value
 bar OFF. Sweep toward 0% the 3 gap classes — (1) wasmtime-works-zwasm-doesn't, (2) wasm/wasi spec non-conformance,
