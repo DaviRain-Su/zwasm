@@ -15,10 +15,11 @@ realworld interp-vs-jit 56/56 byte-match; regalloc overlap-verifier 0 fails; uni
 The "capture-path / NOT-a-miscompile" theory was FALSIFIED (Rosetta reproduces; direct CLI corrupt). Diagnostic oracle
 kept: `ZWASM_DEBUG=regverify` runs the overlap verifier in the prod compile path.
 
-**NEXT**: confirm 3-host `test-all` green (pushed; x86_64 ubuntu = full-spec gate) at Step 0.7. THEN open a `.auto`→JIT
-flip BUNDLE — it is NOT a one-line default flip: site = `src/api/instance.zig:934-937` (TODO ADR-0200 routing) AND a
-SECOND past-revert cause at `:2878` (JIT instance `exports_storage` population). D-477 (wide host-sigs) rejects at
-instantiation → safe interp fallback → NOT a blocker. D-489/D-494 cleared; go/sha all match both arches. **Tag-cut PENDED**
+**ubuntu full test-all GREEN @7cfd14ee8** (full spec 25539 on x86_64 Linux — the regalloc fix is VALIDATED, no
+regression). windows verdict pending → verify next Step 0.7. **NEXT**: open a `.auto`→JIT flip BUNDLE — NOT a one-line
+default flip: site = `src/api/instance.zig:934-937` (TODO ADR-0200 routing) AND a SECOND past-revert cause at `:2878`
+(JIT instance `exports_storage` population). D-477 (wide host-sigs) rejects at instantiation → safe interp fallback →
+NOT a blocker. D-489/D-494 cleared; go/sha all match both arches. **Tag-cut PENDED**
 (release notes drafted `.dev/release_notes/v2.0.0-alpha.3.md`; last tag `v2.0.0-alpha.2`). **cljw dogfooding PAUSED both
 sides**. The `.auto`→JIT FLIP itself is the next campaign step (separate change) AFTER 3-host green — do NOT auto-tag.
 
