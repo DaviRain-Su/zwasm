@@ -3,12 +3,28 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Current state — Phase 17, STOPPED for USER DECISION: `.auto`→JIT flip = a CAMPAIGN, not overnight (D-496)
+## Current state — Phase 17, ACTIVE CAMPAIGN: JIT-C-API surface → `.auto`→JIT flip → tag alpha.3 (user chose C)
 
-**STOPPED 2026-06-22 (bucket-2/3, surfaced to user).** The overnight directive was: complete `.auto`→JIT flip → cljw
-coordinate → tag `v2.0.0-alpha.3` → stop. Reality: the FULL `.auto`→JIT flip is a **multi-cycle JIT-C-API campaign**,
-NOT an overnight task — so it is NOT done, and the tag (its precondition) was NOT cut. Tree restored to the GREEN
-committed baseline (dbda9f873); cron `224c0c30` DELETED; loop NOT re-armed (clean stop).
+**USER DECISION 2026-06-22: option C** — run the FULL JIT-C-API flip CAMPAIGN (ADR-0153 five-phase), THEN `.auto`→JIT,
+THEN tag `v2.0.0-alpha.3`. Multi-cycle (overnight+). Drive autonomously. cljw confirmed the green baseline `8a4a01905`
+is CLEAN (from_cljw_06 LOAD-regression alarm RETRACTED = false alarm; their wasm e2e all green) — no blocker. cljw
+stays in WAIT for the tag (end of campaign).
+
+## Active rework campaign
+
+- **Campaign-ID**: jit-capi-surface-flip (D-496)
+- **Goal**: a JIT-backed instance exposes the FULL embedding C-API surface (memory/table/global externs via
+  `wasm_instance_exports`; `wasm_extern_as_memory|table|global`; `zwasm_instance_get_func`; introspection
+  `wasm_extern_type`/`wasm_memory_type`/`wasm_table_type`/`wasm_global_type`) — so `.auto`→JIT can be the default with
+  ZERO C-API regressions. Then flip `.auto`→JIT (keep the LINKER `.interp` for now — it caused ~36 of the 69) + re-land
+  the CLI `--fuel`/`--timeout` JIT-arm. Exit = full `zig build test` + 3-host green WITH `.auto`=JIT, then tag.
+- **Phase**: I Investigation (IN PROGRESS) — map how the interp instance exposes memory/table/global externs+accessors+
+  introspection, enumerate the exact JIT gaps + blast-radius (the ~30 C-API failures), ROI → findings doc + ADR.
+- **Phases (ADR-0153)**: I Investigation → II correctness-first tests (pin current interp behaviour; JIT-accessor
+  characterization) → III design (ADR for the JIT C-API extern/accessor surface) → IV impl (TDD, green at every commit)
+  → V retro + flip + tag. I+II are hard gates before redesign code.
+- **Continuity-memo**: 69-failure breakdown in D-496. Full flip routing/run.zig-fuel-arm code re-implementable per D-496
+  refs + git reflog. Green baseline = `8a4a01905` (regalloc fix + docs).
 
 **What IS done (committed, 3-host green)**: D-489 + D-494 — the two real flip blockers — RESOLVED @462ea1e57 (regalloc
 LSRA dual spill-slot mint collision; fix = unify on `n_spill_minted`; ubuntu+windows test-all OK; realworld 56/56 both
