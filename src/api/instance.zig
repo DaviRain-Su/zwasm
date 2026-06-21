@@ -1,4 +1,4 @@
-// FILE-SIZE-EXEMPT: (cap=3500) C ABI translation catalog (Zone 3 boundary layer); no separable subsystem per ADR-0099 §D2 P3 evaluation (see .dev/architecture/api_instance_audit.md, §9.12-G (c)). 10.F D-173/D-172 accessor surfaces extended exempt cap 2500→2800→3000; cyc174 raised 3000→3200 (ADR-0099 amend) for the Wasm start-section execution feature (a runtime-feature add in instantiateInternal, NOT accessor bloat) — consistent with the non-separable P3 eval + the validator.zig cyc158 precedent. P13 §13.2 raised 3200→3300 (ADR-0099 amend) for the runtime-entity host-creation surface — standalone-entity (instance==null) branches in the global/table/memory accessors + the buildBindings host-import arm; the `_new` CONSTRUCTORS are already split to extern_new.zig, this is the irreducible accessor/binding half coupled to the entity structs. ADR-0184 raised 3300→3400 (ADR-0099 amend 2026-06-13) for the engine-owned io plumbing (Threaded ownership + Host.io wiring + preopen materialization), same runtime-feature-add class. ADR-0200 raised 3400→3500 (ADR-0099 amend 2026-06-21) for the JIT-backed engine fork (EngineKind + instantiateJit + the per-instance engine branch in instantiateInternal), same runtime-feature-add class. D-171 restructure remains for a genuine separable subsystem.
+// FILE-SIZE-EXEMPT: (cap=3700) C ABI translation catalog (Zone 3 boundary layer); no separable subsystem per ADR-0099 §D2 P3 evaluation (see .dev/architecture/api_instance_audit.md, §9.12-G (c)). 10.F D-173/D-172 accessor surfaces extended exempt cap 2500→2800→3000; cyc174 raised 3000→3200 (ADR-0099 amend) for the Wasm start-section execution feature (a runtime-feature add in instantiateInternal, NOT accessor bloat) — consistent with the non-separable P3 eval + the validator.zig cyc158 precedent. P13 §13.2 raised 3200→3300 (ADR-0099 amend) for the runtime-entity host-creation surface — standalone-entity (instance==null) branches in the global/table/memory accessors + the buildBindings host-import arm; the `_new` CONSTRUCTORS are already split to extern_new.zig, this is the irreducible accessor/binding half coupled to the entity structs. ADR-0184 raised 3300→3400 (ADR-0099 amend 2026-06-13) for the engine-owned io plumbing (Threaded ownership + Host.io wiring + preopen materialization), same runtime-feature-add class. ADR-0200 raised 3400→3700 (ADR-0099 amend 2026-06-21) for the JIT-backed engine surface (EngineKind + instantiateJit + the per-instance engine branch in instantiateInternal; the wasm_func_call JIT arm + Val↔JIT marshalling helpers + JIT exports_storage population — all C-ABI translation, NOT a separable subsystem: extracting the ~80-LOC marshalling cluster would be an N3 shallow module). D-171 restructure increasingly warranted as ADR-0200 grows the C surface — the genuine separable-subsystem split.
 //! Engine / Store / Module / Instance / Func / Extern surface of
 //! the C ABI binding (§9.5 / 5.0 chunk d carve-out from
 //! `wasm.zig` per ADR-0007).
@@ -687,6 +687,35 @@ fn instantiateJit(store: *Store, module: *const Module, limits: InstantiateLimit
         .runtime = null,
         .jit = jit,
     };
+
+    // ADR-0200 — surface the JIT's func exports through the C-API discovery path
+    // (`wasm_instance_exports` + Func handles). The JIT compiles NO
+    // `exports_storage`/`func_ptrs_storage` (interp-only), so map its
+    // `compiled.exports` (name→funcidx) to `sections.Export{name, .func, idx}`.
+    // The name slices borrow `jit.compiled.arena` (lives in the JitInstance); the
+    // slice itself lives on a minimal per-instance arena freed in the JIT teardown.
+    const fexports = jit.compiled.exports;
+    if (fexports.len > 0) {
+        const arena = alloc.create(std.heap.ArenaAllocator) catch {
+            jit.deinit(alloc);
+            alloc.destroy(jit);
+            alloc.destroy(inst);
+            return null;
+        };
+        arena.* = std.heap.ArenaAllocator.init(alloc);
+        const exps = arena.allocator().alloc(sections.Export, fexports.len) catch {
+            arena.deinit();
+            alloc.destroy(arena);
+            jit.deinit(alloc);
+            alloc.destroy(jit);
+            alloc.destroy(inst);
+            return null;
+        };
+        for (fexports, exps) |fe, *ex| ex.* = .{ .name = fe.name, .kind = .func, .idx = fe.func_idx };
+        inst.arena = arena;
+        inst.exports_storage = exps;
+    }
+
     // D-174 live-instance registry so wasm_store_delete cascades teardown.
     // EXEMPT-FALLBACK: D-174 — append OOM degrades to forward-order-only teardown (matches interp path).
     store.live_instances.append(alloc, @ptrCast(inst)) catch {};
@@ -972,11 +1001,19 @@ pub export fn wasm_instance_delete(i: ?*Instance) callconv(.c) void {
     // already-freed handle.
     removeFromLiveInstances(store, handle);
     if (handle.jit) |jp| {
-        // ADR-0200 — JIT-backed instance: free the heap-pinned JitInstance.
+        // ADR-0200 — JIT-backed instance: free the heap-pinned JitInstance, then
+        // the per-instance arena holding `exports_storage` (its name slices
+        // borrowed jit.compiled.arena, freed just above, and are not read here).
         const jit: *runner.JitInstance = @ptrCast(@alignCast(jp));
         jit.deinit(alloc);
         alloc.destroy(jit);
         handle.jit = null;
+        if (handle.arena) |arena| {
+            arena.deinit();
+            alloc.destroy(arena);
+            handle.arena = null;
+        }
+        handle.exports_storage = &.{};
     }
     if (handle.runtime) |rt| {
         if (handle.arena) |arena| {
@@ -1730,6 +1767,17 @@ pub export fn wasm_func_call(
     const inst = handle.instance orelse return null;
     const store = inst.store orelse return null;
     const alloc = storeAllocator(store) orelse return null;
+    // ADR-0200 — JIT-backed instance: route to the native engine. JIT invoke is
+    // by-NAME, so reverse-map func_idx → export name via exports_storage (a
+    // DIVERGENCE from the interp funcidx-keyed `func_ptrs_storage` path; a
+    // func_idx with no export name is unreachable through the C handle anyway).
+    if (inst.runtime == null) {
+        if (inst.jit) |jp| {
+            const jit: *runner.JitInstance = @ptrCast(@alignCast(jp));
+            return wasmFuncCallJit(jit, inst, store, alloc, handle.func_idx, args, results);
+        }
+        return null;
+    }
     const rt = inst.runtime orelse return null;
     // `func_ptrs_storage` is the full funcidx-space table
     // (imports first, then defined). For exports referencing
@@ -1785,6 +1833,96 @@ pub export fn wasm_func_call(
     };
     rt.operand_len = op_base;
     return null;
+}
+
+/// ADR-0200 — `wasm_func_call` JIT arm. Resolve func_idx→export name, get the
+/// sig, marshal `Val[]` args → u64, run via `JitInstance.invoke`/`invokeMulti`,
+/// marshal results back. Scalar args+results only (i32/i64/f32/f64); ref/v128
+/// or an uncovered shape → `binding_error` trap (mirrors the Zig facade arm).
+fn wasmFuncCallJit(jit: *runner.JitInstance, inst: *Instance, store: *Store, alloc: std.mem.Allocator, func_idx: u32, args: ?*const ValVec, results: ?*ValVec) ?*Trap {
+    const name = jitExportName(inst, func_idx) orelse return allocTrap(alloc, store, .binding_error);
+    const sig = jit.exportFuncSig(alloc, name) orelse return allocTrap(alloc, store, .binding_error);
+    const args_size = if (args) |a| a.size else 0;
+    const results_size = if (results) |r| r.size else 0;
+    if (args_size != sig.params.len) return allocTrap(alloc, store, .binding_error);
+    if (results_size != sig.results.len) return allocTrap(alloc, store, .binding_error);
+    if (sig.params.len > 16 or sig.results.len > 16) return allocTrap(alloc, store, .binding_error);
+
+    var abuf: [16]u64 = undefined;
+    if (args) |a| if (a.data) |dp| {
+        for (0..a.size) |idx| abuf[idx] = cValToJitBits(dp[idx]);
+    };
+
+    if (sig.results.len > 1) {
+        var rbuf: [16]runner.TypedResult = undefined;
+        jit.invokeMulti(alloc, name, abuf[0..sig.params.len], rbuf[0..sig.results.len]) catch |err| return jitErrToTrap(err, jit, alloc, store);
+        if (results) |r| if (r.data) |dp| {
+            for (0..sig.results.len) |idx| dp[idx] = typedResultToCVal(rbuf[idx]) orelse return allocTrap(alloc, store, .binding_error);
+        };
+        return null;
+    }
+
+    const got = jit.invoke(alloc, name, abuf[0..sig.params.len]) catch |err| return jitErrToTrap(err, jit, alloc, store);
+    if (sig.results.len == 1) {
+        if (results) |r| if (r.data) |dp| {
+            const bits = got orelse return allocTrap(alloc, store, .binding_error);
+            dp[0] = jitBitsToCVal(sig.results[0], bits) orelse return allocTrap(alloc, store, .binding_error);
+        };
+    }
+    return null;
+}
+
+/// Reverse-map a wasm func index to its first export name (ADR-0200). Null when
+/// the func_idx is not an exported function (unreachable through a C Func handle).
+fn jitExportName(inst: *const Instance, func_idx: u32) ?[]const u8 {
+    for (inst.exports_storage) |exp| {
+        if (exp.kind == .func and exp.idx == func_idx) return exp.name;
+    }
+    return null;
+}
+
+/// Marshal a C `Val` to the JIT host-invoke u64 bit-carrier (i32/f32 in low 32).
+fn cValToJitBits(v: Val) u64 {
+    return switch (v.kind) {
+        .i32 => @as(u64, @as(u32, @bitCast(v.of.i32))),
+        .i64 => @bitCast(v.of.i64),
+        .f32 => @as(u64, @as(u32, @bitCast(v.of.f32))),
+        .f64 => @bitCast(v.of.f64),
+        .anyref, .funcref => if (v.of.ref) |rp| refPayload(rp) else 0,
+    };
+}
+
+/// Decode a JIT scalar result u64 into a C `Val` by valtype; null for ref/v128
+/// (not retrievable via the single-u64 arm — surfaces as a binding_error trap).
+fn jitBitsToCVal(vt: zir.ValType, bits: u64) ?Val {
+    return switch (vt) {
+        .i32 => .{ .kind = .i32, .of = .{ .i32 = @bitCast(@as(u32, @truncate(bits))) } },
+        .i64 => .{ .kind = .i64, .of = .{ .i64 = @bitCast(bits) } },
+        .f32 => .{ .kind = .f32, .of = .{ .f32 = @bitCast(@as(u32, @truncate(bits))) } },
+        .f64 => .{ .kind = .f64, .of = .{ .f64 = @bitCast(bits) } },
+        .v128, .ref => null,
+    };
+}
+
+/// Decode a self-describing JIT `TypedResult` (multi-value) into a C `Val`; null
+/// for ref carriers (need a `*Ref` handle — deferred; surfaces binding_error).
+fn typedResultToCVal(tr: runner.TypedResult) ?Val {
+    return switch (tr) {
+        .i32 => |x| .{ .kind = .i32, .of = .{ .i32 = @bitCast(x) } },
+        .i64 => |x| .{ .kind = .i64, .of = .{ .i64 = @bitCast(x) } },
+        .f32 => |x| .{ .kind = .f32, .of = .{ .f32 = @bitCast(x) } },
+        .f64 => |x| .{ .kind = .f64, .of = .{ .f64 = @bitCast(x) } },
+        .funcref, .externref => null,
+    };
+}
+
+/// Map a JIT engine error to a C `*Trap`. Runtime traps carry a numeric
+/// `trap_kind` on the JIT runtime (generic bucket → unreachable, D-292).
+fn jitErrToTrap(err: runner.Error, jit: *runner.JitInstance, alloc: std.mem.Allocator, store: *Store) ?*Trap {
+    return switch (err) {
+        error.Trap => allocTrap(alloc, store, trap_surface.jitTrapCode(jit.owned.rt.trap_kind) orelse .unreachable_),
+        else => allocTrap(alloc, store, .binding_error),
+    };
 }
 
 // ============================================================
@@ -2354,6 +2492,47 @@ test "wasm_instance_exports: surfaces declared exports + dispatches via wasm_ext
     const trap = wasm_func_call(f, &args, &results);
     try testing.expect(trap == null);
     try testing.expectEqual(@as(i32, 42), results_data[0].of.i32);
+}
+
+test "ADR-0200 C-path JIT: wasm_instance_exports + wasm_func_call on a JIT instance (add 2,3 → 5)" {
+    const e = wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer wasm_engine_delete(e);
+    const s = wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer wasm_store_delete(s);
+    // (module (func (export "add") (param i32 i32) (result i32) local.get 0 local.get 1 i32.add))
+    var bytes = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x07, 0x01, 0x60, 0x02, 0x7f, 0x7f, 0x01, 0x7f, // type (i32 i32)->i32
+        0x03, 0x02, 0x01, 0x00, // func type 0
+        0x07, 0x07, 0x01, 0x03, 0x61, 0x64, 0x64, 0x00, 0x00, // export "add" func 0
+        0x0a, 0x09, 0x01, 0x07, 0x00, 0x20, 0x00, 0x20, 0x01, 0x6a, 0x0b, // i32.add
+    };
+    const bv: ByteVec = .{ .size = bytes.len, .data = &bytes };
+    const m = wasm_module_new(s, &bv) orelse return error.ModuleAllocFailed;
+    defer wasm_module_delete(m);
+    // Force the JIT engine via the facade entry; stock `wasm_instance_new`
+    // hardcodes `.auto` (= interp) — the C `zwasm_instance_new_ex` knob is next.
+    const inst = instantiateFacade(s, m, null, .{}, .jit) orelse return error.InstanceAllocFailed;
+    defer wasm_instance_delete(inst);
+
+    var exports: ExternVec = .{ .size = 0, .data = null };
+    wasm_instance_exports(inst, &exports);
+    defer wasm_extern_vec_delete(&exports);
+    try testing.expectEqual(@as(usize, 1), exports.size);
+    const ext = exports.data.?[0] orelse return error.MissingExtern;
+    try testing.expectEqual(@as(u8, @intFromEnum(ExternKind.func)), wasm_extern_kind(ext));
+
+    const fc = wasm_extern_as_func(ext) orelse return error.NotFunc;
+    var args_data = [_]Val{
+        .{ .kind = .i32, .of = .{ .i32 = 2 } },
+        .{ .kind = .i32, .of = .{ .i32 = 3 } },
+    };
+    const args: ValVec = .{ .size = 2, .data = &args_data };
+    var results_data: [1]Val = undefined;
+    var results: ValVec = .{ .size = 1, .data = &results_data };
+    const trap = wasm_func_call(fc, &args, &results);
+    try testing.expect(trap == null);
+    try testing.expectEqual(@as(i32, 5), results_data[0].of.i32);
 }
 
 test "wasm_instance_exports: empty when no export section" {
