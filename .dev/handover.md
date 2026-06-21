@@ -26,10 +26,11 @@ COMPLETE (veneer→buffer-path fall-through); 3-arg+ ride the generic buffer-wri
 **`.auto`→JIT flip = DEBT-GATED, NOT active, NOT urgent.** Twice-reverted (last @7dbdb973c; origin green). It's a
 FORCING FUNCTION that exposed real x86_64 JIT bugs Mac-arm64 masks. Re-land is gated on: **(a) D-489** — an x86_64
 SPILL-PRESSURE miscompile in tinygo_json (wrong scalar value / iovec under heavy frame; deep multi-session debug,
-2 subagents narrowed the class but not the line — its v128-select candidate D-490 was ruled out); **(b)** pin the
-interp-conformance runners (`wast_runtime_runner`) to `.interp`; **(c)** wide-shape `wrapper_thunk.emit` (D-477,
-Win64>3/v128/>2-result — only the EXTREME wasmtime conformance corpus needs it, no real consumer). All debt-tracked
-(D-489/D-490/D-477/D-478). **This does NOT block cljw** (explicit `.jit` works) → do NOT let the D-489 deep-debug
+2 subagents narrowed the class but not the line — its v128-select candidate **D-490 was a SEPARATE bug, now
+FIXED @eddd74941** with a gated regression fixture: x86_64 `emitV128Select` spill-stage alias, verified red→green);
+**(b)** pin the interp-conformance runners (`wast_runtime_runner`) to `.interp`; **(c)** wide-shape
+`wrapper_thunk.emit` (D-477, Win64>3/v128/>2-result — only the EXTREME wasmtime conformance corpus needs it, no real
+consumer). Debt-tracked (D-489/D-477/D-478/D-491). **This does NOT block cljw** (explicit `.jit` works) → do NOT let the D-489 deep-debug
 stall the loop; pick it up as a focused campaign or alongside other sweep work. **NEXT = STANDING CORRECTNESS SWEEP.**
 
 **STANDING DIRECTIVE = CORRECTNESS SWEEP** (user 2026-06-20, memory `feedback_correctness_sweep_phase`): high-value

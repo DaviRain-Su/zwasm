@@ -3,48 +3,6 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
-  - id: "D-490"
-    layer: "code"
-    status: "now"
-    description: |-
-      x86_64 `emitV128Select` (op_simd.zig:953-959) spill-stage REGISTER COLLISION (found
-      during D-489 audit; a REAL latent bug but NOT the D-489 cause — see below). When the
-      v128 `select`'s i32 cond is register-spilled, `gprLoadSpilled(cond_v, 0)` returns
-      `spill_stage_gprs[0]` == the SAME reg as `r_mask`; the code then does `XOR r_mask,r_mask`
-      BEFORE `TEST cond_r,cond_r`, zeroing cond before testing → ZF always set → CMOV never
-      fires → lane mask stays 0 → v128 select returns val2 for every lane (x86_64-only,
-      spilled-cond-only). arm64 reads cond via CMP-immediately-after-load + transient mask reg
-      (correct). This handler predates the D-330 "TEST-first" fix that emitInt/FpSelect got.
-      READY FIX (mirrors D-330): replace L956-959 with TEST cond_r,cond_r → SETNE r_neg1 →
-      MOVZX r_neg1,r_neg1 → XOR r_mask,r_mask → SUB r_mask,r_neg1 (captures cond into r_neg1
-      ≠ cond_r BEFORE clobbering r_mask; builds 0/-1 mask). All encoders exist (encSetccR,
-      encMovzxR32R8, encSubRR). BLOCKER TO VERIFY: a v128 `select_typed` (0x1c) fixture is
-      REJECTED by zwasm's validator (`BadValType at op 0x1c`) — so STEP 0 is to confirm
-      whether v128 `select` is even reachable + build a spill-pressure fixture that triggers
-      it before committing the (untested) codegen fix. Do NOT commit the fix without a
-      red→green test. REACHABILITY RESOLVED 2026-06-21: v128 select IS reachable via the
-      UNTYPED `select` (0x1b) — v128 is a number type so untyped select validly handles it
-      (spec simd_select test uses 0x1b + passes; runs under JIT — interp has NO v128, traps
-      Unreachable by design). VERIFY ATTEMPT: an untyped-v128-select fixture with cond spilled
-      via a SINGLE `(call)` did NOT trigger (cond stayed in a real reg, not the stage reg) —
-      arm64 + x86_64 jit both gave the correct 170. TRIGGER NEEDS the subagent's >16-live-locals
-      heavy frame so regalloc forces the operands to spill. **VERIFIED + RE-SCOPED 2026-06-21:
-      it's MULTI-ARCH, not x86_64-only.** Repro (24 i32 locals all live across the select +
-      untyped v128 `select`, cond via local; `i32x4.extract_lane 0`): v128 select returns val2
-      REGARDLESS of cond on BOTH arm64 AND x86_64 jit (cond=0 and cond=2 both → val2). A SCALAR
-      i32 select in the identical heavy frame is CORRECT (interp==jit, respects cond) → proves
-      it's v128-select-specific, not cond/local-spill. ROOTS DIFFER per arch: x86_64 = the
-      cond/r_mask alias (above); ARM64 = a known SPILL-EXEMPT V-reg gap — `emitV128Select`
-      (arm64/op_simd.zig:490) loads only stages 0/1 of the 3 V operands (mask/val1/val2); val2
-      at "stage 2" is unsupported, so under a heavy frame the BSL operands are wrong. FULL FIX =
-      multi-arch SIMD-spill completion (D-034-class; arm64 needs the 3rd V spill stage,
-      `qLoadSpilled` stage-2 + the x86_64 alias fix). NICHE (v128 select with all operands
-      spilled under heavy register pressure — rare) + NOT cljw-blocking → low-pri. Gen the repro
-      with a 24-local wat (see git log @<this commit> note) when working it.
-    first_raised: "2026-06-21"
-    last_reviewed: "2026-06-21"
-    refs: |-
-      src/engine/codegen/x86_64/op_simd.zig:941-959 (emitV128Select) ; arm64 sibling op_simd.zig:484-488 ; pattern: op_alu_int.zig:1093 / op_alu_float.zig:616 (TEST-first scalar selects)
   - id: "D-491"
     layer: "code"
     status: "note"
@@ -97,8 +55,8 @@ entries:
       op-set (opcode diff empty) yet pass → NOT an op-family bug → a spill-staging /
       large-frame defect. memory.copy ruled out (byte-only experiment gave a fatal signal,
       not a fix). AUDIT round 2 (subagent a1e55763) found a real spill collision in
-      `emitV128Select` (now D-490) but **tinygo_json uses NO v128 select (0 bitselect; 0x1c
-      select_typed is validator-rejected) → D-490 is NOT D-489's cause**. So the bug is in a
+      `emitV128Select` (was D-490, FIXED @eddd74941 — x86_64-only, verified red→green) but
+      **tinygo_json uses NO v128 select → that was NOT D-489's cause**. So the bug is in a
       GPR handler the audit "cleared" (scalar select / div-rem / wide-mul / ALU / patchRel32 /
       gpr.zig disp) — i.e. one of those clears is WRONG, OR a path not audited. STILL OPEN.
       DRIVE (next, FRESH focused session — this is a deep multi-cycle x86_64 spill debug, do
