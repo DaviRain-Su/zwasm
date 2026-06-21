@@ -28,6 +28,12 @@ Exhaustively investigated this session (built jit.callcount/jit.calledge profile
   asyncify context. **NEXT = JIT half of global.trace** (instrument JIT global.set emit, op_globals.zig, ~1 site/arch):
   diff jit g1/g2 vs interp 0→1→0 on dfr2 — if jit's g1 doesn't follow, that's the asyncify divergence. Tractable + targeted.
 
+**WINDOWS GATE (D-495 batch @c3c4e8447) — ENV FLAKE, not a code regression** (2026-06-21): build summary 5736/6030
+passed; ALL suites green on Win64 (wasm-3.0-assert 86/0, memory64/gc/multi-memory, realworld 56 PASS, component 170/0,
+wasi 3/0). The 1 failed step = a host-embedding EXAMPLE (`zwasm-zig-host-hello.exe` + rust `main.rs`) panicking
+`failed to create file: NotFound (code 44 = missing parent dir)` — a Windows path/harness issue, NOT my GC-array changes
+(those are exercised by the green GC asserts). NOT reverted; tracked (windows-host-example-filecreate). Re-verify next windows gate.
+
 ## RESUME POINTER (2026-06-21) — STANDING CORRECTNESS SWEEP; D-491/492(abstract)/493 CLOSED; D-495 v128-array-fill host-PANIC GUARDED; D-489/494(asyncify) paused, D-492(typed-ref)/D-495(proper v128-fill) open
 
 **v128-GC class swept this session**: select-v128 (D-491), select-GC-reftype (D-492), array.new_data-v128 (D-493) all
