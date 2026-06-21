@@ -965,8 +965,12 @@ pub fn jitGcAllocArrayFill(rt: *JitRuntime, typeidx: u32, length: u32, init: u64
     const gti: *const gc_type_info.GcTypeInfos = @ptrCast(@alignCast(gti_opaque));
     if (typeidx >= gti.array_infos.len) return 0;
     const ai = gti.array_infos[typeidx] orelse return 0;
-    const ref = object_alloc.allocArrayObject(heap, typeidx, length, ai.element.size, false) catch return 0;
     const esz: u32 = ai.element.size;
+    // D-495: init value arrives as a u64 (8 bytes); a v128 element (esz=16) can't
+    // be reconstructed → trap cleanly (return 0) rather than panic on the OOB
+    // slice. Proper fix = pointer-marshal the 16-byte value.
+    if (esz > 8) return 0;
+    const ref = object_alloc.allocArrayObject(heap, typeidx, length, ai.element.size, false) catch return 0;
     const ahsz: u32 = @sizeOf(gc_type_info.ArrayHeader);
     const init_bytes = std.mem.asBytes(&init);
     var i: u32 = 0;
@@ -1009,6 +1013,11 @@ pub fn jitGcArrayFill(rt: *JitRuntime, typeidx: u32, ref: u32, idx: u32, value: 
     const end = @addWithOverflow(idx, count);
     if (end[1] != 0 or end[0] > length) return 0; // OOB trap
     const esz: u32 = ai.element.size;
+    // D-495: the fill value arrives as a u64 (8 bytes); a v128 element (esz=16)
+    // can't be reconstructed → trap cleanly rather than panic on the OOB slice
+    // (guest-triggerable host panic otherwise). Proper fix = pointer-marshal the
+    // 16-byte value. esz is 8 for all scalar/ref elements, 16 only for v128.
+    if (esz > 8) return 0;
     const ahsz: u32 = @sizeOf(gc_type_info.ArrayHeader);
     const value_bytes = std.mem.asBytes(&value);
     var i: u32 = 0;
