@@ -1275,7 +1275,10 @@ pub fn compile(
                     // tests) → i32 CSEL Wd.
                     const TypeClass = enum { gpr32, gpr64, fp32, fp64 };
                     const tc: TypeClass = switch (ins.extra) {
-                        0x7E, 0x70, 0x6F => .gpr64, // i64 / funcref / externref
+                        // 64-bit GPR: i64 + ALL reftypes (funcref/externref +
+                        // GC/EH abstract refs — 64-bit pointers; D-492). Routing
+                        // a reftype to .gpr32 would TRUNCATE the pointer.
+                        0x7E, 0x70, 0x6F, 0x6E, 0x6D, 0x6C, 0x6B, 0x6A, 0x69, 0x71, 0x72, 0x73, 0x74 => .gpr64,
                         0x7D => .fp32, // f32 (9.9-m-4b)
                         0x7C => .fp64, // f64 (9.9-m-4b)
                         else => .gpr32, // 0x7F i32 or untyped .select

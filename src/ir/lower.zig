@@ -352,7 +352,11 @@ pub const Lowerer = struct {
                 const t = self.body[self.pos];
                 self.pos += 1;
                 switch (t) {
+                    // numeric + v128 + funcref/externref + GC/EH single-byte
+                    // abstract reftypes (D-492: `select t` admits any valtype).
                     0x7F, 0x7E, 0x7D, 0x7C, 0x7B, 0x70, 0x6F => {},
+                    0x6E, 0x6D, 0x6C, 0x6B, 0x6A, 0x69 => {}, // any/eq/i31/struct/array/exn ref
+                    0x71, 0x72, 0x73, 0x74 => {}, // null{,extern,func,exn}ref
                     else => return Error.BadBlockType,
                 }
                 try self.emit(.select_typed, 0, t);

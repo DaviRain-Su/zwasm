@@ -3046,6 +3046,18 @@ pub const Validator = struct {
             0x7B => .v128,
             0x70 => .funcref,
             0x6F => .externref,
+            // Wasm 3.0 GC / EH single-byte abstract reftypes (mirror
+            // init_expr.readValType): `select t` admits ANY valtype (D-492).
+            0x6E => .anyref,
+            0x6D => .eqref,
+            0x6C => .i31ref,
+            0x6B => .structref,
+            0x6A => .arrayref,
+            0x69 => .exnref,
+            0x71 => .nullref,
+            0x72 => .nullexternref,
+            0x73 => .nullfuncref,
+            0x74 => .nullexnref,
             else => return Error.BadValType,
         };
         try self.popExpect(.i32);
