@@ -18,25 +18,24 @@ D-305 niche shapes. Version `2.0.0-alpha.3`. Low-pri follow-up: consolidate dupl
 ## Active bundle
 
 - **Bundle-ID**: ADR-0200-jit-backed-embedding-api
-- **Cycles-remaining**: ~4 (WASI host-fn → C-path → v128 substrate → sandbox → mini-consumer → cljw)
-- **Continuity-memo**: **LANDED (Zig-facade `engine=.jit`; detail in git)**: engine fork @7bfc49c8d
+- **Cycles-remaining**: ~3 (C-knob → WASI host-fn → v128 substrate → mini-consumer → cljw)
+- **Continuity-memo**: **LANDED (`engine=.jit`; detail in git/commits)**: Zig-facade engine fork @7bfc49c8d
   (`InstantiateOpts.engine: EngineKind{auto,jit,interp}`; `.jit`→heap-pinned `runner.JitInstance`, Zone-1
-  `Instance.jit: ?*anyopaque`, interp `runtime==null`; invoke arm + `UnsupportedEngineSignature` +
-  `trap_kind`→`Trap` map); multi-result @bc534de73; mutator/budget arms @441c24e77 (fuel/memory/table/
-  interrupt → JIT, discharged D-314 assert-crash seam); **fork CENTRALIZED in `instantiateInternal`
-  @34ffb855c** (C `wasm_instance_new` + linker fork too; callers pass `.auto`); **D-451 import validation
-  @8ba2e5121** (`runner.assertWasiImportsSatisfied` pub; unsatisfiable import → InstantiateFailed;
-  sched_yield dispatches). `.auto` STILL→interp pending host-import bridge. **NEXT**: (a) **WASI host-fn
-  wiring** — set `jit.owned.rt.wasi_host = store.wasi_host` (both `?*anyopaque`) in `instantiateJit` +
-  materialize preopens; END-TO-END test = clock_time_get into memory + i64.load → nonzero (host-vs-no-host
-  divergence; cf. jit_dispatch.zig:688 unit test). NOTE proc_exit exit-code surfacing is INCOMPLETE in JIT
-  (jit_dispatch.zig:313 → Error.Trap generic). (b) **C-path** — `wasm_func_call` JIT arm + C engine knob;
-  **DIVERGENCE found: JIT instances populate NO `exports_storage`/`func_ptrs_storage`**, so the wasm-c-api
-  Func-handle path (`wasm_instance_exports`→`wasm_func_call`) needs a retrofit (populate exports from
-  `jit.compiled.exports` name→idx + a by-funcidx JIT call arm) — bigger than the facade mirror; ADR-0200 §API
-  wants `zwasm_engine_kind` AUTO=0/JIT/INTERP per-instance. (c) **WASI/Linker** engine selection (Linker holds
-  OWN `wasi_host` linker.zig:95) then flip `.auto`→JIT. (d) accessor READS. (e) **v128/SIMD** (needs D-477
-  v128 substrate). (f) D-314 sign-off; (g) mini-consumer + cljw signal. **Next = (a) WASI host-fn wiring.**
+  `Instance.jit: ?*anyopaque`, interp `runtime==null`); multi-result @bc534de73; mutator/budget arms
+  @441c24e77 (fuel/memory/table/interrupt → JIT, killed D-314 assert-crash seam); fork CENTRALIZED in
+  `instantiateInternal` @34ffb855c; D-451 import validation @8ba2e5121 (`runner.assertWasiImportsSatisfied`
+  pub); **C-path call path @ddb75feed** — `instantiateJit` populates `exports_storage` from
+  `jit.compiled.exports` (+ minimal arena, freed in JIT teardown) so `wasm_instance_exports` works;
+  `wasm_func_call` JIT arm (func_idx→name reverse-map, `Val`↔u64 marshalling, invoke/invokeMulti, trap
+  map); scalar args/results. api/instance.zig exempt cap 3500→3700. `.auto` STILL→interp. **NEXT**: (a)
+  **C engine knob** — `zwasm_instance_new_ex(store,module,imports,trap_out,kind)` in `src/api/zwasm_ext.zig`
+  + `ZWASM_ENGINE_{AUTO=0,JIT,INTERP}` in `include/zwasm.h` (mirror `zwasm_instance_get_func` extension
+  pattern); makes the stock C path JIT-selectable (today only `instantiateFacade(...,.jit)` forces it).
+  (b) **WASI host-fn** — `jit.owned.rt.wasi_host = store.wasi_host` in `instantiateJit` + preopens; e2e test
+  = clock_time_get→memory→i64.load nonzero (cf. jit_dispatch.zig:688). proc_exit exit-code INCOMPLETE in JIT
+  (jit_dispatch.zig:313). (c) WASI/Linker engine sel (Linker holds OWN wasi_host) → flip `.auto`→JIT. (d)
+  accessor READS memory/global/table. (e) **v128/SIMD** (needs D-477 v128 substrate). (f) D-314 sign-off;
+  (g) mini-consumer + cljw signal. **Next = (a) C engine knob.**
 - **Exit-condition**: first-party mini-consumer (C via `include/zwasm.h` + Zig via `src/zwasm/*`)
   instantiates engine=jit, calls a multi-arg AND a v128/SIMD export, asserts results; engine-knob
   default documented; cljw readiness signal sent (`to_cljw_NN`). NOT cw — that's cw's responsibility.
