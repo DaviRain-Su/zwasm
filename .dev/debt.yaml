@@ -18,15 +18,18 @@ entries:
       `jit.owned.rt.wasi_host = store.wasi_host` + preopen materialization in
       `instantiateJit`; `jit_wasi` conformance case (clock_time_get→memory→i64.load
       nonzero) gated. REMAINING in (1): non-WASI host-func (`wasm_func_new` callback)
-      dispatch under JIT — INCREMENT 1 LANDED: 0-arg host callbacks returning {void,i32}
-      now dispatch via a Zig comptime thunk-table (`src/api/jit_host_bridge.zig`,
-      arch-independent, NO machine-code emission — supersedes the per-arch reg-marshalling
-      survey below). `thunk0_<ret>[K]` hardcodes slot K, reads `rt.host_payloads_base[K]`
-      (*HostFuncPayload), calls `WasmFuncCallback`, sets trap_flag. instantiateJit threads
-      builder_state + `collectHostFuncTargets` (covered sig planted; uncovered rejected to
-      `.interp`). Gated: `test/c_api_conformance/jit_callback.c`. Remaining increments:
-      N-scalar-arg, FP/i64 results, ref args, then the `.auto`-to-JIT flip. proc_exit exit-code
-      INCOMPLETE (jit_dispatch.zig:313). Original host-func
+      dispatch under JIT — INCREMENTS 1+2 LANDED: 0..4 GP-scalar (i32/i64) args with a
+      {void,i32,i64} result now dispatch via a Zig comptime thunk-table
+      (`src/api/jit_host_bridge.zig`, arch-independent, NO machine-code emission — supersedes
+      the per-arch reg-marshalling survey below). Key simplification: i32/i64 share the integer
+      arg-register class, so the thunk takes N `u64` params and the bridge marshals each per
+      `payload.params[i]` (no 4^N table). `thunkN[K]` hardcodes slot K, reads
+      `rt.host_payloads_base[K]` (*HostFuncPayload), calls `WasmFuncCallback`, sets trap_flag.
+      instantiateJit threads builder_state + `collectHostFuncTargets` (covered sig planted;
+      uncovered rejected to `.interp`). Gated: `jit_callback.c` (0-arg) + `jit_callback_args.c`
+      (i32×2→i32, i64→i64). Remaining: FP (f32/f64) args/results — SEPARATE register class, needs
+      positionally-typed thunks (the u64-collapse only holds all-GP); then `.auto`-to-JIT flip.
+      proc_exit exit-code INCOMPLETE (jit_dispatch.zig:313). Original host-func
       SURVEY 2026-06-21 (design `private/notes/d478-host-func-jit-bridge-design.md`): the
       JIT passes guest CALL args to `dispatch[idx]` in NATIVE arg registers per the callee's
       exact C sig (no uniform buffer; `op_call.zig` marshalCallArgs) → the host bridge must be
