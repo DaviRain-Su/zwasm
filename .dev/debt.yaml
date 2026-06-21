@@ -21,23 +21,32 @@ entries:
       gate — so x86_64 JIT *execution* of realworld programs is under-tested vs arm64.
       REPRO (Mac): `zig build -Dtarget=x86_64-macos && ./zig-out/bin/zwasm run --engine jit
       test/realworld/wasm/tinygo_json.wasm` → mangled; `--engine interp` → `roundtrip: OK`.
-      BLAST RADIUS NARROWED (2026-06-21): a full interp-vs-jit diff over ALL 56 realworld
-      fixtures on x86_64 found **ONLY tinygo_json diverges** (c_large_memory was a FALSE
-      positive — interp just timed out at 30s; completes `result: OK` at 120s). So the bug
-      is NARROW, not a broad x86_64 JIT regression — most programs (incl. other tinygo/go/
-      rust) run x86_64-JIT-correct. SYMPTOM ANALYSIS: `%!(EXTRA ...)` = Go fmt saw FEWER
-      format verbs than args → the FORMAT STRING `"name=%s age=%d city=%s\n"` is read wrong
-      (truncated/empty) → points to **string-constant / slice-header / data-segment load
-      corruption** on x86_64 (a memory load reading wrong ptr/len/bytes), NOT arg marshalling
-      (the args survive — they show as EXTRA). DRIVE (next, fresh context): debug_jit_auto
-      differential value-trace (Recipe 18) to find the first x86_64-jit-vs-interp memory/reg
-      divergence; OR craft a minimal wat doing a data-segment string load + a fmt-like verb
-      scan to repro the bad load. Also a GATE gap: x86_64 JIT realworld run-stage should join
-      the standard gate. Blocks the `.auto`-flip re-land (needs x86_64 JIT realworld-correct).
+      NARROW: a full interp-vs-jit diff over ALL 56 realworld fixtures on x86_64 found
+      **ONLY tinygo_json diverges** (c_large_memory was a FALSE positive — interp timed out
+      at 30s; OK at 120s). ROOT-CAUSE NARROWED via fd_write-iovec instrumentation
+      (subagent a1bad139, 2026-06-21) — **the string-load hypothesis is DISPROVEN**:
+      INTERP issues 3 writes (`#2 off=90512 len=29` "name=Alice…", `#3 len=14` "roundtrip:
+      OK"); x86_64-JIT issues only 2 (`#2 off=90928 len=67`, 16 LEADING BYTES ZERO) — the
+      guest computed a **WRONG iovec POINTER (90928 vs 90512, Δ416) + WRONG LENGTH (67 vs
+      29)**, merging writes #2+#3 into one zero-filled buffer. So it's a **wrong scalar
+      VALUE miscompile upstream in Go's fmt/reflect code**, not buffer/string-load
+      corruption. ROOT-CAUSE CLASS (strong): **x86_64 SPILL-PRESSURE-specific** — x86_64 has
+      only 4 allocatable GPRs (RBX/R12/R13/R14, `codegen/x86_64/abi.zig:160`) + 2 spill-stage
+      regs (R10/R11) vs arm64's 8, so a defect that only manifests under tinygo_json's heavy
+      spill frame (~65KB fmt body). Passing tinygo_{hello,fib,sort} share the IDENTICAL
+      op-set (opcode diff empty) yet pass → NOT an op-family bug → a spill-staging /
+      large-frame defect. memory.copy ruled out (byte-only experiment gave a fatal signal,
+      not a fix). DRIVE (next): value-trace (Recipe 18) the guest func issuing write #2, walk
+      back to the first SPILLED-operand op producing a wrong value; focus the audit on
+      multi-spilled-operand handlers under >16-slot frames (`emitSelectCtx`, div/rem,
+      wide-mul) + `patchRel32` branch-target fixups that may go wrong only past a spill-frame
+      size threshold (`codegen/x86_64/gpr.zig` spill staging). Also a GATE gap: x86_64 JIT
+      realworld run-stage should join the standard gate. Blocks the `.auto`-flip re-land.
     first_raised: "2026-06-21"
     last_reviewed: "2026-06-21"
     refs: |-
       test/realworld/wasm/tinygo_json.wasm (fixture) + test/realworld/run_runner_jit.zig:235 (opt-in run gate)
+      src/engine/codegen/x86_64/abi.zig:160 (4-GPR pool) + src/engine/codegen/x86_64/gpr.zig (spill staging) + src/wasi/fd.zig:81 (fdWrite — where the iovec trace was taken)
       .claude/skills/debug_jit_auto/SKILL.md (Recipe 18 value-trace) ; relates to the jit-export-invoke-dispatch-matrix bundle (flip re-land)
   - id: "D-478"
     layer: "code"
