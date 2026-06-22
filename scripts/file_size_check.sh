@@ -54,12 +54,20 @@ while IFS= read -r f; do
     # entry.zig at cap=3000 per D-168 close.
     exempt=0
     per_file_cap=0
+    uncapped=0
     marker_line=$(head -5 "$f" 2>/dev/null | grep -E '^// FILE-SIZE-EXEMPT:.*ADR-[0-9]+' | head -1 || true)
     if [ -n "$marker_line" ]; then
         exempt=1
         cap_extract=$(echo "$marker_line" | sed -nE 's/.*\(cap=([0-9]+)\).*/\1/p' || true)
         if [ -n "$cap_extract" ] && [ "$cap_extract" -gt "$EXEMPT_CAP" ]; then
             per_file_cap=$cap_extract
+        fi
+        # `(cap=UNCAPPED)` — designated irreducible catalog with NO line cap
+        # (user-ratified 2026-06-22 for the C-ABI translation file: a flat list of
+        # thin per-entity wrappers, not a smell-bearing subsystem; the line metric
+        # is a poor fit). Requires the ADR-ref marker like any exemption.
+        if echo "$marker_line" | grep -q '(cap=UNCAPPED)'; then
+            uncapped=1
         fi
     fi
 
@@ -72,7 +80,9 @@ while IFS= read -r f; do
         fi
     fi
 
-    if [ "$lines" -gt "$effective_hard_cap" ]; then
+    if [ "$uncapped" -eq 1 ]; then
+        echo "EXEMPT-UNCAPPED: $f ($lines lines) — designated irreducible catalog, no line cap (user-ratified 2026-06-22; FILE-SIZE-EXEMPT marker)" >&2
+    elif [ "$lines" -gt "$effective_hard_cap" ]; then
         if [ "$per_file_cap" -gt 0 ]; then
             echo "PER-FILE-CAP EXCEEDED: $f ($lines lines, per-file-cap=$per_file_cap) — even the per-file override cap is exceeded" >&2
         elif [ "$exempt" -eq 1 ]; then
