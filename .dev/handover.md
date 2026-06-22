@@ -18,6 +18,11 @@ Both attempt-#4 ubuntu gaps root-caused; (A) fix-path NARROWED this cycle (full 
 restores the whole flip + attempt-#3's ~14 pins → layer A+B → full Mac test → **ubuntu-gate (MANDATORY)** → 3-host
 green → tag alpha.3. funcref D-497/D-498 stay pinned-debt. cljw waits. cron `f34c7ee2`; CronDelete only at final stop.
 
+**IN FLIGHT**: a subagent (agentId a4b151e9...) is implementing the (a) always-R15 fix + `bodyStartFromBytes`
+helper + 59 emit-test sed, verifying Mac-green + Rosetta `--fuel 0`-traps; it leaves changes UNCOMMITTED for review
+(do NOT edit emit.zig/prologue.zig/emit_test_* concurrently). Next cycle: review its diff → commit (A) → (B) pin →
+`git revert 18d2f887a` (restore flip+~14 pins) → layer A+B → ubuntu-gate → 3-host → tag.
+
 **LESSON (load-bearing): Mac `zig build test` is INSUFFICIENT to declare the flip green — MUST ubuntu-gate.**
 
 ## D-496 campaign (jit-capi-surface-flip) — accessors LANDED+green; flip re-land pending (A)+(B) fixes
