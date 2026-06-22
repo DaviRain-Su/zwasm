@@ -1,4 +1,4 @@
-// FILE-SIZE-EXEMPT: (cap=3800) C ABI translation catalog (Zone 3 boundary layer); no separable subsystem per ADR-0099 §D2 P3 evaluation (see .dev/architecture/api_instance_audit.md, §9.12-G (c)). 10.F D-173/D-172 accessor surfaces extended exempt cap 2500→2800→3000; cyc174 raised 3000→3200 (ADR-0099 amend) for the Wasm start-section execution feature (a runtime-feature add in instantiateInternal, NOT accessor bloat) — consistent with the non-separable P3 eval + the validator.zig cyc158 precedent. P13 §13.2 raised 3200→3300 (ADR-0099 amend) for the runtime-entity host-creation surface — standalone-entity (instance==null) branches in the global/table/memory accessors + the buildBindings host-import arm; the `_new` CONSTRUCTORS are already split to extern_new.zig, this is the irreducible accessor/binding half coupled to the entity structs. ADR-0184 raised 3300→3400 (ADR-0099 amend 2026-06-13) for the engine-owned io plumbing (Threaded ownership + Host.io wiring + preopen materialization), same runtime-feature-add class. ADR-0200 raised 3400→3700 (ADR-0099 amend 2026-06-21) for the JIT-backed engine surface (EngineKind + instantiateJit + the per-instance engine branch in instantiateInternal; the wasm_func_call JIT arm + Val↔JIT marshalling helpers + JIT exports_storage population — all C-ABI translation, NOT a separable subsystem: extracting the ~80-LOC marshalling cluster would be an N3 shallow module). ADR-0200 raised 3700→3800 (ADR-0099 amend 2026-06-21, user-authorized) for the JIT C-surface completion (instantiateJit now populating export_types parallel to exports_storage for by-name discovery + the C-path discover/invoke test) — same runtime-feature-add-in-instantiate class. D-171 restructure increasingly warranted as ADR-0200 grows the C surface — the genuine separable-subsystem split.
+// FILE-SIZE-EXEMPT: (cap=4000) C ABI translation catalog (Zone 3 boundary layer); no separable subsystem per ADR-0099 §D2 P3 evaluation (see .dev/architecture/api_instance_audit.md, §9.12-G (c)). 10.F D-173/D-172 accessor surfaces extended exempt cap 2500→2800→3000; cyc174 raised 3000→3200 (ADR-0099 amend) for the Wasm start-section execution feature (a runtime-feature add in instantiateInternal, NOT accessor bloat) — consistent with the non-separable P3 eval + the validator.zig cyc158 precedent. P13 §13.2 raised 3200→3300 (ADR-0099 amend) for the runtime-entity host-creation surface — standalone-entity (instance==null) branches in the global/table/memory accessors + the buildBindings host-import arm; the `_new` CONSTRUCTORS are already split to extern_new.zig, this is the irreducible accessor/binding half coupled to the entity structs. ADR-0184 raised 3300→3400 (ADR-0099 amend 2026-06-13) for the engine-owned io plumbing (Threaded ownership + Host.io wiring + preopen materialization), same runtime-feature-add class. ADR-0200 raised 3400→3700 (ADR-0099 amend 2026-06-21) for the JIT-backed engine surface (EngineKind + instantiateJit + the per-instance engine branch in instantiateInternal; the wasm_func_call JIT arm + Val↔JIT marshalling helpers + JIT exports_storage population — all C-ABI translation, NOT a separable subsystem: extracting the ~80-LOC marshalling cluster would be an N3 shallow module). ADR-0200 raised 3700→3800 (ADR-0099 amend 2026-06-21, user-authorized) for the JIT C-surface completion (instantiateJit now populating export_types parallel to exports_storage for by-name discovery + the C-path discover/invoke test) — same runtime-feature-add-in-instantiate class. D-171 restructure increasingly warranted as ADR-0200 grows the C surface — the genuine separable-subsystem split. ADR-0200/D-496 raised 3800→4000 (ADR-0099 amend 2026-06-22) for the JIT-instance C-API accessor surface (global/memory/get_func JIT arms in the entity accessors + `.jit`-pinned tests) — same runtime-feature-add class. **D-171 split now STRONGLY warranted: the JIT `.jit`-pinned tests + chunk-4 table arms should land in an EXTRACTED test/accessor module, NOT further cap bumps — split before continuing the D-496 campaign past chunk 4.**
 //! Engine / Store / Module / Instance / Func / Extern surface of
 //! the C ABI binding (§9.5 / 5.0 chunk d carve-out from
 //! `wasm.zig` per ADR-0007).
@@ -1207,7 +1207,15 @@ pub export fn zwasm_instance_get_func(i: ?*Instance, idx: u32) callconv(.c) ?*Fu
     const inst = i orelse return null;
     const store = inst.store orelse return null;
     const alloc = storeAllocator(store) orelse return null;
-    if (idx >= inst.funcs_storage.len) return null;
+    // D-496 — JIT instances populate no funcs_storage; bound against the JIT's
+    // full func count instead (wasm_func_call's JIT arm dispatches by func_idx).
+    const func_count: usize = if (inst.runtime != null)
+        inst.funcs_storage.len
+    else if (jitOf(inst)) |jit|
+        jit.funcCount()
+    else
+        inst.funcs_storage.len;
+    if (idx >= func_count) return null;
     const f = alloc.create(Func) catch return null;
     f.* = .{ .instance = inst, .func_idx = idx };
     return f;
@@ -1475,9 +1483,13 @@ pub export fn wasm_global_get(g: ?*const Global, out: ?*Val) callconv(.c) void {
     o.* = .{ .kind = .i32, .of = .{ .i32 = 0 } };
     const handle = g orelse return;
     const slot: *runtime.Value = if (handle.instance) |inst| blk: {
-        const rt = inst.runtime orelse return;
-        if (handle.global_idx >= rt.globals.len) return;
-        break :blk rt.globals[handle.global_idx];
+        if (inst.runtime) |rt| {
+            if (handle.global_idx >= rt.globals.len) return;
+            break :blk rt.globals[handle.global_idx];
+        }
+        // D-496 — JIT-backed instance: read the global cell from the JitRuntime.
+        if (jitOf(inst)) |jit| break :blk (jit.globalCell(handle.global_idx) orelse return);
+        return;
     } else handle.cell orelse return; // standalone host global
     const g_store: ?*Store = if (handle.instance) |inst| inst.store else handle.store;
     const g_rm: ?RefMarshalCtx = if (g_store) |st|
@@ -1499,9 +1511,13 @@ pub export fn wasm_global_set(g: ?*Global, v: ?*const Val) callconv(.c) void {
     const handle = g orelse return;
     if (!handle.mutable) return;
     const slot: *runtime.Value = if (handle.instance) |inst| blk: {
-        const rt = inst.runtime orelse return;
-        if (handle.global_idx >= rt.globals.len) return;
-        break :blk rt.globals[handle.global_idx];
+        if (inst.runtime) |rt| {
+            if (handle.global_idx >= rt.globals.len) return;
+            break :blk rt.globals[handle.global_idx];
+        }
+        // D-496 — JIT-backed instance: write the global cell in the JitRuntime.
+        if (jitOf(inst)) |jit| break :blk (jit.globalCell(handle.global_idx) orelse return);
+        return;
     } else handle.cell orelse return; // standalone host global
     slot.* = marshalValIn(val.*);
 }
@@ -1547,8 +1563,9 @@ pub export fn wasm_memory_delete(m: ?*Memory) callconv(.c) void {
 pub export fn wasm_memory_data(m: ?*Memory) callconv(.c) ?[*]u8 {
     const handle = m orelse return null;
     const bytes: []u8 = if (handle.instance) |inst| blk: {
-        const rt = inst.runtime orelse return null;
-        break :blk rt.memory;
+        if (inst.runtime) |rt| break :blk rt.memory;
+        if (jitOf(inst)) |jit| break :blk jit.memoryBytes(); // D-496
+        return null;
     } else (handle.minst orelse return null).bytes; // standalone host memory
     if (bytes.len == 0) return null;
     return bytes.ptr;
@@ -1559,8 +1576,9 @@ pub export fn wasm_memory_data(m: ?*Memory) callconv(.c) ?[*]u8 {
 pub export fn wasm_memory_data_size(m: ?*const Memory) callconv(.c) usize {
     const handle = m orelse return 0;
     if (handle.instance) |inst| {
-        const rt = inst.runtime orelse return 0;
-        return rt.memory.len;
+        if (inst.runtime) |rt| return rt.memory.len;
+        if (jitOf(inst)) |jit| return jit.memoryBytes().len; // D-496
+        return 0;
     }
     return (handle.minst orelse return 0).bytes.len;
 }
@@ -1572,9 +1590,15 @@ pub export fn wasm_memory_size(m: ?*const Memory) callconv(.c) u32 {
     const handle = m orelse return 0;
     var ps_log2: u6 = 16;
     const len: usize = if (handle.instance) |inst| blk: {
-        const rt = inst.runtime orelse return 0;
-        if (rt.memories.len > 0) ps_log2 = @intCast(rt.memories[0].page_size_log2);
-        break :blk rt.memory.len;
+        if (inst.runtime) |rt| {
+            if (rt.memories.len > 0) ps_log2 = @intCast(rt.memories[0].page_size_log2);
+            break :blk rt.memory.len;
+        }
+        if (jitOf(inst)) |jit| { // D-496
+            ps_log2 = jit.memoryPageSizeLog2();
+            break :blk jit.memoryBytes().len;
+        }
+        return 0;
     } else dblk: {
         const mi = handle.minst orelse return 0;
         ps_log2 = @intCast(mi.page_size_log2);
@@ -1594,15 +1618,21 @@ pub export fn wasm_memory_size(m: ?*const Memory) callconv(.c) u32 {
 pub export fn wasm_memory_grow(m: ?*Memory, delta: u32) callconv(.c) bool {
     const handle = m orelse return false;
     if (handle.instance) |inst| {
-        const rt = inst.runtime orelse return false;
-        // Custom-page-sizes (ADR-0168 v0.2): grow in the memory's page units.
-        const ps_log2: u6 = if (rt.memories.len > 0) @intCast(rt.memories[0].page_size_log2) else 16;
-        const old_pages = rt.memory.len >> ps_log2;
-        const new_bytes = (old_pages + delta) << ps_log2;
-        const grown = rt.alloc.realloc(rt.memory, new_bytes) catch return false;
-        @memset(grown[rt.memory.len..new_bytes], 0);
-        rt.setMemory0Bytes(grown);
-        return true;
+        if (inst.runtime) |rt| {
+            // Custom-page-sizes (ADR-0168 v0.2): grow in the memory's page units.
+            const ps_log2: u6 = if (rt.memories.len > 0) @intCast(rt.memories[0].page_size_log2) else 16;
+            const old_pages = rt.memory.len >> ps_log2;
+            const new_bytes = (old_pages + delta) << ps_log2;
+            const grown = rt.alloc.realloc(rt.memory, new_bytes) catch return false;
+            @memset(grown[rt.memory.len..new_bytes], 0);
+            rt.setMemory0Bytes(grown);
+            return true;
+        }
+        if (jitOf(inst)) |jit| { // D-496 — re-syncs vm_base/mem_limit internally
+            _ = jit.growMemory(delta) orelse return false;
+            return true;
+        }
+        return false;
     }
     // standalone host memory: realloc its own bytes via the Store allocator
     const mi = handle.minst orelse return false;
@@ -2903,6 +2933,73 @@ test "D-496 JIT C-path: func+memory+table+global exports all surface via wasm_in
     try testing.expect(wasm_extern_as_memory(data[1]) != null);
     try testing.expect(wasm_extern_as_table(data[2]) != null);
     try testing.expect(wasm_extern_as_global(data[3]) != null);
+}
+
+test "D-496 JIT C-path: wasm_global_get/set round-trips a mutable global (.jit)" {
+    // D-496 chunk 2: global value read/write on a JIT instance (was `inst.runtime
+    // orelse return` = no-op on JIT). Reads/writes via JitInstance.globalCell.
+    const e = wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer wasm_engine_delete(e);
+    const s = wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer wasm_store_delete(s);
+    var bytes = mixed_exports_wasm;
+    const bv: ByteVec = .{ .size = bytes.len, .data = &bytes };
+    const m = wasm_module_new(s, &bv) orelse return error.ModuleAllocFailed;
+    defer wasm_module_delete(m);
+    const inst = instanceNewWithEngine(s, m, null, null, .jit) orelse return error.InstanceAllocFailed;
+    defer wasm_instance_delete(inst);
+    var exports_vec: ExternVec = .{ .size = 0, .data = null };
+    wasm_instance_exports(inst, &exports_vec);
+    defer wasm_extern_vec_delete(&exports_vec);
+    const data = exports_vec.data orelse return error.ExportsDataNull;
+    const g = wasm_extern_as_global(data[3]) orelse return error.GlobalNull;
+    var out: Val = .{ .kind = .i32, .of = .{ .i32 = 0 } };
+    wasm_global_get(g, &out);
+    try testing.expectEqual(@as(i32, 7), out.of.i32); // mixed_exports "g" = (mut i32) 7
+    wasm_global_set(g, &.{ .kind = .i32, .of = .{ .i32 = 42 } });
+    wasm_global_get(g, &out);
+    try testing.expectEqual(@as(i32, 42), out.of.i32);
+}
+
+test "D-496 JIT C-path: wasm_memory_data/size/grow on a JIT instance (.jit)" {
+    // D-496 chunk 3: memory accessors on a JIT instance (was no-op on JIT).
+    const e = wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer wasm_engine_delete(e);
+    const s = wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer wasm_store_delete(s);
+    var bytes = mixed_exports_wasm;
+    const bv: ByteVec = .{ .size = bytes.len, .data = &bytes };
+    const m = wasm_module_new(s, &bv) orelse return error.ModuleAllocFailed;
+    defer wasm_module_delete(m);
+    const inst = instanceNewWithEngine(s, m, null, null, .jit) orelse return error.InstanceAllocFailed;
+    defer wasm_instance_delete(inst);
+    var exports_vec: ExternVec = .{ .size = 0, .data = null };
+    wasm_instance_exports(inst, &exports_vec);
+    defer wasm_extern_vec_delete(&exports_vec);
+    const data = exports_vec.data orelse return error.ExportsDataNull;
+    const mem = wasm_extern_as_memory(data[1]) orelse return error.MemoryNull;
+    try testing.expectEqual(@as(u32, 1), wasm_memory_size(mem)); // mixed_exports "m" = 1 page
+    try testing.expectEqual(@as(usize, 65536), wasm_memory_data_size(mem));
+    try testing.expect(wasm_memory_data(mem) != null);
+    try testing.expect(wasm_memory_grow(mem, 1));
+    try testing.expectEqual(@as(u32, 2), wasm_memory_size(mem));
+}
+
+test "D-496 JIT C-path: zwasm_instance_get_func resolves by index (.jit)" {
+    // D-496 chunk 5: by-index func handle on a JIT instance (funcs_storage empty
+    // on JIT → bound against the JIT's func count instead). Handle is callable.
+    const e = wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer wasm_engine_delete(e);
+    const s = wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer wasm_store_delete(s);
+    var bytes = mixed_exports_wasm;
+    const bv: ByteVec = .{ .size = bytes.len, .data = &bytes };
+    const m = wasm_module_new(s, &bv) orelse return error.ModuleAllocFailed;
+    defer wasm_module_delete(m);
+    const inst = instanceNewWithEngine(s, m, null, null, .jit) orelse return error.InstanceAllocFailed;
+    defer wasm_instance_delete(inst);
+    const func = zwasm_instance_get_func(inst, 0) orelse return error.FuncResolveFailed;
+    defer wasm_func_delete(func);
 }
 
 test "ADR-0200 JIT C-path: export_types parallel to exports_storage so by-name discovery resolves (wast_runtime_runner regression)" {

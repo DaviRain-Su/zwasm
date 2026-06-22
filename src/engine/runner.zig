@@ -21,6 +21,7 @@ const Allocator = std.mem.Allocator;
 
 const parser = @import("../parse/parser.zig");
 const sections = @import("../parse/sections.zig");
+const value_mod = @import("../runtime/value.zig"); // D-496 — global cell type for the C-API JIT arm
 const leb128 = @import("../support/leb128.zig"); // D-478 — start-section funcidx decode
 const zir = @import("../ir/zir.zig");
 const validator_mod = @import("../validate/validator.zig");
@@ -1150,6 +1151,36 @@ pub const JitInstance = struct {
         const defined_off = idx - num_imports;
         if (defined_off >= gs_buf.items.len) return null;
         return .{ .idx = idx, .valtype = valtype, .mutable = gs_buf.items[defined_off].mutable };
+    }
+
+    /// D-496 — pointer to global `idx`'s live `Value` cell (full index space),
+    /// backing the C-API `wasm_global_get/set` JIT arm (mirrors interp's
+    /// `rt.globals[idx]`). `globals_offsets[idx]` is the byte offset into
+    /// `globals_base`; the layout uses Value-aligned stride. Null if out of range.
+    pub fn globalCell(self: *JitInstance, idx: u32) ?*value_mod.Value {
+        if (idx >= self.compiled.globals_offsets.len) return null;
+        const base: [*]u8 = @ptrCast(self.owned.rt.globals_base);
+        return @ptrCast(@alignCast(base + self.compiled.globals_offsets[idx]));
+    }
+
+    /// D-496 — the JIT's live memory0 slice (`vm_base[0..mem_limit]`), backing the
+    /// C-API memory accessors (mirrors interp `rt.memory`). Empty when no memory.
+    pub fn memoryBytes(self: *JitInstance) []u8 {
+        const limit = std.math.cast(usize, self.owned.rt.mem_limit) orelse return &.{};
+        if (limit == 0) return &.{};
+        return self.owned.rt.vm_base[0..limit];
+    }
+
+    /// D-496 — memory0 page-size log2 (default 16 = 64 KiB; ADR-0168 custom sizes).
+    pub fn memoryPageSizeLog2(self: *JitInstance) u6 {
+        return @intCast(self.owned.rt.mem0_page_size_log2);
+    }
+
+    /// D-496 — total function count (imports + defined; full index space matching
+    /// `wasmFuncCallJit`'s `compiled.func_sigs`), for `zwasm_instance_get_func`'s
+    /// JIT bound check (the JIT path populates no `funcs_storage`).
+    pub fn funcCount(self: *JitInstance) usize {
+        return self.compiled.func_sigs.len;
     }
 
     /// ADR-0200 increment 5 — facade `Instance.table()` support. Resolves an
