@@ -3,21 +3,21 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Current state — Phase 17, `.auto`→JIT flip RE-LANDING with funcref fix; Mac-green → ubuntu-gate → tag (user=C)
+## Current state — Phase 17 完成形 plateau; `.auto`→JIT flip CAMPAIGN COMPLETE; v2.0.0-alpha.3 TAGGED @fc7ff0b3b
 
-**funcref-JIT-C-API fix COMMITTED @50765903f (D-498), arm64 + Rosetta x86_64 GREEN** — closes the 3rd/last flip
-blocker (funcref C-API conformance SEGV+exit1): SEGV root = JIT `func_entities[i].runtime=undefined` →
-`wasm_ref_as_func` deref crashed → use the Ref's carried `.instance`; dispatch by func_idx (runner `invokeIdx`/
-`invokeMultiIdx`/`funcSigByIdx`, not export name); funcref RESULT via `invokeRefIdx`+`refResultToCVal` (owned `*Ref`).
-2 `.jit` tests in extern_new.zig. **Flip RE-LANDED on top (this turn)**: revert-of-reverts restored routing/linker-pin/
-run.zig-engine-param/~14 interp pins + (b)'s 3 facade sandbox `.interp` pins + D-499. **NEXT: full Mac test → push →
-ubuntu+windows gate (MANDATORY; Mac necessary-not-sufficient).** If 3-host GREEN with `.auto`=JIT → cut `v2.0.0-alpha.3`
-tag (USER-AUTHORIZED, tag-only) + to_cljw_09 + CronDelete f34c7ee2 + clean stop. If red → triage, do NOT tag.
+**CAMPAIGN DONE (user option C).** `.auto`→JIT is the default engine, **3-host GREEN** (Mac+ubuntu+windows full
+`test-all`). **Tag `v2.0.0-alpha.3` CUT + pushed @fc7ff0b3b** (annotated, tag-only — NO GitHub Release, Latest stays
+v1.11.0). to_cljw_09 SENT (cljw pins fc7ff0b3b). What landed: D-489/D-494 regalloc fix + 5 JIT-C-API accessor chunks
+(D-496) + `.auto`→JIT routing + D-498 funcref C-API (table-call + result). Niche debts (interp-pinned, default never
+crashes): D-497 funcref-table grow, D-499 x86_64 trivial-fn fuel poll, D-500 Win64 component thunk.
+**Next session = the loop is back at the 完成形 plateau** (no active campaign): correctness-sweep / debt repayment /
+surface refinement per ROADMAP §16. The D-497/499/500 JIT gaps are the natural next discharge candidates.
 
-**USER: work FOREGROUND (no slow impl-subagents; spot investigation OK); Mac `-Dtarget=x86_64`+Rosetta for direct
-x86_64 repro; minimise gate-wait/ceremony.** D-499 (x86_64 trivial-fn fuel/interrupt) + D-497 (funcref-table grow)
-stay pinned-debt. The substantive alpha.3 content (D-489/D-494 regalloc fix + 5 JIT-C-API accessor chunks) is committed
-+ 3-host-green independent of the flip.
+**Operational wins this session (keep using)**: (1) Rosetta x86_64-macos reproduces x86_64-linux JIT bugs (build on
+Mac `-Dtarget=x86_64-macos`, run under Rosetta). (2) **Win64 fast-repro**: cross-build `zig build test -Dtarget=
+x86_64-windows-gnu` on Mac (the run-step "fails" but the test.exe is built) → `scp` to windowsmini → ssh-run from the
+repo dir (cwd matters for file-fixture tests). ~2min vs ~25min full gate. (3) Mac `zig build test` is INSUFFICIENT for
+flip-class changes — ubuntu-gate (+ windows for ABI-risk) is mandatory before declaring green.
 
 **LESSON (load-bearing): Mac `zig build test` is INSUFFICIENT to declare the flip green — MUST ubuntu-gate.**
 
