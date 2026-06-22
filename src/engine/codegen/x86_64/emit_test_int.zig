@@ -43,8 +43,12 @@ test "compile: empty function (no instrs) emits prologue only" {
     const empty_alloc: regalloc.Allocation = .{ .slots = &.{}, .n_slots = 0 };
     const out = try compile(testing.allocator, &f, empty_alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32, &.{}, false);
     defer deinit(testing.allocator, out);
-    // Prologue only: 55 48 89 E5 = 4 bytes (push rbp + mov rbp, rsp).
-    try testing.expectEqualSlices(u8, &.{ 0x55, 0x48, 0x89, 0xE5 }, out.bytes);
+    // D-496: every function installs R15 + the full prologue poll. A no-instr
+    // function emits the prologue only (no `end` → no body, no function
+    // epilogue), so bytes.len == body_start and the stream begins with PUSH RBP.
+    const body_start = prologue.bodyStartFromBytes(out.bytes);
+    try testing.expectEqual(@as(usize, body_start), out.bytes.len);
+    try testing.expectEqual(@as(u8, 0x55), out.bytes[0]);
 }
 
 test "compile: (i32.const 42) end → 13 bytes" {
@@ -59,30 +63,24 @@ test "compile: (i32.const 42) end → 13 bytes" {
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32, &.{}, false);
     defer deinit(testing.allocator, out);
 
-    // Expected stream (slot 0 = RBX after pool shrink — chunk 13b):
-    //   55                       PUSH RBP
-    //   48 89 E5                 MOV RBP, RSP
+    // Body + function epilogue (D-496: full R15 prologue located via
+    // body_start; epilogue now pops R15 before RBP):
     //   BB 2A 00 00 00           MOV EBX, #42 (slot 0 = RBX)
     //   89 D8                    MOV EAX, EBX (return marshalling)
+    //   48 83 C4 08              ADD RSP, 8
+    //   41 5F                    POP R15
     //   5D                       POP RBP
     //   C3                       RET
-    // Total: 1 + 3 + 5 + 2 + 1 + 1 = 13 bytes.
+    const body_start = prologue.bodyStartFromBytes(out.bytes);
     const expected = [_]u8{
-        0x55,
-        0x48,
-        0x89,
-        0xE5,
-        0xBB,
-        0x2A,
-        0x00,
-        0x00,
-        0x00,
-        0x89,
-        0xD8,
-        0x5D,
-        0xC3,
+        0xBB, 0x2A, 0x00, 0x00, 0x00, // MOV EBX, #42
+        0x89, 0xD8, // MOV EAX, EBX
+        0x48, 0x83, 0xC4, 0x08, // ADD RSP, 8
+        0x41, 0x5F, // POP R15
+        0x5D, // POP RBP
+        0xC3, // RET
     };
-    try testing.expectEqualSlices(u8, &expected, out.bytes);
+    try testing.expectEqualSlices(u8, &expected, out.bytes[body_start .. body_start + expected.len]);
 }
 
 test "compile: (i32.const 0xDEADBEEF) end — little-endian imm32" {
@@ -97,10 +95,9 @@ test "compile: (i32.const 0xDEADBEEF) end — little-endian imm32" {
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32, &.{}, false);
     defer deinit(testing.allocator, out);
     // Differs from the 42 case only at the imm32 bytes. The imm32 follows the
-    // 4-byte prologue + 1-byte MOV-EBX opcode (0xBB) → starts at offset 5.
-    try testing.expectEqual(@as(usize, 13), out.bytes.len);
-    // D-055 migration: imm32 = body_start (4) + 1-byte MOV-EBX opcode (0xBB).
-    const imm32_off = prologue.body_start_offset(false, 0) + 1;
+    // prologue + 1-byte MOV-EBX opcode (0xBB).
+    // D-055 migration: imm32 = body_start + 1-byte MOV-EBX opcode (0xBB).
+    const imm32_off = prologue.bodyStartFromBytes(out.bytes) + 1;
     try testing.expectEqualSlices(u8, &.{ 0xEF, 0xBE, 0xAD, 0xDE }, out.bytes[imm32_off .. imm32_off + 4]);
 }
 
@@ -113,8 +110,10 @@ test "compile: void function with `end` only emits prologue + epilogue" {
     const empty_alloc: regalloc.Allocation = .{ .slots = &.{}, .n_slots = 0 };
     const out = try compile(testing.allocator, &f, empty_alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32, &.{}, false);
     defer deinit(testing.allocator, out);
-    // 55 48 89 E5 5D C3 = 6 bytes (prologue + pop + ret; no return marshalling).
-    try testing.expectEqualSlices(u8, &.{ 0x55, 0x48, 0x89, 0xE5, 0x5D, 0xC3 }, out.bytes);
+    // D-496: empty body (just `end`), no return marshalling. The function
+    // epilogue now tears down the R15 frame: ADD RSP,8 ; POP R15 ; POP RBP ; RET.
+    const body_start = prologue.bodyStartFromBytes(out.bytes);
+    try testing.expectEqualSlices(u8, &.{ 0x48, 0x83, 0xC4, 0x08, 0x41, 0x5F, 0x5D, 0xC3 }, out.bytes[body_start .. body_start + 8]);
 }
 
 test "compile: function with 1 local + (i32.const 42) (local.set 0) (local.get 0) end" {
@@ -148,12 +147,13 @@ test "compile: function with 1 local + (i32.const 42) (local.set 0) (local.get 0
     // Body: PUSH RBP ; MOV RBP,RSP ; SUB RSP,16 ; XOR EAX,EAX ; MOV [RBP-8],RAX
     //       ; MOV EBX,[RBP-8] (home seed) ; MOV EBX,#42 (const) ; MOV EBX,EBX
     //       (set, reg→reg) ; MOV <tmp>,EBX (get) ; MOV EAX,<tmp> ; epilogue.
-    // The seed MOV EBX, [RBP-8] = 8B 5D F8 (reg=RBX, no REX needed).
-    const seed = [_]u8{ 0x8B, 0x5D, 0xF8 };
+    // D-496: R15 save now occupies [RBP-8], so local 0 lives at [RBP-16].
+    // The seed MOV EBX, [RBP-16] = 8B 5D F0 (reg=RBX, no REX needed).
+    const seed = [_]u8{ 0x8B, 0x5D, 0xF0 };
     try testing.expect(std.mem.find(u8, out.bytes, &seed) != null);
-    // No 32-bit STORE of EBX to the local slot [RBP-8] (89 5D F8) — the set is
+    // No 32-bit STORE of EBX to the local slot [RBP-16] (89 5D F0) — the set is
     // reg→reg, never a slot store (homed local never re-touches its slot).
-    const slot_store = [_]u8{ 0x89, 0x5D, 0xF8 };
+    const slot_store = [_]u8{ 0x89, 0x5D, 0xF0 };
     try testing.expect(std.mem.find(u8, out.bytes, &slot_store) == null);
     // Ends in POP RBP ; RET.
     try testing.expectEqual(@as(u8, 0xC3), out.bytes[out.bytes.len - 1]);
@@ -177,12 +177,13 @@ test "compile: local.tee preserves stack — uses top vreg without popping" {
     defer regalloc.deinit(testing.allocator, alloc);
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32, &.{}, false);
     defer deinit(testing.allocator, out);
-    // The home reg (slot 0 = RBX) is seeded from the slot in the prologue
-    // (MOV EBX, [RBP-8] = 8B 5D F8); the tee is a reg→reg MOV into RBX, leaving
-    // the value on the stack for `end` to marshal into EAX. No slot STORE.
-    const seed = [_]u8{ 0x8B, 0x5D, 0xF8 };
+    // D-496: R15 save occupies [RBP-8], so local 0 is at [RBP-16]. The home reg
+    // (slot 0 = RBX) is seeded from the slot in the prologue (MOV EBX, [RBP-16] =
+    // 8B 5D F0); the tee is a reg→reg MOV into RBX, leaving the value on the
+    // stack for `end` to marshal into EAX. No slot STORE.
+    const seed = [_]u8{ 0x8B, 0x5D, 0xF0 };
     try testing.expect(std.mem.find(u8, out.bytes, &seed) != null);
-    const slot_store = [_]u8{ 0x89, 0x5D, 0xF8 };
+    const slot_store = [_]u8{ 0x89, 0x5D, 0xF0 };
     try testing.expect(std.mem.find(u8, out.bytes, &slot_store) == null);
     try testing.expectEqual(@as(u8, 0xC3), out.bytes[out.bytes.len - 1]);
 }
@@ -201,28 +202,23 @@ test "compile: (block (br 0) end) end — forward br with end-patch" {
     const out = try compile(testing.allocator, &f, empty_alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32, &.{}, false);
     defer deinit(testing.allocator, out);
 
-    // Expected stream:
-    //   55 48 89 E5                    prologue (no SUB RSP — no locals)
+    // Body + function epilogue (D-496: full R15 prologue; epilogue pops R15):
     //   E9 00 00 00 00                 JMP rel32, patched to disp=0 (target = next byte)
+    //   48 83 C4 08                    ADD RSP, 8
+    //   41 5F                          POP R15
     //   5D                             POP RBP (function-level end)
     //   C3                             RET
-    // The JMP's disp is 0 because the patch site is at offset 4
-    // (after prologue) + insn_size 5 → next instruction at offset 9,
-    // which IS the block's end target. Disp = 9 - 9 = 0.
+    // The JMP's disp is 0 because the block's end target is the very next byte
+    // (disp is body-relative, unaffected by the prologue size).
+    const body_start = prologue.bodyStartFromBytes(out.bytes);
     const expected = [_]u8{
-        0x55,
-        0x48,
-        0x89,
-        0xE5,
-        0xE9,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x5D,
-        0xC3,
+        0xE9, 0x00, 0x00, 0x00, 0x00, // JMP rel32 disp=0
+        0x48, 0x83, 0xC4, 0x08, // ADD RSP, 8
+        0x41, 0x5F, // POP R15
+        0x5D, // POP RBP
+        0xC3, // RET
     };
-    try testing.expectEqualSlices(u8, &expected, out.bytes);
+    try testing.expectEqualSlices(u8, &expected, out.bytes[body_start .. body_start + expected.len]);
 }
 
 test "compile: (loop (br 0) end) end — backward br with concrete disp" {
@@ -243,7 +239,7 @@ test "compile: (loop (br 0) end) end — backward br with concrete disp" {
     // prologue is emitted; fb = 8 (no locals/spills — just the 2-PUSH parity
     // pad). The `br 0` emits     // TEST 3 + JZ 6 + MOV R11D,[R11] 7 + TEST 3 + JNE 6), then the backward
     // JMP at body0+62 targeting the loop header at body0 → disp = -67.
-    const body0 = prologue.body_start_offset(true, 8);
+    const body0 = prologue.bodyStartFromBytes(out.bytes);
     try testing.expectEqualSlices(
         u8,
         inst.encMovR64FromMemDisp32(.r11, abi.runtime_ptr_save_gpr, @intCast(jit_abi.interrupt_ptr_off)).slice(),
@@ -270,44 +266,29 @@ test "compile: (i32.const 1) (if) (i32.const 7) (end) end — single-arm if; JE 
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32, &.{}, false);
     defer deinit(testing.allocator, out);
 
-    // Expected layout (slot 0 = RBX, slot 1 = R12 after chunk 13b pool shrink):
-    //   55 48 89 E5                    prologue              [0..4]
-    //   BB 01 00 00 00                 MOV EBX, #1           [4..9]
-    //   85 DB                          TEST EBX, EBX         [9..11]
-    //   0F 84 06 00 00 00              JE +6 (skip then-body) [11..17]
-    //   41 BC 07 00 00 00              MOV R12D, #7          [17..23]
-    //   5D                             POP RBP               [23]
-    //   C3                             RET                   [24]
-    // JE disp = 23 - 17 = 6 (skip from after JE to past then-body's
-    // i32.const 7). Then-body is 6 bytes (MOV R12D #7).
+    // Body + function epilogue (D-496: full R15 prologue; epilogue pops R15).
+    // Branch disps are body-relative, unaffected by the prologue size.
+    //   BB 01 00 00 00                 MOV EBX, #1
+    //   85 DB                          TEST EBX, EBX
+    //   0F 84 06 00 00 00              JE +6 (skip then-body)
+    //   41 BC 07 00 00 00              MOV R12D, #7
+    //   48 83 C4 08                    ADD RSP, 8
+    //   41 5F                          POP R15
+    //   5D                             POP RBP
+    //   C3                             RET
+    // JE disp = 6 (skip past then-body's 6-byte MOV R12D #7).
+    const body_start = prologue.bodyStartFromBytes(out.bytes);
     const expected = [_]u8{
-        0x55,
-        0x48,
-        0x89,
-        0xE5,
-        0xBB,
-        0x01,
-        0x00,
-        0x00,
-        0x00,
-        0x85,
-        0xDB,
-        0x0F,
-        0x84,
-        0x06,
-        0x00,
-        0x00,
-        0x00,
-        0x41,
-        0xBC,
-        0x07,
-        0x00,
-        0x00,
-        0x00,
-        0x5D,
-        0xC3,
+        0xBB, 0x01, 0x00, 0x00, 0x00, // MOV EBX, #1
+        0x85, 0xDB, // TEST EBX, EBX
+        0x0F, 0x84, 0x06, 0x00, 0x00, 0x00, // JE +6
+        0x41, 0xBC, 0x07, 0x00, 0x00, 0x00, // MOV R12D, #7
+        0x48, 0x83, 0xC4, 0x08, // ADD RSP, 8
+        0x41, 0x5F, // POP R15
+        0x5D, // POP RBP
+        0xC3, // RET
     };
-    try testing.expectEqualSlices(u8, &expected, out.bytes);
+    try testing.expectEqualSlices(u8, &expected, out.bytes[body_start .. body_start + expected.len]);
 }
 
 test "compile: (block (i32.const 0) (br_if 0) end) end — Jcc forward fixup" {
@@ -327,34 +308,26 @@ test "compile: (block (i32.const 0) (br_if 0) end) end — Jcc forward fixup" {
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32, &.{}, false);
     defer deinit(testing.allocator, out);
 
-    // Expected (slot 0 = RBX after chunk 13b pool shrink):
-    //   55 48 89 E5                    prologue              [0..4]
-    //   BB 00 00 00 00                 MOV EBX, #0           [4..9]
-    //   85 DB                          TEST EBX, EBX         [9..11]
-    //   0F 85 00 00 00 00              JNE +0 (block-end)    [11..17] disp = 17-17 = 0
-    //   5D C3                          POP RBP ; RET         [17..19]
+    // Body + function epilogue (D-496: full R15 prologue; epilogue pops R15).
+    // The JNE disp is body-relative (= 0, block-end immediately follows).
+    //   BB 00 00 00 00                 MOV EBX, #0
+    //   85 DB                          TEST EBX, EBX
+    //   0F 85 00 00 00 00              JNE +0 (block-end)
+    //   48 83 C4 08                    ADD RSP, 8
+    //   41 5F                          POP R15
+    //   5D                             POP RBP
+    //   C3                             RET
+    const body_start = prologue.bodyStartFromBytes(out.bytes);
     const expected = [_]u8{
-        0x55,
-        0x48,
-        0x89,
-        0xE5,
-        0xBB,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x85,
-        0xDB,
-        0x0F,
-        0x85,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x5D,
-        0xC3,
+        0xBB, 0x00, 0x00, 0x00, 0x00, // MOV EBX, #0
+        0x85, 0xDB, // TEST EBX, EBX
+        0x0F, 0x85, 0x00, 0x00, 0x00, 0x00, // JNE +0
+        0x48, 0x83, 0xC4, 0x08, // ADD RSP, 8
+        0x41, 0x5F, // POP R15
+        0x5D, // POP RBP
+        0xC3, // RET
     };
-    try testing.expectEqualSlices(u8, &expected, out.bytes);
+    try testing.expectEqualSlices(u8, &expected, out.bytes[body_start .. body_start + expected.len]);
 }
 
 test "compile: (loop (i32.const 0) (br_if 0) end) end — Jcc backward concrete disp" {
@@ -379,7 +352,7 @@ test "compile: (loop (i32.const 0) (br_if 0) end) end — Jcc backward concrete 
     // the no-params br_if-to-loop path = 62-byte back-edge poll block (interrupt 32 + fuel 30) + re-TEST
     // EBX,EBX (2, the poll clobbers flags) + backward JNE at body0+71
     // targeting the loop header at body0 → disp = body0-(body0+41)-6 = -77.
-    const body0 = prologue.body_start_offset(true, 8);
+    const body0 = prologue.bodyStartFromBytes(out.bytes);
     try testing.expectEqualSlices(
         u8,
         inst.encMovR64FromMemDisp32(.r11, abi.runtime_ptr_save_gpr, @intCast(jit_abi.interrupt_ptr_off)).slice(),
@@ -409,44 +382,30 @@ test "compile: br_table — single case + default both → block end" {
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32, &.{}, false);
     defer deinit(testing.allocator, out);
 
-    // Expected stream (slot 0 = RBX after chunk 13b pool shrink):
-    //   55 48 89 E5                    prologue              [0..4]
-    //   BB 00 00 00 00                 MOV EBX, #0           [4..9]
-    //   83 FB 00                       CMP EBX, 0            [9..12]
-    //   75 05                          JNE +5 (skip JMP)     [12..14]
-    //   E9 05 00 00 00                 JMP case-0 → block end (forward fixup; patched to disp=5) [14..19]
-    //   E9 00 00 00 00                 JMP default → block end (forward fixup; patched to disp=0) [19..24]
-    //   5D C3                          POP RBP ; RET         [24..26]
-    // Block end target = 24. case JMP at 14 → disp=24-14-5=5. default JMP at 19 → disp=24-19-5=0.
+    // Body + function epilogue (D-496: full R15 prologue; epilogue pops R15).
+    // Branch disps are body-relative, unaffected by the prologue size.
+    //   BB 00 00 00 00                 MOV EBX, #0
+    //   83 FB 00                       CMP EBX, 0
+    //   75 05                          JNE +5 (skip JMP)
+    //   E9 05 00 00 00                 JMP case-0 → block end (disp=5)
+    //   E9 00 00 00 00                 JMP default → block end (disp=0)
+    //   48 83 C4 08                    ADD RSP, 8
+    //   41 5F                          POP R15
+    //   5D                             POP RBP
+    //   C3                             RET
+    const body_start = prologue.bodyStartFromBytes(out.bytes);
     const expected = [_]u8{
-        0x55,
-        0x48,
-        0x89,
-        0xE5,
-        0xBB,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x83,
-        0xFB,
-        0x00,
-        0x75,
-        0x05,
-        0xE9,
-        0x05,
-        0x00,
-        0x00,
-        0x00,
-        0xE9,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x5D,
-        0xC3,
+        0xBB, 0x00, 0x00, 0x00, 0x00, // MOV EBX, #0
+        0x83, 0xFB, 0x00, // CMP EBX, 0
+        0x75, 0x05, // JNE +5
+        0xE9, 0x05, 0x00, 0x00, 0x00, // JMP case-0 disp=5
+        0xE9, 0x00, 0x00, 0x00, 0x00, // JMP default disp=0
+        0x48, 0x83, 0xC4, 0x08, // ADD RSP, 8
+        0x41, 0x5F, // POP R15
+        0x5D, // POP RBP
+        0xC3, // RET
     };
-    try testing.expectEqualSlices(u8, &expected, out.bytes);
+    try testing.expectEqualSlices(u8, &expected, out.bytes[body_start .. body_start + expected.len]);
 }
 
 test "compile: br_table count > 127 — wide case path (rel32 / imm32) compiles" {
@@ -566,7 +525,7 @@ test "compile: (i32.const 0) i32.load offset=0 end — ADR-0026 prologue + bound
     @memcpy(post_probe[off .. off + exp_sub_rsp_8.len], exp_sub_rsp_8.slice());
     off += exp_sub_rsp_8.len;
     try testing.expectEqual(@as(usize, 15), off);
-    const body_start = prologue.body_start_offset(true, 8);
+    const body_start = prologue.bodyStartFromBytes(out.bytes);
     // D-314 interrupt poll (30 B) inserted between the JBE and the sentinel.
     // Spot-check its leading MOV RAX,[R15+interrupt_ptr_off] opcode (49 8B 87);
     // the 2 disp32s (JZ skip, JNE stub) are patched, so assert opcode-only.
@@ -648,7 +607,7 @@ test "compile: (i32.const 0)(i32.const 99) i32.store offset=0 — store path" {
     // Epilogue: ADD RSP,8 / POP R15 / POP RBP / RET                  8
     // Trap stub: 21 bytes
     // D-055 migration: prologue size sourced from body_start_offset().
-    const body_start = prologue.body_start_offset(true, 8);
+    const body_start = prologue.bodyStartFromBytes(out.bytes);
     try testing.expectEqualSlices(u8, &.{ 0x44, 0x89, 0x24, 0x10 }, out.bytes[body_start + 5 + 6 + 7 + 2 + 4 + 7 + 6 ..][0..4]);
     // Verify the JA was patched (disp != 0); JA = 0x0F 0x87
     const ja_at = body_start + 5 + 6 + 7 + 2 + 4 + 7;
@@ -903,17 +862,14 @@ test "compile: i32 param + local.get + end — params marshal MOV [rbp-8], esi" 
     const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 1 };
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32, &.{}, false);
     defer deinit(testing.allocator, out);
-    // The marshalled MOV [rbp-8], <argreg> appears between the
-    // SUB RSP and the body's local.get. SysV's user int arg 0 is
-    // RSI; Win64's user int arg 0 is RDX. Either way it goes to
-    // [rbp-8] (no uses_runtime_ptr; first local at offset -8).
-    const expected = inst.encStoreR32MemRBP(-8, abi.current.arg_gprs[1]);
-    // Search the prologue range for the marshal byte sequence.
-    const prologue_end: usize = 12; // PUSH RBP + MOV RBP,RSP + SUB RSP,16
+    // The marshalled MOV [rbp-16], <argreg> appears between the SUB RSP and the
+    // body's local.get. SysV's user int arg 0 is RSI; Win64's user int arg 0 is
+    // RDX. D-496: R15 save now occupies [rbp-8], so the first local is at
+    // [rbp-16]. Search the whole stream for the marshal byte sequence.
+    const expected = inst.encStoreR32MemRBP(-16, abi.current.arg_gprs[1]);
     var found = false;
     var i: usize = 0;
-    while (i + expected.len <= prologue_end + expected.len) : (i += 1) {
-        if (i + expected.len > out.bytes.len) break;
+    while (i + expected.len <= out.bytes.len) : (i += 1) {
         if (std.mem.eql(u8, expected.slice(), out.bytes[i .. i + expected.len])) {
             found = true;
             break;
@@ -940,45 +896,29 @@ test "compile: (i32.const 7) (i32.const 5) i32.add end — verifies ADD is emitt
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32, &.{}, false);
     defer deinit(testing.allocator, out);
 
-    // Expected stream:
-    //   55                       PUSH RBP
-    //   48 89 E5                 MOV RBP, RSP
+    // Body + function epilogue (D-496: full R15 prologue; epilogue pops R15):
     //   BB 07 00 00 00           MOV EBX, #7   (vreg 0 → slot 0 → RBX)
     //   41 BC 05 00 00 00        MOV R12D, #5  (vreg 1 → slot 1 → R12)
     //   41 89 DD                 MOV R13D, EBX (vreg 2 → slot 2 → R13, lhs lift)
     //   45 01 E5                 ADD R13D, R12D (rhs add)
     //   44 89 E8                 MOV EAX, R13D (return marshalling)
+    //   48 83 C4 08              ADD RSP, 8
+    //   41 5F                    POP R15
     //   5D                       POP RBP
     //   C3                       RET
+    const body_start = prologue.bodyStartFromBytes(out.bytes);
     const expected = [_]u8{
-        0x55,
-        0x48,
-        0x89,
-        0xE5,
-        0xBB,
-        0x07,
-        0x00,
-        0x00,
-        0x00,
-        0x41,
-        0xBC,
-        0x05,
-        0x00,
-        0x00,
-        0x00,
-        0x41,
-        0x89,
-        0xDD,
-        0x45,
-        0x01,
-        0xE5,
-        0x44,
-        0x89,
-        0xE8,
-        0x5D,
-        0xC3,
+        0xBB, 0x07, 0x00, 0x00, 0x00, // MOV EBX, #7
+        0x41, 0xBC, 0x05, 0x00, 0x00, 0x00, // MOV R12D, #5
+        0x41, 0x89, 0xDD, // MOV R13D, EBX
+        0x45, 0x01, 0xE5, // ADD R13D, R12D
+        0x44, 0x89, 0xE8, // MOV EAX, R13D
+        0x48, 0x83, 0xC4, 0x08, // ADD RSP, 8
+        0x41, 0x5F, // POP R15
+        0x5D, // POP RBP
+        0xC3, // RET
     };
-    try testing.expectEqualSlices(u8, &expected, out.bytes);
+    try testing.expectEqualSlices(u8, &expected, out.bytes[body_start .. body_start + expected.len]);
 }
 
 // §9.7 / 7.10-b: parallel-move for ALU when dst==rhs (D-029).
@@ -1043,7 +983,7 @@ test "compile: (i32.const 8) (i32.const 3) i32.sub end — SUB opcode 29" {
     // Spot-check (slot 2 = R13, slot 1 = R12 after chunk 13b pool shrink):
     // SUB R13D, R12D = 45 29 E5 lives at offset 18..21.
     // D-055 migration: prologue size sourced from body_start_offset().
-    const sub_off = prologue.body_start_offset(false, 0) + 14;
+    const sub_off = prologue.bodyStartFromBytes(out.bytes) + 14;
     try testing.expectEqualSlices(u8, &.{ 0x45, 0x29, 0xE5 }, out.bytes[sub_off .. sub_off + 3]);
 }
 
@@ -1069,7 +1009,7 @@ test "compile: (i32.const 6) (i32.const 7) i32.mul end — IMUL 0F AF" {
     // ModR/M: mod=11, reg=101 (r13), rm=100 (r12) → 11 101 100 = EC.
     // So 45 0F AF EC at offset 18..22.
     // D-055 migration: prologue size sourced from body_start_offset().
-    const imul_off = prologue.body_start_offset(false, 0) + 14;
+    const imul_off = prologue.bodyStartFromBytes(out.bytes) + 14;
     try testing.expectEqualSlices(u8, &.{ 0x45, 0x0F, 0xAF, 0xEC }, out.bytes[imul_off .. imul_off + 4]);
 }
 
@@ -1091,49 +1031,29 @@ test "compile: (i32.const 7) (i32.const 5) i32.eq end — CMP+SETE+MOVZX" {
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32, &.{}, false);
     defer deinit(testing.allocator, out);
 
-    // Expected stream:
-    //   55 48 89 E5                     prologue
+    // Body + function epilogue (D-496: full R15 prologue; epilogue pops R15):
     //   BB 07 00 00 00                  MOV EBX, #7
     //   41 BC 05 00 00 00               MOV R12D, #5
     //   44 39 E3                        CMP EBX, R12D
     //   41 0F 94 C5                     SETE R13B
     //   45 0F B6 ED                     MOVZX R13D, R13B
     //   44 89 E8                        MOV EAX, R13D
+    //   48 83 C4 08                     ADD RSP, 8
+    //   41 5F                           POP R15
     //   5D C3                           POP RBP ; RET
+    const body_start = prologue.bodyStartFromBytes(out.bytes);
     const expected = [_]u8{
-        0x55,
-        0x48,
-        0x89,
-        0xE5,
-        0xBB,
-        0x07,
-        0x00,
-        0x00,
-        0x00,
-        0x41,
-        0xBC,
-        0x05,
-        0x00,
-        0x00,
-        0x00,
-        0x44,
-        0x39,
-        0xE3,
-        0x41,
-        0x0F,
-        0x94,
-        0xC5,
-        0x45,
-        0x0F,
-        0xB6,
-        0xED,
-        0x44,
-        0x89,
-        0xE8,
-        0x5D,
-        0xC3,
+        0xBB, 0x07, 0x00, 0x00, 0x00, // MOV EBX, #7
+        0x41, 0xBC, 0x05, 0x00, 0x00, 0x00, // MOV R12D, #5
+        0x44, 0x39, 0xE3, // CMP EBX, R12D
+        0x41, 0x0F, 0x94, 0xC5, // SETE R13B
+        0x45, 0x0F, 0xB6, 0xED, // MOVZX R13D, R13B
+        0x44, 0x89, 0xE8, // MOV EAX, R13D
+        0x48, 0x83, 0xC4, 0x08, // ADD RSP, 8
+        0x41, 0x5F, // POP R15
+        0x5D, 0xC3, // POP RBP ; RET
     };
-    try testing.expectEqualSlices(u8, &expected, out.bytes);
+    try testing.expectEqualSlices(u8, &expected, out.bytes[body_start .. body_start + expected.len]);
 }
 
 test "compile: i32.lt_s vs i32.lt_u — different cc codes" {
@@ -1155,9 +1075,10 @@ test "compile: i32.lt_s vs i32.lt_u — different cc codes" {
         const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32, &.{}, false);
         defer deinit(testing.allocator, out);
         // SETcc opcode byte (slot 0 = RBX, slot 1 = R12 after chunk 13b pool shrink).
-        // Layout: [prologue 4][movimm-EBX 5][movimm-R12D 6][cmp 3] = 18,
-        // then SETcc REX(41) at 18, 0x0F at 19, opcode at 20.
-        try testing.expectEqual(case.cc, out.bytes[20]);
+        // Body layout: [movimm-EBX 5][movimm-R12D 6][cmp 3] = 14, then SETcc
+        // REX(41), 0x0F, opcode → opcode at body_start + 16.
+        const body_start = prologue.bodyStartFromBytes(out.bytes);
+        try testing.expectEqual(case.cc, out.bytes[body_start + 16]);
     }
 }
 
@@ -1177,41 +1098,27 @@ test "compile: (i32.const 0) i32.eqz end — TEST+SETE+MOVZX" {
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32, &.{}, false);
     defer deinit(testing.allocator, out);
 
-    // Expected stream:
-    //   55 48 89 E5                     prologue
+    // Body + function epilogue (D-496: full R15 prologue; epilogue pops R15):
     //   BB 00 00 00 00                  MOV EBX, #0
     //   85 DB                           TEST EBX, EBX
     //   41 0F 94 C4                     SETE R12B   (REX.B for r12)
     //   45 0F B6 E4                     MOVZX R12D, R12B
     //   44 89 E0                        MOV EAX, R12D
+    //   48 83 C4 08                     ADD RSP, 8
+    //   41 5F                           POP R15
     //   5D C3                           POP RBP ; RET
+    const body_start = prologue.bodyStartFromBytes(out.bytes);
     const expected = [_]u8{
-        0x55,
-        0x48,
-        0x89,
-        0xE5,
-        0xBB,
-        0x00,
-        0x00,
-        0x00,
-        0x00,
-        0x85,
-        0xDB,
-        0x41,
-        0x0F,
-        0x94,
-        0xC4,
-        0x45,
-        0x0F,
-        0xB6,
-        0xE4,
-        0x44,
-        0x89,
-        0xE0,
-        0x5D,
-        0xC3,
+        0xBB, 0x00, 0x00, 0x00, 0x00, // MOV EBX, #0
+        0x85, 0xDB, // TEST EBX, EBX
+        0x41, 0x0F, 0x94, 0xC4, // SETE R12B
+        0x45, 0x0F, 0xB6, 0xE4, // MOVZX R12D, R12B
+        0x44, 0x89, 0xE0, // MOV EAX, R12D
+        0x48, 0x83, 0xC4, 0x08, // ADD RSP, 8
+        0x41, 0x5F, // POP R15
+        0x5D, 0xC3, // POP RBP ; RET
     };
-    try testing.expectEqualSlices(u8, &expected, out.bytes);
+    try testing.expectEqualSlices(u8, &expected, out.bytes[body_start .. body_start + expected.len]);
 }
 
 test "compile: (i32.const 1) (i32.const 4) i32.shl end — MOV CL + MOV dst + SHL CL" {
@@ -1232,47 +1139,29 @@ test "compile: (i32.const 1) (i32.const 4) i32.shl end — MOV CL + MOV dst + SH
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32, &.{}, false);
     defer deinit(testing.allocator, out);
 
-    // Expected stream:
-    //   55 48 89 E5                     prologue
+    // Body + function epilogue (D-496: full R15 prologue; epilogue pops R15):
     //   BB 01 00 00 00                  MOV EBX, #1     (vreg 0 = lhs)
     //   41 BC 04 00 00 00               MOV R12D, #4    (vreg 1 = rhs)
     //   44 89 E1                        MOV ECX, R12D   (rhs → CL count)
     //   41 89 DD                        MOV R13D, EBX   (lhs → dst)
     //   41 D3 E5                        SHL R13D, CL
     //   44 89 E8                        MOV EAX, R13D
+    //   48 83 C4 08                     ADD RSP, 8
+    //   41 5F                           POP R15
     //   5D C3                           POP RBP ; RET
+    const body_start = prologue.bodyStartFromBytes(out.bytes);
     const expected = [_]u8{
-        0x55,
-        0x48,
-        0x89,
-        0xE5,
-        0xBB,
-        0x01,
-        0x00,
-        0x00,
-        0x00,
-        0x41,
-        0xBC,
-        0x04,
-        0x00,
-        0x00,
-        0x00,
-        0x44,
-        0x89,
-        0xE1,
-        0x41,
-        0x89,
-        0xDD,
-        0x41,
-        0xD3,
-        0xE5,
-        0x44,
-        0x89,
-        0xE8,
-        0x5D,
-        0xC3,
+        0xBB, 0x01, 0x00, 0x00, 0x00, // MOV EBX, #1
+        0x41, 0xBC, 0x04, 0x00, 0x00, 0x00, // MOV R12D, #4
+        0x44, 0x89, 0xE1, // MOV ECX, R12D
+        0x41, 0x89, 0xDD, // MOV R13D, EBX
+        0x41, 0xD3, 0xE5, // SHL R13D, CL
+        0x44, 0x89, 0xE8, // MOV EAX, R13D
+        0x48, 0x83, 0xC4, 0x08, // ADD RSP, 8
+        0x41, 0x5F, // POP R15
+        0x5D, 0xC3, // POP RBP ; RET
     };
-    try testing.expectEqualSlices(u8, &expected, out.bytes);
+    try testing.expectEqualSlices(u8, &expected, out.bytes[body_start .. body_start + expected.len]);
 }
 
 test "compile: i32.shr_s vs i32.shr_u — kind byte differs (sar 41 D3 fd vs shr 41 D3 ed)" {
@@ -1296,11 +1185,12 @@ test "compile: i32.shr_s vs i32.shr_u — kind byte differs (sar 41 D3 fd vs shr
         const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 3 };
         const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32, &.{}, false);
         defer deinit(testing.allocator, out);
-        // Layout (slot 0=RBX, slot 1=R12, slot 2=R13 after chunk 13b pool shrink):
-        // 4 prologue + 5 mov-EBX + 6 mov-R12D + 3 mov-ECX + 3 mov-R13D = 21,
-        // then REX 0x41 at 21, D3 at 22, ModR/M at 23.
-        try testing.expectEqual(@as(u8, 0xD3), out.bytes[22]);
-        try testing.expectEqual(case.modrm, out.bytes[23]);
+        // Body layout (slot 0=RBX, slot 1=R12, slot 2=R13 after chunk 13b pool
+        // shrink): 5 mov-EBX + 6 mov-R12D + 3 mov-ECX + 3 mov-R13D = 17, then
+        // REX 0x41, D3 at body_start+18, ModR/M at body_start+19.
+        const body_start = prologue.bodyStartFromBytes(out.bytes);
+        try testing.expectEqual(@as(u8, 0xD3), out.bytes[body_start + 18]);
+        try testing.expectEqual(case.modrm, out.bytes[body_start + 19]);
     }
 }
 
@@ -1320,34 +1210,23 @@ test "compile: (i32.const 8) i32.clz end — LZCNT" {
     const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32, &.{}, false);
     defer deinit(testing.allocator, out);
 
-    // Expected stream:
-    //   55 48 89 E5                    prologue
+    // Body + function epilogue (D-496: full R15 prologue; epilogue pops R15):
     //   BB 08 00 00 00                 MOV EBX, #8
     //   F3 44 0F BD E3                 LZCNT R12D, EBX (dst=R12 reg, src=EBX r/m)
     //   44 89 E0                       MOV EAX, R12D
+    //   48 83 C4 08                    ADD RSP, 8
+    //   41 5F                          POP R15
     //   5D C3                          POP RBP ; RET
+    const body_start = prologue.bodyStartFromBytes(out.bytes);
     const expected = [_]u8{
-        0x55,
-        0x48,
-        0x89,
-        0xE5,
-        0xBB,
-        0x08,
-        0x00,
-        0x00,
-        0x00,
-        0xF3,
-        0x44,
-        0x0F,
-        0xBD,
-        0xE3,
-        0x44,
-        0x89,
-        0xE0,
-        0x5D,
-        0xC3,
+        0xBB, 0x08, 0x00, 0x00, 0x00, // MOV EBX, #8
+        0xF3, 0x44, 0x0F, 0xBD, 0xE3, // LZCNT R12D, EBX
+        0x44, 0x89, 0xE0, // MOV EAX, R12D
+        0x48, 0x83, 0xC4, 0x08, // ADD RSP, 8
+        0x41, 0x5F, // POP R15
+        0x5D, 0xC3, // POP RBP ; RET
     };
-    try testing.expectEqualSlices(u8, &expected, out.bytes);
+    try testing.expectEqualSlices(u8, &expected, out.bytes[body_start .. body_start + expected.len]);
 }
 
 test "compile: i32.clz vs i32.ctz vs i32.popcnt — opcode byte differs" {
@@ -1370,12 +1249,13 @@ test "compile: i32.clz vs i32.ctz vs i32.popcnt — opcode byte differs" {
         const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 2 };
         const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32, &.{}, false);
         defer deinit(testing.allocator, out);
-        // Layout (slot 0 = RBX after chunk 13b pool shrink):
-        // 4 prologue + 5 mov-EBX-imm32 = 9. Then F3 at 9, REX at 10 (0x44),
-        // 0x0F at 11, opcode at 12.
-        try testing.expectEqual(@as(u8, 0xF3), out.bytes[9]);
-        try testing.expectEqual(@as(u8, 0x0F), out.bytes[11]);
-        try testing.expectEqual(case.opcode, out.bytes[12]);
+        // Body layout (slot 0 = RBX after chunk 13b pool shrink):
+        // 5 mov-EBX-imm32, then F3 at body_start+5, REX (0x44), 0x0F at
+        // body_start+7, opcode at body_start+8.
+        const body_start = prologue.bodyStartFromBytes(out.bytes);
+        try testing.expectEqual(@as(u8, 0xF3), out.bytes[body_start + 5]);
+        try testing.expectEqual(@as(u8, 0x0F), out.bytes[body_start + 7]);
+        try testing.expectEqual(case.opcode, out.bytes[body_start + 8]);
     }
 }
 
@@ -1415,7 +1295,7 @@ test "compile: i32.wrap_i64 emits MOV r32_dst, r32_src (self-MOV zero-extends)" 
     defer deinit(testing.allocator, out);
     // Layout: 4 prologue + 5 mov-EBX-imm32 = 9. Then MOV EBX, EBX = 2 bytes.
     // D-055 migration: prologue size sourced from body_start_offset().
-    const off = prologue.body_start_offset(false, 0) + 5;
+    const off = prologue.bodyStartFromBytes(out.bytes) + 5;
     const expected = inst.encMovRR(.d, .rbx, .rbx);
     try testing.expectEqualSlices(u8, expected.slice(), out.bytes[off .. off + expected.len]);
 }
@@ -1438,7 +1318,7 @@ test "compile: i64.extend_i32_u emits MOV r32_dst, r32_src" {
     // Layout (slot 0 = RBX after chunk 13b pool shrink):
     // 4 prologue + 5 mov-EBX-imm32 = 9. Then MOV EBX, EBX = 2 bytes.
     // D-055 migration: prologue size sourced from body_start_offset().
-    const off = prologue.body_start_offset(false, 0) + 5;
+    const off = prologue.bodyStartFromBytes(out.bytes) + 5;
     const expected = inst.encMovRR(.d, .rbx, .rbx);
     try testing.expectEqualSlices(u8, expected.slice(), out.bytes[off .. off + expected.len]);
 }
@@ -1462,7 +1342,7 @@ test "compile: i64.extend_i32_s emits MOVSXD r64_dst, r32_src" {
     // Layout (slot 0 = RBX after chunk 13b pool shrink):
     // 4 prologue + 5 mov-EBX-imm32 = 9. Then MOVSXD RBX, EBX = 3 bytes.
     // D-055 migration: prologue size sourced from body_start_offset().
-    const off = prologue.body_start_offset(false, 0) + 5;
+    const off = prologue.bodyStartFromBytes(out.bytes) + 5;
     const expected = inst.encMovsxdR64R32(.rbx, .rbx);
     try testing.expectEqualSlices(u8, expected.slice(), out.bytes[off .. off + expected.len]);
 }
@@ -1499,7 +1379,7 @@ test "compile: call N — 0 args, void return — emits MOV RDI,R15 + CALL + fix
     // outgoing_max_bytes>0 makes emitShadowAlloc/Free no-op.
     // D-055 migration: prologue size sourced from body_start_offset().
     // Both SysV (frame=8) and Win64 (frame=40) fit in imm8 → body_start = 13 today.
-    const body_start = prologue.body_start_offset(true, 8);
+    const body_start = prologue.bodyStartFromBytes(out.bytes);
     const expected_mov = inst.encMovRR(.q, abi.current.entry_arg0_gpr, abi.current.runtime_ptr_save_gpr);
     try testing.expectEqualSlices(u8, expected_mov.slice(), out.bytes[body_start .. body_start + expected_mov.len]);
     // CALL byte offset = post-prologue + MOV <arg0>, R15 (3 bytes).
@@ -1538,7 +1418,7 @@ test "compile: call N — 0 args, i32 return — captures EAX into result vreg" 
     //   + 5                  CALL rel32
     //   = 21
     // D-055 migration: prologue size sourced from body_start_offset().
-    const capture_off: u32 = prologue.body_start_offset(true, 8) + 3 + 5;
+    const capture_off: u32 = prologue.bodyStartFromBytes(out.bytes) + 3 + 5;
     const expected_capture = inst.encMovRR(.d, .rbx, .rax);
     try testing.expectEqualSlices(u8, expected_capture.slice(), out.bytes[capture_off .. capture_off + expected_capture.len]);
 }
@@ -1569,7 +1449,7 @@ test "compile: call N — 1 i32 arg — marshals top-of-stack into arg_gprs[1] (
     //   MOV <arg0>, R15                  (3 bytes) → runtime_ptr restore
     //   CALL rel32                       (5 bytes)
     // D-055 migration: prologue size sourced from body_start_offset() + i32.const 5 bytes.
-    const marshal_off: u32 = prologue.body_start_offset(true, 8) + 5;
+    const marshal_off: u32 = prologue.bodyStartFromBytes(out.bytes) + 5;
     const expected_marshal = inst.encMovRR(.d, abi.current.arg_gprs[1], .rbx);
     try testing.expectEqualSlices(u8, expected_marshal.slice(), out.bytes[marshal_off .. marshal_off + expected_marshal.len]);
 }
@@ -1612,7 +1492,7 @@ test "compile: call_indirect — bounds + sig (JAE+JNE → trap stub) + CALL RAX
     //   [81..83]  CALL RAX                (indirect)
     // D-055 migration: all assertions use body_start_offset() so they survive
     // future +7 prologue shift from JIT-execution sentinel injection.
-    const body_start = prologue.body_start_offset(true, 8);
+    const body_start = prologue.bodyStartFromBytes(out.bytes);
     const expected_table_size_load = inst.encMovR32FromMemDisp32(.rax, .r15, 24);
     const table_size_off = body_start + 5;
     try testing.expectEqualSlices(u8, expected_table_size_load.slice(), out.bytes[table_size_off .. table_size_off + expected_table_size_load.len]);

@@ -190,7 +190,13 @@ pub fn compile(
     // Helper in `usage.zig`. Per ADR-0026 + §9.9 / 9.9-m-5
     // (D-087/088/089 cohort) — see helper doc for the full
     // op set.
-    const uses_runtime_ptr = usage.usesRuntimePtr(func);
+    // D-496 — force R15 install + prologue poll on EVERY function for
+    // sandbox soundness (arm64 parity). A trivial function (no memory /
+    // global / call) would otherwise skip R15 + the fuel/interrupt poll,
+    // so `--fuel 0` / a pending interrupt would not trap. The trap stub
+    // writes trap_kind via R15, so R15 MUST be installed (a poll-via-RAX
+    // path was falsified). Keep `usage` referenced for the prescan helper.
+    const uses_runtime_ptr = usage.usesRuntimePtr(func) or true;
 
     // Frame-bytes formula depends on prologue shape (SysV §3.2.2
     // 16-byte stack alignment; CALL pushes ret addr → entry RSP

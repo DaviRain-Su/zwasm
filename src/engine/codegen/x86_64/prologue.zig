@@ -106,6 +106,30 @@ pub fn body_start_offset(uses_runtime_ptr: bool, frame_bytes: u32) u32 {
     return off;
 }
 
+/// Body-start offset derived from the EMITTED prologue bytes.
+///
+/// D-496: every function now installs R15 + the full prologue poll
+/// (`uses_runtime_ptr` forced true in emit.zig for sandbox soundness),
+/// so the fixed prologue prefix is ALWAYS the full shape:
+///   push_rbp(1)+push_r15(2)+mov_rbp_rsp(3)+mov_r15(3)+stack_probe(13)
+///   +interrupt_poll(30)+fuel_poll(30)+sentinel(11) = 93 bytes,
+/// optionally followed by `SUB RSP, imm` (imm8 = 4 bytes, imm32 = 7).
+///
+/// Reads the SUB RSP form at `bytes[full..]` to add the frame step,
+/// so tests no longer need to recompute `frame_bytes` per case.
+pub fn bodyStartFromBytes(bytes: []const u8) u32 {
+    const full: u32 = push_rbp_size + push_r15_size + mov_rbp_rsp_size +
+        mov_r15_argptr_size + stack_probe_size + interrupt_poll_size +
+        fuel_poll_size + sentinel_size;
+    comptime std.debug.assert(full == 93);
+    if (bytes.len >= full + 3 and bytes[full] == 0x48 and bytes[full + 2] == 0xEC) {
+        // SUB RSP, imm — opcode byte at full+1 distinguishes the form.
+        if (bytes[full + 1] == 0x83) return full + 4; // imm8 form
+        if (bytes[full + 1] == 0x81) return full + 7; // imm32 form
+    }
+    return full;
+}
+
 /// Read a u32 word at `byte_offset` in `bytes` (little-endian).
 /// Convenience for prologue-byte test patterns mirroring
 /// `arm64/prologue.zig::wordAt`.
