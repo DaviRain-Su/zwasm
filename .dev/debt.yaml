@@ -3,6 +3,34 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
+  - id: "D-499"
+    layer: "code"
+    status: "blocked-by"
+    description: |-
+      blocked-by: the x86_64 JIT emitting the prologue fuel/interrupt poll for EVERY
+      function (not just runtime-ptr-using ones). On x86_64 the stack-probe/interrupt/
+      fuel prologue poll is gated on `uses_runtime_ptr` (emit.zig); a TRIVIAL leaf fn
+      (no memory/global/call) skips R15 install + the poll, so `fuel=0` / a pending
+      interrupt does NOT trap a trivial fn on x86_64 JIT (arm64 installs X19 + polls
+      unconditionally, so it DOES trap). RUNAWAY-SAFETY IS INTACT: loops are back-edge
+      -polled, so a runaway guest is still bounded; only the fuel=0-immediate-trap
+      SEMANTIC differs for trivial straight-line fns on x86_64. Surfaced by the D-496
+      `.auto`→JIT flip (default now routes trivial fns to JIT). The 3 facade sandbox
+      tests asserting this on a trivial fn are pinned `.interp` (module.zig fuel=0;
+      instance.zig interrupt + setFuel). ATTEMPTED FIX (force uses_runtime_ptr=true so
+      every fn polls) was REVERTED: it caused an x86_64 REGRESSION — the buffer-write
+      multi-result entry path (entry_buffer_write) ABRTs (frame-offset/param-shuffle
+      interaction with the always-R15 prologue), on top of needing a 59 emit-test
+      recompute. Blanket-R15 has too-large blast radius. DISCHARGE: either (i) emit the
+      poll for trivial fns WITHOUT breaking buffer-write (targeted prologue + buffer
+      -write frame-offset fix, x86_64-validated), or (ii) ratify trivial-fn fuel/
+      interrupt as interp-only (runaway-safe) + keep the pins. Niche: host fuel=0 on a
+      trivial leaf fn via the JIT default is rare.
+    first_raised: "2026-06-22"
+    last_reviewed: "2026-06-22"
+    refs: |-
+      src/engine/codegen/x86_64/emit.zig:uses_runtime_ptr gate · src/zwasm/module.zig +
+      instance.zig (.interp pins) · entry_buffer_write (the regression) · D-496 (parent)
   - id: "D-498"
     layer: "code"
     status: "blocked-by"
