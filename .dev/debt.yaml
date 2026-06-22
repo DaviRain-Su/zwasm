@@ -72,15 +72,38 @@ entries:
       entry for non-exported funcs → real gap, pin .interp + debt OR generate entry);
       **runWasmJit-SIMD = the CLI captured-run path (`runWasmCapturedFull`) hardcodes `.auto` so
       its interp leg now routes to JIT — needs an ENGINE PARAM threaded so `zwasm run --engine
-      interp` actually forces interp** (real design need, NOT a pin; the SIMD test's interp leg
-      must force interp); wasm_table_grow funcref (D-497); extern_new funcref round-trip (check);
-      rejects-WASI-no-host (check). NEXT: `git stash pop`, triage the 17 per above (pins +
-      run.zig engine-param + the non-exported-func-call decision), green full test → 3-host → tag.
+      interp` actually forces interp** (real design need, NOT a pin).
+      ---- ch6 FLIP attempt #3 (2026-06-22, STASHED "D-496-ch6-flip" again — 2 REAL FIXES added
+      since #2, NOT committed; tree green at d3602f214) ----
+      Two REAL fixes made (in the stash): (1) **engine-param threading** — `Limits.engine`
+      (default `.auto`) wired into `runWasmCapturedFull`'s instantiate; main.zig sets `.interp`
+      for explicit `--engine interp` (was broken by the flip: --engine interp routed to JIT);
+      SIMD test interp-leg forced `.interp`. CLEARED runWasmJit-SIMD. (2) **WASI-host rejection**
+      — `collectHostFuncTargets` now rejects a WASI import when `store.wasi_host == null` (interp
+      parity: don't silently accept a hostless WASI module on JIT). Full test now **16→(WASI fix
+      will clear rejects-WASI) ~15**. FINAL triage of the remaining ~14 (all CLASSIFIED, execute
+      cleanly next cycle):
+      • CLEAN `.interp` pins — genuinely interp-specific (cross-instance aliasing is interp-only;
+        non-exported func call is interp-only; the JIT call arm dispatches by EXPORT NAME):
+        i32-dispatch-42 + instance_new/delete (non-exported func 0, i32_const_42 has no export);
+        cross-module funcref via wasm_instance_new; zombie lifecycle + multi-consumer (CROSS-
+        MODULE, MULTIPLE instances per test — pin the RIGHT instance(s) carefully); cross-module
+        Store binding x2; Linker.defineInstance + T1.12 cross-inst memory (facade `Module.instantiate`
+        on the SOURCE → pin `.{ .engine = .interp }`).
+      • REAL JIT GAPS → pin `.interp` + debt (host funcref marshalling on JIT is niche; core
+        surface works): reftype funcref param+result via wasm_func_call (funcref_id exported
+        (funcref)→(funcref); wasmFuncCallJit's cValToJitBits/jitBitsToCVal likely lack funcref) +
+        extern_new funcref round-trip → NEW debt D-498 "JIT C-API funcref param/result marshalling";
+        T1.15 Instance.table + setTableElementsLimit + wasm_table_grow = funcref-table GROW = D-497.
+      NEXT: `git stash pop`, apply the ~14 pins (careful w/ multi-instance cross-module tests),
+      file D-498, green full test → 3-host → tag alpha.3. facade `table.zig` ALREADY has JIT arms
+      (lines 39-40/53/70/108) so T1.15's gap is specifically funcref grow (D-497), not get/set/size.
     first_raised: "2026-06-22"
     last_reviewed: "2026-06-22"
     refs: |-
-      src/api/instance.zig:938 (routing) · src/cli/run.zig:runWasmCapturedFull (needs engine param) ·
-      src/zwasm/linker.zig:795 (.interp pin) · stash "D-496-ch6-flip" · memory project_auto_jit_flip_strategy
+      src/api/instance.zig:938 (routing) + collectHostFuncTargets (WASI-host reject) · src/cli/run.zig
+      Limits.engine + runWasmCapturedFull · src/cli/main.zig (--engine interp→.interp) ·
+      src/zwasm/linker.zig:795 (.interp pin) · stash "D-496-ch6-flip" · D-497 · memory project_auto_jit_flip_strategy
   - id: "D-495"
     layer: "code"
     status: "note"

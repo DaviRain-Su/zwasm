@@ -41,14 +41,13 @@ stays in WAIT for the tag (end of campaign).
   (linker.zig:795, covers the ~36 component failures); run.zig fuel-arm re-landed (~593, jitOf().setFuel/
   setMemoryPagesLimit/setInterruptFlag); 6 interp-internal C-API tests pinned `.interp` (instance.zig 2305/2337/2356/
   2612 + cross-module 3344/3361). Behaviorally confirmed: `.auto` --fuel→trap exit 1, tinygo_json→roundtrip OK via JIT.
-  Full test → **17 failures (down from 69)**. **STASHED** `git stash` "D-496-ch6-flip" (3 src files: instance.zig
-  routing+pins, run.zig fuel-arm, linker.zig .interp); tree GREEN at d3602f214. **NEXT cycle = `git stash pop` + triage
-  the 17 (full breakdown in D-496)**: most are clean `.interp` pins (interp-internal asserts + cross-module aliasing,
-  interp-only like linker); REAL items needing more than a pin: (i) **run.zig captured-run path hardcodes `.auto` → its
-  interp leg routes to JIT; needs an ENGINE PARAM so `zwasm run --engine interp` forces interp** (runWasmJit-SIMD test);
-  (ii) **calling a NON-EXPORTED func by index on a JIT instance** (i32_const_42 has no export → i32-dispatch-42 +
-  instance_new/delete) — pin .interp + debt OR generate a host-callable entry; (iii) wasm_table_grow funcref = D-497.
-  Green full test → commit flip → push → 3-host → (7) tag alpha.3 (USER-AUTHORIZED, campaign end).
+  flip attempt #3 STASHED "D-496-ch6-flip" (tree GREEN @d3602f214) with TWO REAL FIXES added (preserved in stash):
+  (1) engine-param threading (`Limits.engine`, `--engine interp`→`.interp`, SIMD test interp-leg pinned) — cleared
+  runWasmJit-SIMD; (2) WASI-host rejection in collectHostFuncTargets (interp parity). Full test 69→~14 remaining, ALL
+  CLASSIFIED in D-496: clean `.interp` pins (cross-module aliasing/zombie = MULTI-instance, pin carefully; non-exported
+  func call; facade source) + funcref gaps → pin+debt (NEW D-498 JIT C-API funcref param/result marshalling; D-497
+  funcref-table grow). **NEXT cycle = `git stash pop` → apply ~14 pins per D-496 → file D-498 → green → 3-host → tag
+  alpha.3** (USER-AUTHORIZED, campaign end). ubuntu green @414bb9a17 (ch1-4).
 - **Continuity-memo**: 69-failure breakdown in D-496. Full flip routing/run.zig-fuel-arm code re-implementable per D-496
   refs + git reflog. Green baseline = `8a4a01905` (regalloc fix + docs). Phase I investigation agent dispatched
   (JIT-C-API gap map). **Backstop cron = `f34c7ee2`** (every 10 min /continue) — `CronDelete` it at the FINAL stop
