@@ -34,16 +34,21 @@ stays in WAIT for the tag (end of campaign).
   edge: funcref-table get/set (no host funcptr mirror, runner.zig:1200) — handle carefully or defer w/ debt. v128
   globals already C-union-excluded (no new gap). JitRuntime fields: jit_abi.zig:151 (vm_base:154, globals_base:206,
   tables_ptr:290).
-- **Phase IV chunks**: (1) DONE @45f5b93c7 — instantiateJit kind-generic exports (memory/table/global externs +
-  introspection surface). (2/3/5) DONE @f7d5e0233 — JitInstance accessors (globalCell/memoryBytes/memoryPageSizeLog2/
-  funcCount) + C-API arms for global get/set, memory data/_size/size/grow, zwasm_instance_get_func (zwasm_ext setters
-  already routed). instance.zig now `(cap=UNCAPPED)` @4e1b06892 (user-ratified irreducible C-ABI catalog). **NEXT (4)
-  table size/get/set/grow JIT arm** — `rt.tables_ptr` ([*]TableSlice, jit_abi:290) + `growTable` (runner.zig:1203);
-  wasm_table_size :1692 (easy = len), get :1708 / set / grow. **HARD EDGE: funcref-table get/set** — JIT funcref tables
-  have no host funcptr→Ref mirror (runner.zig:1200); mixed_exports "t" IS funcref, so the existing table tests need it.
-  Decide: build the funcref-Ref mirror, OR externref-only + debt-row the funcref-table-get/set-on-JIT gap. Then (6) flip
-  `.auto`→JIT + re-land run.zig fuel-arm + LINKER stays interp + full+3-host; (7) tag alpha.3. Each = `.jit` red→green;
-  `.auto`=interp until (6). Accessor sites: wasm_table_size :1692 / get :1708 / set / grow.
+- **Phase IV chunks**: (1) DONE @45f5b93c7 kind-generic exports. (2/3/5) DONE @f7d5e0233 global/memory/get_func arms.
+  instance.zig `(cap=UNCAPPED)` @4e1b06892. (4) DONE @d3602f214 — table size/get/set raw-ref round-trip; funcref-GROW
+  gap → D-497; funcptr fail-safe-clear on set. **(6) FLIP IN PROGRESS (UNCOMMITTED)**: `.auto`→JIT routing landed
+  instance.zig:938 (try-JIT→interp-fallback on pre-start reject; start-trap propagates); LINKER pinned `.interp`
+  (linker.zig:795, covers the ~36 component failures); run.zig fuel-arm re-landed (~593, jitOf().setFuel/
+  setMemoryPagesLimit/setInterruptFlag); 6 interp-internal C-API tests pinned `.interp` (instance.zig 2305/2337/2356/
+  2612 + cross-module 3344/3361). Behaviorally confirmed: `.auto` --fuel→trap exit 1, tinygo_json→roundtrip OK via JIT.
+  Full test → **17 failures (down from 69)**. **STASHED** `git stash` "D-496-ch6-flip" (3 src files: instance.zig
+  routing+pins, run.zig fuel-arm, linker.zig .interp); tree GREEN at d3602f214. **NEXT cycle = `git stash pop` + triage
+  the 17 (full breakdown in D-496)**: most are clean `.interp` pins (interp-internal asserts + cross-module aliasing,
+  interp-only like linker); REAL items needing more than a pin: (i) **run.zig captured-run path hardcodes `.auto` → its
+  interp leg routes to JIT; needs an ENGINE PARAM so `zwasm run --engine interp` forces interp** (runWasmJit-SIMD test);
+  (ii) **calling a NON-EXPORTED func by index on a JIT instance** (i32_const_42 has no export → i32-dispatch-42 +
+  instance_new/delete) — pin .interp + debt OR generate a host-callable entry; (iii) wasm_table_grow funcref = D-497.
+  Green full test → commit flip → push → 3-host → (7) tag alpha.3 (USER-AUTHORIZED, campaign end).
 - **Continuity-memo**: 69-failure breakdown in D-496. Full flip routing/run.zig-fuel-arm code re-implementable per D-496
   refs + git reflog. Green baseline = `8a4a01905` (regalloc fix + docs). Phase I investigation agent dispatched
   (JIT-C-API gap map). **Backstop cron = `f34c7ee2`** (every 10 min /continue) — `CronDelete` it at the FINAL stop

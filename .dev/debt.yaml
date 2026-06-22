@@ -50,13 +50,37 @@ entries:
       defer the flip to a campaign (cljw is blocked awaiting the tag; flip ≠ alpha.3); OR (B)
       scoped flip = CLI `zwasm run`→JIT-with-interp-fallback only, C-API .auto stays interp
       (overnight-feasible, delivers "run defaults to JIT"); OR (C) full flip = a JIT-C-API
-      accessor/introspection campaign (ADR-0153 five-phase) before the tag. Full flip work is
-      stashed in this row + git reflog; re-implement per the routing above.
+      accessor/introspection campaign (ADR-0153 five-phase) before the tag. USER CHOSE (C)
+      2026-06-22.
+      ---- CAMPAIGN PROGRESS (option C) ----
+      Phase I done (agent a91c8f4a). Phase IV accessor chunks COMMITTED + green + pushed:
+      ch1 @45f5b93c7 (kind-generic exports → externs+introspection), ch2/3/5 @f7d5e0233
+      (global/memory/get_func arms), instance.zig UNCAPPED @4e1b06892, ch4 @d3602f214 (table
+      size/get/set raw-ref; funcref-grow → D-497). These cleared 52 of the 69.
+      **ch6 FLIP attempt #2 (STASHED `git stash` "D-496-ch6-flip", NOT committed — tree green
+      at d3602f214)**: routing instance.zig:938 + linker `.interp` pin + run.zig fuel-arm + 6
+      C-API test pins → full test now **17 failures** (down from 69). Triage of the 17:
+      (a) CLEAN `.interp` pins (assert interp internals / cross-module aliasing which is
+      interp-only like the linker): wasm_instance_new/delete round-trip (runtime!=null 2291);
+      cross-module funcref via wasm_instance_new; zombie lifecycle x2; cross-module Store
+      binding x2; reftype funcref param+result round-trip. (b) FACADE `Module.instantiate(.{})`
+      → .auto→JIT (verify whether Linker-routed or direct): T1.12 cross-inst memory; T1.15
+      Instance.table (D-272); facade setTableElementsLimit (D-316); Linker.defineInstance —
+      CHECK if these go via the (now interp-pinned) Linker or direct facade. (c) REAL GAPS /
+      DESIGN: **i32-dispatch-42 + instance_new-delete = calling a NON-EXPORTED func by index on
+      a JIT instance** (i32_const_42_wasm has no export section; JIT may lack a host-callable
+      entry for non-exported funcs → real gap, pin .interp + debt OR generate entry);
+      **runWasmJit-SIMD = the CLI captured-run path (`runWasmCapturedFull`) hardcodes `.auto` so
+      its interp leg now routes to JIT — needs an ENGINE PARAM threaded so `zwasm run --engine
+      interp` actually forces interp** (real design need, NOT a pin; the SIMD test's interp leg
+      must force interp); wasm_table_grow funcref (D-497); extern_new funcref round-trip (check);
+      rejects-WASI-no-host (check). NEXT: `git stash pop`, triage the 17 per above (pins +
+      run.zig engine-param + the non-exported-func-call decision), green full test → 3-host → tag.
     first_raised: "2026-06-22"
     last_reviewed: "2026-06-22"
     refs: |-
-      src/api/instance.zig:938 (routing) · src/cli/run.zig:runWasmCapturedFull (fuel arm) ·
-      src/api/instance.zig jitOf + JIT exports (func-only) · memory project_auto_jit_flip_strategy
+      src/api/instance.zig:938 (routing) · src/cli/run.zig:runWasmCapturedFull (needs engine param) ·
+      src/zwasm/linker.zig:795 (.interp pin) · stash "D-496-ch6-flip" · memory project_auto_jit_flip_strategy
   - id: "D-495"
     layer: "code"
     status: "note"
