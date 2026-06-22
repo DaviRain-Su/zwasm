@@ -99,6 +99,16 @@ entries:
       69→0) then REVERTED @18d2f887a — 3-host gate caught x86_64-LINUX failures Mac MASKED ----
       Mac arm64 `zig build test` passed all, but ubuntu `zig build test-all` FAILED @67e144752 on
       THREE NEW classes Mac didn't surface (the flip-exposes-x86_64 pattern, like D-489):
+      (A) ROOT-CAUSED 2026-06-22 — **x86_64 gates the prologue interrupt+fuel poll on
+      `if (uses_runtime_ptr)` (x86_64/emit.zig:333), but arm64 installs runtime_ptr + emits the
+      poll UNCONDITIONALLY (arm64/emit.zig:325 encOrrReg X19 + 336-364 poll). So a TRIVIAL
+      function (no memory/global/call → uses_runtime_ptr=false) on x86_64 JIT skips R15-install AND
+      the whole interrupt/fuel poll → fuel=0/interrupt never trap (the 3 facade sandbox failures).
+      Pre-existing x86_64 gap, EXPOSED by the flip routing facade sandbox tests through `.auto`→JIT.
+      FIX: x86_64 must install R15 + emit the interrupt/fuel poll even when !uses_runtime_ptr (force
+      uses_runtime_ptr=true whenever metering can be armed = always, OR emit the poll block
+      unconditionally with R15). Then ubuntu-gate. This is a real x86_64 SANDBOX correctness fix
+      (trivial straight-line funcs were not fuel/interrupt-bounded on x86_64). (original obs:)
       (A) **facade fuel/interrupt SANDBOX tests trap on interp but NOT on x86_64 JIT** —
       `Module.instantiate fuel=.limited(0)` (module.zig:376) + `Instance.interrupt` (instance.zig:600)
       + `setFuel exhausted` (instance.zig:989) all `expected error.OutOfFuel/Interrupted, found void`
