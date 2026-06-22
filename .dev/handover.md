@@ -3,31 +3,21 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Current state — Phase 17, `.auto`→JIT flip REVERTED to green @4a042b5fc; 3 blocker classes; A-vs-C SURFACED to user
+## Current state — Phase 17, `.auto`→JIT flip RE-LANDING with funcref fix; Mac-green → ubuntu-gate → tag (user=C)
 
-**FLIP REVERTED (tree green @4a042b5fc); awaiting user A-vs-C decision.** The flip kept hitting REAL ubuntu
-blockers across 6 attempts — THREE distinct classes (full detail D-496): (1) x86_64 trivial-fn sandbox poll
-(D-499); (2) always-R15 "proper" fix caused an `entry_buffer_write` ABRT regression; (3) **funcref C-API
-conformance exes `funcref_table_call` SEGV + `funcref_result_call` exit-1 under `.auto`→JIT** — a CRASH in the
-DEFAULT path (D-497/D-498), not pinnable niche debt. A SEGV in the default violates memory-safety; the flip
-cannot ship until the JIT funcref C-API path at least cleanly rejects (no SEGV). SOLID + committed + 3-host-green:
-the D-489/D-494 regalloc miscompile fix (the substantive alpha.3 content) + the 5 JIT-C-API accessor chunks.
-**USER: work FOREGROUND (no slow impl-subagents; spot investigation OK); use Mac `-Dtarget=x86_64` + Rosetta for
-direct x86_64 repro, don't wait on full gates / ceremony.** **funcref-JIT-C-API fix IMPLEMENTED (uncommitted),
-arm64 test running (bvas5pyz0)**: SEGV root = JIT `func_entities[i].runtime = undefined` (setup.zig:639) →
-`wasm_ref_as_func` deref of `fe.runtime.instance` crashed; FIXED to use the Ref's carried `.instance` (extern_new.zig).
-Dispatch gap FIXED: `wasmFuncCallJit` now calls by func_idx (runner.zig `invokeIdx`/`invokeMultiIdx`/`funcSigByIdx`),
-not export name. funcref RESULT FIXED: `invokeRefIdx` captures the ref payload + `refResultToCVal`/`typedResultToCVal`
-wrap it in an owned `*Ref`. 2 new `.jit` tests (funcref_table_call + funcref_result_call mirrors). NEXT: confirm
-arm64 green + Rosetta x86_64 (decisive — the SEGV was x86_64) → commit → re-land (b) flip + this → ubuntu-gate → tag.
+**funcref-JIT-C-API fix COMMITTED @50765903f (D-498), arm64 + Rosetta x86_64 GREEN** — closes the 3rd/last flip
+blocker (funcref C-API conformance SEGV+exit1): SEGV root = JIT `func_entities[i].runtime=undefined` →
+`wasm_ref_as_func` deref crashed → use the Ref's carried `.instance`; dispatch by func_idx (runner `invokeIdx`/
+`invokeMultiIdx`/`funcSigByIdx`, not export name); funcref RESULT via `invokeRefIdx`+`refResultToCVal` (owned `*Ref`).
+2 `.jit` tests in extern_new.zig. **Flip RE-LANDED on top (this turn)**: revert-of-reverts restored routing/linker-pin/
+run.zig-engine-param/~14 interp pins + (b)'s 3 facade sandbox `.interp` pins + D-499. **NEXT: full Mac test → push →
+ubuntu+windows gate (MANDATORY; Mac necessary-not-sufficient).** If 3-host GREEN with `.auto`=JIT → cut `v2.0.0-alpha.3`
+tag (USER-AUTHORIZED, tag-only) + to_cljw_09 + CronDelete f34c7ee2 + clean stop. If red → triage, do NOT tag.
 
-**USER CHOSE C (3rd time) 2026-06-22**: complete the flip before tagging, incl. the funcref-JIT-C-API work.
-**The (b) approach already cleared 2 of 3 blockers** (facade sandbox tests pinned `.interp`/D-499; buffer-write
-untouched since NO always-R15). **ONE remaining flip blocker = the funcref C-API conformance exes**
-(`zwasm-conformance-funcref_table_call` SEGV + `funcref_result_call` exit-1 under `.auto`→JIT) = D-497/D-498.
-PLAN: implement funcref-JIT-C-API (table-call + result marshalling; at minimum a CLEAN reject, no SEGV — memory
-safety) → re-land (b) flip (revert the 3 reverts 4a042b5fc/bb18ac520... or re-apply cleanly) + funcref fix →
-ubuntu-gate → 3-host green → tag. cron `f34c7ee2` backstop; CronDelete only at the final stop (after tag).
+**USER: work FOREGROUND (no slow impl-subagents; spot investigation OK); Mac `-Dtarget=x86_64`+Rosetta for direct
+x86_64 repro; minimise gate-wait/ceremony.** D-499 (x86_64 trivial-fn fuel/interrupt) + D-497 (funcref-table grow)
+stay pinned-debt. The substantive alpha.3 content (D-489/D-494 regalloc fix + 5 JIT-C-API accessor chunks) is committed
++ 3-host-green independent of the flip.
 
 **LESSON (load-bearing): Mac `zig build test` is INSUFFICIENT to declare the flip green — MUST ubuntu-gate.**
 

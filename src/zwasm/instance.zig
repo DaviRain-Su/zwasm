@@ -584,7 +584,9 @@ test "facade Instance.interrupt(): a pending interrupt traps the next invoke; cl
     defer eng.deinit();
     var mod = try eng.compile(&bytes);
     defer mod.deinit();
-    var inst = try mod.instantiate(.{});
+    // D-499 — pin .interp: trivial-fn fuel/interrupt is not trapped on x86_64 JIT (poll
+    // only emitted for runtime-ptr-using fns); runaway-safety intact (loops polled).
+    var inst = try mod.instantiate(.{ .engine = .interp });
     defer inst.deinit();
 
     var results = [_]_zwasm.Value{.{ .i32 = 0 }};
@@ -979,7 +981,9 @@ test "facade setFuel: exhausted budget traps OutOfFuel; ample budget completes +
     defer eng.deinit();
     var mod = try eng.compile(&bytes);
     defer mod.deinit();
-    var inst = try mod.instantiate(.{});
+    // D-499 — pin .interp: trivial-fn fuel/interrupt is not trapped on x86_64 JIT (poll
+    // only emitted for runtime-ptr-using fns); runaway-safety intact (loops polled).
+    var inst = try mod.instantiate(.{ .engine = .interp });
     defer inst.deinit();
 
     var results = [_]_zwasm.Value{.{ .i32 = 0 }};
