@@ -127,6 +127,20 @@ entries:
       call sites auto-compute the right offset, ZERO per-test churn. Factor the poll emit to take a
       base-reg param (R15|RAX). Verify Rosetta `--fuel 0 trivial` → trap + full Mac test + ubuntu-gate.
       Preserves lean-frame perf AND fixes the sandbox gap AND avoids 59-test recompute. (original obs:)
+      **2026-06-22 — RAX DESIGN FALSIFIED (implemented + Rosetta-tested → CRASH exit 70).** The
+      RAX/rt_base poll is FUNDAMENTALLY BROKEN: the out-of-fuel/interrupt TRAP STUB writes trap_kind
+      to the JitRuntime VIA R15 (`[R15+trap_kind_off]`); a lean (!uses_runtime_ptr) fn never installs
+      R15 → the stub faults on garbage R15 (`--engine jit --fuel 0 trivial.wasm` → internal error/
+      SIGSEGV, not a clean out_of_fuel trap). The poll's TRAP path needs R15; installing R15 without
+      corrupting the caller needs PUSH R15 (frame change) = the heavy approach. So the ONLY correct (A)
+      codegen fix is **(a) force uses_runtime_ptr=true** (emit.zig:193) + recompute the **59 byte-exact
+      emit tests** (emit_test_float 35 + emit_test_int 24): each `prologue.body_start_offset(false, fb)`
+      → `(true, NEW_fb)` where NEW_fb = the fn's frame_bytes WITH R15 (trivial 0-local fn: 0→8).
+      Per-test recompute; good SUBAGENT task (build→read offsets→fix→repeat). Alt still open: **(b) pin
+      the ~3 facade sandbox tests `.interp` + debt the x86_64 trivial-fn fuel/interrupt gap** (runaway
+      -safety INTACT — loops back-edge-polled; only fuel=0-immediate-trap differs for trivial straight
+      -line fns; sandbox is security so (a) preferable but (b) defensible since runaway bounded). Tree
+      reset green @dad3550ba (RAX + flip-restore + B-pin discarded; B-pin 2-line re-doable). (orig obs:)
       (A) **facade fuel/interrupt SANDBOX tests trap on interp but NOT on x86_64 JIT** —
       `Module.instantiate fuel=.limited(0)` (module.zig:376) + `Instance.interrupt` (instance.zig:600)
       + `setFuel exhausted` (instance.zig:989) all `expected error.OutOfFuel/Interrupted, found void`

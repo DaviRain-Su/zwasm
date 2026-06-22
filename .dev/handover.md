@@ -3,20 +3,20 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Current state — Phase 17, `.auto`→JIT flip campaign (user=C): both new gaps ROOT-CAUSED, fixes specified; tree green @5a31fd645
+## Current state — Phase 17, `.auto`→JIT flip campaign (user=C); tree green @dad3550ba; (A) narrowed to one fix path
 
-**USER RECONFIRMED C 2026-06-22** (continue full flip before tag, knowing it's a multi-day x86_64-JIT campaign).
-Both attempt-#4 ubuntu gaps now ROOT-CAUSED with concrete fixes (full detail in D-496):
-- **(A)** x86_64 prologue fuel/interrupt poll gated on `uses_runtime_ptr` (arm64 unconditional) → trivial fns
-  unbounded. **BETTER FIX** (Rosetta-verified the always-R15 variant works; this avoids 59-test churn): emit the
-  poll via RAX scratch in an `else` to emit.zig:333's `if (uses_runtime_ptr)` (lean frame kept) + update
-  `prologue.body_start_offset` FALSE case to include the poll size (auto-fixes the ~59 emit tests, zero per-test churn).
-- **(B)** `test/runners/wast_runtime_runner.zig:709,798` use `.auto`→JIT for cross-module imported-memory →
-  ExportNotFound. FIX = pin those 2 sites `.interp` (it's the runtime conformance runner). 2-line fix.
-**REMAINING flip plan (next cycles, fresh context for the intricate A codegen)**: (A) RAX-poll fix + (B) pin +
-re-apply attempt-#3's ~14 interp pins (`git revert 18d2f887a` restores the whole flip incl. those pins; then layer
-A+B on top) + funcref D-497/D-498 stay pinned-debt → full Mac test → **ubuntu-gate (mandatory; Mac insufficient)** →
-3-host green → tag alpha.3. cljw waits. Backstop cron `f34c7ee2`; CronDelete only at the final stop.
+**USER RECONFIRMED C 2026-06-22** (continue full flip before tag; multi-day x86_64-JIT campaign).
+Both attempt-#4 ubuntu gaps root-caused; (A) fix-path NARROWED this cycle (full detail in D-496):
+- **(A)** x86_64 prologue fuel/interrupt poll gated on `uses_runtime_ptr` → trivial fns unbounded. The lighter
+  RAX-poll idea was IMPLEMENTED + Rosetta-tested → **FALSIFIED (crash)**: the trap stub writes trap_kind via R15,
+  which a lean fn never installs. **ONLY correct codegen fix = (a) force `uses_runtime_ptr=true` (emit.zig:193) +
+  recompute the 59 byte-exact emit tests** (each `body_start_offset(false,fb)`→`(true,NEW_fb)`; per-test frame
+  recompute — good SUBAGENT task). Alt: **(b) pin the ~3 facade sandbox tests `.interp` + debt the gap** (runaway
+  -safety intact; only fuel=0-trivial semantic differs). Pick (a) unless it proves too costly → fall to (b).
+- **(B)** `wast_runtime_runner.zig:709,798` `.auto`→JIT for imported-memory → pin `.interp`. 2-line fix (re-doable).
+**REMAINING flip plan**: do (A) [(a) via subagent for the 59 tests, OR (b)] → (B) pin → `git revert 18d2f887a`
+restores the whole flip + attempt-#3's ~14 pins → layer A+B → full Mac test → **ubuntu-gate (MANDATORY)** → 3-host
+green → tag alpha.3. funcref D-497/D-498 stay pinned-debt. cljw waits. cron `f34c7ee2`; CronDelete only at final stop.
 
 **LESSON (load-bearing): Mac `zig build test` is INSUFFICIENT to declare the flip green — MUST ubuntu-gate.**
 
