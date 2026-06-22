@@ -34,10 +34,17 @@ stays in WAIT for the tag (end of campaign).
   edge: funcref-table get/set (no host funcptr mirror, runner.zig:1200) — handle carefully or defer w/ debt. v128
   globals already C-union-excluded (no new gap). JitRuntime fields: jit_abi.zig:151 (vm_base:154, globals_base:206,
   tables_ptr:290).
-- **Phase IV chunks**: (1) instantiateJit memory/table/global exports + `.jit`-pinned exports/introspection test;
-  (2) global get/set JIT arm; (3) memory data/size/grow JIT arm; (4) table size/get/set/grow JIT arm (funcref edge);
-  (5) zwasm_instance_get_func JIT arm; (6) flip `.auto`→JIT + run.zig fuel-arm + linker stays interp + full+3-host;
-  (7) tag alpha.3. Each chunk = `.jit`-pinned red test → impl → green.
+- **Phase IV chunks**: (1) **DONE @45f5b93c7** — instantiateJit decodes full export section + buildExportTypes
+  (kind-generic); JIT instance surfaces memory/table/global externs + introspection; `.jit` test green, full test 0
+  fail. NEXT (2) global get/set JIT arm; (3) memory data/size/grow JIT arm; (4) table size/get/set/grow (funcref edge);
+  (5) zwasm_instance_get_func JIT arm; (6) flip `.auto`→JIT + run.zig fuel-arm + LINKER stays interp + full+3-host;
+  (7) tag alpha.3. Each chunk = `.jit`-pinned red test → impl → green; keep `.auto`=interp until (6).
+  **JIT-field access (for chunks 2-5)** — cleanest = add encapsulated value accessors on `JitInstance` (runner.zig),
+  call from the C-API arms: globals = `JitRuntime.globals_base` ([*]Value, jit_abi.zig:206) + `compiled.globals_offsets`
+  (byte offsets, runner.zig:224); memory = `rt.vm_base`/`rt.mem_limit` + `JitInstance.growMemory` (:1095); tables =
+  `rt.tables_ptr` ([*]TableSlice) + `growTable` (:1203). C-API accessor sites with `inst.runtime orelse return` needing
+  an `if (jitOf(inst))` arm: wasm_global_get :1477 / set :1501; wasm_memory_data :1549 / _size :1561 / size :1574 /
+  grow :1596; wasm_table_size :1664 / get :1680 / set :1700 / grow; zwasm_instance_get_func (zwasm_ext + instance.zig:1206).
 - **Continuity-memo**: 69-failure breakdown in D-496. Full flip routing/run.zig-fuel-arm code re-implementable per D-496
   refs + git reflog. Green baseline = `8a4a01905` (regalloc fix + docs). Phase I investigation agent dispatched
   (JIT-C-API gap map). **Backstop cron = `f34c7ee2`** (every 10 min /continue) — `CronDelete` it at the FINAL stop
