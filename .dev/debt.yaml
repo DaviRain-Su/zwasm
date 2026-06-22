@@ -3,6 +3,28 @@
 # Refresh on every /continue resume — .claude/skills/continue/RESUME.md Step 0.5.
 
 entries:
+  - id: "D-500"
+    layer: "code"
+    status: "blocked-by"
+    description: |-
+      blocked-by: a Win64 JIT wrapper-thunk (buffer-write entry) for the string-arg
+      component shape. The component CM-API `invokeTyped("greet", string)` routes args
+      through `invokeViaBufferSingle` → `hasThunk(func_idx)`; on Win64 no thunk is
+      emitted for that shape (`wrapper_thunk.emit` Win64 limitation) → UnsupportedEntry
+      Signature. Surfaced by the D-496 `.auto`→JIT flip: REQ-1/REQ-7 component_tests
+      FAILED on Win64 ONLY (ubuntu x86_64 SysV + Mac arm64 emit the thunk + PASS).
+      MITIGATED: the component CM-API core is now `.interp`-pinned (component.zig
+      instantiate — cross-module/component orchestration is interp's domain, like the
+      Linker; cljw uses interp for components D-488), so the flip ships without routing
+      components through the Win64-incomplete JIT thunk path. DISCHARGE: emit the Win64
+      buffer-write wrapper-thunk for the string-arg (+ remaining GPR) component shapes,
+      then drop the interp pin. Niche: component-on-JIT is not a flip goal (the flip
+      targets plain compute modules); cljw consumes components on interp.
+    first_raised: "2026-06-22"
+    last_reviewed: "2026-06-22"
+    refs: |-
+      src/engine/runner.zig:invokeViaBufferSingle/hasThunk · wrapper_thunk.emit (Win64) ·
+      src/api/component.zig:instantiate (.interp pin) · component_tests REQ-1/REQ-7 · D-496
   - id: "D-499"
     layer: "code"
     status: "blocked-by"

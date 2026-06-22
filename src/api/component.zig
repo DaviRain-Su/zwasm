@@ -394,7 +394,15 @@ pub fn instantiate(engine: *Engine, alloc: Allocator, bytes: []const u8, opts: I
     errdefer alloc.destroy(core);
     // Propagate the rich InstantiateError (StartTrapped / MemoryLimitExceeded)
     // so the budget cause reaches the consumer (REQ-4).
-    core.* = try module.instantiate(opts);
+    // D-496/D-500 — the component CM-API core runs on INTERP: cross-module/component
+    // orchestration is interp's domain (like the Linker, also `.interp`-pinned), and
+    // cljw (the consumer) uses interp for components (D-488). The `.auto`→JIT flip
+    // would route invokeTyped through the JIT buffer-write thunk, which has a Win64
+    // gap for the string-arg shape (`greet(string)` → hasThunk=false → Unsupported;
+    // REQ-1/REQ-7 Win64-only). Component-on-JIT is a separate future capability (D-500).
+    var core_opts = opts;
+    core_opts.engine = .interp;
+    core.* = try module.instantiate(core_opts);
 
     var info = try ctypes.decodeTypeInfo(alloc, &decoded);
     errdefer info.deinit();
