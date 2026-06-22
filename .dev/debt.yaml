@@ -105,10 +105,19 @@ entries:
       function (no memory/global/call → uses_runtime_ptr=false) on x86_64 JIT skips R15-install AND
       the whole interrupt/fuel poll → fuel=0/interrupt never trap (the 3 facade sandbox failures).
       Pre-existing x86_64 gap, EXPOSED by the flip routing facade sandbox tests through `.auto`→JIT.
-      FIX: x86_64 must install R15 + emit the interrupt/fuel poll even when !uses_runtime_ptr (force
-      uses_runtime_ptr=true whenever metering can be armed = always, OR emit the poll block
-      unconditionally with R15). Then ubuntu-gate. This is a real x86_64 SANDBOX correctness fix
-      (trivial straight-line funcs were not fuel/interrupt-bounded on x86_64). (original obs:)
+      FIX (verified path): force uses_runtime_ptr=true in x86_64/emit.zig:193 (`body_uses or true`)
+      → installs R15 + emits the prologue poll for every fn. ROSETTA-VERIFIED WORKING: `<x86-bin>
+      run --engine jit --fuel 0 trivial.wasm` → traps out_of_fuel (was exit 0). BUT BLAST RADIUS:
+      the prologue grows for trivial fns → **59 byte-exact emit tests fail** (emit_test_float 35 +
+      emit_test_int 24); each asserts body bytes at a `prologue.body_start_offset(false,...)` offset
+      that's now wrong — and it's NOT a uniform false→true flip (frame_bytes/rsp_sub also shift for
+      trivial fns), so each needs byte-offset RECOMPUTE. Heavy + error-prone. FORK: (a) do the fix +
+      recompute 59 emit tests (correct, symmetric w/ arm64, sandbox-sound, +per-fn perf) — CORRECT
+      design per the documented JIT fuel model ("poll-site crossings" include the prologue); OR
+      (b) pin the ~3 facade sandbox tests `.interp` + debt the x86_64 trivial-poll gap (light; runaway
+      -safety INTACT since loops are back-edge-polled; only fuel=0-immediate-trap semantic differs for
+      trivial straight-line fns; leaves arm64/x86_64 asymmetry). Attempt #4's (A) fix REVERTED (kept
+      tree green @6807ea443); finding preserved here. (original obs:)
       (A) **facade fuel/interrupt SANDBOX tests trap on interp but NOT on x86_64 JIT** —
       `Module.instantiate fuel=.limited(0)` (module.zig:376) + `Instance.interrupt` (instance.zig:600)
       + `setFuel exhausted` (instance.zig:989) all `expected error.OutOfFuel/Interrupted, found void`
