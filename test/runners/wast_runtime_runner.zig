@@ -706,7 +706,10 @@ fn instantiateWithImports(ctx: *RunnerContext, wasm_bytes: []const u8) !ActiveMo
     if (imports_slice) |slice| imports_vec = .{ .size = slice.len, .data = @ptrCast(@constCast(slice.ptr)) };
     const imports_ptr: ?*const anyopaque = @ptrCast(&imports_vec);
 
-    const instance = wasm_c_api.wasm_instance_new(store, module, imports_ptr, null) orelse
+    // D-496(B) — pin `.interp`: the wasmtime_misc RUNTIME CONFORMANCE runner; cross-module
+    // imported memory/table is interp's cross-instance-aliasing domain (post-flip `.auto`
+    // routes to JIT, which rejects imports; the JIT conformance is spec_assert_runner).
+    const instance = zwasm.api.instance.instanceNewWithEngine(store, module, imports_ptr, null, .interp) orelse
         return error.InstanceAllocFailed;
     return .{
         .engine = engine,
@@ -795,7 +798,8 @@ fn handleInstantiateExpectFail(
     if (imports_slice) |slice| imports_vec = .{ .size = slice.len, .data = @ptrCast(@constCast(slice.ptr)) };
     const imports_ptr: ?*const anyopaque = @ptrCast(&imports_vec);
 
-    const instance_opt = wasm_c_api.wasm_instance_new(store, module, imports_ptr, null);
+    // D-496(B) — pin `.interp` (conformance runner; cross-module imports = interp domain).
+    const instance_opt = zwasm.api.instance.instanceNewWithEngine(store, module, imports_ptr, null, .interp);
 
     // Whichever way it went, retain the bundle in ctx.all so
     // the c_api Store (which holds the zombie runtime + arena
