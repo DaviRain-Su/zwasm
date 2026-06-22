@@ -34,17 +34,16 @@ stays in WAIT for the tag (end of campaign).
   edge: funcref-table get/set (no host funcptr mirror, runner.zig:1200) — handle carefully or defer w/ debt. v128
   globals already C-union-excluded (no new gap). JitRuntime fields: jit_abi.zig:151 (vm_base:154, globals_base:206,
   tables_ptr:290).
-- **Phase IV chunks**: (1) **DONE @45f5b93c7** — instantiateJit decodes full export section + buildExportTypes
-  (kind-generic); JIT instance surfaces memory/table/global externs + introspection; `.jit` test green, full test 0
-  fail. NEXT (2) global get/set JIT arm; (3) memory data/size/grow JIT arm; (4) table size/get/set/grow (funcref edge);
-  (5) zwasm_instance_get_func JIT arm; (6) flip `.auto`→JIT + run.zig fuel-arm + LINKER stays interp + full+3-host;
-  (7) tag alpha.3. Each chunk = `.jit`-pinned red test → impl → green; keep `.auto`=interp until (6).
-  **JIT-field access (for chunks 2-5)** — cleanest = add encapsulated value accessors on `JitInstance` (runner.zig),
-  call from the C-API arms: globals = `JitRuntime.globals_base` ([*]Value, jit_abi.zig:206) + `compiled.globals_offsets`
-  (byte offsets, runner.zig:224); memory = `rt.vm_base`/`rt.mem_limit` + `JitInstance.growMemory` (:1095); tables =
-  `rt.tables_ptr` ([*]TableSlice) + `growTable` (:1203). C-API accessor sites with `inst.runtime orelse return` needing
-  an `if (jitOf(inst))` arm: wasm_global_get :1477 / set :1501; wasm_memory_data :1549 / _size :1561 / size :1574 /
-  grow :1596; wasm_table_size :1664 / get :1680 / set :1700 / grow; zwasm_instance_get_func (zwasm_ext + instance.zig:1206).
+- **Phase IV chunks**: (1) DONE @45f5b93c7 — instantiateJit kind-generic exports (memory/table/global externs +
+  introspection surface). (2/3/5) DONE @f7d5e0233 — JitInstance accessors (globalCell/memoryBytes/memoryPageSizeLog2/
+  funcCount) + C-API arms for global get/set, memory data/_size/size/grow, zwasm_instance_get_func (zwasm_ext setters
+  already routed). instance.zig now `(cap=UNCAPPED)` @4e1b06892 (user-ratified irreducible C-ABI catalog). **NEXT (4)
+  table size/get/set/grow JIT arm** — `rt.tables_ptr` ([*]TableSlice, jit_abi:290) + `growTable` (runner.zig:1203);
+  wasm_table_size :1692 (easy = len), get :1708 / set / grow. **HARD EDGE: funcref-table get/set** — JIT funcref tables
+  have no host funcptr→Ref mirror (runner.zig:1200); mixed_exports "t" IS funcref, so the existing table tests need it.
+  Decide: build the funcref-Ref mirror, OR externref-only + debt-row the funcref-table-get/set-on-JIT gap. Then (6) flip
+  `.auto`→JIT + re-land run.zig fuel-arm + LINKER stays interp + full+3-host; (7) tag alpha.3. Each = `.jit` red→green;
+  `.auto`=interp until (6). Accessor sites: wasm_table_size :1692 / get :1708 / set / grow.
 - **Continuity-memo**: 69-failure breakdown in D-496. Full flip routing/run.zig-fuel-arm code re-implementable per D-496
   refs + git reflog. Green baseline = `8a4a01905` (regalloc fix + docs). Phase I investigation agent dispatched
   (JIT-C-API gap map). **Backstop cron = `f34c7ee2`** (every 10 min /continue) — `CronDelete` it at the FINAL stop
