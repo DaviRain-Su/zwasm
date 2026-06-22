@@ -12,6 +12,15 @@ conformance exes `funcref_table_call` SEGV + `funcref_result_call` exit-1 under 
 DEFAULT path (D-497/D-498), not pinnable niche debt. A SEGV in the default violates memory-safety; the flip
 cannot ship until the JIT funcref C-API path at least cleanly rejects (no SEGV). SOLID + committed + 3-host-green:
 the D-489/D-494 regalloc miscompile fix (the substantive alpha.3 content) + the 5 JIT-C-API accessor chunks.
+**USER: work FOREGROUND (no slow impl-subagents; spot investigation OK); use Mac `-Dtarget=x86_64` + Rosetta for
+direct x86_64 repro, don't wait on full gates / ceremony.** **funcref-JIT-C-API fix IMPLEMENTED (uncommitted),
+arm64 test running (bvas5pyz0)**: SEGV root = JIT `func_entities[i].runtime = undefined` (setup.zig:639) →
+`wasm_ref_as_func` deref of `fe.runtime.instance` crashed; FIXED to use the Ref's carried `.instance` (extern_new.zig).
+Dispatch gap FIXED: `wasmFuncCallJit` now calls by func_idx (runner.zig `invokeIdx`/`invokeMultiIdx`/`funcSigByIdx`),
+not export name. funcref RESULT FIXED: `invokeRefIdx` captures the ref payload + `refResultToCVal`/`typedResultToCVal`
+wrap it in an owned `*Ref`. 2 new `.jit` tests (funcref_table_call + funcref_result_call mirrors). NEXT: confirm
+arm64 green + Rosetta x86_64 (decisive — the SEGV was x86_64) → commit → re-land (b) flip + this → ubuntu-gate → tag.
+
 **USER CHOSE C (3rd time) 2026-06-22**: complete the flip before tagging, incl. the funcref-JIT-C-API work.
 **The (b) approach already cleared 2 of 3 blockers** (facade sandbox tests pinned `.interp`/D-499; buffer-write
 untouched since NO always-R15). **ONE remaining flip blocker = the funcref C-API conformance exes**
