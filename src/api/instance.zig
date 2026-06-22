@@ -2024,8 +2024,11 @@ pub fn jitOf(inst: *Instance) ?*runner.JitInstance {
 /// marshal results back. Scalar args+results only (i32/i64/f32/f64); ref/v128
 /// or an uncovered shape → `binding_error` trap (mirrors the Zig facade arm).
 fn wasmFuncCallJit(jit: *runner.JitInstance, inst: *Instance, store: *Store, alloc: std.mem.Allocator, func_idx: u32, args: ?*const ValVec, results: ?*ValVec) ?*Trap {
-    const name = jitExportName(inst, func_idx) orelse return allocTrap(alloc, store, .binding_error);
-    const sig = jit.exportFuncSig(alloc, name) orelse return allocTrap(alloc, store, .binding_error);
+    // D-496/D-498 — dispatch by func_idx, NOT export name: a funcref recovered from
+    // a table or `ref.func` (wasm_ref_as_func) need not be exported, so the prior
+    // jitExportName lookup returned null → binding_error. func_idx is always valid
+    // (it came from the Func handle / FuncEntity).
+    const sig = jit.funcSigByIdx(func_idx) orelse return allocTrap(alloc, store, .binding_error);
     const args_size = if (args) |a| a.size else 0;
     const results_size = if (results) |r| r.size else 0;
     if (args_size != sig.params.len) return allocTrap(alloc, store, .binding_error);
@@ -2039,14 +2042,25 @@ fn wasmFuncCallJit(jit: *runner.JitInstance, inst: *Instance, store: *Store, all
 
     if (sig.results.len > 1) {
         var rbuf: [16]runner.TypedResult = undefined;
-        jit.invokeMulti(alloc, name, abuf[0..sig.params.len], rbuf[0..sig.results.len]) catch |err| return jitErrToTrap(err, jit, alloc, store);
+        jit.invokeMultiIdx(func_idx, abuf[0..sig.params.len], rbuf[0..sig.results.len]) catch |err| return jitErrToTrap(err, jit, alloc, store);
         if (results) |r| if (r.data) |dp| {
-            for (0..sig.results.len) |idx| dp[idx] = typedResultToCVal(rbuf[idx]) orelse return allocTrap(alloc, store, .binding_error);
+            for (0..sig.results.len) |idx| dp[idx] = typedResultToCVal(rbuf[idx], inst, alloc) orelse return allocTrap(alloc, store, .binding_error);
         };
         return null;
     }
 
-    const got = jit.invoke(alloc, name, abuf[0..sig.params.len]) catch |err| return jitErrToTrap(err, jit, alloc, store);
+    // D-498 — a single funcref/externref result is captured by `invokeRefIdx`
+    // (the scalar `invokeIdx` runs a ref-result func as void); marshal the raw
+    // payload into an owned `*Ref` C handle.
+    if (sig.results.len == 1 and std.meta.activeTag(sig.results[0]) == .ref) {
+        const payload = jit.invokeRefIdx(func_idx, abuf[0..sig.params.len]) catch |err| return jitErrToTrap(err, jit, alloc, store);
+        if (results) |r| if (r.data) |dp| {
+            dp[0] = refResultToCVal(sig.results[0], payload, inst, alloc) orelse return allocTrap(alloc, store, .binding_error);
+        };
+        return null;
+    }
+
+    const got = jit.invokeIdx(func_idx, abuf[0..sig.params.len]) catch |err| return jitErrToTrap(err, jit, alloc, store);
     if (sig.results.len == 1) {
         if (results) |r| if (r.data) |dp| {
             const bits = got orelse return allocTrap(alloc, store, .binding_error);
@@ -2056,13 +2070,15 @@ fn wasmFuncCallJit(jit: *runner.JitInstance, inst: *Instance, store: *Store, all
     return null;
 }
 
-/// Reverse-map a wasm func index to its first export name (ADR-0200). Null when
-/// the func_idx is not an exported function (unreachable through a C Func handle).
-fn jitExportName(inst: *const Instance, func_idx: u32) ?[]const u8 {
-    for (inst.exports_storage) |exp| {
-        if (exp.kind == .func and exp.idx == func_idx) return exp.name;
-    }
-    return null;
+/// D-498 — wrap a raw JIT ref payload (u64; funcref = `*FuncEntity` ptr, externref
+/// = host payload) into an owned `*Ref` C handle carrying the source instance, so a
+/// standard consumer can `wasm_ref_as_func` it. Null payload → null funcref.
+fn refResultToCVal(vt: zir.ValType, payload: u64, inst: *Instance, alloc: std.mem.Allocator) ?Val {
+    const kind: ValKind = if (vt.isFuncref()) .funcref else .anyref;
+    if (payload == runtime.Value.null_ref) return .{ .kind = kind, .of = .{ .ref = null } };
+    const ref_handle = alloc.create(Ref) catch return null;
+    ref_handle.* = .{ .instance = inst, .ref = payload };
+    return .{ .kind = kind, .of = .{ .ref = ref_handle } };
 }
 
 /// Marshal a C `Val` to the JIT host-invoke u64 bit-carrier (i32/f32 in low 32).
@@ -2088,15 +2104,16 @@ fn jitBitsToCVal(vt: zir.ValType, bits: u64) ?Val {
     };
 }
 
-/// Decode a self-describing JIT `TypedResult` (multi-value) into a C `Val`; null
-/// for ref carriers (need a `*Ref` handle — deferred; surfaces binding_error).
-fn typedResultToCVal(tr: runner.TypedResult) ?Val {
+/// Decode a self-describing JIT `TypedResult` (multi-value) into a C `Val`. D-498 —
+/// funcref/externref carriers are wrapped into an owned `*Ref` handle.
+fn typedResultToCVal(tr: runner.TypedResult, inst: *Instance, alloc: std.mem.Allocator) ?Val {
     return switch (tr) {
         .i32 => |x| .{ .kind = .i32, .of = .{ .i32 = @bitCast(x) } },
         .i64 => |x| .{ .kind = .i64, .of = .{ .i64 = @bitCast(x) } },
         .f32 => |x| .{ .kind = .f32, .of = .{ .f32 = @bitCast(x) } },
         .f64 => |x| .{ .kind = .f64, .of = .{ .f64 = @bitCast(x) } },
-        .funcref, .externref => null,
+        .funcref => |p| refResultToCVal(zir.ValType.funcref, p, inst, alloc),
+        .externref => |p| refResultToCVal(zir.ValType.externref, p, inst, alloc),
     };
 }
 

@@ -379,8 +379,14 @@ pub export fn wasm_ref_as_func(r: ?*instance.Ref) callconv(.c) ?*Func {
     const handle = r orelse return null;
     if (handle.func_view) |fv| return fv;
     const fe = runtime.Value.refAsFuncEntity(.{ .ref = handle.ref }) orelse return null;
-    const inst_opaque = fe.runtime.instance orelse return null;
-    const inst: *instance.Instance = @ptrCast(@alignCast(inst_opaque));
+    // D-496/D-498 — prefer the Ref's own carried instance (set by wasm_table_get /
+    // funcref-result marshalling). A JIT-built FuncEntity has `runtime = undefined`
+    // (setup.zig: no interp Runtime on the JIT path), so `fe.runtime.instance` would
+    // dereference garbage → SEGV. The interp path falls back to fe.runtime.instance.
+    const inst: *instance.Instance = handle.instance orelse blk: {
+        const inst_opaque = fe.runtime.instance orelse return null;
+        break :blk @ptrCast(@alignCast(inst_opaque));
+    };
     const store = inst.store orelse return null;
     const alloc = instance.storeAllocator(store) orelse return null;
     const fv = alloc.create(Func) catch return null;
@@ -899,6 +905,88 @@ test "wasm_func_as_ref / wasm_ref_as_func: funcref round-trip recovers a callabl
 
     try testing.expect(wasm_ref_as_func(null) == null);
     try testing.expect(wasm_func_as_ref(null) == null);
+}
+
+// (module (func (result i32) i32.const 42) (table (export "t") 1 1 funcref)
+//  (elem (i32.const 0) func 0)) — funcref table call (mirrors
+// test/c_api_conformance/funcref_table_call.c). D-498 RED on `.jit`: SEGV
+// (wasm_ref_as_func deref of the JIT FuncEntity's `runtime=undefined`) + dispatch
+// gap (wasmFuncCallJit by export NAME; func 0 is NOT exported).
+const funcref_table_call_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x05, 0x01, 0x60,
+    0x00, 0x01, 0x7f, 0x03, 0x02, 0x01, 0x00, 0x04, 0x05, 0x01, 0x70, 0x01,
+    0x01, 0x01, 0x07, 0x05, 0x01, 0x01, 0x74, 0x01, 0x00, 0x09, 0x07, 0x01,
+    0x00, 0x41, 0x00, 0x0b, 0x01, 0x00, 0x0a, 0x06, 0x01, 0x04, 0x00, 0x41,
+    0x2a, 0x0b,
+};
+
+test "D-498 JIT C-path: funcref from a table is callable (table_get→ref_as_func→func_call) (.jit)" {
+    const e = instance.wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer instance.wasm_engine_delete(e);
+    const s = instance.wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer instance.wasm_store_delete(s);
+    var bytes = funcref_table_call_wasm;
+    const bv: vec.ByteVec = .{ .size = bytes.len, .data = &bytes };
+    const m = instance.wasm_module_new(s, &bv) orelse return error.ModuleAllocFailed;
+    defer instance.wasm_module_delete(m);
+    const inst = instance.instanceNewWithEngine(s, m, null, null, .jit) orelse return error.InstanceAllocFailed;
+    defer instance.wasm_instance_delete(inst);
+    var exports: vec.ExternVec = .{ .size = 0, .data = null };
+    instance.wasm_instance_exports(inst, &exports);
+    defer instance.wasm_extern_vec_delete(&exports);
+    const tab = instance.wasm_extern_as_table(exports.data.?[0]) orelse return error.TableNull;
+    const ref = instance.wasm_table_get(tab, 0) orelse return error.RefNull;
+    defer instance.wasm_ref_delete(ref);
+    const f = wasm_ref_as_func(ref) orelse return error.RefNotFunc;
+    const args: vec.ValVec = .{ .size = 0, .data = null };
+    var results_data: [1]instance.Val = undefined;
+    var results: vec.ValVec = .{ .size = 1, .data = &results_data };
+    try testing.expect(instance.wasm_func_call(f, &args, &results) == null);
+    try testing.expectEqual(@as(i32, 42), results_data[0].of.i32);
+}
+
+// (module (type (func (result i32))) (type (func (result funcref)))
+//  (func (result i32) i32.const 42) (func (export "get") (result funcref) ref.func 0)
+//  (table (export "t") 1 1 funcref) (elem (i32.const 0) func 0)) — funcref RESULT
+// (mirrors funcref_result_call.c). D-498 RED on `.jit`: ref result was dropped.
+const funcref_result_call_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x09, 0x02, 0x60,
+    0x00, 0x01, 0x7f, 0x60, 0x00, 0x01, 0x70, 0x03, 0x03, 0x02, 0x00, 0x01,
+    0x04, 0x05, 0x01, 0x70, 0x01, 0x01, 0x01, 0x07, 0x0b, 0x02, 0x03, 0x67,
+    0x65, 0x74, 0x00, 0x01, 0x01, 0x74, 0x01, 0x00, 0x09, 0x07, 0x01, 0x00,
+    0x41, 0x00, 0x0b, 0x01, 0x00, 0x0a, 0x0b, 0x02, 0x04, 0x00, 0x41, 0x2a,
+    0x0b, 0x04, 0x00, 0xd2, 0x00, 0x0b,
+};
+
+test "D-498 JIT C-path: funcref returned from a call is callable (func_call→result.ref→ref_as_func→call) (.jit)" {
+    const e = instance.wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer instance.wasm_engine_delete(e);
+    const s = instance.wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer instance.wasm_store_delete(s);
+    var bytes = funcref_result_call_wasm;
+    const bv: vec.ByteVec = .{ .size = bytes.len, .data = &bytes };
+    const m = instance.wasm_module_new(s, &bv) orelse return error.ModuleAllocFailed;
+    defer instance.wasm_module_delete(m);
+    const inst = instance.instanceNewWithEngine(s, m, null, null, .jit) orelse return error.InstanceAllocFailed;
+    defer instance.wasm_instance_delete(inst);
+    var exports: vec.ExternVec = .{ .size = 0, .data = null };
+    instance.wasm_instance_exports(inst, &exports);
+    defer instance.wasm_extern_vec_delete(&exports);
+    const getf = instance.wasm_extern_as_func(exports.data.?[0]) orelse return error.FuncNull; // export[0]="get"
+    const gargs: vec.ValVec = .{ .size = 0, .data = null };
+    var gres_data: [1]instance.Val = undefined;
+    var gres: vec.ValVec = .{ .size = 1, .data = &gres_data };
+    try testing.expect(instance.wasm_func_call(getf, &gargs, &gres) == null);
+    try testing.expectEqual(instance.ValKind.funcref, gres_data[0].kind);
+    // `Val.of.ref` is the C-opaque `?*anyopaque` wasm_ref_t*; cast to the Zig handle.
+    const ref_opaque = gres_data[0].of.ref orelse return error.ResultRefNull;
+    const ref: *instance.Ref = @ptrCast(@alignCast(ref_opaque));
+    const f = wasm_ref_as_func(ref) orelse return error.RefNotFunc;
+    const args: vec.ValVec = .{ .size = 0, .data = null };
+    var results_data: [1]instance.Val = undefined;
+    var results: vec.ValVec = .{ .size = 1, .data = &results_data };
+    try testing.expect(instance.wasm_func_call(f, &args, &results) == null);
+    try testing.expectEqual(@as(i32, 42), results_data[0].of.i32);
 }
 
 var foreign_test_finalized: bool = false;

@@ -1110,6 +1110,13 @@ pub const JitInstance = struct {
         return self.compiled.func_sigs[idx];
     }
 
+    /// D-496/D-498 — signature by FULL func-space index (for a funcref recovered
+    /// from a table / `ref.func`, which need not be exported).
+    pub fn funcSigByIdx(self: *JitInstance, idx: u32) ?FuncType {
+        if (idx >= self.compiled.func_sigs.len) return null;
+        return self.compiled.func_sigs[idx];
+    }
+
     /// ADR-0200 increment 5 — facade `Instance.global()` support. Resolves an
     /// exported global by name to its full-index-space idx (matching
     /// `JitRuntime.globals_base`), valtype, and mutability. Null when `name`
@@ -1272,6 +1279,13 @@ pub const JitInstance = struct {
     /// Wider arities / v128 result / non-scalar args → `UnsupportedEntrySignature`.
     pub fn invoke(self: *JitInstance, allocator: Allocator, export_name: []const u8, args: []const u64) Error!?u64 {
         const func_idx = try findExportFunc(allocator, self.wasm_bytes, export_name);
+        return self.invokeIdx(func_idx, args);
+    }
+
+    /// D-496/D-498 — single-result invoke by FULL func-space index (not export
+    /// name), so a funcref recovered from a table or `ref.func` (need not be
+    /// exported) is callable through the C-API. Body shared with `invoke`.
+    pub fn invokeIdx(self: *JitInstance, func_idx: u32, args: []const u64) Error!?u64 {
         if (func_idx >= self.compiled.func_sigs.len) return Error.ExportNotFound;
         if (func_idx < self.compiled.num_imports) return Error.UnsupportedEntrySignature;
         const sig = self.compiled.func_sigs[func_idx];
@@ -1361,6 +1375,23 @@ pub const JitInstance = struct {
         return if (rk == 0 or rk == 2) (rbuf[0] & 0xFFFFFFFF) else rbuf[0];
     }
 
+    /// D-498 — invoke a func with a SINGLE ref (funcref/externref) result by
+    /// func_idx, capturing the ref payload (u64) from the integer return register.
+    /// The scalar `invokeIdx` runs a ref-result func as VOID (discards the result),
+    /// so this dedicated path is needed to return a funcref/externref to a C host.
+    /// No-arg shape (the common funcref-getter, `funcref_result_call`); an arg'd
+    /// ref-result func → UnsupportedEntrySignature (clean reject; extendable).
+    pub fn invokeRefIdx(self: *JitInstance, func_idx: u32, args: []const u64) Error!u64 {
+        if (func_idx >= self.compiled.func_sigs.len) return Error.ExportNotFound;
+        if (func_idx < self.compiled.num_imports) return Error.UnsupportedEntrySignature;
+        const sig = self.compiled.func_sigs[func_idx];
+        if (sig.results.len != 1 or std.meta.activeTag(sig.results[0]) != .ref) return Error.UnsupportedEntrySignature;
+        if (sig.params.len != args.len or sig.params.len != 0) return Error.UnsupportedEntrySignature;
+        // The ref result lives in the integer return register; capture it as u64 via
+        // the i64-width no-arg dispatch (rk=1 = i64 per scalarKey).
+        return try dispatchNoArg(self.compiled.module, func_idx, &self.owned.rt, 1);
+    }
+
     /// Multi-value invoke (results.len > 1), which `invoke` rejects. Routes
     /// through the ADR-0106 wrapper-thunk buffer-write entry (`entry_buf`):
     /// the wrapper writes each result to `[results+8*i]`, sidestepping the
@@ -1376,6 +1407,17 @@ pub const JitInstance = struct {
         results_out: []buffer_write.TypedResult,
     ) Error!void {
         const func_idx = try findExportFunc(allocator, self.wasm_bytes, export_name);
+        return self.invokeMultiIdx(func_idx, args, results_out);
+    }
+
+    /// D-496/D-498 — multi-result invoke by FULL func-space index (not export
+    /// name). Body shared with `invokeMulti`.
+    pub fn invokeMultiIdx(
+        self: *JitInstance,
+        func_idx: u32,
+        args: []const u64,
+        results_out: []buffer_write.TypedResult,
+    ) Error!void {
         if (func_idx >= self.compiled.func_sigs.len) return Error.ExportNotFound;
         if (func_idx < self.compiled.num_imports) return Error.UnsupportedEntrySignature;
         const sig = self.compiled.func_sigs[func_idx];
