@@ -3,20 +3,15 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Current state — Phase 17, `.auto`→JIT flip campaign (user=C); tree green @dad3550ba; (A) narrowed to one fix path
+## Current state — Phase 17, `.auto`→JIT flip RE-LANDED @a2fc02782, Mac-GREEN; ubuntu-gate is the verdict → then tag
 
-**USER RECONFIRMED C 2026-06-22** (continue full flip before tag; multi-day x86_64-JIT campaign).
-Both attempt-#4 ubuntu gaps root-caused; (A) fix-path NARROWED this cycle (full detail in D-496):
-- **(A)** x86_64 prologue fuel/interrupt poll gated on `uses_runtime_ptr` → trivial fns unbounded. The lighter
-  RAX-poll idea was IMPLEMENTED + Rosetta-tested → **FALSIFIED (crash)**: the trap stub writes trap_kind via R15,
-  which a lean fn never installs. **ONLY correct codegen fix = (a) force `uses_runtime_ptr=true` (emit.zig:193) +
-  recompute the 59 byte-exact emit tests** (each `body_start_offset(false,fb)`→`(true,NEW_fb)`; per-test frame
-  recompute — good SUBAGENT task). Alt: **(b) pin the ~3 facade sandbox tests `.interp` + debt the gap** (runaway
-  -safety intact; only fuel=0-trivial semantic differs). Pick (a) unless it proves too costly → fall to (b).
-- **(B)** `wast_runtime_runner.zig:709,798` `.auto`→JIT for imported-memory → pin `.interp`. 2-line fix (re-doable).
-**REMAINING flip plan**: do (A) [(a) via subagent for the 59 tests, OR (b)] → (B) pin → `git revert 18d2f887a`
-restores the whole flip + attempt-#3's ~14 pins → layer A+B → full Mac test → **ubuntu-gate (MANDATORY)** → 3-host
-green → tag alpha.3. funcref D-497/D-498 stay pinned-debt. cljw waits. cron `f34c7ee2`; CronDelete only at final stop.
+**FLIP RE-LANDED (user=C), Mac `zig build test` GREEN (TESTEXIT 0).** The full flip = (A) always-R15 prologue poll
+@3424fe4f0 (Rosetta-verified: trivial `--fuel 0`→out_of_fuel; closes the x86_64 sandbox gap) + (B) wast_runtime_runner
+`.interp` pin @bddcd0c62 + the flip routing/linker-pin/run.zig-engine-param/~14 interp pins restored @a2fc02782.
+funcref D-497/D-498 stay pinned-debt. **NEXT: ubuntu-gate (the MANDATORY real verdict — Mac is necessary-not-sufficient,
+the hard lesson) + windows.** If 3-host GREEN with `.auto`=JIT → close campaign + cut+push `v2.0.0-alpha.3` tag
+(USER-AUTHORIZED, tag-only) + to_cljw_09 + CronDelete f34c7ee2 + clean stop. If ubuntu RED → triage the new failure
+(likely another x86_64 gap), do NOT tag. cron `f34c7ee2` backstop; CronDelete only at the final stop.
 
 **IN FLIGHT**: a subagent (agentId a4b151e9...) is implementing the (a) always-R15 fix + `bodyStartFromBytes`
 helper + 59 emit-test sed, verifying Mac-green + Rosetta `--fuel 0`-traps; it leaves changes UNCOMMITTED for review
