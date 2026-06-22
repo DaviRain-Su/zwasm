@@ -12,9 +12,13 @@ conformance exes `funcref_table_call` SEGV + `funcref_result_call` exit-1 under 
 DEFAULT path (D-497/D-498), not pinnable niche debt. A SEGV in the default violates memory-safety; the flip
 cannot ship until the JIT funcref C-API path at least cleanly rejects (no SEGV). SOLID + committed + 3-host-green:
 the D-489/D-494 regalloc miscompile fix (the substantive alpha.3 content) + the 5 JIT-C-API accessor chunks.
-**NEXT = user decision**: A) tag `v2.0.0-alpha.3` NOW on this green baseline + defer the flip to a continued
-campaign (recommended — unblocks cljw; the meat is done+green); or C) keep grinding the flip (funcref-JIT-C-API
-work, multi-day). The tag is USER-AUTHORIZED either way. cron `f34c7ee2` backstop; CronDelete only at the final stop.
+**USER CHOSE C (3rd time) 2026-06-22**: complete the flip before tagging, incl. the funcref-JIT-C-API work.
+**The (b) approach already cleared 2 of 3 blockers** (facade sandbox tests pinned `.interp`/D-499; buffer-write
+untouched since NO always-R15). **ONE remaining flip blocker = the funcref C-API conformance exes**
+(`zwasm-conformance-funcref_table_call` SEGV + `funcref_result_call` exit-1 under `.auto`→JIT) = D-497/D-498.
+PLAN: implement funcref-JIT-C-API (table-call + result marshalling; at minimum a CLEAN reject, no SEGV — memory
+safety) → re-land (b) flip (revert the 3 reverts 4a042b5fc/bb18ac520... or re-apply cleanly) + funcref fix →
+ubuntu-gate → 3-host green → tag. cron `f34c7ee2` backstop; CronDelete only at the final stop (after tag).
 
 **LESSON (load-bearing): Mac `zig build test` is INSUFFICIENT to declare the flip green — MUST ubuntu-gate.**
 
