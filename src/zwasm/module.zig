@@ -371,12 +371,7 @@ test "Module.instantiate: fuel=.limited(0) traps first instruction; .unmetered c
     defer mod.deinit();
     var results = [_]_zwasm.Value{.{ .i32 = 0 }};
 
-    // D-499 — pin `.interp`: `f` is a TRIVIAL leaf fn (no mem/global/call), and the
-    // x86_64 JIT only emits the fuel/interrupt prologue poll for runtime-ptr-using
-    // fns, so fuel=0 does NOT trap a trivial fn on x86_64 JIT (arm64 always polls).
-    // The fuel=0-immediate-trap semantic on trivial fns is debt-tracked (D-499);
-    // runaway-safety is intact (loops are back-edge-polled). This tests the contract.
-    var inst0 = try mod.instantiate(.{ .fuel = .{ .limited = 0 }, .engine = .interp });
+    var inst0 = try mod.instantiate(.{ .fuel = .{ .limited = 0 } });
     defer inst0.deinit();
     try testing.expectError(error.OutOfFuel, inst0.invoke("f", &.{}, &results));
 

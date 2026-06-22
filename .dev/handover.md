@@ -3,17 +3,20 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Current state — Phase 17, `.auto`→JIT flip RE-LANDED via (b) @6b0a20100; Mac-test running → ubuntu-gate → tag
+## Current state — Phase 17, `.auto`→JIT flip RE-LANDED @a2fc02782, Mac-GREEN; ubuntu-gate is the verdict → then tag
 
-**FLIP RE-LANDED via (b) (user=C).** The (A) always-R15 "proper" fix was REVERTED — it caused an x86_64 REGRESSION
-(entry_buffer_write multi-result ABRT) on top of the 59-emit-test churn (too-large blast radius). Pivoted to **(b):
-flip WITHOUT always-R15 + pin the 3 facade sandbox tests `.interp` + debt the x86_64-trivial-fn fuel/interrupt gap as
-D-499** (runaway-safety intact — loops back-edge-polled; only fuel=0-immediate-trap-on-trivial-fn differs on x86_64,
-a niche gap tracked like funcref D-497/D-498). This COMPLETES the flip (`.auto`→JIT default works for real programs)
-with the niche gap debt-tracked. Commits: flip @6b0a20100 (routing/linker-pin/run.zig-param/~14 pins) + (B)
-wast_runtime_runner @bddcd0c62 + 3 facade pins + D-499 (pending commit). **NEXT: Mac-test (bpe01p2rd) → push →
-ubuntu-gate + windows (MANDATORY verdict — Mac necessary-not-sufficient).** If 3-host GREEN → cut `v2.0.0-alpha.3` tag
-(USER-AUTHORIZED, tag-only) + to_cljw_09 + CronDelete f34c7ee2 + clean stop. If red → triage, do NOT tag.
+**FLIP RE-LANDED (user=C), Mac `zig build test` GREEN (TESTEXIT 0).** The full flip = (A) always-R15 prologue poll
+@3424fe4f0 (Rosetta-verified: trivial `--fuel 0`→out_of_fuel; closes the x86_64 sandbox gap) + (B) wast_runtime_runner
+`.interp` pin @bddcd0c62 + the flip routing/linker-pin/run.zig-engine-param/~14 interp pins restored @a2fc02782.
+funcref D-497/D-498 stay pinned-debt. **NEXT: ubuntu-gate (the MANDATORY real verdict — Mac is necessary-not-sufficient,
+the hard lesson) + windows.** If 3-host GREEN with `.auto`=JIT → close campaign + cut+push `v2.0.0-alpha.3` tag
+(USER-AUTHORIZED, tag-only) + to_cljw_09 + CronDelete f34c7ee2 + clean stop. If ubuntu RED → triage the new failure
+(likely another x86_64 gap), do NOT tag. cron `f34c7ee2` backstop; CronDelete only at the final stop.
+
+**IN FLIGHT**: a subagent (agentId a4b151e9...) is implementing the (a) always-R15 fix + `bodyStartFromBytes`
+helper + 59 emit-test sed, verifying Mac-green + Rosetta `--fuel 0`-traps; it leaves changes UNCOMMITTED for review
+(do NOT edit emit.zig/prologue.zig/emit_test_* concurrently). Next cycle: review its diff → commit (A) → (B) pin →
+`git revert 18d2f887a` (restore flip+~14 pins) → layer A+B → ubuntu-gate → 3-host → tag.
 
 **LESSON (load-bearing): Mac `zig build test` is INSUFFICIENT to declare the flip green — MUST ubuntu-gate.**
 
