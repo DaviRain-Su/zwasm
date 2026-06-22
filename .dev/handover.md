@@ -3,20 +3,24 @@
 > ≤ 100 lines (soft) / 120 (hard). Canonical fresh-session entry point. Framing:
 > [`handover_doc_discipline.md`](../.claude/rules/handover_doc_discipline.md).
 
-## Current state — Phase 17, `.auto`→JIT flip attempt #4 REVERTED (ubuntu caught x86_64 gaps Mac masked); investigating
+## Current state — Phase 17, `.auto`→JIT flip campaign (user=C): both new gaps ROOT-CAUSED, fixes specified; tree green @5a31fd645
 
-**FLIP REVERTED @18d2f887a** (D-496, user option C). Attempt #4 committed @3db5e40bd (Mac `zig build test` 69→0 GREEN)
-but the 3-host gate FAILED on ubuntu x86_64 — Mac masked THREE new x86_64-only classes (flip-exposes-x86_64 pattern):
-(A) facade fuel/interrupt SANDBOX tests `expected OutOfFuel/Interrupted, found void` on x86_64 JIT (trivial-func
-prologue fuel/interrupt poll — potential x86_64 sandbox gap OR interp-semantics tests needing `.interp` pin);
-(B) spec `imported-memory-copy invoke ExportNotFound` (spec-runner `.auto` no interp-fallback for imported-memory).
-Reverted to restore 3-host green (ch1-5 accessors KEPT). **LESSON: Mac `zig build test` is INSUFFICIENT to declare the
-flip green — MUST ubuntu-gate first.** **NEXT**: investigate (A) [x86_64 JIT prologue fuel/interrupt: real gap→FIX, or
-interp-granularity→pin] + (B) [spec-runner `.auto` fallback], then re-land flip (`git revert 18d2f887a` restores it) +
-attempt#3's ~14 pins → ubuntu-gate GREEN → 3-host → tag alpha.3. Full detail in D-496. Do NOT tag before 3-host green.
-cljw waits for the tag. Backstop cron `f34c7ee2`; CronDelete only at the FINAL stop (after tag).
+**USER RECONFIRMED C 2026-06-22** (continue full flip before tag, knowing it's a multi-day x86_64-JIT campaign).
+Both attempt-#4 ubuntu gaps now ROOT-CAUSED with concrete fixes (full detail in D-496):
+- **(A)** x86_64 prologue fuel/interrupt poll gated on `uses_runtime_ptr` (arm64 unconditional) → trivial fns
+  unbounded. **BETTER FIX** (Rosetta-verified the always-R15 variant works; this avoids 59-test churn): emit the
+  poll via RAX scratch in an `else` to emit.zig:333's `if (uses_runtime_ptr)` (lean frame kept) + update
+  `prologue.body_start_offset` FALSE case to include the poll size (auto-fixes the ~59 emit tests, zero per-test churn).
+- **(B)** `test/runners/wast_runtime_runner.zig:709,798` use `.auto`→JIT for cross-module imported-memory →
+  ExportNotFound. FIX = pin those 2 sites `.interp` (it's the runtime conformance runner). 2-line fix.
+**REMAINING flip plan (next cycles, fresh context for the intricate A codegen)**: (A) RAX-poll fix + (B) pin +
+re-apply attempt-#3's ~14 interp pins (`git revert 18d2f887a` restores the whole flip incl. those pins; then layer
+A+B on top) + funcref D-497/D-498 stay pinned-debt → full Mac test → **ubuntu-gate (mandatory; Mac insufficient)** →
+3-host green → tag alpha.3. cljw waits. Backstop cron `f34c7ee2`; CronDelete only at the final stop.
 
-## D-496 campaign (jit-capi-surface-flip) — LANDED local-green, pending 3-host
+**LESSON (load-bearing): Mac `zig build test` is INSUFFICIENT to declare the flip green — MUST ubuntu-gate.**
+
+## D-496 campaign (jit-capi-surface-flip) — accessors LANDED+green; flip re-land pending (A)+(B) fixes
 
 Five chunks done: ch1 @45f5b93c7 (kind-generic exports), ch2/3/5 @f7d5e0233 (global/memory/get_func arms), ch4
 @d3602f214 (table), ch6 FLIP @3db5e40bd (`.auto`→JIT, full test 69→0). instance.zig `(cap=UNCAPPED)` @4e1b06892.

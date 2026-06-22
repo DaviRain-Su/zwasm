@@ -117,7 +117,16 @@ entries:
       (b) pin the ~3 facade sandbox tests `.interp` + debt the x86_64 trivial-poll gap (light; runaway
       -safety INTACT since loops are back-edge-polled; only fuel=0-immediate-trap semantic differs for
       trivial straight-line fns; leaves arm64/x86_64 asymmetry). Attempt #4's (A) fix REVERTED (kept
-      tree green @6807ea443); finding preserved here. (original obs:)
+      tree green @6807ea443); finding preserved here. USER CHOSE C 2026-06-22 (do (A) properly).
+      **BETTER (A) DESIGN (lower churn than always-R15)**: keep uses_runtime_ptr body-driven (lean
+      frame for trivial fns — NO R15 push/frame change); in emit.zig add an `else` to the
+      `if (uses_runtime_ptr)` prologue block emitting the interrupt+fuel poll + jit_executed sentinel
+      via RAX (caller-saved scratch, dead at prologue): MOV RAX,entry_arg0(rt); poll [RAX+...];
+      SUB [RAX+fuel_cell_off],1; JS stub; MOV [RAX+jit_executed_flag_off],1. No R15 save needed.
+      Then make `prologue.body_start_offset` FALSE case ALSO include the poll size → the ~59 emit-test
+      call sites auto-compute the right offset, ZERO per-test churn. Factor the poll emit to take a
+      base-reg param (R15|RAX). Verify Rosetta `--fuel 0 trivial` → trap + full Mac test + ubuntu-gate.
+      Preserves lean-frame perf AND fixes the sandbox gap AND avoids 59-test recompute. (original obs:)
       (A) **facade fuel/interrupt SANDBOX tests trap on interp but NOT on x86_64 JIT** —
       `Module.instantiate fuel=.limited(0)` (module.zig:376) + `Instance.interrupt` (instance.zig:600)
       + `setFuel exhausted` (instance.zig:989) all `expected error.OutOfFuel/Interrupted, found void`
@@ -125,11 +134,12 @@ entries:
       post-flip `.auto`→JIT, and x86_64 JIT does NOT honor fuel=0 / interrupt for a TRIVIAL function
       (no loop back-edge; only the prologue poll, which x86_64 may not emit/check the same as arm64).
       POTENTIAL x86_64 SANDBOX HOLE or these are interp-semantics tests needing `.interp` pin —
-      MUST investigate (arm64 JIT honored them = Mac green; x86_64 did not). (B) **spec wast
-      `imported-memory-copy/* invoke ExportNotFound`** — the spec assert runner's `.auto` path does
-      not fall back to interp for an imported-memory module (JIT rejects imports → but the runner
-      surfaced ExportNotFound instead of interp-running). (C) (windows verdict never landed; ubuntu
-      failed first.) NEXT: investigate (A) — is x86_64 JIT prologue fuel/interrupt poll a real gap
+      MUST investigate (arm64 JIT honored them = Mac green; x86_64 did not). (B) **wast
+      `imported-memory-copy/* invoke ExportNotFound`** — ROOT-CAUSED + FIX: `test/runners/
+      wast_runtime_runner.zig:709,798` use `wasm_instance_new` (`.auto`→JIT post-flip); it's the
+      wasmtime_misc RUNTIME CONFORMANCE runner with cross-module imported memory (interp's domain).
+      FIX = pin those 2 sites `instanceNewWithEngine(..., .interp)` (JIT conformance is the separate
+      spec_assert_runner). 2-line fix. (C) (windows verdict never landed; ubuntu failed first.) NEXT: investigate (A) — is x86_64 JIT prologue fuel/interrupt poll a real gap
       (FIX) or do these sandbox tests assert interp-granularity (pin `.interp`)? + (B) spec-runner
       `.auto` fallback. THEN re-land the flip + the ~14 pins from attempt #3 + green 3-host → tag.
       Mac `zig build test` is INSUFFICIENT for the flip — MUST gate ubuntu before declaring green.
