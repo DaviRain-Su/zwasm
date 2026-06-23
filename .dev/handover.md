@@ -10,9 +10,23 @@
 Plateau holds; no active campaign. **D-498 DONE @ab996afc0**: JIT C-API funcref param+result marshalling —
 `invokeRefIdx` extended to 1/2-param ref-result shapes (ref params ride i64 carrier); unpinned the param+result
 `wasm_func_call` test to `.jit` + added non-null funcref-PARAM round-trip test. Deleted from debt.
-**Remaining niche JIT gaps (interp-pinned, default never crashes)**: D-497 funcref-table GROW on JIT (host
-funcptr-mirror realloc), D-499 x86_64 trivial-fn fuel/interrupt poll (blanket-R15 regressed buffer-write;
-targeted-fix OR ratify-interp), D-500 Win64 component wrapper-thunk. **NEXT = D-497** (Mac-testable arm64+x86_64).
+**Remaining niche JIT gaps (interp-pinned, default never crashes)**: D-497 funcref-table GROW (ACTIVE BUNDLE below),
+D-499 x86_64 trivial-fn fuel/interrupt poll (blanket-R15 regressed buffer-write; targeted-fix OR ratify-interp),
+D-500 Win64 component wrapper-thunk.
+
+## Active bundle
+
+- **Bundle-ID**: D-497-jit-funcref-table-grow (ADR-0201)
+- **Cycles-remaining**: ~3
+- **Continuity-memo**: FuncEntity carries .funcptr+.typeidx; reach mirrors via rt.tables_jit_ci_ptr[idx].{funcptr_base,
+  typeidx_base} (NO TableSlice layout change). Two grow entries: jitTableGrowGuest (resolve real *FuncEntity) vs
+  jitTableGrowHost (fail-safe clear, host ref maybe forged). Barrier: funcref mirrors size to `min` → pre-allocate to
+  growCapacity in setup.zig (funcptrs_buf/typeidxs_buf/extra_*_buf + extra_offs stride). ABI-sensitive → 3-host.
+- **Plan**: (1) setup.zig pre-alloc funcref mirrors to growCapacity; (2) split jitTableGrowGuest/Host + wire
+  table_grow_fn override; (3) tests: guest table.grow funcref + call_indirect grown slot (arm64+x86_64), host C-API
+  grow+get; unpin instance.zig:3936 to a `.jit` sibling. (4) ubuntu gate + batch windows.
+- **Exit-condition**: guest `table.grow` of a funcref table + `call_indirect` of a grown slot returns the grown
+  func's result on BOTH arches (Mac + ubuntu green); host C-API funcref grow+get green; D-497 deleted from debt.
 
 **Operational wins this session (keep using)**: (1) Rosetta x86_64-macos reproduces x86_64-linux JIT bugs (build on
 Mac `-Dtarget=x86_64-macos`, run under Rosetta). (2) **Win64 fast-repro**: cross-build `zig build test -Dtarget=
