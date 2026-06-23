@@ -340,6 +340,16 @@ pub fn emitTableGrow(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
         },
     }
     try ctx.pushed_vregs.append(ctx.allocator, result);
+
+    // D-497 (ADR-0201): a grow of table 0 changes the entry count cached in the
+    // X25 reserved reg (call_indirect's table-0 bounds check reads W25, not the
+    // fresh TableSlice.len). X25 is callee-saved, so it survives the BLR with the
+    // STALE pre-grow value; reload it so a grown slot is reachable from a
+    // call_indirect later in THIS function. Cross-function calls re-establish X25
+    // at the callee prologue; x86_64 reads rt.table_size fresh from R15 each time,
+    // so this reload is arm64-only.
+    if (tableidx == 0)
+        try gpr.writeU32(ctx.allocator, ctx.buf, inst.encLdrImmW(25, abi.runtime_ptr_save_gpr, jit_abi.table_size_off));
 }
 
 /// Wasm spec §4.4.14 (table.fill x) — pop n (i32), val (reftype),

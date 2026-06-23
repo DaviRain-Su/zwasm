@@ -2209,6 +2209,32 @@ test "jitTableGrow: no host cap → table.grow within descriptor max succeeds (D
     try testing.expectEqual(@as(u32, 1), try entry.callI32NoArgs(compiled.module, 0, &owned.rt));
 }
 
+test "jitTableGrow: D-497 guest funcref table.grow + call_indirect grown slot (ADR-0201)" {
+    // (module (type (func (result i32)))
+    //   (func (result i32) i32.const 42)                 ;; func 0 — target
+    //   (func (export "test") (result i32)               ;; func 1
+    //     ref.func 0  i32.const 1  table.grow 0  drop      ;; slot 1 := funcref 0
+    //     i32.const 1  call_indirect (type 0))             ;; call the grown slot
+    //   (table 1 4 funcref) (export "f" func 0) (elem declare func 0))
+    const wasm = [_]u8{
+        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+        0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f, // type 0: ()→i32
+        0x03, 0x03, 0x02, 0x00, 0x00, // 2 funcs, both type 0
+        0x04, 0x05, 0x01, 0x70, 0x01, 0x01, 0x04, // table funcref {min 1, max 4}
+        0x07, 0x0c, 0x02, 0x01, 0x66, 0x00, 0x00, 0x04, 0x74, 0x65, 0x73, 0x74, 0x00, 0x01, // export "f" f0, "test" f1
+        0x09, 0x05, 0x01, 0x03, 0x00, 0x01, 0x00, // elem declare func 0 (ref.func validity)
+        0x0a, 0x16, 0x02, // code: 2 funcs
+        0x04, 0x00, 0x41, 0x2a, 0x0b, // f0: i32.const 42; end
+        0x0f, 0x00, 0xd2, 0x00, 0x41, 0x01, 0xfc, 0x0f, 0x00, 0x1a, 0x41, 0x01, 0x11, 0x00, 0x00, 0x0b, // f1
+    };
+    var compiled = try compileWasm(testing.allocator, &wasm);
+    defer compiled.deinit(testing.allocator);
+    var owned = try setupRuntime(testing.allocator, &compiled, &wasm);
+    defer owned.deinit(testing.allocator);
+    // Grow slot 1 := funcref of func 0, then call_indirect[1] → func 0 → 42.
+    try testing.expectEqual(@as(u32, 42), try entry.callI32NoArgs(compiled.module, 1, &owned.rt));
+}
+
 // Trap-KIND execution tests (ADR-0164 A / D-292: unreachable=5, oob_memory=6,
 // div_by_zero=7, int_overflow=8) live in the sibling `runner_trap_test.zig`
 // (split to keep this file under the 2000-line hard cap; mirrors runner_gc_test).

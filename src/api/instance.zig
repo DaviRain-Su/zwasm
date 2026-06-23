@@ -1788,10 +1788,18 @@ pub export fn wasm_table_grow(t: ?*Table, delta: u32, init: ?*Ref) callconv(.c) 
     var tab_ptr: *runtime.TableInstance = undefined;
     var alloc: std.mem.Allocator = undefined;
     if (handle.instance) |inst| {
-        const rt = inst.runtime orelse return false;
-        if (handle.table_idx >= rt.tables.len) return false;
-        tab_ptr = &rt.tables[handle.table_idx];
-        alloc = rt.alloc;
+        if (inst.runtime) |rt| {
+            if (handle.table_idx >= rt.tables.len) return false;
+            tab_ptr = &rt.tables[handle.table_idx];
+            alloc = rt.alloc;
+        } else {
+            // D-497 (ADR-0201) — JIT-backed instance: grow into the pre-allocated
+            // mirror capacity (a no-max table has no headroom → false). The HOST
+            // path stores the raw ref + clears the funcptr mirror (fail-safe).
+            const jit = jitOf(inst) orelse return false;
+            const payload: u64 = if (init) |r| r.ref else runtime.Value.null_ref;
+            return jit.growTable(handle.table_idx, payload, delta) != null;
+        }
     } else { // standalone host table
         tab_ptr = handle.tinst orelse return false;
         alloc = storeAllocator(handle.store orelse return false) orelse return false;
@@ -3064,7 +3072,7 @@ test "D-496 JIT C-path: zwasm_instance_get_func resolves by index (.jit)" {
 test "D-496 JIT C-path: wasm_table_size/get/set raw-ref round-trip on a JIT instance (.jit)" {
     // D-496 chunk 4: table size + raw-ref get/set on a JIT instance (was no-op on
     // JIT). Mirrors interp's raw Value.ref C-API semantics (the existing interp
-    // table test forges a sentinel ref). funcref-table GROW on JIT = D-497 gap.
+    // table test forges a sentinel ref). funcref-table GROW on JIT = D-497 (ADR-0201).
     const e = wasm_engine_new() orelse return error.EngineAllocFailed;
     defer wasm_engine_delete(e);
     const s = wasm_store_new(e) orelse return error.StoreAllocFailed;
@@ -3089,6 +3097,52 @@ test "D-496 JIT C-path: wasm_table_size/get/set raw-ref round-trip on a JIT inst
     const r1 = wasm_table_get(tab, 0) orelse return error.RefNull;
     defer wasm_ref_delete(r1);
     try testing.expectEqual(@as(u64, 0xC0FFEE), r1.ref);
+}
+
+// (module (table (export "t") 1 4 funcref)) — a max-bounded funcref table, so the
+// JIT pre-allocates grow headroom (ADR-0201). No funcs/code needed.
+const funcref_table_max_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x04, 0x05, 0x01, 0x70, 0x01, 0x01, 0x04, // table funcref {min 1, max 4}
+    0x07, 0x05, 0x01, 0x01, 0x74, 0x01, 0x00, // export "t" table 0
+};
+
+test "D-497 JIT C-path: wasm_table_grow on a funcref table (host fail-safe fill) (.jit)" {
+    const e = wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer wasm_engine_delete(e);
+    const s = wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer wasm_store_delete(s);
+    var bytes = funcref_table_max_wasm;
+    const bv: ByteVec = .{ .size = bytes.len, .data = &bytes };
+    const m = wasm_module_new(s, &bv) orelse return error.ModuleAllocFailed;
+    defer wasm_module_delete(m);
+    const inst = instanceNewWithEngine(s, m, null, null, .jit) orelse return error.InstanceAllocFailed;
+    defer wasm_instance_delete(inst);
+    var exports_vec: ExternVec = .{ .size = 0, .data = null };
+    wasm_instance_exports(inst, &exports_vec);
+    defer wasm_extern_vec_delete(&exports_vec);
+    const data = exports_vec.data orelse return error.ExportsDataNull;
+    const tab = wasm_extern_as_table(data[0]) orelse return error.TableNull;
+    try testing.expectEqual(@as(u32, 1), wasm_table_size(tab));
+
+    // Grow by 2 (1→3, within max 4) with a forged sentinel init — the HOST path
+    // stores it in refs and clears the funcptr mirror (never derefs the ref).
+    var init_ref: Ref = .{ .instance = null, .ref = 0xBEEF };
+    try testing.expect(wasm_table_grow(tab, 2, &init_ref));
+    try testing.expectEqual(@as(u32, 3), wasm_table_size(tab));
+    for (1..3) |i| {
+        const r = wasm_table_get(tab, @intCast(i)) orelse return error.RefNull;
+        defer wasm_ref_delete(r);
+        try testing.expectEqual(@as(u64, 0xBEEF), r.ref);
+    }
+    // Slot 0 untouched.
+    const r0 = wasm_table_get(tab, 0) orelse return error.RefNull;
+    defer wasm_ref_delete(r0);
+    try testing.expectEqual(@as(u64, runtime.Value.null_ref), r0.ref);
+
+    // Grow past the declared max (3+2=5 > 4) → refused.
+    try testing.expect(!wasm_table_grow(tab, 2, null));
+    try testing.expectEqual(@as(u32, 3), wasm_table_size(tab));
 }
 
 test "ADR-0200 JIT C-path: export_types parallel to exports_storage so by-name discovery resolves (wast_runtime_runner regression)" {

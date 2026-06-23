@@ -1264,14 +1264,16 @@ pub const JitInstance = struct {
         return .{ .idx = idx, .elem_type = td.elem_type, .max = if (td.max) |m| std.math.cast(u32, m) orelse null else null };
     }
 
-    /// ADR-0200 increment 5 — host-facade `Table.grow`. Grows table `tableidx`
-    /// by `delta` slots filled with `init` (a `Value.ref`-encoded u64),
-    /// returning the OLD size, or `null` on refusal. funcref tables are
-    /// rejected (`jitTableGrow` needs a funcptr mirror it can't synthesise
-    /// host-side — same restriction the guest `table.grow` op carries).
+    /// ADR-0200 increment 5 / D-497 (ADR-0201) — host-facade `Table.grow`. Grows
+    /// table `tableidx` by `delta` slots filled with `init` (a `Value.ref`-encoded
+    /// u64), returning the OLD size, or `null` on refusal. Funcref tables grow via
+    /// the HOST entry (`jitTableGrowHost`): the new slots' funcptr mirror is cleared
+    /// fail-safe (the host `init` may be a forged ref, never dereferenced) — a
+    /// callable grown funcref slot then needs `wasm_table_set` (mirror-aware). Grow
+    /// is bounded by the pre-allocated capacity (a no-max table has no headroom).
     pub fn growTable(self: *JitInstance, tableidx: u32, init_ref: u64, delta: u32) ?u32 {
         if (tableidx >= self.owned.rt.tables_count) return null;
-        const old = setup_mod.jitTableGrow(&self.owned.rt, tableidx, init_ref, delta);
+        const old = setup_mod.jitTableGrowHost(&self.owned.rt, tableidx, init_ref, delta);
         if (old < 0) return null;
         return @bitCast(old);
     }

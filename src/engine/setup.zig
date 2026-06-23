@@ -219,20 +219,23 @@ pub fn jitMemoryGrow(rt: *entry.JitRuntime, delta_pages: u32) callconv(.c) i32 {
     return @bitCast(@as(u32, @truncate(old_pages)));
 }
 
-/// Real `table_grow_fn` (replaces `defaultTableGrowReject`) for D-224.
-/// Grows a non-funcref table by `delta`, filling the new slots with `init`
-/// and returning the OLD size (or -1 on failure). No realloc: setup
-/// pre-allocates each non-funcref table's `refs` arena up to its capacity
-/// (`.max`), so growth just fills pre-allocated slots + bumps `.len` — the
-/// `TableSlice` descriptor is updated in place (table.get reads it fresh, so
-/// no JIT base reload, unlike memory.grow). funcref tables stay rejected
-/// (grown slots would need a funcptrs mirror that resolves the funcref
-/// operand to a native entry — out of this chunk's scope).
-pub fn jitTableGrow(rt: *entry.JitRuntime, tableidx: u32, init: u64, delta: u32) callconv(.c) i32 {
+/// D-497 (ADR-0201) — shared `table.grow` core. Grows table `tableidx` by `delta`,
+/// filling new slots with `init` (Value.ref-encoded u64) and returning the OLD size
+/// (or -1 on failure). No realloc: setup pre-allocates each table's `refs` arena (and,
+/// for funcref tables, the funcptr/typeidx mirrors) up to its capacity (`.max`), so
+/// growth fills pre-allocated slots + bumps `.len` in place (table.get reads it fresh,
+/// so no JIT base reload, unlike memory.grow). For a funcref table the parallel
+/// funcptr/typeidx views are filled: null init → funcptr 0 + sentinel typeidx (a later
+/// `call_indirect` traps cleanly); non-null init → if `resolve` (GUEST path: `init` is
+/// a real `*FuncEntity`) read `fe.funcptr`/`fe.typeidx` (matching `emitTableSet`'s LDR
+/// mirror), else (HOST path: `init` may be a forged ref) clear to the sentinel
+/// (fail-safe, mirrors `tableSetRef`; a callable grown slot then needs `wasm_table_set`).
+fn jitTableGrowCore(rt: *entry.JitRuntime, tableidx: u32, init: u64, delta: u32, resolve: bool) i32 {
+    const FuncEntity = @import("../runtime/instance/func.zig").FuncEntity;
+    const Value = @import("../runtime/value.zig").Value;
     if (tableidx >= rt.tables_count) return -1;
     const descs: [*]entry.TableSlice = @constCast(rt.tables_ptr);
     const d = &descs[tableidx];
-    if (@intFromPtr(d.funcptrs) != 0) return -1; // funcref → unsupported here
     const old_len = d.len;
     const new_len: u64 = @as(u64, old_len) + @as(u64, delta);
     if (new_len > d.max) return -1; // exceeds pre-allocated capacity (= .max)
@@ -241,10 +244,44 @@ pub fn jitTableGrow(rt: *entry.JitRuntime, tableidx: u32, init: u64, delta: u32)
     // max. Mirrors the interp table.grow handler (instantiate.zig) so the
     // sandbox triad's table leg is cross-engine. maxInt sentinel = unlimited.
     if (new_len > rt.store_table_elements_max) return -1;
+    const is_funcref = @intFromPtr(d.funcptrs) != 0;
+    // typeidx mirror reached via tables_jit_ci_ptr (NO TableSlice layout change).
+    const typeidx_base: ?[*]u32 = if (is_funcref and tableidx < rt.tables_jit_ci_count)
+        @constCast(rt.tables_jit_ci_ptr[tableidx].typeidx_base)
+    else
+        null;
     var i: u32 = old_len;
-    while (i < old_len + delta) : (i += 1) d.refs[i] = init;
+    while (i < old_len + delta) : (i += 1) {
+        d.refs[i] = init;
+        if (!is_funcref) continue;
+        var fp: u64 = 0;
+        var ti: u32 = std.math.maxInt(u32);
+        if (init != Value.null_ref and resolve) {
+            const fe: *const FuncEntity = @ptrFromInt(@as(usize, @intCast(init)));
+            fp = fe.funcptr;
+            ti = fe.typeidx;
+        }
+        d.funcptrs[i] = fp;
+        if (typeidx_base) |tb| tb[i] = ti;
+    }
     d.len = @intCast(new_len);
+    // D-497: table 0's `call_indirect` fast path bounds-checks against the scalar
+    // `rt.table_size` snapshot (not `d.len`); bump it so a grown table-0 slot is
+    // reachable. Tables k>0 read `tables_ptr[k].len` directly (jit_abi helper).
+    if (tableidx == 0) rt.table_size = @intCast(new_len);
     return @bitCast(old_len);
+}
+
+/// GUEST `table_grow_fn` (replaces `defaultTableGrowReject`) — `init` from the wasm
+/// stack is a real funcref/externref, so funcref native-entry resolution is safe.
+pub fn jitTableGrow(rt: *entry.JitRuntime, tableidx: u32, init: u64, delta: u32) callconv(.c) i32 {
+    return jitTableGrowCore(rt, tableidx, init, delta, true);
+}
+
+/// HOST C-API `table.grow` (`growTable` facade) — `init` is a host `*Ref` whose
+/// payload may be forged, so never dereference it as a `*FuncEntity` (fail-safe).
+pub fn jitTableGrowHost(rt: *entry.JitRuntime, tableidx: u32, init: u64, delta: u32) i32 {
+    return jitTableGrowCore(rt, tableidx, init, delta, false);
 }
 
 /// Build a JitRuntime + populate its host_dispatch table + init
@@ -680,10 +717,24 @@ pub fn setupRuntimeLinked(
         }
     }
 
-    const funcptrs_buf = try allocator.alloc(u64, if (table_size == 0) 1 else table_size);
+    // D-497 / ADR-0201 — grow-headroom pre-allocation. Per-table capacity =
+    // declared max capped at `grow_cap`, never below min; a no-max table stays at
+    // min (no JIT grow headroom, same as before — the shared arena can't realloc).
+    // Funcref tables now follow the SAME rule (was min-only), so their funcptr/
+    // typeidx mirrors get headroom for grown slots' native-entry resolution.
+    const grow_cap: u32 = 65536;
+    const growCapacity = struct {
+        fn f(tm: anytype, cap: u32) u32 {
+            const m = tm.max orelse return tm.min;
+            return @max(tm.min, @min(m, cap));
+        }
+    }.f;
+    const table0_cap: u32 = if (table_metas.len > 0) growCapacity(table_metas[0], grow_cap) else table_size;
+
+    const funcptrs_buf = try allocator.alloc(u64, if (table0_cap == 0) 1 else table0_cap);
     errdefer allocator.free(funcptrs_buf);
     @memset(funcptrs_buf, 0);
-    const typeidxs_buf = try allocator.alloc(u32, if (table_size == 0) 1 else table_size);
+    const typeidxs_buf = try allocator.alloc(u32, if (table0_cap == 0) 1 else table0_cap);
     errdefer allocator.free(typeidxs_buf);
     // Sentinel `maxInt(u32)` for "no function in this slot" — the
     // JIT-emitted call_indirect type-check `cmp w16, #expected`
@@ -700,24 +751,13 @@ pub fn setupRuntimeLinked(
     // mirrors writes from `funcptrs_buf` into the corresponding
     // `table_refs` slot (using the FuncEntity-ptr encoding, NOT
     // the native-code-ptr encoding used by `funcptrs_buf`).
-    // D-224 — table.grow capacity: pre-allocate non-funcref tables up to
-    // their declared `max` (capped) so `jitTableGrow` can bump `.len` into
-    // pre-allocated slots without realloc (the shared arena can't realloc one
-    // slice). funcref tables stay at `min` (grow needs a funcptrs mirror for
-    // grown slots → still rejected). `.max` is set to this capacity so the
+    // D-224 / D-497 (ADR-0201) — table.grow capacity: pre-allocate tables up to
+    // their declared `max` (capped) so `jitTableGrow` bumps `.len` into pre-
+    // allocated slots without realloc (the shared arena can't realloc one slice).
+    // `growCapacity` (defined above) now covers funcref tables too — their
+    // funcptr/typeidx mirrors are sized to the same capacity, so a grown funcref
+    // slot has room for its resolved native entry. `.max` = this capacity so the
     // grow fn's cap-check == the actual pre-allocated size.
-    const grow_cap: u32 = 65536;
-    const growCapacity = struct {
-        fn f(tm: anytype, cap: u32) u32 {
-            if (tm.is_funcref) return tm.min;
-            const m = tm.max orelse return tm.min;
-            // The arena MUST hold the table's INITIAL `min` slots — the init
-            // loop + `.len` write all of them. Capping max-headroom at `cap`
-            // must never undercut `min` (a non-funcref table with min > cap
-            // would otherwise alloc < min and OOB-write at setup → SEGV).
-            return @max(tm.min, @min(m, cap));
-        }
-    }.f;
     var total_table_refs: usize = 0;
     for (table_metas) |tm| total_table_refs += growCapacity(tm, grow_cap);
     const tables_descs = try allocator.alloc(entry.TableSlice, if (table_metas.len == 0) 1 else table_metas.len);
@@ -734,9 +774,9 @@ pub fn setupRuntimeLinked(
             tables_descs[i] = .{
                 .refs = table_refs.ptr + ref_offset,
                 .len = tm.min,
-                // D-224: `.max` = pre-allocated capacity (funcref keeps its
-                // declared max; grow rejects it via the funcptrs check).
-                .max = if (tm.is_funcref) (tm.max orelse entry.table_no_max) else cap,
+                // D-224 / D-497: `.max` = pre-allocated capacity (funcref included
+                // now). A no-max table has cap == min → grow rejected (no headroom).
+                .max = cap,
                 .funcptrs = fp_init,
             };
             ref_offset += cap;
@@ -778,7 +818,7 @@ pub fn setupRuntimeLinked(
     // dispatch (table 0 reuses funcptrs/typeidxs; k>0 → extras).
     var extra_total_slots: usize = 0;
     if (table_metas.len > 1) {
-        for (table_metas[1..]) |tm| extra_total_slots += tm.min;
+        for (table_metas[1..]) |tm| extra_total_slots += growCapacity(tm, grow_cap); // D-497: grow headroom
     }
     const tables_jit_ci_buf = try allocator.alloc(entry.TableJitCallInfo, if (table_metas.len == 0) 1 else table_metas.len);
     errdefer allocator.free(tables_jit_ci_buf);
@@ -799,7 +839,7 @@ pub fn setupRuntimeLinked(
                 };
                 // TODO(9.12-audit): table storage shape — see D-126 / ADR-0068.
                 if (tm.is_funcref) tables_descs[k].funcptrs = extra_funcptrs_buf.ptr + off;
-                off += tm.min;
+                off += growCapacity(tm, grow_cap); // D-497: stride by grow capacity
             }
         }
     }
@@ -811,7 +851,7 @@ pub fn setupRuntimeLinked(
         var off: usize = 0;
         for (table_metas[1..], 1..) |tm, k| {
             extra_offs[k] = off;
-            off += tm.min;
+            off += growCapacity(tm, grow_cap); // D-497: stride by grow capacity (matches the jit_ci loop)
         }
     }
 
