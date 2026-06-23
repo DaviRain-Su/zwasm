@@ -360,9 +360,14 @@ entries:
       1-/2-arg through the hand-enumerated `dispatchScalar1`/`dispatchScalar2` tables
       (runner.zig:787/830), which OMIT many scalar combos — e.g. an export `(i32,f64)->f64`
       hits `else => UnsupportedEntrySignature` and traps, instead of falling through to the
-      `invokeViaBufferSingle` buffer-write thunk (which arity-3+ already uses). Fix = route
-      uncovered 1-/2-arg shapes through the buffer thunk too (then drop the partial scalar
-      tables). Small; needs 3-host (Win64 FP). (4) NEW (folded from D-500, 2026-06-23):
+      `invokeViaBufferSingle` buffer-write thunk (which arity-3+ already uses). RESOLVED
+      2026-06-23 (regression test added, instance.zig "D-477 sliver(3)"): the 2-arg path
+      ALREADY falls through to invokeViaBufferSingle on UnsupportedEntrySignature
+      (invokeIdx 2-param `catch` arm), and the 1-arg `dispatchScalar1` is the FULL 4×4
+      matrix (no omitted combos) — so `(i32,f64)->f64` works on .jit (Mac-verified, value
+      2.5 round-trips; ubuntu gate covers x86_64 SysV; Win64 FP buffer thunk = D-477 core
+      3077f165b). The partial scalar veneers stay as a fast path (not dropped — harmless).
+      (4) NEW (folded from D-500, 2026-06-23):
       `wrapper_thunk.emitX8664Win64` rejects ≥2-arg + 3-result MEMORY-class host-invoke
       shapes (`if n_results==3 and n_params>1 → UnsupportedOp`, ~emitX8664Win64:450) —
       Win64 positional-slot + 32B shadow-space spill not emitted for that shape; SysV/arm64
