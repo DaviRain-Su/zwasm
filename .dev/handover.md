@@ -17,16 +17,17 @@ D-500 Win64 component wrapper-thunk.
 ## Active bundle
 
 - **Bundle-ID**: D-497-jit-funcref-table-grow (ADR-0201)
-- **Cycles-remaining**: ~3
-- **Continuity-memo**: FuncEntity carries .funcptr+.typeidx; reach mirrors via rt.tables_jit_ci_ptr[idx].{funcptr_base,
-  typeidx_base} (NO TableSlice layout change). Two grow entries: jitTableGrowGuest (resolve real *FuncEntity) vs
-  jitTableGrowHost (fail-safe clear, host ref maybe forged). Barrier: funcref mirrors size to `min` → pre-allocate to
-  growCapacity in setup.zig (funcptrs_buf/typeidxs_buf/extra_*_buf + extra_offs stride). ABI-sensitive → 3-host.
-- **Plan**: (1) setup.zig pre-alloc funcref mirrors to growCapacity; (2) split jitTableGrowGuest/Host + wire
-  table_grow_fn override; (3) tests: guest table.grow funcref + call_indirect grown slot (arm64+x86_64), host C-API
-  grow+get; unpin instance.zig:3936 to a `.jit` sibling. (4) ubuntu gate + batch windows.
-- **Exit-condition**: guest `table.grow` of a funcref table + `call_indirect` of a grown slot returns the grown
-  func's result on BOTH arches (Mac + ubuntu green); host C-API funcref grow+get green; D-497 deleted from debt.
+- **Cycles-remaining**: ~1 (impl DONE @11d70d69f, Mac green; awaiting ubuntu+windows verify)
+- **Continuity-memo**: Impl landed @11d70d69f: setup.zig pre-allocs funcref funcptr/typeidx mirrors to growCapacity;
+  jitTableGrowGuest (resolves *FuncEntity .funcptr/.typeidx) = table_grow_fn, jitTableGrowHost (fail-safe clear) =
+  growTable facade; arm64 X25 (table_size) reload after table-0 grow (x86_64 reads fresh); wasm_table_grow C-API JIT
+  arm. Mac `zig build test` 3092/3104 GREEN (guest call_indirect-grown-slot + host grow tests). **ABI-sensitive** —
+  setup arena-stride arithmetic + x86_64 fresh-table_size + windows call_indirect MUST be gate-verified.
+- **NEXT (Step 0.7)**: verify `/tmp/ubuntu.log` + `/tmp/win.log` green @11d70d69f. ubuntu green + windows green →
+  CLOSE bundle: delete D-497 from debt + drop this section. ubuntu RED → the setup pre-alloc stride is wrong (revert
+  + re-derive). windows RED on call_indirect → real Win64 bug (debt + fix).
+- **Exit-condition**: 11d70d69f green on ubuntu (x86_64) AND windows (Win64 call_indirect of a grown funcref slot);
+  then D-497 deleted from debt, bundle section removed.
 
 **Operational wins this session (keep using)**: (1) Rosetta x86_64-macos reproduces x86_64-linux JIT bugs (build on
 Mac `-Dtarget=x86_64-macos`, run under Rosetta). (2) **Win64 fast-repro**: cross-build `zig build test -Dtarget=
