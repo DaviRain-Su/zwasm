@@ -21,7 +21,8 @@ Plateau holds; no active campaign. **This session closed 3 niche JIT gaps**:
 Also **D-477 sliver(3) RESOLVED+tested @083affd47** (mixed (i32,f64)→f64 JIT export works via the 2-arg buffer-thunk
 fall-through; regression guard added). **NEXT**: correctness-sweep / surface refinement / debt repayment per ROADMAP §16.
 Remaining D-477 slivers (v128 invoke; Win64 ≥4-param spill; Win64 ≥2-arg/3-result thunk) are niche build-on-demand; no
-consumer blocked.
+consumer blocked. SIMD-spill-helper dedup DONE @<this> (xmmDefSpilledV128→delegates to xmmDefSpilled; load/store
+variants legitimately differ by width). No other queued cleanup; plateau is genuinely clean.
 
 **Operational wins this session (keep using)**: (1) Rosetta x86_64-macos reproduces x86_64-linux JIT bugs (build on
 Mac `-Dtarget=x86_64-macos`, run under Rosetta). (2) **Win64 fast-repro**: cross-build `zig build test -Dtarget=
