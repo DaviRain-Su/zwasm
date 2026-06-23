@@ -289,10 +289,11 @@ pub fn xmmDefSpilledV128(
     vreg: usize,
     stage_idx: u8,
 ) Error!Xmm {
-    return switch (alloc.slot(vreg, .fpr)) {
-        .reg => |id| abi.fpSlotToReg(id) orelse Error.SlotOverflow,
-        .spill => abi.fp_spill_stage_xmms[stage_idx],
-    };
+    // Identical to `xmmDefSpilled`: a "def" emits no load/store (just picks the
+    // home XMM or the stage reg), so v128 and scalar share one body — width only
+    // matters at the load/store pair (`xmmLoadSpilledV128`/`xmmStoreSpilledV128`).
+    // Kept as a distinct name so v128 call sites read intent-clearly.
+    return xmmDefSpilled(alloc, vreg, stage_idx);
 }
 
 /// ADR-0053 Part 2 — pair of `xmmDefSpilledV128`. Emits
