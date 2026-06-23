@@ -3099,6 +3099,44 @@ test "D-496 JIT C-path: wasm_table_size/get/set raw-ref round-trip on a JIT inst
     try testing.expectEqual(@as(u64, 0xC0FFEE), r1.ref);
 }
 
+// (module (func (export "mix") (param i32 f64) (result f64) local.get 1))
+// D-477 sliver(3): a mixed (i32,f64)→f64 export — a 2-arg scalar combo the
+// dispatchScalar2 veneer omits, so it must FALL THROUGH to the buffer-write thunk
+// (not trap UnsupportedEntrySignature) on a JIT instance via the C-API call path.
+const mix_i32f64_wasm = [_]u8{
+    0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+    0x01, 0x07, 0x01, 0x60, 0x02, 0x7f, 0x7c, 0x01, 0x7c, // type (i32,f64)->f64
+    0x03, 0x02, 0x01, 0x00,
+    0x07, 0x07, 0x01, 0x03, 0x6d, 0x69, 0x78, 0x00, 0x00, // export "mix" func 0
+    0x0a, 0x06, 0x01, 0x04, 0x00, 0x20, 0x01, 0x0b, // local.get 1; end
+};
+
+test "D-477 sliver(3): JIT C-path mixed (i32,f64)->f64 export falls through to buffer thunk (.jit)" {
+    const e = wasm_engine_new() orelse return error.EngineAllocFailed;
+    defer wasm_engine_delete(e);
+    const s = wasm_store_new(e) orelse return error.StoreAllocFailed;
+    defer wasm_store_delete(s);
+    var bytes = mix_i32f64_wasm;
+    const bv: ByteVec = .{ .size = bytes.len, .data = &bytes };
+    const m = wasm_module_new(s, &bv) orelse return error.ModuleAllocFailed;
+    defer wasm_module_delete(m);
+    const inst = instanceNewWithEngine(s, m, null, null, .jit) orelse return error.InstanceAllocFailed;
+    defer wasm_instance_delete(inst);
+    const func = zwasm_instance_get_func(inst, 0) orelse return error.FuncResolveFailed;
+    defer wasm_func_delete(func);
+
+    var args_data: [2]Val = .{
+        .{ .kind = .i32, .of = .{ .i32 = 5 } },
+        .{ .kind = .f64, .of = .{ .f64 = 2.5 } },
+    };
+    const args: ValVec = .{ .size = 2, .data = &args_data };
+    var results_data: [1]Val = undefined;
+    var results: ValVec = .{ .size = 1, .data = &results_data };
+    try testing.expect(wasm_func_call(func, &args, &results) == null);
+    try testing.expectEqual(ValKind.f64, results_data[0].kind);
+    try testing.expectEqual(@as(f64, 2.5), results_data[0].of.f64);
+}
+
 // (module (table (export "t") 1 4 funcref)) — a max-bounded funcref table, so the
 // JIT pre-allocates grow headroom (ADR-0201). No funcs/code needed.
 const funcref_table_max_wasm = [_]u8{
