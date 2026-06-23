@@ -24,9 +24,11 @@ No active campaign/bundle.
 **NEXT**: no `now`-class debt (0); high/medium-value named work is exhausted. Remaining = build-on-demand / parked
 (below). Per ROADMAP §16: correctness-sweep / surface refinement / debt repayment as real signals surface (a consumer
 need, a new spec item, a discovered bug). Do NOT speculatively grind no-consumer niche slivers (debt's own guidance).
-**§14.3 fuzz sweep CLEAN** (ran 2026-06-23 @7af222e9a): `fuzz_loader: 2008 processed, 1777 compiled (1266 interp +
-1665 JIT-compiled), 231 rejected, 0 crashes` — robustness reconfirmed across the full campaign corpus, no bug
-surfaced. (Re-run anytime: `nix develop .#gen --command bash scripts/gen_fuzz_corpus.sh campaign && zig build fuzz-campaign`.)
+**Fuzz sweeps CLEAN** (2026-06-23 @7af222e9a): loader campaign `2008 processed, 1777 compiled (1266 interp + 1665 JIT),
+231 rejected, 0 crashes`; exec-differential (interp-vs-JIT, D-469) seed `9/9 funcs, 0 mismatched`. Robustness +
+JIT-correctness reconfirmed. NOTE: exec-diff over the RAW SMITH campaign corpus reports `0 funcs compared` (smith
+exports no 0-param/scalar-result funcs — KNOWN limitation, lesson 2026-06-20) → don't re-run exec-diff on raw smith;
+the curated `exec_seed` is its real coverage. Re-run loader: `nix develop .#gen --command bash scripts/gen_fuzz_corpus.sh campaign && zig build fuzz-campaign`.
 
 ## Operational invariants (keep using)
 
