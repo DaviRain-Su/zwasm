@@ -41,9 +41,12 @@ the curated `exec_seed` is its real coverage. Re-run loader: `nix develop .#gen 
 
 ## Parked / gated — do NOT speculatively grind (see debt.yaml)
 
-- **D-477 slivers** (partial, build-on-demand, no consumer): (1) v128 args/results invoke (Win64-by-ref gotcha);
-  (2) Win64 ≥4-param stack-spill; (4) Win64 ≥2-arg/3-result MEMORY-class thunk (folded from D-500; needs windowsmini
-  blind-iteration). Recipe in debt D-477 + investigation agent a9ef96a8. Build when a real consumer needs the shape.
+- **D-477 slivers** (partial, build-on-demand, no DIRECT consumer): (1) v128 args/results invoke (Win64-by-ref gotcha;
+  would unblock the SIMD differential oracle — but indirect + itself otherwise-blocked); (2) Win64 ≥4-param stack-spill;
+  (4) Win64 ≥2-arg/3-result MEMORY-class thunk (folded from D-500). Full recipe: `private/notes/d477-remaining-slices-design.md`
+  + debt D-477. **RE-EXAMINED 2026-06-23 — design note + debt BOTH classify these "build-on-demand NICHE"; do NOT
+  re-investigate or speculatively build.** Trigger = a real consumer (e.g. SIMD-differential productization, a v128/Win64
+  host-invoke need). SIMD correctness already covered (simd_assert 25075/0 + fuzz-loader 1665 JIT-compiled clean).
 - **validator.zig at 3449/3450 cap** — NEXT validator edit MUST extract per the file's marker plan first.
 - D-305 long-tail (niche CM shapes; `component_graph.zig` 1895/2000 split first); D-464 async adversarial; D-475
   table64-JIT (perf, Win64-risk); D-462 feature-separation (user-gated). 22 `blocked-by` = future-bucket/parked.
