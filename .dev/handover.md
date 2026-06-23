@@ -14,9 +14,12 @@ Plateau holds; no active campaign. **This session closed 3 niche JIT gaps**:
   (fail-safe clear); arm64 X25 reload after table-0 grow; wasm_table_grow C-API JIT arm. Both deleted from debt.
 - **D-499 RATIFIED interp-only @cd0a75e96** (note): targeted fix intractable (always-R15 regresses Win64 buffer-write;
   trap stub structurally needs R15); runaway-safety intact on both arches; 3 facade tests `.interp`-pinned.
-**Remaining niche gap**: D-500 Win64 component wrapper-thunk (components-on-JIT works Mac+ubuntu; Win64 string-arg
-thunk missing → component CM-API `.interp`-pinned). **NEXT**: D-500 decision pending investigation (fix-Win64-thunk
-vs ratify-as-intended-architecture); windows host now FREE for any Win64-thunk verification.
+- **D-500 RESOLVED** (note): component CM-API `.interp` pin is RATIFIED ARCHITECTURE (ADR-0172 — cross-instance
+  aliasing is Zone-2, component-on-JIT architecturally precluded), NOT a Win64 workaround; the residual general Win64
+  `wrapper_thunk` ≥2-arg/3-result MEMORY-class host-invoke gap folded into D-477 sliver (4) (niche, build-on-demand).
+**All named niche JIT gaps are now closed/ratified/folded — loop back at the clean 完成形 plateau** (no active campaign).
+**NEXT**: correctness-sweep / surface refinement / debt repayment per ROADMAP §16. D-477 residual slivers (incl. the new
+Win64 multi-result thunk) are niche build-on-demand; no consumer is blocked.
 
 **Operational wins this session (keep using)**: (1) Rosetta x86_64-macos reproduces x86_64-linux JIT bugs (build on
 Mac `-Dtarget=x86_64-macos`, run under Rosetta). (2) **Win64 fast-repro**: cross-build `zig build test -Dtarget=

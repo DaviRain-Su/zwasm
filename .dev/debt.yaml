@@ -5,26 +5,28 @@
 entries:
   - id: "D-500"
     layer: "code"
-    status: "blocked-by"
+    status: "note"
     description: |-
-      blocked-by: a Win64 JIT wrapper-thunk (buffer-write entry) for the string-arg
-      component shape. The component CM-API `invokeTyped("greet", string)` routes args
-      through `invokeViaBufferSingle` → `hasThunk(func_idx)`; on Win64 no thunk is
-      emitted for that shape (`wrapper_thunk.emit` Win64 limitation) → UnsupportedEntry
-      Signature. Surfaced by the D-496 `.auto`→JIT flip: REQ-1/REQ-7 component_tests
-      FAILED on Win64 ONLY (ubuntu x86_64 SysV + Mac arm64 emit the thunk + PASS).
-      MITIGATED: the component CM-API core is now `.interp`-pinned (component.zig
-      instantiate — cross-module/component orchestration is interp's domain, like the
-      Linker; cljw uses interp for components D-488), so the flip ships without routing
-      components through the Win64-incomplete JIT thunk path. DISCHARGE: emit the Win64
-      buffer-write wrapper-thunk for the string-arg (+ remaining GPR) component shapes,
-      then drop the interp pin. Niche: component-on-JIT is not a flip goal (the flip
-      targets plain compute modules); cljw consumes components on interp.
+      RESOLVED for components (2026-06-23, investigation agent a9ef96a8): the component
+      CM-API `.interp` pin is RATIFIED ARCHITECTURE, not a Win64 workaround. ADR-0172
+      (accepted 2026-06-07): component host orchestration lives in Zone 3 and runs on the
+      interp/Linker path because component instantiation does cross-instance memory
+      aliasing + elem-segment wiring — Zone-2 invariants INCOMPATIBLE with the JIT's
+      per-instance isolation. So component-on-JIT is architecturally PRECLUDED (not merely
+      "not a goal"); the pin (component.zig:397 + linker.zig:484) can never be dropped for
+      components, and they never route through the Win64 JIT thunk. The D-496-flip Win64
+      failure was the flip transiently routing components to JIT before the ADR-0172 pin;
+      re-pinning was the correct fix. RESIDUAL (folded into D-477): the underlying Win64
+      `wrapper_thunk.emitX8664Win64` rejects ≥2-arg + 3-result MEMORY-class host-invoke
+      shapes (positional-slot + shadow-space gap) — a general host-invoke completeness
+      sliver reachable only by a host C-API call of such a shape on a JIT instance,
+      Win64-only, niche. Tracked under D-477; build on demand.
     first_raised: "2026-06-22"
-    last_reviewed: "2026-06-22"
+    last_reviewed: "2026-06-23"
     refs: |-
-      src/engine/runner.zig:invokeViaBufferSingle/hasThunk · wrapper_thunk.emit (Win64) ·
-      src/api/component.zig:instantiate (.interp pin) · component_tests REQ-1/REQ-7 · D-496
+      ADR-0172 (component orchestration = Zone-3/interp, ratified) · src/api/component.zig:397
+      + src/zwasm/linker.zig:484 (.interp pin, architectural) · wrapper_thunk.emitX8664Win64
+      ≥2-arg/3-result gap → D-477 · investigation agent a9ef96a8 2026-06-23
   - id: "D-499"
     layer: "code"
     status: "note"
@@ -360,11 +362,17 @@ entries:
       hits `else => UnsupportedEntrySignature` and traps, instead of falling through to the
       `invokeViaBufferSingle` buffer-write thunk (which arity-3+ already uses). Fix = route
       uncovered 1-/2-arg shapes through the buffer thunk too (then drop the partial scalar
-      tables). Small; needs 3-host (Win64 FP). RECOMMENDATION: D-477 core
+      tables). Small; needs 3-host (Win64 FP). (4) NEW (folded from D-500, 2026-06-23):
+      `wrapper_thunk.emitX8664Win64` rejects ≥2-arg + 3-result MEMORY-class host-invoke
+      shapes (`if n_results==3 and n_params>1 → UnsupportedOp`, ~emitX8664Win64:450) —
+      Win64 positional-slot + 32B shadow-space spill not emitted for that shape; SysV/arm64
+      emit it fine. Reachable only by a host C-API call of a (≥2-arg)→(3-result MEMORY)
+      func on a JIT instance, Win64-only, niche; needs windowsmini (blind-emit + fast-repro
+      loop). NOT a component path (components are interp by ADR-0172). RECOMMENDATION: D-477 core
       unblocks the ADR-0200 API-JIT phase (the user's priority) — the slivers need not
       gate it; pivot to the API phase, build slivers on demand.
     first_raised: "2026-06-20"
-    last_reviewed: "2026-06-21"
+    last_reviewed: "2026-06-23"
     refs: |-
       src/cli/main.zig:253-258 (the AI-invented "requires the interp engine" reject)
       src/engine/runner.zig (runWasiLenient entry path; 0-arg + v128-result)
