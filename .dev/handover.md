@@ -21,7 +21,11 @@ No active campaign/bundle.
 - **D-477 sliver(3) @083affd47 RESOLVED+tested** — mixed (i32,f64)→f64 JIT export works via the 2-arg buffer-thunk
   fall-through (regression guard added). **SIMD-spill dedup @df3fa42d7** (xmmDefSpilledV128→delegates).
 
-**NEXT**: idle plateau — no `now`-class debt; remaining work is build-on-demand/parked (below). v128-host-invoke bundle
+**NEXT**: LOOP CLEAN-STOPPED (bucket-3, 2026-06-24) — work exhaustively complete; all remaining forward work is
+external-signal-gated (build-on-demand / parked / user-gated) AND every autonomous-prep path walked (handover, debt,
+lessons, proposal_watch, coherence audit, loader+exec fuzz sweeps, v128 Phase-I). Resume-chain clean: git synced
+@19e4850fe, no cron, no orphans. Next `/continue` (user direction / a real signal) resumes instantly. Detail:
+no `now`-class debt; remaining work is build-on-demand/parked (below). v128-host-invoke bundle
 OPENED then PARKED 2026-06-24 after Phase-I survey (ae0522a8): the only easy win (no-arg `()→v128` result) ALREADY
 WORKS (runner.zig:698 runWasi→callV128NoArgs→ScalarResult.v128; "wasmtime supports this"). The genuine remainder is
 the delicate ~7-site thunk path (v128 PARAMS + general marshalling, model-A) with LOW marginal value (SIMD correctness
