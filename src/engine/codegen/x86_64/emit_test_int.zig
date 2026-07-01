@@ -858,7 +858,7 @@ test "compile: br with depth strictly above labels.len → UnsupportedOp" {
     try testing.expectError(Error.UnsupportedOp, compile(testing.allocator, &f, empty_alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32, &.{}, false));
 }
 
-test "compile: function with 16 locals compiles (§9.7 / 7.10-g lifts the i8 cap)" {
+test "compile: function with 16 locals compiles (lifts the i8 cap)" {
     // Pre-7.10-g this surfaced UnsupportedOp[total_locals>15];
     // the disp32 form widening lifts the cap to ~268M slots.
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{} };
@@ -872,7 +872,7 @@ test "compile: function with 16 locals compiles (§9.7 / 7.10-g lifts the i8 cap
     defer deinit(testing.allocator, out);
 }
 
-test "compile: function with v128 param → SysV compile-success (§9.9 / 9.9-e-2)" {
+test "compile: function with v128 param → SysV compile-success" {
     // v128 args
     // arrive in XMM0..XMM7 and stash via MOVUPS [RBP+disp_v128].
     // Win64 v128 stays UnsupportedOp (passed by hidden pointer
@@ -1691,7 +1691,7 @@ test "compile: self-recursive (call 0) emits JBE with patched disp32 pointing at
     try testing.expectEqual(@as(u8, 0x41), out.bytes[@intCast(stub_abs)]);
 }
 
-test "compile: self-recursive (i64)->i64 — probe + i64-result marshal (D-165 cycle 2)" {
+test "compile: self-recursive (i64)->i64 — probe + i64-result marshal" {
     // D-165 spike — sibling of the R3 ()->() test above for
     // the fac-rec shape `(func (param i64) (result i64))` that hangs
     // on Win64 with `assert_exhaustion fac-rec i64:1073741824`.
@@ -1829,7 +1829,7 @@ test "compile: self-recursive (i64)->i64 — probe + i64-result marshal (D-165 c
     try testing.expect(rt_restore_found);
 }
 
-test "compile: try_table emit populates EmitOutput.exception_handlers (IT-2)" {
+test "compile: try_table emit populates EmitOutput.exception_handlers" {
     // Mirror of arm64 sibling test.
     const exception_table = @import("../shared/exception_table.zig");
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{} };
@@ -1876,7 +1876,7 @@ test "compile: try_table emit populates EmitOutput.exception_handlers (IT-2)" {
     try testing.expectEqual(out.exception_handlers[1].pc_end, out.exception_handlers[1].landing_pad_pc);
 }
 
-test "compile: throw emits JMP rel32 placeholder + appends unreach_fixup (IT-3 trap-path)" {
+test "compile: throw emits JMP rel32 placeholder + appends unreach_fixup (trap-path)" {
     // Mirror of arm64 sibling — see that test for rationale.
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{} };
     var f = ZirFunc.init(0, sig, &.{});
@@ -1896,7 +1896,7 @@ test "compile: throw emits JMP rel32 placeholder + appends unreach_fixup (IT-3 t
     try testing.expectEqual(@as(usize, 0), out.exception_handlers.len);
 }
 
-test "compile: try_table reaches per-op emit with ExceptionTable.Builder wired (IT-1)" {
+test "compile: try_table reaches per-op emit with ExceptionTable.Builder wired" {
     // EH integration — compile() detects `.try_table`
     // ops in func.instrs and allocates a per-function
     // `ExceptionTable.Builder`. Per-op stub's

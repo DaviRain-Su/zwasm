@@ -144,7 +144,7 @@ pub fn emitThunk(buf: []u8, callee_rt: usize, callee_entry: usize) void {
 
 const testing = std.testing;
 
-test "emitThunk: encoding round-trip via helpers (D-144 cycle 4)" {
+test "emitThunk: encoding round-trip via helpers" {
     // Re-derive each instruction via the encoder helpers rather
     // than hardcoding byte sequences — keeps the test stable
     // across future thunk reshuffles (was bitten by the §A1 →
@@ -198,7 +198,7 @@ test "emitThunk: instruction prefix is constant across two distinct callees" {
     try testing.expectEqualSlices(u8, buf_a[0..80], buf_b[0..80]);
 }
 
-test "emitThunk: D-144 cycle 4 saves/restores X19+X24..X28 around BLR" {
+test "emitThunk: saves/restores X19+X24..X28 around BLR" {
     // Structural assertion: between the BLR and the LDP epilogue,
     // the thunk re-loads each of the six reserved-invariant
     // callee-saved registers (X19 + X24..X28) from the frame.

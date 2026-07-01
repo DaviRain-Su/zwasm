@@ -1614,7 +1614,7 @@ test "JitRuntime: layout offsets match documented prologue load sequence" {
     try testing.expectEqual(@as(u12, 80), jit_executed_flag_off);
 }
 
-test "JitRuntime: total size = 464 bytes (post-10.E tag_ids tail)" {
+test "JitRuntime: total size = 608 bytes" {
     // EH dispatcher fields appended
     // (+32 bytes = 2 ptrs × 8 B + 2 u32 × 4 B + 2 u32 pads × 4 B).
     // The handler-dispatch result fields
@@ -1640,7 +1640,7 @@ test "JitRuntime: total size = 464 bytes (post-10.E tag_ids tail)" {
     try testing.expectEqual(@as(u32, 608), head_size);
 }
 
-test "jitGcAlloc: allocates struct{i32} via the *JitRuntime bridge (10.G A-2a)" {
+test "jitGcAlloc: allocates struct{i32} via the *JitRuntime bridge" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -1676,7 +1676,7 @@ test "jitGcAlloc: null gc_heap → returns 0 (null sentinel)" {
     try testing.expectEqual(@as(u32, 0), jitGcAlloc(&rt, 0));
 }
 
-test "jitGcAllocArray: allocates array(mut i32) length 3 via the *JitRuntime bridge (10.G array A-1)" {
+test "jitGcAllocArray: allocates array(mut i32) length 3 via the *JitRuntime bridge" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -1716,7 +1716,7 @@ test "jitGcAllocArray: null gc_heap → returns 0 (null sentinel)" {
     try testing.expectEqual(@as(u32, 0), jitGcAllocArray(&rt, 0, 3));
 }
 
-test "jitGcAllocArrayFill: allocates array(mut i32) len 2 filled with init (10.G array A-4)" {
+test "jitGcAllocArrayFill: allocates array(mut i32) len 2 filled with init" {
     var arena = std.heap.ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const a = arena.allocator();
@@ -1749,7 +1749,7 @@ test "jitGcAllocArrayFill: allocates array(mut i32) len 2 filled with init (10.G
     }
 }
 
-test "JitRuntime: eh_payload_buf + eh_payload_len offsets (ADR-0120 Cycle 2)" {
+test "JitRuntime: eh_payload_buf + eh_payload_len offsets (ADR-0120)" {
     // 8-aligned (X-form u64 array stride).
     if ((eh_payload_buf_off & 7) != 0) @compileError("eh_payload_buf_off not 8-aligned");
     // 4-aligned (W-form u32 store).
@@ -1791,23 +1791,23 @@ test "reifyExnref: snapshots thrown tag + payload into a *Exception (ADR-0120 D6
     try testing.expectEqual(@as(usize, 2), ctx.exceptions.items.len); // both tracked
 }
 
-test "JitRuntime: D-165 cycle 4 trap_stub_entry_count offset (W-form imm12-safe)" {
+test "JitRuntime: trap_stub_entry_count offset (W-form imm12-safe)" {
     try testing.expectEqual(@as(u12, 232), trap_stub_entry_count_off);
     // 4-aligned (W-form); imm12 budget unchecked but 232 << 16380 trivially.
     if ((trap_stub_entry_count_off & 3) != 0) @compileError("trap_stub_entry_count_off not 4-aligned");
 }
 
-test "JitRuntime: §9.9 / 9.9-l-1b-d093-d8a callout offsets (host_state + memory_grow_fn)" {
+test "JitRuntime: callout offsets (host_state + memory_grow_fn)" {
     try testing.expectEqual(@as(u12, 184), host_state_off);
     try testing.expectEqual(@as(u12, 192), memory_grow_fn_off);
 }
 
-test "JitRuntime: §9.9 / 9.9-l-1b-d093-d42 tables_jit_ci offsets" {
+test "JitRuntime: tables_jit_ci offsets" {
     try testing.expectEqual(@as(u12, 200), tables_jit_ci_ptr_off);
     try testing.expectEqual(@as(u12, 208), tables_jit_ci_count_off);
 }
 
-test "JitRuntime: §9.9 / 9.9-l-1b-d093-d48 table_grow_fn offset" {
+test "JitRuntime: table_grow_fn offset" {
     try testing.expectEqual(@as(u12, 216), table_grow_fn_off);
 }
 
@@ -1821,7 +1821,7 @@ test "TableJitCallInfo: layout is 16 bytes with funcptr_base/typeidx_base at exp
     try testing.expectEqual(@as(usize, 8), @offsetOf(TableJitCallInfo, "typeidx_base"));
 }
 
-test "JitRuntime: §9.9 / 9.9-m-1b + 9.9-m-3a + 9.9-m-3b + 9.9-m-2a + 9.9-m-2c-init new field offsets" {
+test "JitRuntime: new field offsets" {
     try testing.expectEqual(@as(u12, 88), func_entities_ptr_off);
     try testing.expectEqual(@as(u12, 96), func_entities_count_off);
     try testing.expectEqual(@as(u12, 104), data_dropped_ptr_off);
@@ -1881,7 +1881,7 @@ test "JitRuntime: round-trip construction + field reads" {
     try testing.expectEqual(@as(u32, 1), rt.host_dispatch_count);
 }
 
-test "JitRuntime: §10.E IT-6 cycle 3c — EH ptr+count fields populate and are readable" {
+test "JitRuntime: EH ptr+count fields populate and are readable" {
     // Verify the new EH dispatcher
     // fields (`eh_table_entries` + `eh_table_count` +
     // `eh_code_map_entries` + `eh_code_map_count`) can be

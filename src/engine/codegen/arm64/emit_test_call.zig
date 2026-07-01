@@ -350,7 +350,7 @@ test "compile: call_indirect — bounds (CMP/B.HS) + sig (LDR/CMP/B.NE) + funcpt
     try testing.expectEqual(@as(u32, inst.encOrrRegW(9, 31, 0)), std.mem.readInt(u32, out.bytes[body0 + 48 ..][0..4], .little));
 }
 
-test "compile: bundled Class C MEMORY-class — caller LEA X8 + callee STR X8 + buffer capture (ADR-0069 §Phase 2 chunks (b)-e-1 + (b)-e-2)" {
+test "compile: bundled Class C MEMORY-class — caller LEA X8 + callee STR X8 + buffer capture (ADR-0069)" {
     // Wasm spec §3.4.5 multi-value + AAPCS64 §6.8.2 Composite Type
     // return. The test function `() -> (i32, i32, i32)` is itself
     // MEMORY-class (3 × 8 B = 24 B > 16 B), and it calls func[0]

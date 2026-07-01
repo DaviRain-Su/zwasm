@@ -189,7 +189,7 @@ const x86_64_sysv_results0_eq_42: [16]u8 = .{
     0x90, 0x90,
 };
 
-test "buffer-write entry: hand-rolled JIT writes results[0] = 42 (ADR-0106 path (a) cycle 1 API check)" {
+test "buffer-write entry: hand-rolled JIT writes results[0] = 42 (ADR-0106 path (a) API check)" {
     // D-193 triage: ungated. Gate already included x86_64 (ran on
     // ubuntu); removing the defensive over-skip on non-CI hosts
     // (Linux aarch64 / Mac x86_64). Win deferred per ADR-0122 phaseEnd.
@@ -277,7 +277,7 @@ pub fn invokeMultiResultNoArgs(
     }
 }
 
-test "buffer-write entry: invokeMultiResultNoArgs unpacks 3-i32 result (ADR-0106 cycle 3b)" {
+test "buffer-write entry: invokeMultiResultNoArgs unpacks 3-i32 result (ADR-0106)" {
     // D-193 triage: ungated. Gate already included x86_64 (ran on
     // ubuntu); removing the defensive over-skip on non-CI hosts
     // (Linux aarch64 / Mac x86_64). Win deferred per ADR-0122 phaseEnd.
@@ -328,7 +328,7 @@ test "buffer-write entry: invokeMultiResultNoArgs unpacks 3-i32 result (ADR-0106
     try testing.expectEqual(@as(u32, 300), results[2].i32);
 }
 
-test "buffer-write entry: native-emit () → (i32, i64) shape (SKIP arm callI32i64NoArgs shape; ADR-0106 cycle 3c)" {
+test "buffer-write entry: native-emit () → (i32, i64) shape (SKIP arm callI32i64NoArgs shape; ADR-0106)" {
     // D-193 triage: ungated. Gate already included x86_64 (ran on
     // ubuntu); removing the defensive over-skip on non-CI hosts
     // (Linux aarch64 / Mac x86_64). Win deferred per ADR-0122 phaseEnd.
@@ -376,7 +376,7 @@ test "buffer-write entry: native-emit () → (i32, i64) shape (SKIP arm callI32i
     try testing.expectEqual(@as(u64, 8), results[1].i64);
 }
 
-test "buffer-write entry: native-emit () → (i64, i32) shape (SKIP arm callI64i32NoArgs shape; ADR-0106 cycle 3c)" {
+test "buffer-write entry: native-emit () → (i64, i32) shape (SKIP arm callI64i32NoArgs shape; ADR-0106)" {
     // D-193 triage: ungated. Gate already included x86_64 (ran on
     // ubuntu); removing the defensive over-skip on non-CI hosts
     // (Linux aarch64 / Mac x86_64). Win deferred per ADR-0122 phaseEnd.
@@ -447,7 +447,7 @@ else if (builtin.cpu.arch == .x86_64)
 else
     struct {};
 
-test "buffer-write entry: native-emit () → (i32, i32, i32) multi-result via buffer (ADR-0106 cycle 3a / D-164 trigger shape)" {
+test "buffer-write entry: native-emit () → (i32, i32, i32) multi-result via buffer (ADR-0106 / D-164 trigger shape)" {
     // D-193 triage: ungated. Gate already included x86_64 (ran on
     // ubuntu); removing the defensive over-skip on non-CI hosts
     // (Linux aarch64 / Mac x86_64). Win deferred per ADR-0122 phaseEnd.
@@ -503,7 +503,7 @@ test "buffer-write entry: native-emit () → (i32, i32, i32) multi-result via bu
     try testing.expectEqual(@as(u64, 33), results_buf[2] & 0xFFFFFFFF);
 }
 
-test "buffer-write entry: native-emit (i32) → i32 identity via [args_ptr+0] (ADR-0106 cycle 2e)" {
+test "buffer-write entry: native-emit (i32) → i32 identity via [args_ptr+0] (ADR-0106)" {
     // D-193 triage: ungated. Gate already included x86_64 (ran on
     // ubuntu); removing the defensive over-skip on non-CI hosts
     // (Linux aarch64 / Mac x86_64). Win deferred per ADR-0122 phaseEnd.
@@ -550,7 +550,7 @@ test "buffer-write entry: native-emit (i32) → i32 identity via [args_ptr+0] (A
     try testing.expectEqual(@as(u64, 123), results_buf[0] & 0xFFFFFFFF);
 }
 
-test "buffer-write entry: native-emit (i32.const 42) end → results[0] = 42 (ADR-0106 cycle 2c/2d)" {
+test "buffer-write entry: native-emit (i32.const 42) end → results[0] = 42 (ADR-0106)" {
     // D-193 triage: ungated. Gate already included x86_64 (ran on
     // ubuntu); removing the defensive over-skip on non-CI hosts
     // (Linux aarch64 / Mac x86_64). Win deferred per ADR-0122 phaseEnd.

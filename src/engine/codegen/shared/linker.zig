@@ -891,7 +891,7 @@ test "linkWithThunks: single multi-result function — wrapper invocation writes
     try testing.expectEqual(@as(u32, 300), @as(u32, @intCast(results_buf[2] & 0xFFFFFFFF)));
 }
 
-test "link: populates code_map entries for each defined function (IT-4)" {
+test "link: populates code_map entries for each defined function" {
     // link() builds per-Instance CodeMap entries
     // from func_offsets so the FP-walk unwinder can translate a
     // saved LR / RIP into (func_idx, relative_pc). Synthetic bytes
@@ -954,7 +954,7 @@ test "link: import-only module — code_map empty" {
     try testing.expectEqual(@as(usize, 0), module.codeMap().entries.len);
 }
 
-test "link: frame_bytes round-trips from FuncBody to CodeMap.Entry (IT-6 prep)" {
+test "link: frame_bytes round-trips from FuncBody to CodeMap.Entry" {
     // `EmitOutput.frame_bytes`
     // flows through `FuncBody.frame_bytes` into
     // `CodeMap.Entry.frame_bytes`. The EH SP-restore path

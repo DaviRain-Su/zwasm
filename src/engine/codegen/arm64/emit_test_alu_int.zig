@@ -478,7 +478,7 @@ test "compile: i32.eqz emits CMP-imm-0 + CSET EQ" {
     try testing.expectEqual(@as(u32, inst.encCsetW(9, .eq)), std.mem.readInt(u32, out.bytes[body0 + 8 ..][0..4], .little));
 }
 
-test "compile: select_typed i64 (extra=0x7E) emits CSEL Xd, not Wd (§9.9 / 9.9-m-4a)" {
+test "compile: select_typed i64 (extra=0x7E) emits CSEL Xd, not Wd" {
     // Wasm spec §3.3.2.2 / §4.4.4 — select_typed with type=i64
     // requires 64-bit conditional move so the high 32 bits aren't
     // truncated (a W-form CSEL would silently miscompile i64 select
@@ -531,7 +531,7 @@ test "compile: select_typed i64 (extra=0x7E) emits CSEL Xd, not Wd (§9.9 / 9.9-
     try testing.expect(!saw_csel_w);
 }
 
-test "compile: select_typed f64 (extra=0x7C) emits FCSEL Dd via FP regalloc (§9.9 / 9.9-m-4b)" {
+test "compile: select_typed f64 (extra=0x7C) emits FCSEL Dd via FP regalloc" {
     // FCSEL D form: opcode base 0x1E600C00. Bit pattern check —
     // search emitted body for at least one instr matching
     // (word & 0xFFE00C00) == 0x1E600C00 (FCSEL D class). f64

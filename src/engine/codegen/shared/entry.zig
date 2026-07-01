@@ -2893,7 +2893,7 @@ test "entry: callI64NoArgs — i64.const 0xDEADBEEFCAFE returns full 64-bit" {
     try testing.expectEqual(@as(u64, 0xDEADBEEFCAFE), try callI64NoArgs(module, 0, &rt));
 }
 
-test "entry: ref.as_non_null traps on null funcref source — JIT 10.R cycle 51" {
+test "entry: ref.as_non_null traps on null funcref source" {
     // ADR-0123 D2: closes the spike_discipline §2 gap from
     // the scaffolding commit (`86e5bfaf`). Exercises the new
     // arm64 + x86_64 ref.as_non_null emit handler end-to-end through
@@ -2961,7 +2961,7 @@ test "entry: ref.as_non_null traps on null funcref source — JIT 10.R cycle 51"
     try testing.expect(rt.trap_flag != 0);
 }
 
-test "entry: br_on_null branches to block end on null funcref — JIT 10.R cycle 55" {
+test "entry: br_on_null branches to block end on null funcref" {
     // ADR-0123 D2: closes the spike_discipline §2 gap from
     // the scaffolding commit (`1b0fc917`). End-to-end exercises
     // the arm64 br_on_null emit handler.
@@ -3024,7 +3024,7 @@ test "entry: br_on_null branches to block end on null funcref — JIT 10.R cycle
     try testing.expectEqual(@as(u32, 7), try callI32NoArgs(module, 0, &rt));
 }
 
-test "entry: br_on_non_null falls through on null funcref param — JIT 10.R cycle 57" {
+test "entry: br_on_non_null falls through on null funcref param" {
     // ADR-0123 D2: closes the spike_discipline §2 gap from
     // the scaffolding commit (`f30d08a7`). End-to-end exercises
     // the arm64 br_on_non_null emit handler.
@@ -3092,7 +3092,7 @@ test "entry: br_on_non_null falls through on null funcref param — JIT 10.R cyc
     try testing.expectEqual(@as(u32, 1), try callI32_i64(module, 0, &rt, 0));
 }
 
-test "entry: br_on_cast matches i31 → branch carries the ref → i31.get_s = 7 (10.G Cycle B)" {
+test "entry: br_on_cast matches i31 → branch carries the ref → i31.get_s = 7" {
     // GC-on-JIT: end-to-end exercises the br_on_cast emit
     // handler (cast via jitGcRefTest + conditional branch via the shared
     // branchOnReg). The ref is an i31, the target is i31 → match → branch

@@ -275,7 +275,7 @@ test "compile: br_if 0 — forward CBNZ fixup" {
     try testing.expectEqual(@as(u32, inst.encCbnzW(9, 2)), cbnz);
 }
 
-test "compile: try_table emit populates EmitOutput.exception_handlers (IT-2)" {
+test "compile: try_table emit populates EmitOutput.exception_handlers" {
     // EH integration — compile() of a function with
     // a populated try_table block produces an
     // `EmitOutput.exception_handlers` slice with one HandlerEntry
@@ -342,7 +342,7 @@ test "compile: try_table emit populates EmitOutput.exception_handlers (IT-2)" {
     try testing.expectEqual(out.exception_handlers[1].pc_end, out.exception_handlers[1].landing_pad_pc);
 }
 
-test "compile: throw emits B placeholder + appends bounds_fixup (IT-3 trap-path)" {
+test "compile: throw emits B placeholder + appends bounds_fixup (trap-path)" {
     // EH integration minimum — throw emits a single
     // unconditional B placeholder targeting the function trap
     // stub (mirror of `unreachable`). Full dispatcher CALL +
@@ -373,7 +373,7 @@ test "compile: throw emits B placeholder + appends bounds_fixup (IT-3 trap-path)
     try testing.expectEqual(@as(usize, 0), out.exception_handlers.len);
 }
 
-test "compile: try_table reaches per-op emit with ExceptionTable.Builder wired (IT-1)" {
+test "compile: try_table reaches per-op emit with ExceptionTable.Builder wired" {
     // EH integration — compile() detects `.try_table`
     // ops in func.instrs and allocates a per-function
     // `ExceptionTable.Builder`, threading it through

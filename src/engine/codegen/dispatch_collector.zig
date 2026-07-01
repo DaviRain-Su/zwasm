@@ -194,14 +194,14 @@ test "ArchAxis enum has exactly 2 variants per ADR-0074 (Zone 2 arch-axes)" {
     try std.testing.expectEqual(@as(usize, 2), @typeInfo(ArchAxis).@"enum".fields.len);
 }
 
-test "migratedArchOpCount tracks collected per-arch tuples (B59: arm64=348, x86_64=292)" {
+test "migratedArchOpCount tracks collected per-arch tuples (arm64=409, x86_64=0)" {
     try std.testing.expectEqual(@as(usize, 409), migratedArchOpCount(.arm64));
     // x86_64's legacy (args-tuple) collection is empty — every x86_64 op
     // uses the `(ctx, ins)` shape, tracked in `collected_x86_64_ctx_ops`.
     try std.testing.expectEqual(@as(usize, 0), migratedArchOpCount(.x86_64));
 }
 
-test "collected_x86_64_ctx_ops tracks B54+ migrations to `(ctx, ins)` shape" {
+test "collected_x86_64_ctx_ops tracks ctx-op migrations to `(ctx, ins)` shape" {
     try std.testing.expectEqual(@as(usize, 432), collected_x86_64_ctx_ops.len);
 }
 

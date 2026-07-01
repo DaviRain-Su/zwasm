@@ -290,7 +290,7 @@ test "exception_table: catch_ matches exact tag_idx, misses on mismatch" {
     try testing.expectEqual(@as(?HandlerMatch, null), t.lookup(50, 6));
 }
 
-test "exception_table: tag_ids matches by identity — aliased + cross-module (10.E D3)" {
+test "exception_table: tag_ids matches by identity — aliased + cross-module" {
     // tag_ids carries a globally-comparable identity per local index.
     // Aliased imports share an id (Cause A); a cross-module import
     // inherits the source id (Cause B) — both are the same comparison.

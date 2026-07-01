@@ -1340,7 +1340,7 @@ test "compile: unreachable emits JMP rel32 + trap stub patches disp to trap_byte
     try testing.expectEqual(@as(i32, jmp_at + 5 + 8), target_abs);
 }
 
-test "compile: SysV callee with 6 i32 params — 6th param read from caller stack [RBP+16+8*0] (§9.7 / 7.10-j)" {
+test "compile: SysV callee with 6 i32 params — 6th param read from caller stack [RBP+16+8*0]" {
     // Mirror of 7.10-f: caller writes overflow args at
     // `[RSP + 8 * nsaa_idx]` from its stack pointer; callee reads
     // them at `[RBP + 16 + r15_save_off + 8 * nsaa_idx]` (= caller's
@@ -1380,7 +1380,7 @@ test "compile: SysV callee with 6 i32 params — 6th param read from caller stac
     try testing.expect(found);
 }
 
-test "compile: i32.load with offset > i32 imm32 range (§9.7 / 7.10-i) lowers via MOVABS+ADD" {
+test "compile: i32.load with offset > i32 imm32 range lowers via MOVABS+ADD" {
     // Wasm spec §4.4.7 — `memarg.offset` is u32. The pre-7.10-i
     // `encAddR64Imm32` path capped at 0x7FFFFFFF (sign-extended
     // imm32 range); offsets in [0x80000000, 0xFFFFFFFF] surfaced
@@ -1422,7 +1422,7 @@ test "compile: i32.load with offset > i32 imm32 range (§9.7 / 7.10-i) lowers vi
     try testing.expect(found);
 }
 
-test "compile: br N — function-depth (depth == labels.len) emits inline epilogue (§9.7 / 7.10-h)" {
+test "compile: br N — function-depth (depth == labels.len) emits inline epilogue" {
     // Wasm spec §3.4.5 (br) — when the depth equals the number
     // of explicit labels, the branch targets the implicit
     // function-level block (= return). Pre-7.10-h surfaced
@@ -1558,7 +1558,7 @@ test "compile: call N — 6 i32 args, SysV: 6th arg overflows to caller stack [R
     try testing.expect(found);
 }
 
-test "compile: v128-result end emits MOVAPS XMM0, src marshal (§9.9-b per ADR-0046)" {
+test "compile: v128-result end emits MOVAPS XMM0, src marshal (ADR-0046)" {
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.v128} };
     var f = ZirFunc.init(0, sig, &.{});
     defer f.deinit(testing.allocator);
