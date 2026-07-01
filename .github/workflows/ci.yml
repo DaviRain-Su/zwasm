@@ -118,10 +118,35 @@ jobs:
           fi
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      # Build-time dependency: `zig build test-all` runs `wasm-tools parse` to
+      # produce spectest.wasm from test/spec/spectest.wat (build.zig). Required
+      # (not best-effort) — test-all cannot build without it.
+      - name: Install wasm-tools (build-time, required for test-all)
+        shell: bash
+        run: |
+          set -euo pipefail
+          source .github/versions.lock
+          v="${WASM_TOOLS_VERSION}"
+          case "${{ runner.os }}" in
+            Linux)   asset="wasm-tools-${v}-x86_64-linux";   ext="tar.gz" ;;
+            macOS)   asset="wasm-tools-${v}-aarch64-macos";  ext="tar.gz" ;;
+            Windows) asset="wasm-tools-${v}-x86_64-windows"; ext="zip"    ;;
+          esac
+          url="https://github.com/bytecodealliance/wasm-tools/releases/download/v${v}/${asset}.${ext}"
+          mkdir -p "$HOME/.local/bin"
+          cd "$HOME/.local/bin"
+          if [ "$ext" = "zip" ]; then
+            curl -fsSL "$url" -o wt.zip && unzip -j -o wt.zip
+          else
+            curl -fsSL "$url" -o wt.tar.gz && tar -xzf wt.tar.gz --strip-components=1 "${asset}/wasm-tools"
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
       - name: Verify toolchain
         shell: bash
         run: |
           zig version
+          wasm-tools --version
           wasmtime --version || echo "wasmtime absent — differential will SKIP"
 
       - name: ci_gate.sh
