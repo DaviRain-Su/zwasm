@@ -1,0 +1,14 @@
+# Issues are paused for zwasm v2 (small, resource-limited project).
+# Route everything to Discussions; disable blank issues.
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Questions, bugs & feature ideas → Discussions
+    url: https://github.com/clojurewasm/zwasm/discussions
+    about: >-
+      Issues and Pull Requests are currently paused. Please start a Discussion
+      and mention @chaploud. Real-world breakage reports are welcome here.
+  - name: 🔒 Report a security vulnerability (private)
+    url: https://github.com/clojurewasm/zwasm/security/advisories/new
+    about: >-
+      Do NOT report security problems in public. Use private vulnerability
+      reporting — see SECURITY.md.
