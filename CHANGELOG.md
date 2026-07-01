@@ -10,9 +10,13 @@ SemVer compatibility guarantees start at the first stable `v2.0.0` tag.
 
 ## [Unreleased]
 
-The v2 redesign is feature-complete and verified on the
-3-host gate (Mac aarch64 + Linux x86_64 + Windows x86_64); a stable `v2.0.0`
-tag has not yet been cut (the line is pre-release, tagged `v2.0.0-alpha.*`).
+_No changes yet._
+
+## [2.0.0-rc.1] - 2026-07-01
+
+The first tagged **release candidate** for `v2.0.0`. The v2 redesign is
+feature-complete and verified on the 3-host gate (Mac aarch64 + Linux x86_64 +
+Windows x86_64). Earlier pre-releases were tagged `v2.0.0-alpha.*`.
 
 ### Added
 
