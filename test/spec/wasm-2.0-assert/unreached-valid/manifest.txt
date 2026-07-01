@@ -1,0 +1,7 @@
+module unreached-valid.0.wasm
+assert_trap select-trap-left i32:1
+assert_trap select-trap-left i32:0
+assert_trap select-trap-right i32:1
+assert_trap select-trap-right i32:0
+module unreached-valid.1.wasm
+assert_trap meet-bottom ()

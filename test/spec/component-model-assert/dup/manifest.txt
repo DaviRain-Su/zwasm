@@ -1,0 +1,11 @@
+# D-305: a 2-component graph that marshals a STRING PARAM AND a STRING RESULT
+# across the SAME boundary — `dup(s: string) -> string`. Component B copies the
+# received string into a fresh B alloc and returns it; Component A passes "Z"
+# (0x5A), reads the first byte of the returned string from A's OWN memory, and
+# returns it. The correct 0x5A REQUIRES the param be lowered A-memory -> B-memory
+# (A's "Z" copied into B via B's realloc) AND the result lowered B-memory ->
+# A-memory (lift from B, lower into A via A's realloc). The lowered import
+# flattens to `(param_ptr, param_len, retptr) -> ()`.
+# Provenance: test/component/dup_graph.wat.
+graph test/component/dup_graph.wasm
+assert_flat_i32 run -> 90

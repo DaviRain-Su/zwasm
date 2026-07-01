@@ -1,0 +1,23 @@
+assert_invalid array_init_elem.0.wasm
+assert_invalid array_init_elem.1.wasm
+assert_invalid array_init_elem.2.wasm
+module array_init_elem.3.wasm
+assert_trap array_init_elem-null ()
+assert_trap array_init_elem i32:13 i32:0 i32:0
+assert_trap array_init_elem i32:0 i32:13 i32:0
+assert_trap array_init_elem i32:0 i32:0 i32:13
+assert_trap array_init_elem i32:0 i32:0 i32:13
+assert_return array_init_elem i32:12 i32:0 i32:0 -> ()
+assert_return array_init_elem i32:0 i32:12 i32:0 -> ()
+assert_trap array_call_nth i32:0
+assert_trap array_call_nth i32:5
+assert_trap array_call_nth i32:11
+assert_trap array_call_nth i32:12
+assert_return array_init_elem i32:2 i32:3 i32:2 -> ()
+assert_trap array_call_nth i32:1
+assert_return array_call_nth i32:2 -> ()
+assert_return array_call_nth i32:3 -> ()
+assert_trap array_call_nth i32:4
+assert_return drop_segs () -> ()
+assert_return array_init_elem i32:0 i32:0 i32:0 -> ()
+assert_trap array_init_elem i32:0 i32:0 i32:1

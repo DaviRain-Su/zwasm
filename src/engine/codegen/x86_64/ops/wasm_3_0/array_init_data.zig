@@ -1,0 +1,80 @@
+//! x86_64 emit handler for `array.init_data` — Wasm 3.0 GC §3.3.5.6.16.
+//! Mirror of the arm64 handler: pop array GcRef + i32 dst_off + i32 src_off +
+//! i32 len, null-check + bounds-check + copy `len` natural-width elements from
+//! data segment $segidx into the existing array at dst_off inside the
+//! `jitGcArrayInitData(rt, segidx, ref, dst_off, src_off, len)` trampoline
+//! (returns 1=ok / 0=trap). Emit = 6-arg marshal + CALL + trap branch on a 0
+//! result. No result push (4 → 0).
+//!
+//! All four operands consumed into arg regs BEFORE the CALL (strict is_call).
+//! SysV arg regs RDI/RSI/RDX/RCX/R8/R9 ∉ regalloc pool ({RBX,R12,R13,R14}), so
+//! marshalling each operand (stage R10/R11 → MOV arg) cannot clobber another's
+//! source. The `typeidx` immediate is NOT marshalled — it won't fit the 6-arg
+//! budget, so the trampoline reads it back from the array header.
+//!
+//! Lowering: MOV RDI, R15 (rt); MOV ESI, segidx; MOV EDX = ref; MOV ECX =
+//! dst_off; MOV R8D = src_off; MOV R9D = len; MOVABS R10 = &jitGcArrayInitData;
+//! CALL R10 → EAX = 1/0. Then TEST EAX, EAX ; JE → trap stub. Intel SDM Vol.2
+//! (MOV 0x89, MOVABS 0xB8, CALL 0xFF /2, TEST 0x85, Jcc 0x0F 0x84).
+
+const meta = @import("../../../../../instruction/wasm_3_0/array_init_data.zig");
+const ctx_mod = @import("../../ctx.zig");
+const abi = @import("../../abi.zig");
+const gpr = @import("../../gpr.zig");
+const inst = @import("../../inst.zig");
+const jit_abi = @import("../../../shared/jit_abi.zig");
+const gc_marshal = @import("gc_marshal.zig");
+const zir = @import("../../../../../ir/zir.zig");
+
+pub const op_tag = meta.op_tag;
+pub const wasm_level = meta.wasm_level;
+pub const wasi_level = meta.wasi_level;
+
+const call_scratch: abi.Gpr = .r10; // emit scratch — &fn, then CALL target.
+
+pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void {
+    const segidx: u32 = ins.extra;
+    // Operand stack: [.., ref, dst_off, src_off, len] (len on top). Pop reverse.
+    if (ctx.pushed_vregs.items.len < 4) return ctx_mod.Error.AllocationMissing;
+    const len_vreg = ctx.pushed_vregs.pop().?;
+    const src_off_vreg = ctx.pushed_vregs.pop().?;
+    const dst_off_vreg = ctx.pushed_vregs.pop().?;
+    const ref_vreg = ctx.pushed_vregs.pop().?;
+
+    // Marshal user args 2..5 = ref, dst_off, src_off, len (arg 1 =
+    // segidx immediate below) — all i32 (.d). SysV: arg_gprs[2..6] =
+    // RDX/RCX/R8/R9 (all regs). Win64: arg_gprs[2..4] = R8/R9 →
+    // src_off (arg 4) + len (arg 5) spill to [RSP+0x20]/[RSP+0x28]
+    // (D-248). stage R10/R11 + arg regs ∉ pool → no source clobbered.
+    const xref = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, ref_vreg, 0);
+    // D-470 — the trampoline's result==0 conflates null-ref + OOB. Emit an INLINE
+    // null-ref check (→ null_reference, kind 10, matching interp) BEFORE the call;
+    // the residual result==0 is then only the segment/array OOB (oob_memory below).
+    try ctx.buf.appendSlice(ctx.allocator, inst.encTestRR(.q, xref, xref).slice());
+    const null_fixup: u32 = @intCast(ctx.buf.items.len);
+    try ctx.buf.appendSlice(ctx.allocator, inst.encJccRel32(.e, 0).slice());
+    try ctx.null_ref_fixups.append(ctx.allocator, null_fixup);
+    try gc_marshal.routeArg(ctx, 2, xref, .d);
+    const xdst = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, dst_off_vreg, 0);
+    try gc_marshal.routeArg(ctx, 3, xdst, .d);
+    const xsrc = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, src_off_vreg, 0);
+    try gc_marshal.routeArg(ctx, 4, xsrc, .d);
+    const xlen = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, len_vreg, 0);
+    try gc_marshal.routeArg(ctx, 5, xlen, .d);
+
+    // arg 0 = rt (R15); arg 1 = segidx immediate.
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.q, abi.current.arg_gprs[0], abi.runtime_ptr_save_gpr).slice());
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovImm32W(abi.current.arg_gprs[1], segidx).slice());
+    // MOVABS R10 = &jitGcArrayInitData; CALL R10.
+    const addr: u64 = @intFromPtr(&jit_abi.jitGcArrayInitData);
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovImm64Q(call_scratch, addr).slice());
+    try ctx.buf.appendSlice(ctx.allocator, inst.encCallReg(call_scratch).slice());
+
+    // Trap on result == 0 (segment/array OOB; null already caught inline above):
+    // TEST EAX, EAX ; JE → oob_memory stub (kind 6), matching interp.
+    try ctx.buf.appendSlice(ctx.allocator, inst.encTestRR(.d, .rax, .rax).slice());
+    const fixup: u32 = @intCast(ctx.buf.items.len);
+    try ctx.buf.appendSlice(ctx.allocator, inst.encJccRel32(.e, 0).slice());
+    try ctx.oob_fixups.append(ctx.allocator, fixup);
+    // array.init_data is 4 → 0: no result vreg pushed.
+}

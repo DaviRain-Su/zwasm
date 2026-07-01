@@ -1,0 +1,17 @@
+module table_get.0.wasm
+invoke init externref:1
+assert_return get-externref i32:0 -> externref:null
+assert_return get-externref i32:1 -> externref:1
+assert_return get-funcref i32:0 -> funcref:null
+assert_return get-funcref-t64 i64:0 -> funcref:null
+assert_return is_null-funcref i32:1 -> i32:0
+assert_return is_null-funcref i32:2 -> i32:0
+assert_trap get-externref i32:2
+assert_trap get-funcref i32:3
+assert_trap get-externref i32:4294967295
+assert_trap get-funcref i32:4294967295
+assert_invalid table_get.1.wasm
+assert_invalid table_get.2.wasm
+assert_invalid table_get.3.wasm
+assert_invalid table_get.4.wasm
+assert_invalid table_get.5.wasm

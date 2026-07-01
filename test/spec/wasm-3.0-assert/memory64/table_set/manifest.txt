@@ -1,0 +1,28 @@
+module table_set.0.wasm
+assert_return get-externref i32:0 -> externref:null
+assert_return set-externref i32:0 externref:1 -> ()
+assert_return get-externref i32:0 -> externref:1
+assert_return set-externref i32:0 externref:null -> ()
+assert_return get-externref i32:0 -> externref:null
+assert_return set-funcref-t64 i64:0 funcref:null -> ()
+assert_return get-funcref-t64 i64:0 -> funcref:null
+assert_return get-funcref i32:0 -> funcref:null
+assert_return set-funcref-from i32:0 i32:1 -> ()
+assert_return is_null-funcref i32:0 -> i32:0
+assert_return set-funcref i32:0 funcref:null -> ()
+assert_return get-funcref i32:0 -> funcref:null
+assert_trap set-externref i32:2 externref:null
+assert_trap set-funcref i32:3 funcref:null
+assert_trap set-externref i32:4294967295 externref:null
+assert_trap set-funcref i32:4294967295 funcref:null
+assert_trap set-externref i32:2 externref:0
+assert_trap set-funcref-from i32:3 i32:1
+assert_trap set-externref i32:4294967295 externref:0
+assert_trap set-funcref-from i32:4294967295 i32:1
+assert_invalid table_set.1.wasm
+assert_invalid table_set.2.wasm
+assert_invalid table_set.3.wasm
+assert_invalid table_set.4.wasm
+assert_invalid table_set.5.wasm
+assert_invalid table_set.6.wasm
+assert_invalid table_set.7.wasm

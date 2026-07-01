@@ -1,0 +1,6 @@
+module $Mt linking0.0.wasm
+register Mt
+assert_unlinkable linking0.1.wasm
+assert_trap $Mt::call i32:7
+assert_uninstantiable linking0.2.wasm
+assert_return $Mt::call i32:7 -> i32:0

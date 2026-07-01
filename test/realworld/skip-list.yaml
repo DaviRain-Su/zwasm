@@ -1,0 +1,29 @@
+# test/realworld/skip-list.yaml — per-fixture skip allow-list
+# (10.T-5 skeleton; wasmtime per-file header model adopted per
+# Phase 10 design plan §4.4).
+#
+# Format (per fixture):
+#   <fixture-rel-path>:
+#     reason: <SKIP-P10-* token>
+#     adr: ADR-NNNN (paired ADR for the skip token)
+#     unblock: <impl row / SHA condition>
+#
+# Skeleton: no fixtures yet (artifacts land cycle-by-cycle at
+# impl rows). The schema below is the canonical shape; populated
+# entries get added as fixtures and skip-reasons are discovered.
+
+# === Phase 10 toolchain skeleton (no fixtures landed yet) ===
+# When dart/hello_world.dart.wasm lands:
+#   p10/dart/hello_world.dart.wasm:
+#     reason: SKIP-P10-GC-GAP
+#     adr: ADR-0115
+#     unblock: ROADMAP §10 / 10.G [x]
+#
+# When wasm_of_ocaml/list_fold.ml.wasm lands:
+#   p10/wasm_of_ocaml/list_fold.ml.wasm:
+#     reason: SKIP-P10-TC-GAP
+#     adr: ADR-0112
+#     unblock: ROADMAP §10 / 10.TC [x]
+
+# (empty until fixtures land)
+{}

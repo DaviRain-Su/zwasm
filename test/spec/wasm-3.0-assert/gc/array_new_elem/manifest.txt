@@ -1,0 +1,22 @@
+module array_new_elem.0.wasm
+assert_return array-new-elem i32:0 i32:0 -> arrayref:?
+assert_return array-new-elem i32:0 i32:4 -> arrayref:?
+assert_return array-new-elem i32:1 i32:2 -> arrayref:?
+assert_return array-new-elem i32:4 i32:0 -> arrayref:?
+assert_trap array-new-elem i32:0 i32:5
+assert_trap array-new-elem i32:5 i32:0
+assert_trap array-new-elem i32:1 i32:4
+assert_trap array-new-elem i32:4 i32:1
+module array_new_elem.1.wasm
+assert_return array-new-elem-contents () -> i32:187 i32:204
+module array_new_elem.2.wasm
+assert_return array-new-elem i32:0 i32:0 -> arrayref:?
+assert_return array-new-elem i32:0 i32:4 -> arrayref:?
+assert_return array-new-elem i32:1 i32:2 -> arrayref:?
+assert_return array-new-elem i32:4 i32:0 -> arrayref:?
+assert_trap array-new-elem i32:0 i32:5
+assert_trap array-new-elem i32:5 i32:0
+assert_trap array-new-elem i32:1 i32:4
+assert_trap array-new-elem i32:4 i32:1
+module array_new_elem.3.wasm
+assert_return array-new-elem-contents () -> i32:187 i32:204

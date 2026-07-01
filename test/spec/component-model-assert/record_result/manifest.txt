@@ -1,0 +1,7 @@
+# D-305(b2): a RECORD result across a cross-component boundary via RETPTR. B
+# exports mk()->point = {x:3,y:4} (point=record{x,y:u32}); a 2-u32 record result
+# exceeds MAX_FLAT_RESULTS=1 so it returns via a return area — B's producer
+# returns a storage pointer, the boundary raw-copies the blob to A's retptr. A
+# reads x+y -> 7. Provenance: test/component/record_result_graph.wat.
+graph test/component/record_result_graph.wasm
+assert_flat_i32 run -> 7

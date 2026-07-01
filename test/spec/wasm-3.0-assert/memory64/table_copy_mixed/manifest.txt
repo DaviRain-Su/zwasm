@@ -1,0 +1,4 @@
+module table_copy_mixed.0.wasm
+assert_invalid table_copy_mixed.1.wasm
+assert_invalid table_copy_mixed.2.wasm
+assert_invalid table_copy_mixed.3.wasm

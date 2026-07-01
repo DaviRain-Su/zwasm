@@ -27,9 +27,11 @@ body:
       label: Scope
       options:
         - CLI
-        - Library API
+        - C API
+        - Zig API
         - Performance
         - Spec compliance
+        - WASI / Component Model
         - Documentation
         - Other
     validations:

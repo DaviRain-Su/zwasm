@@ -1,0 +1,4 @@
+assert_invalid type-subtyping-invalid.0.wasm
+assert_invalid type-subtyping-invalid.1.wasm
+assert_invalid type-subtyping-invalid.2.wasm
+assert_invalid type-subtyping-invalid.3.wasm

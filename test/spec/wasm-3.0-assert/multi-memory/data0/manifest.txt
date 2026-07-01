@@ -1,0 +1,7 @@
+module data0.0.wasm
+module data0.1.wasm
+module data0.2.wasm
+module data0.3.wasm
+module data0.4.wasm
+module data0.5.wasm
+module data0.6.wasm

@@ -1,0 +1,120 @@
+module loop.0.wasm
+assert_return empty () -> ()
+assert_return singular () -> i32:7
+assert_return multi () -> i32:8
+assert_return nested () -> i32:9
+assert_return deep () -> i32:150
+assert_return as-select-first () -> i32:1
+assert_return as-select-mid () -> i32:2
+assert_return as-select-last () -> i32:2
+assert_return as-if-condition () -> ()
+assert_return as-if-then () -> i32:1
+assert_return as-if-else () -> i32:2
+assert_return as-br_if-first () -> i32:1
+assert_return as-br_if-last () -> i32:2
+assert_return as-br_table-first () -> i32:1
+assert_return as-br_table-last () -> i32:2
+assert_return as-call_indirect-first () -> i32:1
+assert_return as-call_indirect-mid () -> i32:2
+assert_return as-call_indirect-last () -> i32:1
+assert_return as-store-first () -> ()
+assert_return as-store-last () -> ()
+assert_return as-memory.grow-value () -> i32:1
+assert_return as-call-value () -> i32:1
+assert_return as-return-value () -> i32:1
+assert_return as-drop-operand () -> ()
+assert_return as-br-value () -> i32:1
+assert_return as-local.set-value () -> i32:1
+assert_return as-local.tee-value () -> i32:1
+assert_return as-global.set-value () -> i32:1
+assert_return as-load-operand () -> i32:1
+assert_return as-unary-operand () -> i32:0
+assert_return as-binary-operand () -> i32:12
+assert_return as-test-operand () -> i32:0
+assert_return as-compare-operand () -> i32:0
+assert_return as-binary-operands () -> i32:12
+assert_return as-compare-operands () -> i32:0
+assert_return as-mixed-operands () -> i32:27
+assert_return break-bare () -> i32:19
+assert_return break-value () -> i32:18
+assert_return break-multi-value () -> i32:18 i32:4294967278 i64:18
+assert_return break-repeated () -> i32:18
+assert_return break-inner () -> i32:31
+assert_return param () -> i32:3
+assert_return params () -> i32:3
+assert_return params-id () -> i32:3
+assert_return param-break () -> i32:13
+assert_return params-break () -> i32:12
+assert_return params-id-break () -> i32:3
+assert_return effects () -> i32:1
+assert_return while i64:0 -> i64:1
+assert_return while i64:1 -> i64:1
+assert_return while i64:2 -> i64:2
+assert_return while i64:3 -> i64:6
+assert_return while i64:5 -> i64:120
+assert_return while i64:20 -> i64:2432902008176640000
+assert_return for i64:0 -> i64:1
+assert_return for i64:1 -> i64:1
+assert_return for i64:2 -> i64:2
+assert_return for i64:3 -> i64:6
+assert_return for i64:5 -> i64:120
+assert_return for i64:20 -> i64:2432902008176640000
+assert_return nesting f32:0 f32:1088421888 -> f32:0
+assert_return nesting f32:1088421888 f32:0 -> f32:0
+assert_return nesting f32:1065353216 f32:1065353216 -> f32:1065353216
+assert_return nesting f32:1065353216 f32:1073741824 -> f32:1073741824
+assert_return nesting f32:1065353216 f32:1077936128 -> f32:1082130432
+assert_return nesting f32:1065353216 f32:1082130432 -> f32:1086324736
+assert_return nesting f32:1065353216 f32:1120403456 -> f32:1159684096
+assert_return nesting f32:1065353216 f32:1120534528 -> f32:1159892992
+assert_return nesting f32:1073741824 f32:1065353216 -> f32:1065353216
+assert_return nesting f32:1077936128 f32:1065353216 -> f32:1065353216
+assert_return nesting f32:1092616192 f32:1065353216 -> f32:1065353216
+assert_return nesting f32:1073741824 f32:1073741824 -> f32:1077936128
+assert_return nesting f32:1073741824 f32:1077936128 -> f32:1082130432
+assert_return nesting f32:1088421888 f32:1082130432 -> f32:1092940751
+assert_return nesting f32:1088421888 f32:1120403456 -> f32:1166601314
+assert_return nesting f32:1088421888 f32:1120534528 -> f32:1159892992
+assert_return type-use () -> ()
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+assert_invalid loop.12.wasm
+assert_invalid loop.13.wasm
+assert_invalid loop.14.wasm
+assert_invalid loop.15.wasm
+assert_invalid loop.16.wasm
+assert_invalid loop.17.wasm
+assert_invalid loop.18.wasm
+assert_invalid loop.19.wasm
+assert_invalid loop.20.wasm
+assert_invalid loop.21.wasm
+assert_invalid loop.22.wasm
+assert_invalid loop.23.wasm
+assert_invalid loop.24.wasm
+assert_invalid loop.25.wasm
+assert_invalid loop.26.wasm
+assert_invalid loop.27.wasm
+assert_invalid loop.28.wasm
+assert_invalid loop.29.wasm
+assert_invalid loop.30.wasm
+assert_invalid loop.31.wasm
+assert_invalid loop.32.wasm
+assert_invalid loop.33.wasm
+assert_invalid loop.34.wasm
+assert_invalid loop.35.wasm
+assert_invalid loop.36.wasm
+assert_invalid loop.37.wasm
+assert_invalid loop.38.wasm
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text

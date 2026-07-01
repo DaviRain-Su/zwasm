@@ -1,0 +1,10 @@
+module imports3.0.wasm
+register test
+assert_unlinkable imports3.1.wasm
+assert_unlinkable imports3.2.wasm
+assert_unlinkable imports3.3.wasm
+assert_unlinkable imports3.4.wasm
+assert_unlinkable imports3.5.wasm
+assert_unlinkable imports3.6.wasm
+assert_unlinkable imports3.7.wasm
+assert_unlinkable imports3.8.wasm

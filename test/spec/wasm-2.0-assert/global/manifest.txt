@@ -1,0 +1,110 @@
+module global.0.wasm
+assert_return get-a () -> i32:4294967294
+assert_return get-b () -> i64:18446744073709551611
+assert_return get-r () -> i64:0
+assert_return get-mr () -> i64:0
+assert_return get-x () -> i32:4294967284
+assert_return get-y () -> i64:18446744073709551601
+assert_return get-z1 () -> i32:666
+assert_return get-z2 () -> i64:666
+assert_return get-3 () -> f32:3225419776
+assert_return get-4 () -> f64:13839561654909534208
+assert_return get-7 () -> f32:3243245568
+assert_return get-8 () -> f64:13847442954257432576
+assert_return set-x i32:6 -> ()
+assert_return set-y i64:7 -> ()
+assert_return set-7 f32:1090519040 -> ()
+assert_return set-8 f64:4621256167635550208 -> ()
+assert_return get-x () -> i32:6
+assert_return get-y () -> i64:7
+assert_return get-7 () -> f32:1090519040
+assert_return get-8 () -> f64:4621256167635550208
+assert_return set-7 f32:1090519040 -> ()
+assert_return set-8 f64:4621256167635550208 -> ()
+assert_return set-mr i64:9223372036854775819 -> ()
+assert_return get-x () -> i32:6
+assert_return get-y () -> i64:7
+assert_return get-7 () -> f32:1090519040
+assert_return get-8 () -> f64:4621256167635550208
+assert_return get-mr () -> i64:9223372036854775819
+assert_return as-select-first () -> i32:6
+assert_return as-select-mid () -> i32:2
+assert_return as-select-last () -> i32:2
+assert_return as-loop-first () -> i32:6
+assert_return as-loop-mid () -> i32:6
+assert_return as-loop-last () -> i32:6
+assert_return as-if-condition () -> i32:2
+assert_return as-if-then () -> i32:6
+assert_return as-if-else () -> i32:6
+assert_return as-br_if-first () -> i32:6
+assert_return as-br_if-last () -> i32:2
+assert_return as-br_table-first () -> i32:6
+assert_return as-br_table-last () -> i32:2
+assert_return as-call_indirect-first () -> i32:6
+assert_return as-call_indirect-mid () -> i32:2
+assert_trap as-call_indirect-last ()
+assert_return as-store-first () -> ()
+assert_return as-store-last () -> ()
+assert_return as-load-operand () -> i32:1
+assert_return as-memory.grow-value () -> i32:1
+assert_return as-call-value () -> i32:6
+assert_return as-return-value () -> i32:6
+assert_return as-drop-operand () -> ()
+assert_return as-br-value () -> i32:6
+assert_return as-local.set-value i32:1 -> i32:6
+assert_return as-local.tee-value i32:1 -> i32:6
+assert_return as-global.set-value () -> i32:6
+assert_return as-unary-operand () -> i32:0
+assert_return as-binary-operand () -> i32:36
+assert_return as-compare-operand () -> i32:1
+assert_invalid global.1.wasm
+assert_invalid global.2.wasm
+module global.3.wasm
+module global.4.wasm
+assert_invalid global.5.wasm
+assert_invalid global.6.wasm
+assert_invalid global.7.wasm
+assert_invalid global.8.wasm
+assert_invalid global.9.wasm
+assert_invalid global.10.wasm
+assert_invalid global.11.wasm
+assert_invalid global.12.wasm
+assert_invalid global.13.wasm
+assert_invalid global.14.wasm
+assert_invalid global.15.wasm
+assert_invalid global.16.wasm
+assert_invalid global.17.wasm
+assert_invalid global.18.wasm
+assert_invalid global.19.wasm
+assert_invalid global.20.wasm
+assert_invalid global.21.wasm
+assert_invalid global.22.wasm
+module global.23.wasm
+assert_malformed global.24.wasm
+assert_malformed global.25.wasm
+module global.26.wasm
+assert_malformed global.27.wasm
+assert_malformed global.28.wasm
+assert_invalid global.29.wasm
+assert_invalid global.30.wasm
+assert_invalid global.31.wasm
+assert_invalid global.32.wasm
+assert_invalid global.33.wasm
+assert_invalid global.34.wasm
+assert_invalid global.35.wasm
+assert_invalid global.36.wasm
+assert_invalid global.37.wasm
+assert_invalid global.38.wasm
+assert_invalid global.39.wasm
+assert_invalid global.40.wasm
+assert_invalid global.41.wasm
+assert_invalid global.42.wasm
+assert_invalid global.43.wasm
+assert_invalid global.44.wasm
+assert_invalid global.45.wasm
+assert_invalid global.46.wasm
+assert_invalid global.47.wasm
+assert_invalid global.48.wasm
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text

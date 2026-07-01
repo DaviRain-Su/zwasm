@@ -1,0 +1,7 @@
+# D-305(b3): a record-with-STRING param across a cross-component boundary. B
+# exports f(p: record{msg:string, n:u32}) -> u32 = n + len(msg). The string field
+# is an internal pointer, so the boundary round-trips via canon liftFlat (read A's
+# memory) -> lowerFlat (copy into B's memory). A calls f({msg:"hello", n:3}) ->
+# 3+5 = 8. Provenance: test/component/rec_str_param_graph.wat.
+graph test/component/rec_str_param_graph.wasm
+assert_flat_i32 run -> 8

@@ -1,0 +1,758 @@
+module simd_const.0.wasm
+module simd_const.1.wasm
+module simd_const.2.wasm
+module simd_const.3.wasm
+module simd_const.4.wasm
+module simd_const.5.wasm
+module simd_const.6.wasm
+module simd_const.7.wasm
+module simd_const.8.wasm
+module simd_const.9.wasm
+module simd_const.10.wasm
+module simd_const.11.wasm
+module simd_const.12.wasm
+module simd_const.13.wasm
+module simd_const.14.wasm
+module simd_const.15.wasm
+module simd_const.16.wasm
+module simd_const.17.wasm
+module simd_const.18.wasm
+module simd_const.19.wasm
+module simd_const.20.wasm
+module simd_const.21.wasm
+module simd_const.22.wasm
+module simd_const.23.wasm
+module simd_const.24.wasm
+module simd_const.25.wasm
+module simd_const.26.wasm
+module simd_const.27.wasm
+module simd_const.28.wasm
+module simd_const.29.wasm
+module simd_const.30.wasm
+module simd_const.31.wasm
+module simd_const.32.wasm
+module simd_const.33.wasm
+module simd_const.34.wasm
+module simd_const.35.wasm
+module simd_const.36.wasm
+module simd_const.37.wasm
+module simd_const.38.wasm
+module simd_const.39.wasm
+module simd_const.40.wasm
+module simd_const.41.wasm
+module simd_const.42.wasm
+module simd_const.43.wasm
+module simd_const.44.wasm
+module simd_const.45.wasm
+module simd_const.46.wasm
+module simd_const.47.wasm
+module simd_const.48.wasm
+module simd_const.49.wasm
+module simd_const.50.wasm
+module simd_const.51.wasm
+module simd_const.52.wasm
+module simd_const.53.wasm
+module simd_const.54.wasm
+module simd_const.55.wasm
+module simd_const.56.wasm
+module simd_const.57.wasm
+module simd_const.58.wasm
+module simd_const.59.wasm
+module simd_const.60.wasm
+module simd_const.61.wasm
+module simd_const.62.wasm
+module simd_const.63.wasm
+module simd_const.64.wasm
+module simd_const.65.wasm
+module simd_const.66.wasm
+module simd_const.67.wasm
+module simd_const.68.wasm
+module simd_const.69.wasm
+module simd_const.70.wasm
+module simd_const.71.wasm
+module simd_const.72.wasm
+module simd_const.73.wasm
+module simd_const.74.wasm
+module simd_const.75.wasm
+module simd_const.76.wasm
+module simd_const.77.wasm
+module simd_const.78.wasm
+module simd_const.79.wasm
+module simd_const.80.wasm
+module simd_const.81.wasm
+module simd_const.82.wasm
+module simd_const.83.wasm
+module simd_const.84.wasm
+module simd_const.85.wasm
+module simd_const.86.wasm
+module simd_const.87.wasm
+module simd_const.88.wasm
+module simd_const.89.wasm
+module simd_const.90.wasm
+module simd_const.91.wasm
+module simd_const.92.wasm
+module simd_const.93.wasm
+module simd_const.94.wasm
+module simd_const.95.wasm
+module simd_const.96.wasm
+module simd_const.97.wasm
+module simd_const.98.wasm
+module simd_const.99.wasm
+module simd_const.100.wasm
+module simd_const.101.wasm
+module simd_const.102.wasm
+module simd_const.103.wasm
+module simd_const.104.wasm
+module simd_const.105.wasm
+module simd_const.106.wasm
+module simd_const.107.wasm
+module simd_const.108.wasm
+module simd_const.109.wasm
+module simd_const.110.wasm
+module simd_const.111.wasm
+module simd_const.112.wasm
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+module simd_const.198.wasm
+assert_return f () -> v128:00008026000080260000802600008026
+module simd_const.199.wasm
+assert_return f () -> v128:000080a6000080a6000080a6000080a6
+module simd_const.200.wasm
+assert_return f () -> v128:03008026030080260300802603008026
+module simd_const.201.wasm
+assert_return f () -> v128:030080a6030080a6030080a6030080a6
+module simd_const.202.wasm
+assert_return f () -> v128:00008026000080260000802600008026
+module simd_const.203.wasm
+assert_return f () -> v128:000080a6000080a6000080a6000080a6
+module simd_const.204.wasm
+assert_return f () -> v128:03008026030080260300802603008026
+module simd_const.205.wasm
+assert_return f () -> v128:030080a6030080a6030080a6030080a6
+module simd_const.206.wasm
+assert_return f () -> v128:00008026000080260000802600008026
+module simd_const.207.wasm
+assert_return f () -> v128:000080a6000080a6000080a6000080a6
+module simd_const.208.wasm
+assert_return f () -> v128:02008026020080260200802602008026
+module simd_const.209.wasm
+assert_return f () -> v128:020080a6020080a6020080a6020080a6
+module simd_const.210.wasm
+assert_return f () -> v128:00008058000080580000805800008058
+module simd_const.211.wasm
+assert_return f () -> v128:000080d8000080d8000080d8000080d8
+module simd_const.212.wasm
+assert_return f () -> v128:03008058030080580300805803008058
+module simd_const.213.wasm
+assert_return f () -> v128:030080d8030080d8030080d8030080d8
+module simd_const.214.wasm
+assert_return f () -> v128:00008058000080580000805800008058
+module simd_const.215.wasm
+assert_return f () -> v128:000080d8000080d8000080d8000080d8
+module simd_const.216.wasm
+assert_return f () -> v128:02008058020080580200805802008058
+module simd_const.217.wasm
+assert_return f () -> v128:020080d8020080d8020080d8020080d8
+module simd_const.218.wasm
+assert_return f () -> v128:00008058000080580000805800008058
+module simd_const.219.wasm
+assert_return f () -> v128:000080d8000080d8000080d8000080d8
+module simd_const.220.wasm
+assert_return f () -> v128:02008058020080580200805802008058
+module simd_const.221.wasm
+assert_return f () -> v128:020080d8020080d8020080d8020080d8
+module simd_const.222.wasm
+assert_return f () -> v128:00000000000000000000000000000000
+module simd_const.223.wasm
+assert_return f () -> v128:00000080000000800000008000000080
+module simd_const.224.wasm
+assert_return f () -> v128:03000000030000000300000003000000
+module simd_const.225.wasm
+assert_return f () -> v128:03000080030000800300008003000080
+module simd_const.226.wasm
+assert_return f () -> v128:ffff7f7fffff7f7fffff7f7fffff7f7f
+module simd_const.227.wasm
+assert_return f () -> v128:ffff7fffffff7fffffff7fffffff7fff
+module simd_const.228.wasm
+assert_return f () -> v128:ffff7f7fffff7f7fffff7f7fffff7f7f
+module simd_const.229.wasm
+assert_return f () -> v128:ffff7fffffff7fffffff7fffffff7fff
+module simd_const.230.wasm
+assert_return f () -> f64:1905022642377719808
+module simd_const.231.wasm
+assert_return f () -> f64:11128394679232495616
+module simd_const.232.wasm
+assert_return f () -> f64:1905022642377719809
+module simd_const.233.wasm
+assert_return f () -> f64:11128394679232495617
+module simd_const.234.wasm
+assert_return f () -> f64:1905022642377719809
+module simd_const.235.wasm
+assert_return f () -> f64:11128394679232495617
+module simd_const.236.wasm
+assert_return f () -> f64:1905022642377719809
+module simd_const.237.wasm
+assert_return f () -> f64:11128394679232495617
+module simd_const.238.wasm
+assert_return f () -> f64:1905022642377719809
+module simd_const.239.wasm
+assert_return f () -> f64:11128394679232495617
+module simd_const.240.wasm
+assert_return f () -> f64:1905022642377719809
+module simd_const.241.wasm
+assert_return f () -> f64:11128394679232495617
+module simd_const.242.wasm
+assert_return f () -> f64:1905022642377719810
+module simd_const.243.wasm
+assert_return f () -> f64:11128394679232495618
+module simd_const.244.wasm
+assert_return f () -> f64:1905022642377719810
+module simd_const.245.wasm
+assert_return f () -> f64:11128394679232495618
+module simd_const.246.wasm
+assert_return f () -> f64:1905022642377719810
+module simd_const.247.wasm
+assert_return f () -> f64:11128394679232495618
+module simd_const.248.wasm
+assert_return f () -> f64:1905022642377719810
+module simd_const.249.wasm
+assert_return f () -> f64:11128394679232495618
+module simd_const.250.wasm
+assert_return f () -> f64:1905022642377719810
+module simd_const.251.wasm
+assert_return f () -> f64:11128394679232495618
+module simd_const.252.wasm
+assert_return f () -> f64:1905022642377719810
+module simd_const.253.wasm
+assert_return f () -> f64:11128394679232495618
+module simd_const.254.wasm
+assert_return f () -> f64:1905022642377719811
+module simd_const.255.wasm
+assert_return f () -> f64:11128394679232495619
+module simd_const.256.wasm
+assert_return f () -> f64:1905022642377719808
+module simd_const.257.wasm
+assert_return f () -> f64:11128394679232495616
+module simd_const.258.wasm
+assert_return f () -> f64:1905022642377719809
+module simd_const.259.wasm
+assert_return f () -> f64:11128394679232495617
+module simd_const.260.wasm
+assert_return f () -> f64:1905022642377719809
+module simd_const.261.wasm
+assert_return f () -> f64:11128394679232495617
+module simd_const.262.wasm
+assert_return f () -> f64:1905022642377719809
+module simd_const.263.wasm
+assert_return f () -> f64:11128394679232495617
+module simd_const.264.wasm
+assert_return f () -> f64:1905022642377719809
+module simd_const.265.wasm
+assert_return f () -> f64:11128394679232495617
+module simd_const.266.wasm
+assert_return f () -> f64:1905022642377719809
+module simd_const.267.wasm
+assert_return f () -> f64:11128394679232495617
+module simd_const.268.wasm
+assert_return f () -> f64:1905022642377719810
+module simd_const.269.wasm
+assert_return f () -> f64:11128394679232495618
+module simd_const.270.wasm
+assert_return f () -> f64:1905022642377719810
+module simd_const.271.wasm
+assert_return f () -> f64:11128394679232495618
+module simd_const.272.wasm
+assert_return f () -> f64:1905022642377719810
+module simd_const.273.wasm
+assert_return f () -> f64:11128394679232495618
+module simd_const.274.wasm
+assert_return f () -> f64:1905022642377719810
+module simd_const.275.wasm
+assert_return f () -> f64:11128394679232495618
+module simd_const.276.wasm
+assert_return f () -> f64:1905022642377719810
+module simd_const.277.wasm
+assert_return f () -> f64:11128394679232495618
+module simd_const.278.wasm
+assert_return f () -> f64:1905022642377719810
+module simd_const.279.wasm
+assert_return f () -> f64:11128394679232495618
+module simd_const.280.wasm
+assert_return f () -> f64:1905022642377719811
+module simd_const.281.wasm
+assert_return f () -> f64:11128394679232495619
+module simd_const.282.wasm
+assert_return f () -> f64:9106278446543142912
+module simd_const.283.wasm
+assert_return f () -> f64:18329650483397918720
+module simd_const.284.wasm
+assert_return f () -> f64:9106278446543142913
+module simd_const.285.wasm
+assert_return f () -> f64:18329650483397918721
+module simd_const.286.wasm
+assert_return f () -> f64:9106278446543142913
+module simd_const.287.wasm
+assert_return f () -> f64:18329650483397918721
+module simd_const.288.wasm
+assert_return f () -> f64:9106278446543142914
+module simd_const.289.wasm
+assert_return f () -> f64:18329650483397918722
+module simd_const.290.wasm
+assert_return f () -> v128:00000000000070650000000000007065
+module simd_const.291.wasm
+assert_return f () -> v128:00000000000070e500000000000070e5
+module simd_const.292.wasm
+assert_return f () -> v128:01000000000070650100000000007065
+module simd_const.293.wasm
+assert_return f () -> v128:01000000000070e501000000000070e5
+module simd_const.294.wasm
+assert_return f () -> v128:01000000000070650100000000007065
+module simd_const.295.wasm
+assert_return f () -> v128:01000000000070e501000000000070e5
+module simd_const.296.wasm
+assert_return f () -> v128:01000000000070650100000000007065
+module simd_const.297.wasm
+assert_return f () -> v128:01000000000070e501000000000070e5
+module simd_const.298.wasm
+assert_return f () -> v128:01000000000070650100000000007065
+module simd_const.299.wasm
+assert_return f () -> v128:01000000000070e501000000000070e5
+module simd_const.300.wasm
+assert_return f () -> v128:01000000000070650100000000007065
+module simd_const.301.wasm
+assert_return f () -> v128:01000000000070e501000000000070e5
+module simd_const.302.wasm
+assert_return f () -> v128:02000000000070650200000000007065
+module simd_const.303.wasm
+assert_return f () -> v128:02000000000070e502000000000070e5
+module simd_const.304.wasm
+assert_return f () -> v128:02000000000070650200000000007065
+module simd_const.305.wasm
+assert_return f () -> v128:02000000000070e502000000000070e5
+module simd_const.306.wasm
+assert_return f () -> v128:02000000000070650200000000007065
+module simd_const.307.wasm
+assert_return f () -> v128:02000000000070e502000000000070e5
+module simd_const.308.wasm
+assert_return f () -> v128:02000000000070650200000000007065
+module simd_const.309.wasm
+assert_return f () -> v128:02000000000070e502000000000070e5
+module simd_const.310.wasm
+assert_return f () -> v128:02000000000070650200000000007065
+module simd_const.311.wasm
+assert_return f () -> v128:02000000000070e502000000000070e5
+module simd_const.312.wasm
+assert_return f () -> v128:02000000000070650200000000007065
+module simd_const.313.wasm
+assert_return f () -> v128:02000000000070e502000000000070e5
+module simd_const.314.wasm
+assert_return f () -> v128:02000000000070650200000000007065
+module simd_const.315.wasm
+assert_return f () -> v128:02000000000070e502000000000070e5
+module simd_const.316.wasm
+assert_return f () -> v128:03000000000070650300000000007065
+module simd_const.317.wasm
+assert_return f () -> v128:03000000000070e503000000000070e5
+module simd_const.318.wasm
+assert_return f () -> v128:00000000000000460000000000000046
+module simd_const.319.wasm
+assert_return f () -> v128:00000000000000c600000000000000c6
+module simd_const.320.wasm
+assert_return f () -> v128:01000000000000460100000000000046
+module simd_const.321.wasm
+assert_return f () -> v128:01000000000000c601000000000000c6
+module simd_const.322.wasm
+assert_return f () -> v128:01000000000000460100000000000046
+module simd_const.323.wasm
+assert_return f () -> v128:01000000000000c601000000000000c6
+module simd_const.324.wasm
+assert_return f () -> v128:01000000000000460100000000000046
+module simd_const.325.wasm
+assert_return f () -> v128:01000000000000c601000000000000c6
+module simd_const.326.wasm
+assert_return f () -> v128:01000000000000460100000000000046
+module simd_const.327.wasm
+assert_return f () -> v128:01000000000000c601000000000000c6
+module simd_const.328.wasm
+assert_return f () -> v128:01000000000000460100000000000046
+module simd_const.329.wasm
+assert_return f () -> v128:01000000000000c601000000000000c6
+module simd_const.330.wasm
+assert_return f () -> v128:02000000000000460200000000000046
+module simd_const.331.wasm
+assert_return f () -> v128:02000000000000c602000000000000c6
+module simd_const.332.wasm
+assert_return f () -> v128:02000000000000460200000000000046
+module simd_const.333.wasm
+assert_return f () -> v128:02000000000000c602000000000000c6
+module simd_const.334.wasm
+assert_return f () -> v128:02000000000000460200000000000046
+module simd_const.335.wasm
+assert_return f () -> v128:02000000000000c602000000000000c6
+module simd_const.336.wasm
+assert_return f () -> v128:02000000000000460200000000000046
+module simd_const.337.wasm
+assert_return f () -> v128:02000000000000c602000000000000c6
+module simd_const.338.wasm
+assert_return f () -> v128:02000000000000460200000000000046
+module simd_const.339.wasm
+assert_return f () -> v128:02000000000000c602000000000000c6
+module simd_const.340.wasm
+assert_return f () -> v128:02000000000000460200000000000046
+module simd_const.341.wasm
+assert_return f () -> v128:02000000000000c602000000000000c6
+module simd_const.342.wasm
+assert_return f () -> v128:02000000000000460200000000000046
+module simd_const.343.wasm
+assert_return f () -> v128:02000000000000c602000000000000c6
+module simd_const.344.wasm
+assert_return f () -> v128:03000000000000460300000000000046
+module simd_const.345.wasm
+assert_return f () -> v128:03000000000000c603000000000000c6
+module simd_const.346.wasm
+assert_return f () -> v128:000000000000b043000000000000b043
+module simd_const.347.wasm
+assert_return f () -> v128:000000000000b0c3000000000000b0c3
+module simd_const.348.wasm
+assert_return f () -> v128:010000000000b043010000000000b043
+module simd_const.349.wasm
+assert_return f () -> v128:010000000000b0c3010000000000b0c3
+module simd_const.350.wasm
+assert_return f () -> v128:010000000000b043010000000000b043
+module simd_const.351.wasm
+assert_return f () -> v128:010000000000b0c3010000000000b0c3
+module simd_const.352.wasm
+assert_return f () -> v128:020000000000b043020000000000b043
+module simd_const.353.wasm
+assert_return f () -> v128:020000000000b0c3020000000000b0c3
+module simd_const.354.wasm
+assert_return f () -> v128:00000000000000000000000000000000
+module simd_const.355.wasm
+assert_return f () -> v128:00000000000000800000000000000080
+module simd_const.356.wasm
+assert_return f () -> v128:01000000000000000100000000000000
+module simd_const.357.wasm
+assert_return f () -> v128:01000000000000800100000000000080
+module simd_const.358.wasm
+assert_return f () -> v128:01000000000000000100000000000000
+module simd_const.359.wasm
+assert_return f () -> v128:01000000000000800100000000000080
+module simd_const.360.wasm
+assert_return f () -> v128:01000000000000000100000000000000
+module simd_const.361.wasm
+assert_return f () -> v128:01000000000000800100000000000080
+module simd_const.362.wasm
+assert_return f () -> v128:01000000000000000100000000000000
+module simd_const.363.wasm
+assert_return f () -> v128:01000000000000800100000000000080
+module simd_const.364.wasm
+assert_return f () -> v128:01000000000000000100000000000000
+module simd_const.365.wasm
+assert_return f () -> v128:01000000000000800100000000000080
+module simd_const.366.wasm
+assert_return f () -> v128:02000000000000000200000000000000
+module simd_const.367.wasm
+assert_return f () -> v128:02000000000000800200000000000080
+module simd_const.368.wasm
+assert_return f () -> v128:02000000000000000200000000000000
+module simd_const.369.wasm
+assert_return f () -> v128:02000000000000800200000000000080
+module simd_const.370.wasm
+assert_return f () -> v128:02000000000000000200000000000000
+module simd_const.371.wasm
+assert_return f () -> v128:02000000000000800200000000000080
+module simd_const.372.wasm
+assert_return f () -> v128:02000000000000000200000000000000
+module simd_const.373.wasm
+assert_return f () -> v128:02000000000000800200000000000080
+module simd_const.374.wasm
+assert_return f () -> v128:02000000000000000200000000000000
+module simd_const.375.wasm
+assert_return f () -> v128:02000000000000800200000000000080
+module simd_const.376.wasm
+assert_return f () -> v128:02000000000000000200000000000000
+module simd_const.377.wasm
+assert_return f () -> v128:02000000000000800200000000000080
+module simd_const.378.wasm
+assert_return f () -> v128:02000000000000000200000000000000
+module simd_const.379.wasm
+assert_return f () -> v128:02000000000000800200000000000080
+module simd_const.380.wasm
+assert_return f () -> v128:03000000000010000300000000001000
+module simd_const.381.wasm
+assert_return f () -> v128:03000000000010800300000000001080
+module simd_const.382.wasm
+assert_return f () -> v128:ffffffffffffef7fffffffffffffef7f
+module simd_const.383.wasm
+assert_return f () -> v128:ffffffffffffefffffffffffffffefff
+module simd_const.384.wasm
+assert_return f () -> v128:ffffffffffffef7fffffffffffffef7f
+module simd_const.385.wasm
+assert_return f () -> v128:ffffffffffffefffffffffffffffefff
+module simd_const.386.wasm
+assert_return as-br-retval () -> v128:000102030405060708090a0b0c0d0e0f
+assert_return as-br_if-retval () -> v128:00000000010000000200000003000000
+assert_return as-return-retval () -> v128:00000000010000000200000003000000
+assert_return as-if-then-retval () -> v128:00000000010000000200000003000000
+assert_return as-if-else-retval () -> v128:03000000020000000100000000000000
+assert_return as-call-param () -> v128:00000000010000000200000003000000
+assert_return as-call_indirect-param () -> v128:00000000010000000200000003000000
+assert_return as-block-retval () -> v128:00000000010000000200000003000000
+assert_return as-loop-retval () -> v128:00000000010000000200000003000000
+assert_return as-drop-operand () -> ()
+assert_return as-br-retval2 () -> v128:04050607000102030c0d0e0f08090a0b
+assert_return as-br_if-retval2 () -> v128:00000000000000000100000000000000
+assert_return as-return-retval2 () -> v128:00000000000000000100000000000000
+assert_return as-if-then-retval2 () -> v128:00000000000000000100000000000000
+assert_return as-if-else-retval2 () -> v128:01000000000000000000000000000000
+assert_return as-call-param2 () -> v128:00000000000000000100000000000000
+assert_return as-call_indirect-param2 () -> v128:00000000000000000100000000000000
+assert_return as-block-retval2 () -> v128:00000000000000000100000000000000
+assert_return as-loop-retval2 () -> v128:00000000000000000100000000000000
+assert_return as-drop-operand2 () -> ()
+module simd_const.387.wasm
+assert_return as-local.set/get-value_0_0 v128:00000000000000000000000000000000 -> v128:00000000000000000000000000000000
+assert_return as-local.set/get-value_0_1 v128:01000000010000000100000001000000 -> v128:01000000010000000100000001000000
+assert_return as-local.set/get-value_3_0 v128:02000000020000000200000002000000 -> v128:02000000020000000200000002000000
+assert_return as-local.tee-value () -> v128:00000000010000000200000003000000
+module simd_const.388.wasm
+assert_return as-global.set_value_$g0_$g1_$g2_$g3 v128:01000000010000000100000001000000 v128:02000000020000000200000002000000 v128:03000000030000000300000003000000 v128:04000000040000000400000004000000 -> ()
+assert_return global.get_g0 () -> v128:01000000010000000100000001000000
+assert_return global.get_g1 () -> v128:02000000020000000200000002000000
+assert_return global.get_g2 () -> v128:03000000030000000300000003000000
+assert_return global.get_g3 () -> v128:04000000040000000400000004000000
+module simd_const.389.wasm
+assert_return i32x4.test () -> v128:0dd0ad0b0dd0ad0b0dd0ad0b0dd0ad0b
+assert_return i32x4.smax () -> v128:ffffff7fffffff7fffffff7fffffff7f
+assert_return i32x4.neg_smax () -> v128:01000080010000800100008001000080
+assert_return i32x4.inc_smin () -> v128:01000080010000800100008001000080
+assert_return i32x4.neg_zero () -> v128:00000000000000000000000000000000
+assert_return i32x4.not_octal () -> v128:0a0000000a0000000a0000000a000000
+assert_return i32x4.plus_sign () -> v128:2a0000002a0000002a0000002a000000
+assert_return i32x4-dec-sep1 () -> v128:40420f0040420f0040420f0040420f00
+assert_return i32x4-dec-sep2 () -> v128:e8030000e8030000e8030000e8030000
+assert_return i32x4-hex-sep1 () -> v128:99000f0a99000f0a99000f0a99000f0a
+assert_return i32x4-hex-sep2 () -> v128:0faa01000faa01000faa01000faa0100
+assert_return i64x2.test () -> v128:0dd0ad0b0dd0ad0b0dd0ad0b0dd0ad0b
+assert_return i64x2.smax () -> v128:ffffffffffffff7fffffffffffffff7f
+assert_return i64x2.neg_smax () -> v128:01000000000000800100000000000080
+assert_return i64x2.inc_smin () -> v128:01000000000000800100000000000080
+assert_return i64x2.neg_zero () -> v128:00000000000000000000000000000000
+assert_return i64x2.not_octal () -> v128:1a270000000000001a27000000000000
+assert_return i64x2.plus_sign () -> v128:2a000000000000002a00000000000000
+assert_return i64x2-dec-sep1 () -> v128:00a0724e1809000000a0724e18090000
+assert_return i64x2-dec-sep2 () -> v128:80969800000000008096980000000000
+assert_return i64x2-hex-sep1 () -> v128:99000f0a99000f0a99000f0a99000f0a
+assert_return i64x2-hex-sep2 () -> v128:0faaf1a01a0000000faaf1a01a000000
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+module simd_const.410.wasm
+assert_return f32-dec-sep1 () -> v128:00247449002474490024744900247449
+assert_return f32-dec-sep2 () -> v128:00007a4400007a4400007a4400007a44
+assert_return f32-dec-sep3 () -> v128:10c97a4410c97a4410c97a4410c97a44
+assert_return f32-dec-sep4 () -> v128:96196158961961589619615896196158
+assert_return f32-dec-sep5 () -> v128:74ae1d6e74ae1d6e74ae1d6e74ae1d6e
+assert_return f32-hex-sep1 () -> v128:0af0204d0af0204d0af0204d0af0204d
+assert_return f32-hex-sep2 () -> v128:8007d5478007d5478007d5478007d547
+assert_return f32-hex-sep3 () -> v128:f1ff2047f1ff2047f1ff2047f1ff2047
+assert_return f32-hex-sep4 () -> v128:0000f0490000f0490000f0490000f049
+assert_return f32-hex-sep5 () -> v128:28c0ab5528c0ab5528c0ab5528c0ab55
+assert_return f64-dec-sep1 () -> v128:0000000080842e410000000080842e41
+assert_return f64-dec-sep2 () -> v128:0000000000408f400000000000408f40
+assert_return f64-dec-sep3 () -> v128:008bfcfa21598f40008bfcfa21598f40
+assert_return f64-dec-sep4 () -> v128:00009fb232230c4300009fb232230c43
+assert_return f64-dec-sep5 () -> v128:9cde5b72ceb5c3459cde5b72ceb5c345
+assert_return f64-hex-sep1 () -> v128:00000032011ea44100000032011ea441
+assert_return f64-hex-sep2 () -> v128:00000000f0a0fa4000000000f0a0fa40
+assert_return f64-hex-sep3 () -> v128:40b33428fe1fe44040b33428fe1fe440
+assert_return f64-hex-sep4 () -> v128:0000000000003e410000000000003e41
+assert_return f64-hex-sep5 () -> v128:00709f0f0578b54200709f0f0578b542
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+module simd_const.487.wasm
+assert_return parse_i8x16 () -> v128:0000000080808080ffffffffffffffff
+module simd_const.488.wasm
+assert_return parse_i16x8 () -> v128:0000000000800080ffffffffffffffff
+module simd_const.489.wasm
+assert_return parse_i32x4 () -> v128:d1ffffffd1ffffffd1ffffffd1ffffff
+module simd_const.490.wasm
+assert_return parse_i64x2 () -> v128:ffffffffffffff7fffffffffffffff7f
+module simd_const.491.wasm
+assert_return parse_f32x4 () -> v128:0000804f0000804f0000804f0000804f
+module simd_const.492.wasm
+assert_return parse_f64x2 () -> v128:ffffffffffffef7fffffffffffffef7f

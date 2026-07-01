@@ -1,0 +1,11 @@
+module skip-stack-guard-page.0.wasm
+assert_exhaustion test-guard-page-skip i32:0
+assert_exhaustion test-guard-page-skip i32:100
+assert_exhaustion test-guard-page-skip i32:200
+assert_exhaustion test-guard-page-skip i32:300
+assert_exhaustion test-guard-page-skip i32:400
+assert_exhaustion test-guard-page-skip i32:500
+assert_exhaustion test-guard-page-skip i32:600
+assert_exhaustion test-guard-page-skip i32:700
+assert_exhaustion test-guard-page-skip i32:800
+assert_exhaustion test-guard-page-skip i32:900

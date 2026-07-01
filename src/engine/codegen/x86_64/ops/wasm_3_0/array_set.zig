@@ -1,0 +1,82 @@
+//! x86_64 emit handler for `array.set` — Wasm 3.0 GC §3.3.5.6.12.
+//! Mirror of the arm64 handler: pop value + i32 index + array GcRef (trap
+//! null OR index OOB), store the 8-byte value at `base + 12 + index*8`.
+//! Pops 3 (3 → 0, no result). Register-offset store (`MOV [base + idx*8],
+//! r64`); base += 12 first. Same UNSIGNED bounds check (JAE) as array_get.
+//!
+//! Registers: ref → stage-0 (R10), index → stage-1 (R11), object base →
+//! RAX (3rd reg; caller-saved, not in pool/rt). R10 is reused for the
+//! length, then for the value (loaded last, after the OOB check).
+
+const meta = @import("../../../../../instruction/wasm_3_0/array_set.zig");
+const ctx_mod = @import("../../ctx.zig");
+const abi = @import("../../abi.zig");
+const gpr = @import("../../gpr.zig");
+const inst = @import("../../inst.zig");
+const jit_abi = @import("../../../shared/jit_abi.zig");
+const heap_mod = @import("../../../../../feature/gc/heap.zig");
+const zir = @import("../../../../../ir/zir.zig");
+
+pub const op_tag = meta.op_tag;
+pub const wasm_level = meta.wasm_level;
+pub const wasi_level = meta.wasi_level;
+
+const header_size: i32 = 12;
+const length_off: i32 = 8;
+const base: abi.Gpr = .rax; // object-base scratch (3rd reg; caller-saved).
+const scratch0: abi.Gpr = .r10; // stage-0, reused for length then value.
+
+pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void {
+    const elem_vt = ctx.func.arrayElemValType(@intCast(ins.payload)); // D-212
+    // Operand stack: [.., ref, index, value] (value on top). Pop in reverse.
+    if (ctx.pushed_vregs.items.len < 3) return ctx_mod.Error.AllocationMissing;
+    const value_vreg = ctx.pushed_vregs.pop().?;
+    const index_vreg = ctx.pushed_vregs.pop().?;
+    const ref_vreg = ctx.pushed_vregs.pop().?;
+
+    const xref = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, ref_vreg, 0);
+    const xidx = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, index_vreg, 1);
+    // Null-ref trap.
+    try ctx.buf.appendSlice(ctx.allocator, inst.encTestRR(.q, xref, xref).slice());
+    var fixup: u32 = @intCast(ctx.buf.items.len);
+    try ctx.buf.appendSlice(ctx.allocator, inst.encJccRel32(.e, 0).slice());
+    try ctx.null_ref_fixups.append(ctx.allocator, fixup); // D-293 slice-4c null_reference (code 10)
+
+    // base = slab + ref; length [base+8] → R10 (ref dead); OOB check.
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromMemDisp32(base, abi.runtime_ptr_save_gpr, jit_abi.gc_heap_off).slice());
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovR64FromMemDisp32(base, base, @offsetOf(heap_mod.Heap, "bytes")).slice());
+    try ctx.buf.appendSlice(ctx.allocator, inst.encAddRR(.q, base, xref).slice());
+    try ctx.buf.appendSlice(ctx.allocator, inst.encMovR32FromMemDisp32(scratch0, base, length_off).slice());
+    try ctx.buf.appendSlice(ctx.allocator, inst.encCmpRR(.d, xidx, scratch0).slice());
+    fixup = @intCast(ctx.buf.items.len);
+    try ctx.buf.appendSlice(ctx.allocator, inst.encJccRel32(.ae, 0).slice());
+    try ctx.oob_fixups.append(ctx.allocator, fixup); // D-293 slice-4c array index OOB → oob_memory (code 6)
+
+    // base += header → element[0]; load value (R10 reuse) + store.
+    // D-212: an f32/f64 value operand is XMM-class — read it from the XMM
+    // file then MOVD/MOVQ into the scratch GPR for the register-offset store.
+    try ctx.buf.appendSlice(ctx.allocator, inst.encAddR64Imm32(base, header_size).slice());
+    switch (elem_vt) {
+        0x7D, 0x7C => {
+            const xv = try gpr.xmmLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, value_vreg, 0);
+            if (elem_vt == 0x7D)
+                try ctx.buf.appendSlice(ctx.allocator, inst.encMovdR32FromXmm(scratch0, xv).slice())
+            else
+                try ctx.buf.appendSlice(ctx.allocator, inst.encMovqR64FromXmm(scratch0, xv).slice());
+            try ctx.buf.appendSlice(ctx.allocator, inst.encStoreR64MemBaseIdxLsl3(scratch0, base, xidx).slice());
+        },
+        0x7B => {
+            // v128 (D-460): 16-byte element. Scale the index by 16 (idx<<4)
+            // into R10 (dead after the OOB check), load the value into an
+            // XMM (stage-0/XMM14), then MOVUPS [base + R10].
+            try ctx.buf.appendSlice(ctx.allocator, inst.encMovRR(.d, scratch0, xidx).slice());
+            try ctx.buf.appendSlice(ctx.allocator, inst.encShlRImm8(.q, scratch0, 4).slice());
+            const xv = try gpr.xmmLoadSpilledV128(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, value_vreg, 0);
+            try ctx.buf.appendSlice(ctx.allocator, inst.encMovupsMemBaseIdx(true, xv, base, scratch0).slice());
+        },
+        else => {
+            const xval = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, value_vreg, 0);
+            try ctx.buf.appendSlice(ctx.allocator, inst.encStoreR64MemBaseIdxLsl3(xval, base, xidx).slice());
+        },
+    }
+}

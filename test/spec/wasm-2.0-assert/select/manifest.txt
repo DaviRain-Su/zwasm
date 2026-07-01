@@ -1,0 +1,148 @@
+module select.0.wasm
+assert_return select-i32 i32:1 i32:2 i32:1 -> i32:1
+assert_return select-i64 i64:2 i64:1 i32:1 -> i64:2
+assert_return select-f32 f32:1065353216 f32:1073741824 i32:1 -> f32:1065353216
+assert_return select-f64 f64:4607182418800017408 f64:4611686018427387904 i32:1 -> f64:4607182418800017408
+assert_return select-i32 i32:1 i32:2 i32:0 -> i32:2
+assert_return select-i32 i32:2 i32:1 i32:0 -> i32:1
+assert_return select-i64 i64:2 i64:1 i32:4294967295 -> i64:2
+assert_return select-i64 i64:2 i64:1 i32:4042322160 -> i64:2
+assert_return select-f32 f32:2143289344 f32:1065353216 i32:1 -> f32:2143289344
+assert_return select-f32 f32:2139226884 f32:1065353216 i32:1 -> f32:2139226884
+assert_return select-f32 f32:2143289344 f32:1065353216 i32:0 -> f32:1065353216
+assert_return select-f32 f32:2139226884 f32:1065353216 i32:0 -> f32:1065353216
+assert_return select-f32 f32:1073741824 f32:2143289344 i32:1 -> f32:1073741824
+assert_return select-f32 f32:1073741824 f32:2139226884 i32:1 -> f32:1073741824
+assert_return select-f32 f32:1073741824 f32:2143289344 i32:0 -> f32:2143289344
+assert_return select-f32 f32:1073741824 f32:2139226884 i32:0 -> f32:2139226884
+assert_return select-f64 f64:9221120237041090560 f64:4607182418800017408 i32:1 -> f64:9221120237041090560
+assert_return select-f64 f64:9218868437227537156 f64:4607182418800017408 i32:1 -> f64:9218868437227537156
+assert_return select-f64 f64:9221120237041090560 f64:4607182418800017408 i32:0 -> f64:4607182418800017408
+assert_return select-f64 f64:9218868437227537156 f64:4607182418800017408 i32:0 -> f64:4607182418800017408
+assert_return select-f64 f64:4611686018427387904 f64:9221120237041090560 i32:1 -> f64:4611686018427387904
+assert_return select-f64 f64:4611686018427387904 f64:9218868437227537156 i32:1 -> f64:4611686018427387904
+assert_return select-f64 f64:4611686018427387904 f64:9221120237041090560 i32:0 -> f64:9221120237041090560
+assert_return select-f64 f64:4611686018427387904 f64:9218868437227537156 i32:0 -> f64:9218868437227537156
+assert_return select-i32-t i32:1 i32:2 i32:1 -> i32:1
+assert_return select-i64-t i64:2 i64:1 i32:1 -> i64:2
+assert_return select-f32-t f32:1065353216 f32:1073741824 i32:1 -> f32:1065353216
+assert_return select-f64-t f64:4607182418800017408 f64:4611686018427387904 i32:1 -> f64:4607182418800017408
+assert_return select-funcref i64:0 i64:0 i32:1 -> i64:0
+assert_return select-externref i64:9223372036854775810 i64:9223372036854775811 i32:1 -> i64:9223372036854775810
+assert_return select-i32-t i32:1 i32:2 i32:0 -> i32:2
+assert_return select-i32-t i32:2 i32:1 i32:0 -> i32:1
+assert_return select-i64-t i64:2 i64:1 i32:4294967295 -> i64:2
+assert_return select-i64-t i64:2 i64:1 i32:4042322160 -> i64:2
+assert_return select-externref i64:9223372036854775810 i64:9223372036854775811 i32:0 -> i64:9223372036854775811
+assert_return select-externref i64:9223372036854775811 i64:9223372036854775810 i32:0 -> i64:9223372036854775810
+assert_return select-f32-t f32:2143289344 f32:1065353216 i32:1 -> f32:2143289344
+assert_return select-f32-t f32:2139226884 f32:1065353216 i32:1 -> f32:2139226884
+assert_return select-f32-t f32:2143289344 f32:1065353216 i32:0 -> f32:1065353216
+assert_return select-f32-t f32:2139226884 f32:1065353216 i32:0 -> f32:1065353216
+assert_return select-f32-t f32:1073741824 f32:2143289344 i32:1 -> f32:1073741824
+assert_return select-f32-t f32:1073741824 f32:2139226884 i32:1 -> f32:1073741824
+assert_return select-f32-t f32:1073741824 f32:2143289344 i32:0 -> f32:2143289344
+assert_return select-f32-t f32:1073741824 f32:2139226884 i32:0 -> f32:2139226884
+assert_return select-f64-t f64:9221120237041090560 f64:4607182418800017408 i32:1 -> f64:9221120237041090560
+assert_return select-f64-t f64:9218868437227537156 f64:4607182418800017408 i32:1 -> f64:9218868437227537156
+assert_return select-f64-t f64:9221120237041090560 f64:4607182418800017408 i32:0 -> f64:4607182418800017408
+assert_return select-f64-t f64:9218868437227537156 f64:4607182418800017408 i32:0 -> f64:4607182418800017408
+assert_return select-f64-t f64:4611686018427387904 f64:9221120237041090560 i32:1 -> f64:4611686018427387904
+assert_return select-f64-t f64:4611686018427387904 f64:9218868437227537156 i32:1 -> f64:4611686018427387904
+assert_return select-f64-t f64:4611686018427387904 f64:9221120237041090560 i32:0 -> f64:9221120237041090560
+assert_return select-f64-t f64:4611686018427387904 f64:9218868437227537156 i32:0 -> f64:9218868437227537156
+assert_return as-select-first i32:0 -> i32:1
+assert_return as-select-first i32:1 -> i32:0
+assert_return as-select-mid i32:0 -> i32:2
+assert_return as-select-mid i32:1 -> i32:2
+assert_return as-select-last i32:0 -> i32:2
+assert_return as-select-last i32:1 -> i32:3
+assert_return as-loop-first i32:0 -> i32:3
+assert_return as-loop-first i32:1 -> i32:2
+assert_return as-loop-mid i32:0 -> i32:3
+assert_return as-loop-mid i32:1 -> i32:2
+assert_return as-loop-last i32:0 -> i32:3
+assert_return as-loop-last i32:1 -> i32:2
+assert_return as-if-condition i32:0 -> ()
+assert_return as-if-condition i32:1 -> ()
+assert_return as-if-then i32:0 -> i32:3
+assert_return as-if-then i32:1 -> i32:2
+assert_return as-if-else i32:0 -> i32:3
+assert_return as-if-else i32:1 -> i32:2
+assert_return as-br_if-first i32:0 -> i32:3
+assert_return as-br_if-first i32:1 -> i32:2
+assert_return as-br_if-last i32:0 -> i32:2
+assert_return as-br_if-last i32:1 -> i32:2
+assert_return as-br_table-first i32:0 -> i32:3
+assert_return as-br_table-first i32:1 -> i32:2
+assert_return as-br_table-last i32:0 -> i32:2
+assert_return as-br_table-last i32:1 -> i32:2
+assert_return as-call_indirect-first i32:0 -> i32:3
+assert_return as-call_indirect-first i32:1 -> i32:2
+assert_return as-call_indirect-mid i32:0 -> i32:1
+assert_return as-call_indirect-mid i32:1 -> i32:1
+assert_trap as-call_indirect-last i32:0
+assert_trap as-call_indirect-last i32:1
+assert_return as-store-first i32:0 -> ()
+assert_return as-store-first i32:1 -> ()
+assert_return as-store-last i32:0 -> ()
+assert_return as-store-last i32:1 -> ()
+assert_return as-memory.grow-value i32:0 -> i32:1
+assert_return as-memory.grow-value i32:1 -> i32:3
+assert_return as-call-value i32:0 -> i32:2
+assert_return as-call-value i32:1 -> i32:1
+assert_return as-return-value i32:0 -> i32:2
+assert_return as-return-value i32:1 -> i32:1
+assert_return as-drop-operand i32:0 -> ()
+assert_return as-drop-operand i32:1 -> ()
+assert_return as-br-value i32:0 -> i32:2
+assert_return as-br-value i32:1 -> i32:1
+assert_return as-local.set-value i32:0 -> i32:2
+assert_return as-local.set-value i32:1 -> i32:1
+assert_return as-local.tee-value i32:0 -> i32:2
+assert_return as-local.tee-value i32:1 -> i32:1
+assert_return as-global.set-value i32:0 -> i32:2
+assert_return as-global.set-value i32:1 -> i32:1
+assert_return as-load-operand i32:0 -> i32:1
+assert_return as-load-operand i32:1 -> i32:1
+assert_return as-unary-operand i32:0 -> i32:0
+assert_return as-unary-operand i32:1 -> i32:1
+assert_return as-binary-operand i32:0 -> i32:4
+assert_return as-binary-operand i32:1 -> i32:1
+assert_return as-test-operand i32:0 -> i32:0
+assert_return as-test-operand i32:1 -> i32:1
+assert_return as-compare-left i32:0 -> i32:0
+assert_return as-compare-left i32:1 -> i32:1
+assert_return as-compare-right i32:0 -> i32:0
+assert_return as-compare-right i32:1 -> i32:1
+assert_return as-convert-operand i32:0 -> i32:0
+assert_return as-convert-operand i32:1 -> i32:1
+assert_invalid select.1.wasm
+assert_invalid select.2.wasm
+assert_invalid select.3.wasm
+assert_invalid select.4.wasm
+assert_invalid select.5.wasm
+assert_invalid select.6.wasm
+assert_invalid select.7.wasm
+assert_invalid select.8.wasm
+assert_invalid select.9.wasm
+assert_invalid select.10.wasm
+assert_invalid select.11.wasm
+assert_invalid select.12.wasm
+assert_invalid select.13.wasm
+assert_invalid select.14.wasm
+assert_invalid select.15.wasm
+assert_invalid select.16.wasm
+assert_invalid select.17.wasm
+assert_invalid select.18.wasm
+assert_invalid select.19.wasm
+assert_invalid select.20.wasm
+assert_invalid select.21.wasm
+assert_invalid select.22.wasm
+assert_invalid select.23.wasm
+assert_invalid select.24.wasm
+assert_invalid select.25.wasm
+assert_invalid select.26.wasm
+assert_invalid select.27.wasm
+assert_invalid select.28.wasm
+module select.29.wasm

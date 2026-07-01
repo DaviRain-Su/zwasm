@@ -1,0 +1,179 @@
+# Skip-impl one-way ratchet history — ADR-0050 amend (D-3 / D-4).
+#
+# Append one row per chunk-close commit. `scripts/check_skip_impl_ratchet.sh`
+# (skeleton at this seed; completed in §9.12-A) reads this file at pre-push
+# time and FAILs the push if the current commit's skip-impl count is
+# strictly greater than the most recent committed row, unless an `exempt`
+# field cites an Accepted ADR.
+#
+# Schema (per row):
+#   commit:                  git SHA of the chunk-close commit (or "(baseline)")
+#   timestamp:               ISO-8601 (UTC)
+#   non_simd_skip_impl:      integer; `spec_assert_runner_non_simd` manifest skip-impl
+#   simd_skip_impl:          integer; `simd_assert_runner` manifest skip-impl
+#   total:                   non_simd_skip_impl + simd_skip_impl (manifest sum)
+#   runtime_debt_trackable:  integer; ADR-0078 class `debt-trackable` SKIP-* count
+#   runtime_adr_required:    integer; ADR-0078 class `ADR-required` SKIP-* count
+#   runtime_internal:        integer; ADR-0078 class `runner-internal` SKIP-* count
+#                            (informational; never gates)
+#   note:                    short human note (optional)
+#   exempt:                  ADR-NNNN slug if this row legitimately increases
+#                            the count (must reference an Accepted ADR)
+#
+# Gate semantics (per ADR-0078 / D-155 part 1):
+#   gated_total = total + runtime_debt_trackable + runtime_adr_required
+# Per-class runtime fields are missing on pre-D-155-part-1 rows; the script
+# defaults them to 0 for backward compat.
+#
+# Phase 9 completion master plan §7.3 + ADR-0050 (Amend; D-3 / D-4 pending
+# §9.12 collab Accept).
+
+entries:
+  - commit: "(baseline)"
+    timestamp: "2026-05-19T00:00:00Z"
+    non_simd_skip_impl: 193
+    simd_skip_impl: 50
+    total: 243
+    note: |
+      Seed baseline at §9.12-A enforcement layer landing. Live measurement
+      via `zig build test-spec-wasm-2.0-assert` and `zig build test-spec-simd`.
+      Breakdown captured in `private/notes/p9-close-skip-impl-inventory.md`:
+        - SKIP-CROSS-MODULE-IMPORTS: 100 modules + ~66 cascade
+        - SKIP-NO-LINK-TYPECHECK: 26
+        - SKIP-VALIDATOR-GAP (SIMD): 50
+        - exports/manifest.txt skip-impl: 1
+      Phase 9 completion exit criterion = drain this to 0 at §9.12-E (master plan
+      §5.3).
+    exempt: null
+
+  - commit: "0e353955"
+    timestamp: "2026-05-20T20:30:00Z"
+    non_simd_skip_impl: 193
+    simd_skip_impl: 0
+    total: 193
+    note: |
+      §9.12-E first measurement post-B134. SKIP-VALIDATOR-GAP (SIMD)
+      fully discharged (50 → 0) via B133 (lane-index range check) + B134
+      (alignment-immediate range check). `simd_assert_runner: 13351
+      passed, 0 failed, 0 skip-impl + 390 skip-adr`.
+      Remaining: SKIP-CROSS-MODULE-IMPORTS 100, SKIP-NO-LINK-TYPECHECK 26,
+      exports/manifest.txt 1, plus ~66 cascade.
+    exempt: null
+
+  - commit: "B137-pending"
+    timestamp: "2026-05-20T20:50:00Z"
+    non_simd_skip_impl: 192
+    simd_skip_impl: 0
+    total: 192
+    note: |
+      §9.12-E / B137 — manifest format extension + base runner support
+      for `get-action <field> <type> <value>` directive.
+      regen_spec_2_0_assert.sh now emits the directive instead of
+      `skip-impl non-invoke-action` for same-module `(get "field")`
+      actions; base runner recognizes the directive + nullable
+      `handle_get_action` callback. Non-SIMD callback stays null
+      pending D-152 (compileWasm empty-fn-path globals_offsets fix);
+      fallback emits SKIP-NON-INVOKE-ACTION → skipped_adr. Net:
+      `spec_assert_runner_non_simd: 25325 passed, 0 failed, 688
+      skipped (= 192 skip-impl + 496 skip-adr)`.
+    exempt: null
+
+  - commit: "close-plan §6 (e) — semantic shift baseline"
+    timestamp: "2026-05-21T00:00:00Z"
+    non_simd_skip_impl: 0
+    simd_skip_impl: 0
+    total: 0
+    note: |
+      AssertTally split: `skipped` → `manifest_skip_impl` (rename) +
+      new `runtime_skip` field (close-plan §6 (e), tracks C2). The
+      "skip-impl" counter now strictly counts manifest `skip-impl`
+      lines; the prior 192 was almost entirely runtime SKIP-*
+      events (SKIP-CROSS-MODULE-IMPORTS×100 + SKIP-NO-LINK-TYPECHECK
+      + cascades) which now flow to `runtime_skip` separately.
+      Output format extended to 3-counter shape:
+      `661 skipped (= 0 skip-impl + 192 runtime-skip + 469 skip-adr)`.
+      Forward ratchet semantics: only `manifest_skip_impl` is gated;
+      `runtime_skip` is reported but not ratcheted (its growth
+      reflects discovery of structural gaps, NOT a release-gate
+      regression). Pre-existing baseline entries above are
+      historical snapshots under the prior conflated semantics —
+      they are NOT re-extracted because we can't re-run those
+      commits.
+    exempt: null
+
+  - commit: "D-155 part 1 — per-class semantic shift"
+    timestamp: "2026-05-21T07:30:00Z"
+    non_simd_skip_impl: 0
+    simd_skip_impl: 0
+    total: 0
+    runtime_debt_trackable: 56
+    runtime_adr_required: 0
+    runtime_internal: 0
+    note: |
+      D-155 part 1 — `check_skip_impl_ratchet.sh` per-class semantic
+      shift per ADR-0078. The ratchet now classifies each runtime
+      `SKIP-<TOKEN>` log emission via ADR-0078's canonical taxonomy
+      table and gates on `debt-trackable + ADR-required` (only);
+      `runner-internal` counts are reported but never gate.
+      Initial snapshot from Mac aarch64 cached logs (/tmp/non-simd-
+      full.log, /tmp/p9-mac-simd.log):
+        SKIP-NO-LINK-TYPECHECK ×56 → `debt-trackable`
+      This is the only emitted token in the current corpus; matches
+      assert_unlinkable cases needing non-func import-type checking
+      (Track-D scope). The 56 count was previously visible only in
+      raw stderr (routed to `tally.skipped_adr` internally per
+      `spec_assert_runner_base.zig:3243`) — the per-class ratchet
+      now surfaces it explicitly.
+    exempt: ADR-0078
+
+  - commit: "D-457 systemic close — full SIMD spec corpus added"
+    timestamp: "2026-06-16T00:00:00Z"
+    non_simd_skip_impl: 0
+    simd_skip_impl: 271
+    total: 271
+    runtime_debt_trackable: 22
+    runtime_adr_required: 0
+    runtime_internal: 0
+    note: |
+      D-457 systemic close (commits 95b8eb99 / d9da5d7d). The
+      simd_assert corpus inclusion list (`regen_spec_simd_assert.sh`
+      NAMES) grew from 33 to all 59 upstream `simd_*.wast`; the 26
+      added files exposed whole op families that had never been
+      JIT-executed (demote/promote/rounding/narrow/i64x2.extmul — all
+      now wired + green, +688 passing assertions). The gated rise
+      (+237: manifest 0→271, debt 56→22) is NOT a regression:
+        - manifest 271 = the new fixtures' advanced assertion shapes
+          (v128-param marshal / multi-result) that the JIT runner's
+          entry-helper table doesn't cover yet — a runner-harness
+          coverage limit (ADR-0045 §9.9 runner scope), recorded
+          transparently rather than pre-filtered out at corpus-gen.
+          The prior baseline row (2026-05-21, total=0) predated the
+          SIMD corpus being counted, so this is the first real
+          snapshot, not solely this change.
+        - runtime_debt_trackable fell 56→22 (fewer runtime skips).
+        - SKIP-JIT-MULTI-MEMORY ×1 (new token, classified
+          debt-trackable; multi-memory-on-JIT = ROADMAP §14 deferral).
+      Including the full upstream corpus + transparent skips is the
+      direct remedy for the hard-coded-allowlist blind spot (lesson
+      `hardcoded-corpus-subset-hides-whole-op-families`).
+    exempt: ADR-0192
+
+  - commit: "D-458 local_init add — 2 SKIP-VALIDATOR-GAP surfaced (D-459)"
+    timestamp: "2026-06-16T01:00:00Z"
+    non_simd_skip_impl: 0
+    simd_skip_impl: 271
+    total: 271
+    runtime_debt_trackable: 24
+    runtime_adr_required: 0
+    runtime_internal: 0
+    note: |
+      +2 runtime_debt_trackable (22→24) from the D-458 local_init corpus add:
+      local_init.2.wasm (read non-defaultable `(ref extern)` local before set) +
+      local_init.4.wasm (set in `then`, read in `else`) are assert_invalid modules
+      the validator does NOT yet reject — Wasm 3.0 §3.3.1 local definite-assignment
+      is unimplemented. Emitted as SKIP-VALIDATOR-GAP (debt-trackable) rather than a
+      false PASS-as-valid. Tracked as D-459 (focused validator-dataflow bundle next
+      cycle); discharge flips these 2 back to assert_invalid PASS (skip → 0). The
+      rise is the corpus-completeness campaign (ADR-0192) surfacing a real gap — the
+      same transparent-skip-over-silent-omission posture as the SIMD/2.0 corpus adds.
+    exempt: ADR-0192

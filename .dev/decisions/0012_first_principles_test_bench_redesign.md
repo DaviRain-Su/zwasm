@@ -1,0 +1,361 @@
+# 0012 — Adopt tier-provisioned hybrid architecture for the test/bench suite
+
+- **Status**: Closed (Phase 6 DONE)
+- **Date**: 2026-05-03
+- **Author**: continue loop
+- **Tags**: phase-6, test-suite, bench-suite, infrastructure,
+  follows-adr-0011
+
+## Context
+
+ADR-0011 reopened Phase 6 and deferred the v1-asset triage
+methodology to a separate decision. This ADR is that decision.
+
+A v1 audit surfaced two facts that drive the design:
+
+1. **v2 has no runtime-asserting runner.** All four current
+   runners do parse + (optionally) validate + (optionally)
+   instantiate, but none execute `assert_return` /
+   `assert_trap`. This is the literal blocker for the §9.6 /
+   6.2 strict close (see §6.J below — Phase 6 requires 100%
+   PASS, with the only permitted exceptions being v1-era
+   design-dependent fixtures that v2 deliberately rejects on
+   spec-fidelity grounds, each documented in a per-fixture
+   ADR-defer note).
+2. **v1 was 80% planned, 20% ad-hoc.**
+   - Re-derive: spec submodule + auto-bump, by-origin BATCH
+     classification, in-repo realworld source, `gate-commit.sh`
+     unified entry, `flake.nix` + `versions.lock` pinning.
+   - Rebuild from first principles: `bench/wasm/` mixed-origin
+     flat dir, source-less binaries (`tgo_*`, `gc_*`),
+     prefix-as-pseudo-hierarchy, fuzz seed missing,
+     `bench/history.yaml` per-commit accretion.
+
+User requirements from dialogue:
+
+- (1) v2's current 4-runner / 4-dir layout is not a constraint.
+- (2) Public suites must be reproducible by any contributor /
+  CI; origin-based separation acceptable; aggregated entry
+  point must be visible at a glance; per-origin individual
+  execution desired.
+- (3) Tool / platform setup hurdles must stay low; idiosyncratic
+  preparation steps avoided.
+
+## Decision
+
+### 1. Information sources — upstream-tracked + in-repo source
+
+- `test/spec/testsuite/` — git submodule of `WebAssembly/testsuite`,
+  auto-update via v2-side workflow (re-derived from v1
+  `spec-bump.yml`). Replaces v2's current vendored `test/spec/{smoke,
+  wasm-1.0,wasm-2.0}/`.
+- `test/spec/legacy/` — fixtures lifted from v2's existing
+  `v1_carry_over/` that overlap spec testsuite (verified by content
+  comparison during 6.B), kept stable across submodule bumps.
+- `test/wasmtime_misc/wast/` — sparse-clone of
+  `bytecodealliance/wasmtime/tests/misc_testsuite/` to
+  `.cache/wasmtime_misc/`, pinned in `versions.lock`.
+- `test/realworld/{c,cpp,go,rust,tinygo}/` — sources in repo,
+  binaries built on demand by `scripts/build_realworld.sh` and
+  also committed to `test/realworld/wasm/` for binary-only
+  consumers.
+- `bench/{wat,sightglass,custom}/` — sources in repo. **No
+  source-less binaries.**
+- Generated artifacts (wast2json output, fuzz corpora) not
+  committed.
+- Every fixture must be regeneratable via a single
+  `scripts/regen_<asset>.sh` invocation.
+
+### 2. Tool dependencies — three-tier model
+
+| Tier | Tools | Required when | Build-flag opt-in |
+|---|---|---|---|
+| **Enforce** | zig 0.16.0, wabt, python3 | Always | (no flag) |
+| **Conditional** | wasmtime, cargo+rustup, go, tinygo, wasi-sdk | Realworld rebuild OR `test-realworld-diff` | `-Dwith-realworld-rebuild=false` (default), `-Dwith-realworld-diff=false` (default); set `true` ⇒ tools required, fail-fast at build |
+| **Optional** | hyperfine, bun, node | `bench-quick` / cross-runtime comparison | `-Dwith-bench-compare=false` (default); set `true` ⇒ tools required |
+
+`zig build test-all` is sized to run green with only the Enforce
+tier installed.
+
+- **Three-host gate**: Enforce tier on all three (Mac aarch64
+  + OrbStack Ubuntu + windowsmini SSH); bench steps Mac-only.
+- **`versions.lock`**: human-readable pin cross-referenced by
+  `flake.nix` and `install_tools.ps1`; `sync_versions.sh`
+  enforces agreement with `flake.lock`.
+- **Offline / restricted-network CI**: `setup_corpora.sh`
+  (introduced by 6.C) wraps submodule + sparse-checkout into
+  one command, caches under `.cache/`, supports `--offline`.
+
+### 3. Directory layout — by-origin primary
+
+```
+test/
+├── runners/                    cross-origin runners
+│   └── wast_runtime_runner.zig (added in 6.A)
+├── spec/                       upstream: WebAssembly/testsuite
+│   ├── testsuite/              git submodule
+│   ├── manifests/
+│   ├── legacy/                 stable subset from v2 v1_carry_over
+│   └── runner.zig              (kept as-is)
+├── wasmtime_misc/              upstream: wasmtime/tests/misc_testsuite
+│   ├── wast/{basic,reftypes,embenchen,issues,simd,proposals}/
+│   └── manifests/
+├── realworld/                  in-repo source + committed binaries
+│   ├── {c,cpp,go,rust,tinygo}/ sources
+│   ├── wasm/                   binaries
+│   └── {runner,run_runner,diff_runner}.zig  (kept as-is)
+├── c_api/                      in-repo
+├── wasi/                       in-repo (runner.zig kept as-is)
+├── fuzz/                       generated; deterministic seed registry
+└── threads/                    Phase 9+ placeholder
+```
+
+```
+bench/
+├── wat/                        v2-authored
+├── sightglass/                 upstream: Bytecode Alliance sightglass
+├── embenchen/                  Phase 11+ placeholder
+├── custom/                     v2-authored Zig + WAT
+├── runners/                    run_bench.sh + compare_runtimes.sh (Phase 7+ placeholder)
+├── results/
+│   ├── recent.yaml             rolling per-commit (gitignored)
+│   └── history.yaml            phase-boundary append-only (committed)
+└── README.md
+```
+
+**Runner placement rule**: origin-agnostic runners → `test/runners/`;
+origin-specific runners stay in their origin directory. Existing
+v2 runners are origin-specific and stay where they are.
+
+### 4. File naming — directory hierarchy replaces prefix
+
+v1's `tgo_*.wasm`, `shootout-*.wasm`, `gc_*.wasm`,
+`BATCH3_embenchen_*.wast` prefix-as-pseudo-hierarchy is rejected.
+Origin lives in directory paths; filenames carry only fixture-
+local identity.
+
+```
+v1 (rejected):    bench/wasm/tgo_fib.wasm
+v2 (this ADR):    bench/tinygo/wasm/fib.wasm
+
+v1 (rejected):    test/e2e/wast/embenchen_fannkuch.wast
+v2 (this ADR):    test/wasmtime_misc/wast/embenchen/fannkuch.wast
+```
+
+### 5. Entry points — `zig build` aggregation
+
+```
+zig build test-all                    aggregate (Enforce tier only)
+├── test                              src/ unit tests
+├── test-spec                         test/spec/
+├── test-wasmtime-misc                test/wasmtime_misc/
+├── test-realworld                    parse smoke
+├── test-realworld-run                end-to-end
+├── test-realworld-diff               (Conditional tier — wasmtime)
+├── test-c-api
+└── test-wasi
+
+zig build test-fuzz                   Phase 7+ placeholder; NOT in test-all
+zig build bench-quick                 (Optional tier — hyperfine)
+zig build bench-full                  Phase 7+; cross-runtime comparison
+zig build lint                        zlinter (Mac-only, ADR-0009)
+```
+
+Each step is individually invocable (`zig build test-spec
+--filter add`), composes via `dependOn`, respects build flags.
+
+`scripts/{gate_commit.sh, gate_merge.sh}` stay as **hook
+plumbing only** — invoke `zig build` steps + three-host
+orchestration, no embedded test logic.
+
+### 6. Phase 6 reopen work items
+
+```
+6.A (runtime-asserting runner + per-instr trace)
+ │
+ ├─→ 6.B (test/ restructure + 4 fixtures migration)
+ │    │
+ │    └─→ 6.C (vendor wasmtime_misc BATCH1-3 ≈ 55 fixtures)
+ │         │
+ │         └─→ 6.D (wire 6.C into test-all via 6.A runner)
+ │              │
+ │              └─→ 6.E (interp behaviour bug fixes)
+ │                   │
+ │                   └─→ 6.K (redesign + refactoring sweep, ADR-0014)
+ │                        │
+ │                        ├─→ 6.F (test-realworld-diff 30+ matches)  ─┐
+ │                        ├─→ 6.G (ClojureWasm guest e2e)              ├─→ 6.J
+ │                        └─→ 6.H (bench honest baseline)              │
+ │                                                                     │
+ └─→ 6.I (bench/ restructure + sightglass)  ───────────────────────────┘
+       (parallel to 6.E〜6.H + 6.K)
+```
+
+(6.K appended by ADR-0014 §18 amendment; six sub-items
+6.K.1〜6.K.6 detailed in ADR-0014 §2.1.)
+
+| # | Action |
+|---|---|
+| **6.A** | Add `test/runners/wast_runtime_runner.zig`. v1 `e2e_runner.zig` (844 LOC) is textbook reference; re-derived for v2 Zone shape. Capability scope: assert_return / assert_trap / assert_invalid / assert_malformed / assert_unlinkable / assert_uninstantiable / assert_exhaustion / register / action / module + cross-module Store sharing + per-instr execution trace. Thread block + NaN canonical / arithmetic asserts deferred. |
+| **6.B** | Restructure `test/` per §3. Migrate 4 `v1_carry_over/` fixtures: `add` and `f64-copysign` → `test/spec/legacy/` if spec-overlapping (verify by content), else → `test/wasmtime_misc/wast/basic/`; `div-rem` and `empty` → `test/wasmtime_misc/wast/basic/`. Add `test/spec/legacy/` to layout. Update `scripts/gate_merge.sh` and ROADMAP §A13 (load-bearing edit citing this ADR). |
+| **6.C** | Vendor wasmtime_misc BATCH1-3 (≈55 fixtures: basic + reftypes + embenchen + issues) into `test/wasmtime_misc/wast/{basic,reftypes,embenchen,issues}/`. BATCH4 (SIMD), BATCH5 (proposals) defer to feature phases. Introduce `scripts/setup_corpora.sh`. |
+| **6.D** | Wire 6.C corpus into `test-wasmtime-misc` step + `test-all` aggregate via 6.A runner. Existing parse-only / instantiate-only runners kept as-is (the runtime-asserting runner is **added**, not a replacement). |
+| **6.E** | Fix root cause of the 39 trap-mid-execution realworld fixtures using 6.A's per-instr trace. Move fixtures from trap-bucket to completion-bucket. Sequenced after 6.A + 6.D. |
+| **6.F** | `test-realworld-diff` 30+ byte-for-byte matches against wasmtime (original §9.6 / 6.2). Re-add `test-realworld-diff` to `test-all`. Sequenced after 6.E. |
+| **6.G** | ClojureWasm guest end-to-end via `build.zig.zon` `path = ...` (original §9.6 / 6.3). Parallel with 6.F after 6.E. |
+| **6.H** | Bench honest-baseline migration: introduce `bench/results/{recent,history}.yaml` per §7; move existing `bench/baseline_v1_regression.yaml` content to `history.yaml` as "Phase 6 reopen revert" entry, delete old file; regenerate honest baseline post-6.E and append as "Phase 6 close baseline" entry. Sequenced after 6.E. |
+| **6.I** | `bench/` restructure per §3; vendor 5 sightglass benchmarks with in-repo C source + documented build script. Reject v1's TinyGo binary-only and gc_* source-less artifacts. Parallel with 6.E〜6.H. |
+| **6.J** | Phase 6 close gate (**strict close — 100% PASS**): (i) `zig build test-all` green three hosts AND every aggregated runner reports 0 failed (no soft-skip, no "honest close" with non-empty FAIL bucket); (ii) `zig build bench-quick` green Mac-only; (iii) `audit_scaffolding` pass; (iv) Phase Status widget flip 6 → DONE / 7 → IN-PROGRESS (no renumber per ADR-0014); (v) handover retarget §9.7 / 7.0 (= JIT v1 ARM64 baseline, unchanged). The **only permitted exception** to (i) is a v1-era design-dependent fixture that v2 deliberately rejects on spec-fidelity grounds (P1) — each such fixture must be (a) documented in a per-fixture ADR-defer note (`.dev/decisions/skip_<fixture>.md`) explaining what v1 did, what current spec requires, and why v2 declines to implement; (b) physically removed from the active manifest_runtime.txt or marked `# DEFER:` so it is excluded from the runner's tally; the resulting 0 failed count is genuine, not a tolerated nonzero. **Cannot fire until every 6.K row is `[x]` per ADR-0014.** |
+| **6.K** | Redesign + refactoring sweep before Phase 7 (ADR-0014). Six sub-items: 6.K.1 `Value.ref` → `*FuncEntity`; 6.K.2 single-allocator Runtime + Instance back-ref; 6.K.3 cross-module imports table/global/func; 6.K.4 `decodeElement` forms 5/6/7; 6.K.5 Label arity formalisation + §14 anti-pattern entry; 6.K.6 partial-init-table re-measure. Per-row scope/acceptance/DAG in ADR-0014 §2.1. Sequenced after 6.E. |
+
+**Out of Phase-6 scope**:
+
+| Item | Defer to |
+|---|---|
+| BATCH4 SIMD wast | Phase 9 |
+| BATCH5 proposal wast (function-ref / GC / threads / memory64 / tail-call) | Phase 10 |
+| `test/threads/rust-atomic/` | Phase 9+ |
+| `test/fuzz/` deterministic-seed integration | Phase 7 Step 0 |
+| Embenchen full perf suite | Phase 11 |
+| `test/c_api/` conformance expansion | Phase 13 |
+| Cross-runtime bench comparison | Phase 7+ |
+
+### 7. Bench history accretion suppression
+
+- `bench/results/recent.yaml` — gitignored, rolling per-commit.
+- `bench/results/history.yaml` — committed, appended **only at
+  Phase boundaries**; ROADMAP §9 Phase Status widget references
+  entries by phase number.
+- `run_bench.sh` writes `recent.yaml` by default; `--phase-record`
+  flag writes `history.yaml`. New `record_phase_bench.sh` wraps
+  the flag with phase-tag metadata.
+- `.gitignore` updated for `bench/results/recent.yaml`.
+
+**Migration of existing v2 bench files in 6.H**:
+
+| File | Action |
+|---|---|
+| `bench/baseline_v1_regression.yaml` | Content → `history.yaml` "Phase 6 reopen revert" entry; file deleted |
+| `bench/history.yaml` | Existing entries → `bench/results/history.yaml`; old file deleted |
+
+## Alternatives considered
+
+- **Source-First Monorepo**: snapshot all upstream into v2.
+  Rejected: forfeits upstream tracking automation; repo size
+  grows; spec drift becomes invisible.
+- **Mode-First Layout** (`test/{parse,validate,instantiate,
+  runtime}/`): rejected — same fixture runs in multiple modes,
+  forces symlink / duplication / manifest-layer complexity.
+- **Spec-Bench Bipolar** (separate `test/` and `bench/`
+  worlds): rejected — splits the unified entry point requirement
+  (2) asks for; degraded variant of this ADR.
+- **Defer restructure to Phase 11**: rejected — restructure-
+  then-vendor is cheaper than vendor-then-restructure.
+
+## Consequences
+
+### Positive
+- Requirements (1)(2)(3) all satisfied (zero-base, by-origin +
+  aggregated entry, low-tier-1-hurdle).
+- v1's bench/wasm mixing, prefix-as-hierarchy, source-less
+  binaries, and ad-hoc bench history dissolve structurally.
+- The runtime-asserting runner gap (keystone blocker for §9.6 /
+  6.2 strict close) is named as the first action.
+
+### Negative
+- Phase 6 reopen has 10 explicit work items; 6.E and 6.F carry
+  genuine investigative uncertainty.
+- `versions.lock` and `setup_corpora.sh` are new infrastructure.
+- `test/v1_carry_over/` directory is dissolved; downstream
+  references (build.zig, gate_merge.sh, ROADMAP §A13, handover)
+  need updating in 6.B.
+
+### Neutral / follow-ups
+- **ADR-0013 (blocking prerequisite for 6.A)** — runtime-
+  asserting WAST runner detailed design. Drafted when 6.A is
+  active.
+- **ADR-0014** — redesign + refactoring sweep before Phase 7
+  (now Accepted, content replaced from the original placeholder
+  bench-infra slot). Adds §9.6 / 6.K with six sub-items. The
+  bench-infra wiring this slot originally held (sightglass
+  vendoring, fixture-selection criteria, parallel to 6.I) is no
+  longer pre-allocated; if 6.I surfaces a load-bearing decision,
+  file a fresh ADR at that moment under the next free number.
+- `versions.lock` introduction inline in 6.B unless it
+  surfaces a load-bearing decision (then file an ADR at the
+  next free number at the moment of decision).
+- `audit_scaffolding` runs after 6.B and after 6.J.
+- `/continue` autonomous loop re-arms once 6.A is the active
+  task in handover.
+
+## References
+
+- ROADMAP §9.6 (Phase 6, reopened by ADR-0011, scope defined here)
+- ROADMAP §A13 (v1 regression suite merge gate — needs rewording per 6.B)
+- ROADMAP §4.6 (build flag policy — extended by §2 tier flags)
+- ROADMAP §A12 (no pervasive build-time `if` — bench tier-3 conditional skip aligns)
+- ROADMAP §18 (amendment policy — this ADR is §18.2 precondition for 6.B's ROADMAP edit)
+- ADR-0008 (Phase 6 charter — operationalised here)
+- ADR-0011 (Phase 6 reopen — this ADR is its Decision §6 follow-up)
+- ADR-0013 (forthcoming — runtime-asserting WAST runner design)
+- ADR-0014 (Accepted — redesign + refactoring sweep before
+  Phase 7; content replaces the original placeholder bench-
+  infra wiring this slot held when ADR-0012 was drafted)
+- `.claude/rules/no_copy_from_v1.md` (re-derivation discipline for 6.A)
+- `.claude/rules/textbook_survey.md` (Step 0 Survey for each 6.x)
+
+## Amendment log
+
+- **2026-05-03 (commit a9d2b34, user-authorised in-place edit)**:
+  §6.J close criterion tightened from "honest close" (implicit
+  explicit-defer escape hatch) to **strict 100% PASS**. The only
+  permitted exception is a v1-era design-dependent fixture that v2
+  deliberately rejects on spec-fidelity grounds (P1); each must be
+  documented in `.dev/decisions/skip_<fixture>.md` AND removed from
+  the active manifest_runtime.txt or `# DEFER:`-marked, so the
+  runner's reported 0 failed is genuinely empty. ADR-0011 / 0014
+  + ROADMAP §9.6 / 6.J + handover.md updated in the same commit.
+  ADR scope, DAG, and work-item shape otherwise unchanged. The
+  user explicitly took responsibility for the direct edit (no
+  per-edit ADR) to avoid "ADR-of-an-ADR" recursion atop ADR-0011's
+  reopen + this ADR's breakdown + ADR-0014's wiring.
+
+- **2026-05-11 (`3d0e8a7c`, post-audit honest record)**: per
+  the 2026-05-11 ADR audit (`private/20250511_adr_audit/SUMMARY.md`
+  §2.3 / batch_A `## ADR-0012_first_principles_test_bench_redesign`),
+  this ADR's §6 work items closed strict at Phase 6 boundary
+  (commit `b569b8f` → `0825794`) but several **§1–§3
+  infrastructure promises remain unimplemented**. Specifically:
+
+  - §1 / §3 "spec testsuite" — no `test/spec/testsuite/` git
+    submodule; no `test/spec/legacy/` directory.
+  - §2 tier-provisioning — no `versions.lock`; no
+    `setup_corpora.sh`; no `install_tools.ps1`; no
+    `-Dwith-realworld-rebuild` / `-Dwith-realworld-diff` /
+    `-Dwith-bench-compare` build flags.
+  - §3 / §7 — no `bench/wat/` / `bench/custom/` /
+    `bench/embenchen/`; no `build_realworld.sh`; no
+    `record_phase_bench.sh`.
+  - §1 self-promise: "`versions.lock` introduced in 6.B
+    inline" — 6.B closed at `1ba505d` without `versions.lock`
+    landing.
+
+  Effect on Phase 6 close: none operationally — the §6.J strict
+  100% PASS gate fired against `test-all`'s actually-aggregated
+  runners (`test-spec`, `test-spec-wasm-2.0`, `test-realworld`,
+  `test-realworld-run`, `test-realworld-diff`, `test-c-api`,
+  `test-wasi-p1`, `test-wasmtime-misc-basic`). The unimplemented
+  pieces are tier-provisioning automation that was planned but
+  never blocked the Phase 6 close gate.
+
+  Re-targeting: rather than supersede this ADR, the residual
+  scope is filed as **D-074** with the structural barrier
+  named ("no Phase row currently scheduled for the tier-
+  provisioning machinery"). Likely Phase 11 (WASI 0.1 full +
+  bench infra) carries the bench-side rebuild; the spec-
+  submodule + versions.lock + install_tools.ps1 work fits
+  the same Phase or a dedicated infra row.
+
+  Status remains `Accepted` because the §6 work items closed
+  per design; the ADR is **honest about its §1–§3 follow-ups
+  not landing** rather than implying full completion.

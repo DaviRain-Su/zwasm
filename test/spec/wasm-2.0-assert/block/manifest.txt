@@ -1,0 +1,223 @@
+module block.0.wasm
+assert_return empty () -> ()
+assert_return singular () -> i32:7
+assert_return multi () -> i32:8
+assert_return nested () -> i32:9
+assert_return deep () -> i32:150
+assert_return as-select-first () -> i32:1
+assert_return as-select-mid () -> i32:2
+assert_return as-select-last () -> i32:2
+assert_return as-loop-first () -> i32:1
+assert_return as-loop-mid () -> i32:1
+assert_return as-loop-last () -> i32:1
+assert_return as-if-condition () -> ()
+assert_return as-if-then () -> i32:1
+assert_return as-if-else () -> i32:2
+assert_return as-br_if-first () -> i32:1
+assert_return as-br_if-last () -> i32:2
+assert_return as-br_table-first () -> i32:1
+assert_return as-br_table-last () -> i32:2
+assert_return as-call_indirect-first () -> i32:1
+assert_return as-call_indirect-mid () -> i32:2
+assert_return as-call_indirect-last () -> i32:1
+assert_return as-store-first () -> ()
+assert_return as-store-last () -> ()
+assert_return as-memory.grow-value () -> i32:1
+assert_return as-call-value () -> i32:1
+assert_return as-return-value () -> i32:1
+assert_return as-drop-operand () -> ()
+assert_return as-br-value () -> i32:1
+assert_return as-local.set-value () -> i32:1
+assert_return as-local.tee-value () -> i32:1
+assert_return as-global.set-value () -> i32:1
+assert_return as-load-operand () -> i32:1
+assert_return as-unary-operand () -> i32:0
+assert_return as-binary-operand () -> i32:12
+assert_return as-test-operand () -> i32:0
+assert_return as-compare-operand () -> i32:0
+assert_return as-binary-operands () -> i32:12
+assert_return as-compare-operands () -> i32:0
+assert_return as-mixed-operands () -> i32:27
+assert_return break-bare () -> i32:19
+assert_return break-value () -> i32:18
+assert_return break-multi-value () -> i32:18 i32:4294967278 i64:18
+assert_return break-repeated () -> i32:18
+assert_return break-inner () -> i32:15
+assert_return param () -> i32:3
+assert_return params () -> i32:3
+assert_return params-id () -> i32:3
+assert_return param-break () -> i32:3
+assert_return params-break () -> i32:3
+assert_return params-id-break () -> i32:3
+assert_return effects () -> i32:1
+assert_return type-use () -> ()
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+assert_invalid block.12.wasm
+assert_invalid block.13.wasm
+assert_invalid block.14.wasm
+assert_invalid block.15.wasm
+assert_invalid block.16.wasm
+assert_invalid block.17.wasm
+assert_invalid block.18.wasm
+assert_invalid block.19.wasm
+assert_invalid block.20.wasm
+assert_invalid block.21.wasm
+assert_invalid block.22.wasm
+assert_invalid block.23.wasm
+assert_invalid block.24.wasm
+assert_invalid block.25.wasm
+assert_invalid block.26.wasm
+assert_invalid block.27.wasm
+assert_invalid block.28.wasm
+assert_invalid block.29.wasm
+assert_invalid block.30.wasm
+assert_invalid block.31.wasm
+assert_invalid block.32.wasm
+assert_invalid block.33.wasm
+assert_invalid block.34.wasm
+assert_invalid block.35.wasm
+assert_invalid block.36.wasm
+assert_invalid block.37.wasm
+assert_invalid block.38.wasm
+assert_invalid block.39.wasm
+assert_invalid block.40.wasm
+assert_invalid block.41.wasm
+assert_invalid block.42.wasm
+assert_invalid block.43.wasm
+assert_invalid block.44.wasm
+assert_invalid block.45.wasm
+assert_invalid block.46.wasm
+assert_invalid block.47.wasm
+assert_invalid block.48.wasm
+assert_invalid block.49.wasm
+assert_invalid block.50.wasm
+assert_invalid block.51.wasm
+assert_invalid block.52.wasm
+assert_invalid block.53.wasm
+assert_invalid block.54.wasm
+assert_invalid block.55.wasm
+assert_invalid block.56.wasm
+assert_invalid block.57.wasm
+assert_invalid block.58.wasm
+assert_invalid block.59.wasm
+assert_invalid block.60.wasm
+assert_invalid block.61.wasm
+assert_invalid block.62.wasm
+assert_invalid block.63.wasm
+assert_invalid block.64.wasm
+assert_invalid block.65.wasm
+assert_invalid block.66.wasm
+assert_invalid block.67.wasm
+assert_invalid block.68.wasm
+assert_invalid block.69.wasm
+assert_invalid block.70.wasm
+assert_invalid block.71.wasm
+assert_invalid block.72.wasm
+assert_invalid block.73.wasm
+assert_invalid block.74.wasm
+assert_invalid block.75.wasm
+assert_invalid block.76.wasm
+assert_invalid block.77.wasm
+assert_invalid block.78.wasm
+assert_invalid block.79.wasm
+assert_invalid block.80.wasm
+assert_invalid block.81.wasm
+assert_invalid block.82.wasm
+assert_invalid block.83.wasm
+assert_invalid block.84.wasm
+assert_invalid block.85.wasm
+assert_invalid block.86.wasm
+assert_invalid block.87.wasm
+assert_invalid block.88.wasm
+assert_invalid block.89.wasm
+assert_invalid block.90.wasm
+assert_invalid block.91.wasm
+assert_invalid block.92.wasm
+assert_invalid block.93.wasm
+assert_invalid block.94.wasm
+assert_invalid block.95.wasm
+assert_invalid block.96.wasm
+assert_invalid block.97.wasm
+assert_invalid block.98.wasm
+assert_invalid block.99.wasm
+assert_invalid block.100.wasm
+assert_invalid block.101.wasm
+assert_invalid block.102.wasm
+assert_invalid block.103.wasm
+assert_invalid block.104.wasm
+assert_invalid block.105.wasm
+assert_invalid block.106.wasm
+assert_invalid block.107.wasm
+assert_invalid block.108.wasm
+assert_invalid block.109.wasm
+assert_invalid block.110.wasm
+assert_invalid block.111.wasm
+assert_invalid block.112.wasm
+assert_invalid block.113.wasm
+assert_invalid block.114.wasm
+assert_invalid block.115.wasm
+assert_invalid block.116.wasm
+assert_invalid block.117.wasm
+assert_invalid block.118.wasm
+assert_invalid block.119.wasm
+assert_invalid block.120.wasm
+assert_invalid block.121.wasm
+assert_invalid block.122.wasm
+assert_invalid block.123.wasm
+assert_invalid block.124.wasm
+assert_invalid block.125.wasm
+assert_invalid block.126.wasm
+assert_invalid block.127.wasm
+assert_invalid block.128.wasm
+assert_invalid block.129.wasm
+assert_invalid block.130.wasm
+assert_invalid block.131.wasm
+assert_invalid block.132.wasm
+assert_invalid block.133.wasm
+assert_invalid block.134.wasm
+assert_invalid block.135.wasm
+assert_invalid block.136.wasm
+assert_invalid block.137.wasm
+assert_invalid block.138.wasm
+assert_invalid block.139.wasm
+assert_invalid block.140.wasm
+assert_invalid block.141.wasm
+assert_invalid block.142.wasm
+assert_invalid block.143.wasm
+assert_invalid block.144.wasm
+assert_invalid block.145.wasm
+assert_invalid block.146.wasm
+assert_invalid block.147.wasm
+assert_invalid block.148.wasm
+assert_invalid block.149.wasm
+assert_invalid block.150.wasm
+assert_invalid block.151.wasm
+assert_invalid block.152.wasm
+assert_invalid block.153.wasm
+assert_invalid block.154.wasm
+assert_invalid block.155.wasm
+assert_invalid block.156.wasm
+assert_invalid block.157.wasm
+assert_invalid block.158.wasm
+assert_invalid block.159.wasm
+assert_invalid block.160.wasm
+assert_invalid block.161.wasm
+assert_invalid block.162.wasm
+assert_invalid block.163.wasm
+assert_invalid block.164.wasm
+assert_invalid block.165.wasm
+assert_invalid block.166.wasm
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text

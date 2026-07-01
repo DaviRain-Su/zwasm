@@ -1,0 +1,47 @@
+module return_call.0.wasm
+assert_return type-i32 () -> i32:306
+assert_return type-i64 () -> i64:356
+assert_return type-f32 () -> f32:1165172736
+assert_return type-f64 () -> f64:4660882566700597248
+assert_return type-first-i32 () -> i32:32
+assert_return type-first-i64 () -> i64:64
+assert_return type-first-f32 () -> f32:1068037571
+assert_return type-first-f64 () -> f64:4610064722561534525
+assert_return type-second-i32 () -> i32:32
+assert_return type-second-i64 () -> i64:64
+assert_return type-second-f32 () -> f32:1107296256
+assert_return type-second-f64 () -> f64:4634211053438658150
+assert_return fac-acc i64:0 i64:1 -> i64:1
+assert_return fac-acc i64:1 i64:1 -> i64:1
+assert_return fac-acc i64:5 i64:1 -> i64:120
+assert_return fac-acc i64:25 i64:1 -> i64:7034535277573963776
+assert_return count i64:0 -> i64:0
+assert_return count i64:1000 -> i64:0
+assert_return count i64:1000000 -> i64:0
+assert_return even i64:0 -> i32:44
+assert_return even i64:1 -> i32:99
+assert_return even i64:100 -> i32:44
+assert_return even i64:77 -> i32:99
+assert_return even i64:1000000 -> i32:44
+assert_return even i64:1000001 -> i32:99
+assert_return odd i64:0 -> i32:99
+assert_return odd i64:1 -> i32:44
+assert_return odd i64:200 -> i32:99
+assert_return odd i64:77 -> i32:44
+assert_return odd i64:1000000 -> i32:99
+assert_return odd i64:999999 -> i32:44
+assert_return tailprint_i32_f32 i32:5 f32:1119223808 -> ()
+assert_return type-f64-i64-to-i32-f32 f64:4616414798036126925 i64:99 -> i32:99 f32:1082549862
+assert_invalid return_call.1.wasm
+assert_invalid return_call.2.wasm
+assert_invalid return_call.3.wasm
+assert_invalid return_call.4.wasm
+module return_call.5.wasm
+module return_call.6.wasm
+assert_invalid return_call.7.wasm
+assert_invalid return_call.8.wasm
+assert_invalid return_call.9.wasm
+assert_invalid return_call.10.wasm
+assert_invalid return_call.11.wasm
+assert_invalid return_call.12.wasm
+assert_invalid return_call.13.wasm

@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# .githooks/pre-push
+#
+# Activated by:
+#   git config core.hooksPath .githooks
+#
+# Per ADR-0076 D4: pre-push runs ONLY the chunk-close ratchets, NOT
+# the commit gate again. Rationale: every staged commit has already
+# passed the pre-commit hook (--fast static checks); the loop's
+# Step 5 (test) + Step 4 (lint) ran before commit. Re-running the
+# commit gate at push time was pure duplication that added ~30 s
+# to every push without catching anything pre-commit didn't.
+#
+# Four cheap audit gates — all run on every push, all <1s when
+# they have nothing to do:
+# - subrow_exit only fires when HEAD contains a §9.12-X `[x]` flip;
+# - skip_impl_ratchet uses cached test logs (or warns if absent);
+# - check_skip_taxonomy validates SKIP-* emissions vs ADR-0078 table
+#   (catches new tokens landing without classification);
+# - check_skip_taxonomy_pairing validates Paired-artifact resolution
+#   (catches missing ADR file refs).
+#
+# The full 3-host merge gate (Mac + ubuntunote + windowsmini
+# test-all) lives in `scripts/gate_merge.sh` and is invoked
+# **manually** for `main` pushes (A13 merge gate). Per-push to
+# `zwasm-from-scratch` does NOT run the merge gate — per-chunk
+# Mac + ubuntunote (background, ADR-0076 D3) is the autonomous
+# discipline.
+#
+# Skipping the hook with `git push --no-verify` is forbidden by
+# ROADMAP §14.
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+if [ -x scripts/check_subrow_exit.sh ]; then
+    echo "[pre-push] check_subrow_exit --gate ..."
+    bash scripts/check_subrow_exit.sh --gate
+fi
+
+if [ -x scripts/check_skip_impl_ratchet.sh ]; then
+    echo "[pre-push] check_skip_impl_ratchet --gate ..."
+    bash scripts/check_skip_impl_ratchet.sh --gate
+fi
+
+if [ -x scripts/check_skip_taxonomy.sh ]; then
+    echo "[pre-push] check_skip_taxonomy --gate ..."
+    bash scripts/check_skip_taxonomy.sh --gate
+fi
+
+if [ -x scripts/check_skip_taxonomy_pairing.sh ]; then
+    echo "[pre-push] check_skip_taxonomy_pairing --gate ..."
+    bash scripts/check_skip_taxonomy_pairing.sh --gate
+fi

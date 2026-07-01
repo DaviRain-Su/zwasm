@@ -1,275 +1,224 @@
-> [!IMPORTANT]
-> **The v2 from-scratch reimplementation is nearly complete.** You can try it from the `v2.x.x` tags, though some instability and unimplemented items are still expected. Because development resources are limited, we are **pausing acceptance of Issues and Pull Requests** for now — if you hit a problem, please reach out via [Discussions](https://github.com/clojurewasm/zwasm/discussions) and mention @chaploud. On **2026-07-01** the `zwasm-from-scratch` branch will be merged into `main` and replace it. For the old version, refer to its tags and releases. See the [v1 → v2 migration guide](https://github.com/clojurewasm/zwasm/blob/zwasm-from-scratch/docs/migration_v1_to_v2.md).
+# zwasm v2
 
-# zwasm
+A from-scratch WebAssembly runtime in Zig 0.16.0.
 
 [![CI](https://github.com/clojurewasm/zwasm/actions/workflows/ci.yml/badge.svg)](https://github.com/clojurewasm/zwasm/actions/workflows/ci.yml)
-[![Spec Tests](https://img.shields.io/badge/spec_tests-62%2C263%2F62%2C263-brightgreen)](https://github.com/clojurewasm/zwasm)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Zig](https://img.shields.io/badge/Zig-0.16.0-f7a41d?logo=zig&logoColor=white)](https://ziglang.org/)
+[![WebAssembly 3.0](https://img.shields.io/badge/WebAssembly-3.0-654ff0?logo=webassembly&logoColor=white)](https://webassembly.org/)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![GitHub Sponsors](https://img.shields.io/github/sponsors/chaploud?logo=githubsponsors&logoColor=white&color=ea4aaa)](https://github.com/sponsors/chaploud)
 
-A small, full-featured WebAssembly runtime written in Zig. Library and CLI.
+> **Status: feature-complete and green on the 3-host gate**
+> (Mac aarch64 + Linux x86_64 + Windows x86_64). Full WebAssembly 3.0 + WASI
+> preview1 & preview2 (Component Model), interpreter + JIT (arm64 / x86_64) +
+> AOT (`.cwasm`), and the C / Zig / CLI surfaces are settled. Completion is the
+> line, not a release date; tagging and publishing are a
+> deliberate, manual step. The v2 line is pre-release (tagged `v2.0.0-alpha.*`).
 
-Supported host targets:
-- `aarch64-macos`
-- `x86_64-linux`, `aarch64-linux`
-- `x86_64-windows`
+v2 is a ground-up redesign of [zwasm v1](https://github.com/clojurewasm/zwasm)
+with day-one design for WebAssembly 3.0, wasm-c-api conformance, and
+dual-backend (interpreter + JIT-arm64 + JIT-x86) differential testing.
+v1 ABI compatibility is out of scope — see the
+[migration guide](docs/migration_v1_to_v2.md).
 
-## At a glance
+## Supported platforms
 
-| Runtime  | Binary (stripped) | Memory (fib) | Execution                    | Wasm 3.0 |
-|----------|------------------:|-------------:|------------------------------|:--------:|
-| zwasm    | 1.20–1.56 MB      | ~3.5 MB      | Interp + ARM64/x86_64 JIT    |   Full   |
-| wasmtime | ~56 MB            | ~12 MB       | Cranelift AOT/JIT            |   Full   |
-| wasmer   | 30+ MB            | ~15 MB       | LLVM/Cranelift/Singlepass    | Partial  |
-| wazero   | 8–12 MB           | ~6 MB        | Pure Go interp + Compiler    | Partial  |
-| wasm3    | ~0.3 MB           | ~1 MB        | Pure interpreter             | Partial  |
+zwasm is built and tested on these host targets:
 
-zwasm sits in the niche between "tiny but limited" runtimes (wasm3, WAMR) and "full-featured but large" ones (wasmtime, wasmer): full Wasm 3.0 with JIT and SIMD in roughly the same byte budget as a pure interpreter.
+| Platform | Arch    | Notes                                           |
+|----------|---------|-------------------------------------------------|
+| macOS    | aarch64 | primary development target                      |
+| Linux    | x86_64  | native, spec + full test gate                   |
+| Linux    | aarch64 | cross-built (not in the per-release test gate)  |
+| Windows  | x86_64  | native, MSVC ABI                                |
 
-zwasm was extracted from [ClojureWasm](https://github.com/clojurewasm/ClojureWasm) (a Zig reimplementation of Clojure) where keeping a Wasm subsystem inside the language runtime created a "runtime within runtime" layering problem. ClojureWasm remains the primary consumer.
+Each release is verified on native macOS-aarch64, Linux-x86_64, and
+Windows-x86_64 hosts. Linux-aarch64 is cross-built but not covered by that
+per-release test gate. Windows ARM64 and other targets are out of scope for
+now (demand-driven).
 
-## Features
+## Coverage
 
-- **Full Wasm 3.0**. Core MVP plus all 9 ratified 3.0 proposals (GC, exception handling, tail calls, function references, multi-memory, memory64, branch hinting, extended const, relaxed SIMD), plus threads (79 atomics) and wide arithmetic. 581+ opcodes total.
-- **4-tier execution**. Bytecode → predecoded IR → register IR → ARM64/x86_64 JIT. Hot functions promote automatically (HOT_THRESHOLD=3).
-- **SIMD JIT**. ARM64 NEON 253/256 native, x86_64 SSE 244/256 native. Contiguous v128 register storage with Q-cache (Q16–Q31 / XMM6–XMM15).
-- **WASI Preview 1 + Component Model**. 46/46 P1 syscalls (100%); P2 via component-model adapter, WIT parser, Canonical ABI.
-- **Spec conformance**. 62,263 / 62,263 spec tests on Mac aarch64, Linux x86_64, Windows x86_64 (CI). 796 / 796 E2E tests on all three. 50 / 50 real-world programs (Rust + C + C++ + Go + TinyGo) on Mac and Linux; on Windows the GitHub-hosted CI runner exercises the C+C++ subset (25 / 25), while a local Windows checkout reaches the full 50 / 50 once `pwsh scripts/windows/install-tools.ps1` has provisioned Rust + Go + TinyGo. CI parity tracked as W50 (CI Nix-ify).
-- **WAT support**. Run `.wat` text files directly; build-optional via `-Dwat=false`.
-- **Security**. Deny-by-default WASI capabilities, fuel metering, wall-clock timeout, memory ceiling, JIT W^X pages, signal-handled traps.
-- **No libc**. CLI / library / tests link `link_libc = false` (Mac uses libSystem auto-link). C-API shared/static targets keep `link_libc = true` because `std.heap.c_allocator` is exposed.
-- **Allocator-parameterized**. The library takes a `std.mem.Allocator` at load time; embedders own all allocation.
+### Wasm versions
 
-## Wasm spec coverage
+| Spec                                                                                                            | Status  | Notes                                                    |
+|-----------------------------------------------------------------------------------------------------------------|---------|----------------------------------------------------------|
+| Wasm 1.0                                                                                                        | ✅ 100% | spec testsuite green on the 3-host gate                  |
+| Wasm 2.0 (multi-value, SIMD-128, bulk-memory, reference-types, non-trapping FP→int, sign-ext, mutable globals) | ✅ 100% | `skip-impl == 0`; bit-identical across hosts             |
+| Wasm 3.0 (GC, EH, tail-call, memory64, multi-memory, typed func refs, extended-const, relaxed-simd)             | ✅ 100% | all 9 proposals; spec testsuite green on the 3-host gate |
 
-| Spec layer | Proposals included                                                                                          | Status   |
-|------------|-------------------------------------------------------------------------------------------------------------|----------|
-| Wasm 1.0   | MVP (172 opcodes)                                                                                           | Complete |
-| Wasm 2.0   | Sign extension, non-trapping float→int, bulk memory, reference types, multi-value, fixed-width SIMD (236)   | Complete |
-| Wasm 3.0   | Memory64, exception handling, tail calls, extended const, branch hinting, multi-memory, relaxed SIMD (20), function references, GC (31) | Complete |
-| Phase 3    | Wide arithmetic (4), custom page sizes                                                                      | Complete |
-| Phase 4    | Threads (79 atomics)                                                                                        | Complete |
-| Layer      | Component Model (WIT, Canon ABI, WASI P2 adapter)                                                           | Complete |
+### WASI
 
-18 / 18 proposals complete. 399 unit tests, 796 / 796 E2E tests, 50 / 50 real-world programs (Rust, C, C++, TinyGo compiler outputs). Per-proposal opcode and test counts are in the [Spec Coverage](https://clojurewasm.github.io/zwasm/en/spec-coverage.html) chapter.
+| Spec                                 | Status                    | Notes                                                                                                                                                                                                                                                                                                                                                         |
+|--------------------------------------|---------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| WASI 0.1 (preview1)                  | ✅ functional             | interpreter: args / env / preopened dirs / clock / random / fd I/O                                                                                                                                                                                                                                                                                            |
+| WASI 0.2 (preview2, Component Model) | ✅ functional, default-ON | wasmtime-equivalent campaign complete (2026-06-13): real `wasm32-wasip2` Rust/TinyGo components run e2e (fs, sockets incl. TCP listeners, guest-defined resources); typed embedder API (introspection + `invokeTyped`); validation rules 1-12, official corpus 158/0/0; gated by `-Dwasi>=p2` (default), `-Dwasi=p1` = lean opt-out |
 
-## Performance
+All three execution paths do full WASI I/O — the interpreter, the JIT
+(`--engine jit`), and AOT (`.cwasm`). The JIT additionally
+executes SIMD-128 (the interpreter does not).
 
-Apple M4 Pro, ReleaseSafe, hyperfine 5 runs / 3 warmup; vs wasmtime 41.0.1 (Cranelift JIT), Bun 1.3.8, Node v24.13.0:
+### Execution backends
 
-| Benchmark       | zwasm | wasmtime | Bun   | Node  |
-|-----------------|------:|---------:|------:|------:|
-| nqueens(8)      |  2 ms |     5 ms | 14 ms | 23 ms |
-| nbody(1M)       | 22 ms |    22 ms | 32 ms | 36 ms |
-| sieve(1M)       |  5 ms |     7 ms | 17 ms | 29 ms |
-| tak(24,16,8)    |  5 ms |     9 ms | 17 ms | 29 ms |
-| fib(35)         | 46 ms |    51 ms | 36 ms | 52 ms |
-| st_fib2         | 900 ms |   674 ms | 353 ms | 389 ms |
+| Backend                              | Status        |
+|--------------------------------------|---------------|
+| Interpreter (full WASI)              | ✅ functional |
+| JIT — ARM64 (AAPCS64)               | ✅ functional |
+| JIT — x86_64 SysV (Linux/macOS)     | ✅ functional |
+| JIT — x86_64 Win64 (MSVC ABI)       | ✅ functional |
+| AOT — `.cwasm` compile + load + run | ✅ functional |
 
-Of 29 benchmarks, the majority match or beat wasmtime; a few compute-heavy long-running ones (e.g. `st_fib2`) still trail Cranelift AOT. Memory usage is roughly 3–4× lower than wasmtime and 8–10× lower than Bun/Node. Full data: `bench/runtime_comparison.yaml`.
+The GC-on-JIT path is memory-safe: a conservative native-stack-scan
+collector roots live references across collections, verified by an
+adversarial use-after-free test on aarch64 + x86_64.
 
-SIMD microbenchmarks (ARM64 NEON / x86_64 SSE JIT):
+## CLI
 
-| Benchmark              | zwasm scalar | zwasm SIMD | wasmtime SIMD |
-|------------------------|-------------:|-----------:|--------------:|
-| matrix_mul (16×16)     |        10 ms |       6 ms |          8 ms |
-| image_blend (128×128)  |        73 ms |      16 ms |         12 ms |
-| byte_search (64 KB)    |        52 ms |      43 ms |          5 ms |
-
-Hand-written SIMD kernels (`matrix_mul`, `image_blend`) are competitive with wasmtime; `matrix_mul` is faster, `image_blend` is within 1.4×. Compiler-generated SIMD code (e.g. C `-msimd128` with heavy `i16x8.replace_lane`) still shows larger gaps; further work is tracked in `.dev/checklist.md`. Full data: `bench/simd_comparison.yaml`.
-
-## Install
-
-macOS / Linux:
-
-```bash
-zig build -Doptimize=ReleaseSafe
-cp zig-out/bin/zwasm ~/.local/bin/
-
-# or one-liner:
-curl -fsSL https://raw.githubusercontent.com/clojurewasm/zwasm/main/install.sh | bash
+```sh
+zwasm                                  # print version + build options
+zwasm run <file.wasm|.cwasm> [args...] # run a module (WASI _start / main)
+    [--invoke <name>[=a,b,…]]          #   run a named export; =args prints typed results
+    [--engine <interp|jit>]            #   interp (default) or jit (both full WASI; jit adds SIMD)
+    [--dir <host>[:<guest>]]           #   preopen a host directory for WASI
+    [--env <KEY=VAL>]                  #   set a WASI env var (repeatable)
+    [--fuel <N>]                       #   trap after a deterministic budget (error.OutOfFuel)
+    [--timeout <ms>]                   #   interrupt after a wall-clock deadline
+    [--max-memory <bytes>]             #   refuse memory.grow past this many bytes
+    [--max-table-elements <N>]         #   refuse table growth past this many elements
+zwasm compile <file.wasm> -o <out.cwasm>  # compile to a .cwasm AOT artifact
+zwasm --version | -V                   # version + build identity (wasm/wasi/engine)
+zwasm --help | -h | help
 ```
 
-Windows (PowerShell):
+The CLI is deliberately `run` + `compile` — the
+wasmtime/wazero-aligned shape for a runtime. Validation is programmatic
+(C-API `wasm_module_validate` / Zig `Engine.compile`); wat↔wasm
+conversion and module introspection are `wasm-tools` / `wabt`'s job.
+Full flag table + exit codes: [`docs/reference/cli.md`](docs/reference/cli.md).
 
-```powershell
-zig build -Doptimize=ReleaseSafe
-Copy-Item zig-out\bin\zwasm.exe "$env:LOCALAPPDATA\Microsoft\WindowsApps\zwasm.exe"
+Runtime env vars: `ZWASM_DEBUG=<categories>` (dbg category filter),
+`ZWASM_DIAG=<channels>` (diagnostic trace ringbuffer drain).
 
-irm https://raw.githubusercontent.com/clojurewasm/zwasm/main/install.ps1 | iex
-```
+## Embedding
 
-## Usage
+zwasm is a library first, with two host surfaces.
 
-### CLI
-
-```bash
-zwasm module.wasm                       # Run a WASI module (run is implicit)
-zwasm module.wat                        # Run a WAT text module directly
-zwasm module.wasm -- arg1 arg2          # WASI args after `--`
-zwasm module.wasm --invoke fib 35       # Call a specific exported function
-zwasm run module.wasm --allow-all       # Explicit `run` subcommand
-zwasm inspect module.wasm               # Show imports, exports, memory
-zwasm validate module.wasm              # Validate without executing
-zwasm compile module.wasm               # Pre-warm the IR cache to disk
-zwasm features [--json]                 # List supported proposals
-```
-
-### Zig library
+**Zig** (native facade) — add zwasm as a `build.zig.zon`
+dependency, pull its module (`b.dependency("zwasm", .{}).module("zwasm")`),
+then:
 
 ```zig
 const zwasm = @import("zwasm");
 
-var module = try zwasm.WasmModule.load(allocator, wasm_bytes);
-defer module.deinit();
+var eng = try zwasm.Engine.init(alloc, .{});
+defer eng.deinit();
+var mod = try eng.compile(&wasm_bytes);
+defer mod.deinit();
+var inst = try mod.instantiate(.{});
+defer inst.deinit();
 
-var args = [_]u64{35};
-var results = [_]u64{0};
-try module.invoke("fib", &args, &results);
-// results[0] == 9227465
+const add = inst.typedFunc(fn (i32, i32) i32, "add");
+const r = try add.call(.{ 2, 40 }); // 42
 ```
 
-See [docs/usage.md](docs/usage.md) for fuel / timeout / memory limits, host functions, multi-module linking, and WASI configuration.
+Surface: `Engine` / `Module` / `Instance` / `Linker` (host imports via
+`defineFunc` + `Caller`) / `Memory` / `Global` / `Table` / `TypedFunc` /
+`Trap` / `Value`. Runnable: [`examples/zig_dep/`](examples/zig_dep/)
+(external path-dep consumer) and [`examples/zig_host/`](examples/zig_host/).
 
-### C API
+**Sandboxing untrusted guests** (interpreter engine): `mod.instantiate(.{})`
+is **bounded by default** — `InstantiateOpts.fuel` and `.max_memory_pages` carry
+finite defaults (a deterministic instruction budget → `error.OutOfFuel`, and a
+linear-memory cap), so a forgotten budget still yields a metered instance; pass
+`.unmetered` for trusted code. `Instance.interrupt()` stops a runaway guest from
+another thread (timeout or cancellation → `error.Interrupted`);
+`setFuel`/`setMemoryPagesLimit`/`setTableElementsLimit` adjust the budgets on a
+live instance. The **JIT engine carries the same triad**: polls at
+function entry + every loop back-edge deliver interruption and fuel (units there
+= entries + loop iterations), and `memory.grow` honours the host cap. From C,
+use the `zwasm_instance_*` setters in [`include/zwasm.h`](include/zwasm.h);
+from the CLI, `--fuel` / `--timeout` / `--max-memory` (both engines).
 
-```bash
-zig build lib    # libzwasm.{dylib,so,dll} + .a + include/zwasm.h
-```
+**C** (wasm-c-api) — [`include/wasm.h`](include/wasm.h) is byte-identical
+to the upstream standard (the interface wasmtime/wasmer follow); WASI
+host-setup is the hand-authored [`include/wasi.h`](include/wasi.h). See
+[`examples/c_host/`](examples/c_host/) and
+[`docs/reference/c_api.md`](docs/reference/c_api.md).
 
-```c
-#include "zwasm.h"
+**Any FFI language** — [`examples/rust_host/`](examples/rust_host/)
+(`zig build run-rust-host`) declares the same `wasm.h` ABI from Rust and
+links `libzwasm`, demonstrating the C surface is consumable from any
+FFI-capable language, not just C.
 
-zwasm_module_t *mod = zwasm_module_new(wasm_bytes, len);
-uint64_t results[1] = {0};
-zwasm_module_invoke(mod, "f", NULL, 0, results, 1);
-zwasm_module_delete(mod);
-```
-
-For execution limits use `zwasm_config_t`: `zwasm_config_set_fuel`, `zwasm_config_set_timeout`, `zwasm_config_set_max_memory`, `zwasm_config_set_force_interpreter`, `zwasm_config_set_cancellable`. Fuel applies to module startup (`_start`) as well as subsequent invocations.
-
-Full reference: [C API chapter](https://clojurewasm.github.io/zwasm/en/c-api.html). Working examples in `examples/c/`, `examples/python/`, `examples/rust/` (same workflow from Python ctypes and Rust `extern "C"`).
-
-## Examples
-
-### `examples/wat/` — 33 numbered tutorial files
-
-| # | Category | Examples |
-|---|----------|----------|
-| 01–09 | Basics | `hello_add`, `if_else`, `loop`, `factorial`, `fibonacci`, `select`, `collatz`, `stack_machine`, `counter` |
-| 10–15 | Types | `i64_math`, `float_math`, `bitwise`, `type_convert`, `sign_extend`, `saturating_trunc` |
-| 16–19 | Memory | `memory`, `data_string`, `grow_memory`, `bulk_memory` |
-| 20–24 | Functions | `multi_return`, `multi_value`, `br_table`, `mutual_recursion`, `call_indirect` |
-| 25–26 | Wasm 3.0 | `return_call` (tail calls), `extended_const` |
-| 27–29 | Algorithms | `bubble_sort`, `is_prime`, `simd_add` |
-| 30–33 | WASI | `wasi_hello`, `wasi_echo`, `wasi_args`, `wasi_write_file` |
-
-```bash
-zwasm examples/wat/01_hello_add.wat --invoke add 2 3   # → 5
-zwasm examples/wat/05_fibonacci.wat --invoke fib 10    # → 55
-zwasm examples/wat/30_wasi_hello.wat --allow-all       # → Hi!
-```
-
-Other languages: `examples/zig/` (5 embedding examples), `examples/c/`, `examples/python/`, `examples/rust/`.
-
-## Build
-
-Requires Zig 0.16.0.
-
-```bash
-zig build              # Debug build
-zig build test         # Run all unit tests (399 tests)
-zig build c-test       # Run C API tests
-./zig-out/bin/zwasm run file.wasm
-```
-
-On Windows use `zig-out\bin\zwasm.exe`.
-
-### Feature flags
-
-Strip features at compile time:
-
-| Flag                | Description             | Default |
-|---------------------|-------------------------|---------|
-| `-Djit=false`       | Disable JIT compiler    | `true`  |
-| `-Dcomponent=false` | Disable Component Model | `true`  |
-| `-Dwat=false`       | Disable WAT parser      | `true`  |
-| `-Dsimd=false`      | Disable SIMD opcodes    | `true`  |
-| `-Dgc=false`        | Disable GC proposal     | `true`  |
-| `-Dthreads=false`   | Disable threads/atomics | `true`  |
-
-Linux x86_64 ReleaseSafe stripped, measured on the current `main`:
-
-| Variant         | Flags                                          |    Size |  Delta |
-|-----------------|------------------------------------------------|--------:|-------:|
-| Full (default)  | (none)                                         | 1.56 MB |     —  |
-| No JIT          | `-Djit=false`                                  | 1.41 MB |   −10% |
-| No WAT          | `-Dwat=false`                                  | 1.41 MB |   −10% |
-| Minimal         | `-Djit=false -Dcomponent=false -Dwat=false`    | 1.26 MB |   −19% |
-
-(`-Dcomponent=false` alone is currently neutral — the Component Model code path is already dead-code-eliminated when not exercised; combining it with `-Djit=false -Dwat=false` is what produces the 300 KB saving.)
-
-Mac aarch64 stripped is roughly 350 KB smaller than the Linux numbers (1.20 MB full / 0.92 MB minimal). CI enforces per-OS ceilings on the stripped binary: Mac 1.30 MB, Linux 1.60 MB, Windows 1.80 MB (PE overhead). Stripping is portable across ELF / Mach-O / PE via `-Dstrip=true` (LLD `--strip-all`); see D137 in `.dev/decisions.md`.
-
-## Architecture
+## Build flags
 
 ```
- .wat text    .wasm binary    .wasm component
-      |            |                |
-      v            |                v
- WAT Parser        |          Component Decoder
- (optional)        |          (WIT + Canon ABI)
-      |            |                |
-      +------>-----+-----<---------+
-                   |
-                   v
-             Module (decode + validate)
-                   |
-                   v
-             Predecoded IR (fixed-width, cache-friendly)
-                   |
-                   v
-             Register IR (stack elimination, peephole opts)
-                   |                          \
-                   v                           v
-             RegIR Interpreter           ARM64 / x86_64 JIT
-             (default)                   (HOT_THRESHOLD=3)
+-Dwasm=3.0|2.0|1.0          # default 3.0; lower levels omit later proposals
+-Dwasi=none|p1|p2|p3        # default p2; ordered tier. p2 = Component Model / WASI-P2 host,
+                            #   p3 = + Preview-3 async. -Dwasi=p1 = lean build (~-10%)
+-Dengine=both|jit|interp    # default both
+-Dstrip=true|false          # default false
 ```
 
-Hot functions are detected via call counting and back-edge counting, then compiled to native code. Functions using opcodes outside the JIT's coverage continue to run in the register-IR interpreter. JIT pages use W^X protection — code is RW during emit, then switched to RX before execution; signal handlers translate guard-page faults back into Wasm traps.
+## Quick start
 
-## Project philosophy
+```sh
+zig build              # compile the zwasm binary
+zig build test         # unit tests
+zig build test-all     # all enabled test layers
 
-**Small, full, fast — pick three.** zwasm tries to keep the byte budget of an interpreter while delivering the feature set of a tier-1 runtime. The primary metric is performance per byte of binary; secondary metrics are spec fidelity and startup latency.
+# Cross-compile sanity check (catches, e.g., Win64 compile errors in ~3s)
+zig build -Dtarget=x86_64-windows-gnu
+```
 
-**Spec fidelity over expedience.** Every change runs the 62,263-test spec suite, the 796 E2E assertions, and the 50 real-world program suite. We don't keep "known limitations".
+Run `zig build test-all` on each platform you care about — macOS, Linux,
+and Windows are all first-class. Multi-OS verification is handled
+automatically by CI; the `scripts/run_remote_*.sh` helpers are a
+maintainer convenience for driving the gate across a personal host farm
+over SSH (host aliases are configurable via `ZWASM_UBUNTU_HOST` /
+`ZWASM_WINDOWS_HOST`).
 
-**ARM64 + x86_64 first class.** Apple Silicon is the primary optimization target; x86_64 Linux and Windows are equally supported. Both backends ship the same SIMD coverage.
+Nix + direnv is the supported dev environment. `direnv allow` loads
+the pinned Zig 0.16.0 and tool surface (`flake.nix`: hyperfine,
+wasm-tools, wasmtime, yq-go, lldb, nasm).
 
-## Versioning
+## Layout
 
-zwasm follows [Semantic Versioning](https://semver.org/). The public API surface is defined in [docs/api-boundary.md](docs/api-boundary.md).
-
-- **Stable** types and functions (`WasmModule`, `WasmFn`, etc.) won't break in minor/patch releases
-- **Experimental** types (`runtime.*`, WIT) may change in minor releases
-- **Deprecation**: at least one minor version notice before removal
+```
+src/         Zig sources (parse/ validate/ ir/ runtime/ instruction/ feature/
+             engine/ interp/ wasi/ api/ cli/ diagnostic/ support/ platform/)
+include/     Public C headers (wasm.h / wasi.h / zwasm.h)
+build.zig    Build script
+flake.nix    Nix dev shell pinned to Zig 0.16.0
+docs/        Migration guide + design docs
+.dev/        ROADMAP + handover + ADRs + lessons + setup notes
+.claude/     Claude Code settings, skills, rules (auto-loaded)
+scripts/     gate_commit, zone_check, file_size_check, bench, run_remote_*
+test/        per-layer suites; unified `zig build test-all`
+bench/       benchmark history (append-only)
+private/     gitignored agent scratch
+```
 
 ## Documentation
 
-- [Book (English)](https://clojurewasm.github.io/zwasm/en/) — getting started, architecture, embedding, CLI reference
-- [Book (日本語)](https://clojurewasm.github.io/zwasm/ja/)
-- [API Boundary](docs/api-boundary.md) — stable vs experimental surface
-- [CHANGELOG](CHANGELOG.md)
+- [`docs/tutorial.md`](docs/tutorial.md) — getting started (build, run, embed)
+- [`docs/reference/`](docs/reference/) — API reference:
+  [Zig](docs/reference/zig_api.md) · [C](docs/reference/c_api.md) · [CLI](docs/reference/cli.md)
+- [`docs/benchmarks.md`](docs/benchmarks.md) — performance vs other runtimes + across engines
+- [`docs/migration_v1_to_v2.md`](docs/migration_v1_to_v2.md) — v1 → v2 migration + the honest v1-vs-v2 gap analysis
+- [`docs/handoff_cw_v2_zig_api.md`](docs/handoff_cw_v2_zig_api.md) — current-state Zig embedding API (ClojureWasm handoff)
+- [`docs/v1_contributor_history.md`](docs/v1_contributor_history.md) — v1 community contributors + their PRs/issues
+- [`CHANGELOG.md`](CHANGELOG.md) — release notes
 
-## Contributing
+## References
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for build, workflow, and CI checks.
+- [`.dev/ROADMAP.md`](.dev/ROADMAP.md) — mission, principles, phase plan
+- [`.dev/decisions/`](.dev/decisions/) — ADRs (deviations from ROADMAP)
 
 ## License
 
-MIT.
+Copyright 2026 zwasm Contributors. Licensed under Apache-2.0 — see `LICENSE`.
 
-## Support
+---
 
 Developed in spare time alongside a day job. Sponsorship via [GitHub Sponsors](https://github.com/sponsors/chaploud) is welcome and helps keep work going.

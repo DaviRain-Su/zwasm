@@ -1,0 +1,54 @@
+module try_table.0.wasm
+register test
+module try_table.1.wasm
+assert_return simple-throw-catch i32:0 -> i32:23
+assert_return simple-throw-catch i32:1 -> i32:42
+assert_trap unreachable-not-caught ()
+assert_return trap-in-callee i32:7 i32:2 -> i32:3
+assert_trap trap-in-callee i32:1 i32:0
+assert_return catch-complex-1 i32:0 -> i32:3
+assert_return catch-complex-1 i32:1 -> i32:4
+assert_exception catch-complex-1 i32:2
+assert_return catch-complex-2 i32:0 -> i32:3
+assert_return catch-complex-2 i32:1 -> i32:4
+assert_exception catch-complex-2 i32:2
+assert_return throw-catch-param-i32 i32:0 -> i32:0
+assert_return throw-catch-param-i32 i32:1 -> i32:1
+assert_return throw-catch-param-i32 i32:10 -> i32:10
+assert_return throw-catch-param-f32 f32:1084227584 -> f32:1084227584
+assert_return throw-catch-param-f32 f32:1093140480 -> f32:1093140480
+assert_return throw-catch-param-i64 i64:5 -> i64:5
+assert_return throw-catch-param-i64 i64:0 -> i64:0
+assert_return throw-catch-param-i64 i64:18446744073709551615 -> i64:18446744073709551615
+assert_return throw-catch-param-f64 f64:4617315517961601024 -> f64:4617315517961601024
+assert_return throw-catch-param-f64 f64:4622100592565682176 -> f64:4622100592565682176
+assert_return throw-catch_ref-param-i32 i32:0 -> i32:0
+assert_return throw-catch_ref-param-i32 i32:1 -> i32:1
+assert_return throw-catch_ref-param-i32 i32:10 -> i32:10
+assert_return throw-catch_ref-param-f32 f32:1084227584 -> f32:1084227584
+assert_return throw-catch_ref-param-f32 f32:1093140480 -> f32:1093140480
+assert_return throw-catch_ref-param-i64 i64:5 -> i64:5
+assert_return throw-catch_ref-param-i64 i64:0 -> i64:0
+assert_return throw-catch_ref-param-i64 i64:18446744073709551615 -> i64:18446744073709551615
+assert_return throw-catch_ref-param-f64 f64:4617315517961601024 -> f64:4617315517961601024
+assert_return throw-catch_ref-param-f64 f64:4622100592565682176 -> f64:4622100592565682176
+assert_return catch-param-i32 i32:5 -> i32:5
+assert_return catch-imported () -> i32:2
+assert_return catch-imported-alias () -> i32:2
+assert_return catchless-try i32:0 -> i32:0
+assert_return catchless-try i32:1 -> i32:1
+assert_exception return-call-in-try-catch ()
+assert_exception return-call-indirect-in-try-catch ()
+assert_return try-with-param () -> ()
+module try_table.2.wasm
+assert_return imported-mismatch () -> i32:3
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+module try_table.5.wasm
+assert_invalid try_table.6.wasm
+assert_invalid try_table.7.wasm
+assert_invalid try_table.8.wasm
+assert_invalid try_table.9.wasm
+assert_invalid try_table.10.wasm
+assert_invalid try_table.11.wasm
+assert_invalid try_table.12.wasm

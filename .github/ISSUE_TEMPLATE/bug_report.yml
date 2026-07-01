@@ -13,7 +13,7 @@ body:
     id: reproduce
     attributes:
       label: Steps to reproduce
-      description: Minimal steps or a .wasm/.wat file to reproduce the issue.
+      description: Minimal steps or a `.wasm` / `.wat` file to reproduce the issue.
       placeholder: |
         1. Run `zwasm run module.wasm`
         2. ...
@@ -23,8 +23,8 @@ body:
     id: version
     attributes:
       label: zwasm version
-      description: Output of `zwasm version`
-      placeholder: "1.0.0"
+      description: Output of `zwasm --version`
+      placeholder: "2.0.0-rc.1"
     validations:
       required: true
   - type: dropdown
@@ -32,10 +32,22 @@ body:
     attributes:
       label: Platform
       options:
-        - macOS ARM64 (Apple Silicon)
+        - macOS aarch64 (Apple Silicon)
         - Linux x86_64
         - Linux aarch64
+        - Windows x86_64
         - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Execution mode
+      options:
+        - Interpreter (default)
+        - JIT (--engine jit)
+        - AOT (.cwasm)
+        - Not sure / N/A
     validations:
       required: true
   - type: textarea

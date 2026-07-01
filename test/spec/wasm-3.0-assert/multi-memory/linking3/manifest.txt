@@ -1,0 +1,14 @@
+module $Mm linking3.0.wasm
+register Mm
+assert_unlinkable linking3.1.wasm
+assert_return $Mm::load i32:0 -> i32:0
+assert_uninstantiable linking3.2.wasm
+assert_return $Mm::load i32:0 -> i32:97
+assert_return $Mm::load i32:327670 -> i32:0
+assert_uninstantiable linking3.3.wasm
+assert_return $Mm::load i32:0 -> i32:97
+module $Ms linking3.4.wasm
+register Ms
+assert_uninstantiable linking3.5.wasm
+assert_return $Ms::get memory[0] () -> i32:104
+assert_return $Ms::get table[0] () -> i32:57005

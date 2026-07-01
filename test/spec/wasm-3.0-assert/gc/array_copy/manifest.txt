@@ -1,0 +1,35 @@
+assert_invalid array_copy.0.wasm
+assert_invalid array_copy.1.wasm
+assert_invalid array_copy.2.wasm
+assert_invalid array_copy.3.wasm
+module array_copy.4.wasm
+assert_trap array_copy-null-left ()
+assert_trap array_copy-null-right ()
+assert_trap array_copy i32:13 i32:0 i32:0
+assert_trap array_copy i32:0 i32:13 i32:0
+assert_trap array_copy i32:0 i32:0 i32:13
+assert_trap array_copy i32:0 i32:0 i32:13
+assert_return array_copy i32:12 i32:0 i32:0 -> ()
+assert_return array_copy i32:0 i32:12 i32:0 -> ()
+assert_return array_get_nth i32:0 -> i32:0
+assert_return array_get_nth i32:5 -> i32:0
+assert_return array_get_nth i32:11 -> i32:0
+assert_trap array_get_nth i32:12
+assert_return array_copy i32:0 i32:0 i32:2 -> ()
+assert_return array_get_nth i32:0 -> i32:10
+assert_return array_get_nth i32:1 -> i32:10
+assert_return array_get_nth i32:2 -> i32:0
+assert_return array_copy_overlap_test-1 () -> ()
+assert_return array_get_nth i32:0 -> i32:97
+assert_return array_get_nth i32:1 -> i32:97
+assert_return array_get_nth i32:2 -> i32:98
+assert_return array_get_nth i32:5 -> i32:101
+assert_return array_get_nth i32:10 -> i32:106
+assert_return array_get_nth i32:11 -> i32:107
+assert_return array_copy_overlap_test-2 () -> ()
+assert_return array_get_nth i32:0 -> i32:98
+assert_return array_get_nth i32:1 -> i32:99
+assert_return array_get_nth i32:5 -> i32:103
+assert_return array_get_nth i32:9 -> i32:107
+assert_return array_get_nth i32:10 -> i32:108
+assert_return array_get_nth i32:11 -> i32:108

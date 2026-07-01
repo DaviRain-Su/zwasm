@@ -1,0 +1,59 @@
+//! arm64 emit handler for `throw_ref` — Zone 2 per ADR-0074
+//! + ADR-0114 D2 + ADR-0119.
+//!
+//! Wasm spec 3.0 §3.3.10.8. Pop the exnref (a `*Exception` handle the
+//! JIT reified at a catch_ref/catch_all_ref landing pad, D-327), read its
+//! tag_idx + payload back into the JIT payload-staging buffer via the
+//! `rethrowFromExnref` helper, then re-enter the throw dispatcher exactly
+//! as a fresh `throw` of that tag — giving the round-trip identity Wasm
+//! `throw_ref` requires (ADR-0120 D6).
+//!
+//! Zone 2 (`src/engine/codegen/arm64/ops/`).
+
+const meta = @import("../../../../../instruction/wasm_3_0/throw_ref.zig");
+const ctx_mod = @import("../../ctx.zig");
+const abi = @import("../../abi.zig");
+const gpr = @import("../../gpr.zig");
+const inst = @import("../../inst.zig");
+const jit_abi = @import("../../../shared/jit_abi.zig");
+const trampoline_mod = @import("../../../shared/throw_trampoline.zig");
+const throw_op = @import("throw.zig");
+const zir = @import("../../../../../ir/zir.zig");
+
+pub const op_tag = meta.op_tag;
+pub const wasm_level = meta.wasm_level;
+pub const wasi_level = meta.wasi_level;
+
+// ADR-0113 §A + ADR-0114 D6 — terminator axis like throw.
+pub const is_terminator: bool = true;
+pub const n_successor_edges: u8 = 0;
+pub const is_safepoint: bool = false;
+
+/// X16 = IP0 (intra-procedure scratch, AAPCS64 §6.4 caller-saved).
+const scratch: inst.Xn = 16;
+
+/// MOVZ/MOVK X16 = abs addr; BLR X16 (a plain absolute call, no trap-stub
+/// fallback — `rethrowFromExnref` returns normally).
+fn emitAbsCall(ctx: *ctx_mod.EmitCtx, addr: u64) ctx_mod.Error!void {
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovzImm16(scratch, @intCast(addr & 0xFFFF)));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovkImm16(scratch, @intCast((addr >> 16) & 0xFFFF), 1));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovkImm16(scratch, @intCast((addr >> 32) & 0xFFFF), 2));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encMovkImm16(scratch, @intCast((addr >> 48) & 0xFFFF), 3));
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encBLR(scratch));
+}
+
+pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void {
+    _ = ins;
+    // Pop the exnref operand (= *Exception). Marshal into X1 (arg1).
+    if (ctx.pushed_vregs.items.len < 1) return ctx_mod.Error.AllocationMissing;
+    const exn_vreg = ctx.pushed_vregs.pop().?;
+    const exn_reg = try gpr.gprLoadSpilled(ctx.allocator, ctx.buf, ctx.alloc, ctx.spill_base_off, exn_vreg, 0);
+    if (exn_reg != 1) try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(1, 31, exn_reg)); // MOV X1, exn_reg
+    // arg0 = rt (X0 = X19); call rethrowFromExnref → W0 = tag_idx, payload
+    // restored into eh_payload_buf. X0 survives the trampoline call below
+    // (it only clobbers X16), so the dispatcher reads it as the throw-site
+    // tag exactly like `throw`.
+    try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrReg(0, 31, abi.runtime_ptr_save_gpr));
+    try emitAbsCall(ctx, @intFromPtr(&jit_abi.rethrowFromExnref));
+    try throw_op.emitTrampolineCallAndTrap(ctx, @intFromPtr(&trampoline_mod.zwasmThrowTrampoline));
+}

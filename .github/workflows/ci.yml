@@ -1,410 +1,160 @@
-name: CI
+# CI — the host-local gate on the 3 supported OSes, mirroring the local
+# 3-host gate (Mac aarch64 + Linux x86_64 + Windows x86_64). Each matrix leg
+# runs `scripts/ci_gate.sh` so CI verifies exactly what the maintainer runs
+# per host (single source of truth); the differential oracle uses wasmtime
+# when the install step succeeds.
+#
+# Triggers: pull_request (any target) + push to `main` + manual dispatch.
+# NOTE: intentionally NOT `push` on `zwasm-from-scratch` — the maintainer's
+# development branch receives frequent pushes and local verification is the
+# primary path; gating there would storm the runners.
+#
+# The Windows leg is advisory (continue-on-error): the authoritative Windows
+# verification is a native Windows x86_64 host, and the hosted
+# `windows-2022` runner has shown seed-dependent Debug flakiness (D-245).
+# Mac/Linux are blocking.
 
-# FROZEN for the zwasm_from_scratch migration: auto-triggers disabled.
-# Re-enable by uncommenting the `push` / `pull_request` blocks below.
+name: ci
+
 on:
-  # push:
-  #   branches: [main]
-  # pull_request:
-  #   branches: [main]
+  pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
 
-jobs:
-  versions-lock-sync:
-    # Mirrors Merge Gate item #9. Fails the PR if .github/versions.lock and
-    # flake.nix disagree on a tool pin. Cheap (<1 sec) and runs in parallel
-    # with the test matrix.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: bash scripts/sync-versions.sh
+permissions:
+  contents: read
 
-  # Linux + macOS test path uses the Nix devshell (W50 PR-B + PR-C).
-  # The flake.nix provides version-pinned Zig / WASI SDK / wasm-tools
-  # / wasmtime / TinyGo / Go / hyperfine — i.e. the same tools the
-  # Mac/Linux `direnv allow` shell delivers locally — so this job
-  # runs the `scripts/gate-commit.sh` Commit Gate verbatim. Rust
-  # still comes from the runner image's pre-installed rustup; that's
-  # the same split as developers using `rustup target add
-  # wasm32-wasip1` on top of the Nix devshell.
-  #
-  # Windows uses `scripts/windows/install-tools.ps1` to provision the
-  # same toolset (Zig / WASI SDK / wasm-tools / wasmtime / TinyGo /
-  # Go / Rust) into `%LOCALAPPDATA%\zwasm-tools`, exposes them via
-  # `$GITHUB_PATH` / `$GITHUB_ENV`, and then runs the same
-  # `scripts/gate-commit.sh` entrypoint under Git Bash.
-  test-nix:
-    name: test (${{ matrix.os }}, nix devshell)
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: gate (${{ matrix.name }})
+    runs-on: ${{ matrix.runs-on }}
+    continue-on-error: ${{ matrix.advisory || false }}
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        shell: bash
+        include:
+          - name: aarch64-macos
+            runs-on: macos-15
+            zig-dir: zig-aarch64-macos-0.16.0
+            extended: true
+          - name: x86_64-linux
+            runs-on: ubuntu-22.04
+            zig-dir: zig-x86_64-linux-0.16.0
+            extended: true
+          - name: x86_64-windows
+            runs-on: windows-2022
+            zig-dir: zig-x86_64-windows-0.16.0
+            advisory: true
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
-
-      - name: Magic Nix cache
-        uses: DeterminateSystems/magic-nix-cache-action@main
-
-      - name: Setup Rust (wasm32-wasip1 target)
-        run: |
-          source .github/versions.lock
-          rustup install "$RUST_VERSION" --no-self-update
-          rustup default "$RUST_VERSION"
-          rustup target add wasm32-wasip1
-          rustc --version
-
-      - name: Cache Zig build artifacts
-        uses: actions/cache@v4
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          path: |
-            .zig-cache
-            zig-cache
-            ~/.cache/zig
-          key: zig-${{ runner.os }}-nix-${{ hashFiles('build.zig', 'build.zig.zon', 'src/**/*.zig') }}
-          restore-keys: |
-            zig-${{ runner.os }}-nix-
+          ref: ${{ github.sha }}
 
-      - name: Run Commit Gate inside Nix devshell
-        run: |
-          nix develop --command bash -c '
-            set -euo pipefail
-            echo "=== devshell tool versions ==="
-            zig version
-            wasm-tools --version
-            wasmtime --version
-            echo "WASI_SDK_PATH=$WASI_SDK_PATH"
-            export PATH="$HOME/.cargo/bin:$PATH"
-            bash scripts/gate-commit.sh
-          '
+      - name: Cache Zig 0.16.0
+        id: cache-zig
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.local/zig-0.16.0
+          key: zig-0.16.0-${{ matrix.name }}
 
-      # Extras the Commit Gate intentionally skips — these are
-      # CI-specific quality gates that run after gate-commit.sh:
-      # Zig-built C API tests (separate test program path from
-      # FFI tests), static-link workflow, the Rust embedding
-      # example, and a 4.5 MB peak-RSS check via /usr/bin/time.
-
-      - name: Run C API tests (zig build c-test)
-        run: nix develop --command zig build c-test
-
-      # Order matters on Windows: `zig build static-lib` produces a
-      # `zwasm.lib` that has the same filename as the shared-lib
-      # import library written to `zig-out/lib/zwasm.lib`. Linux and
-      # macOS use distinct extensions (`libzwasm.a` vs
-      # `.so` / `.dylib`) and don't have this collision, but to keep
-      # the order symmetric across all OSes the Rust dynamic example
-      # runs *before* the static-lib build.
-
-      - name: Run Rust FFI example (dynamic)
-        run: |
-          nix develop --command bash -c '
-            export PATH="$HOME/.cargo/bin:$PATH"
-            cd examples/rust && cargo run
-          '
-
-      - name: Build static library (PIC + compiler_rt)
-        run: nix develop --command zig build static-lib -Dpic=true -Dcompiler-rt=true
-
-      - name: Run static link tests
-        run: nix develop --command bash test/c_api/run_static_link_test.sh
-
-      - name: Memory usage check (POSIX)
-        run: |
-          BINARY=zig-out/bin/zwasm
-          LIMIT_KB=4608  # 4.5 MB
-          if [ "$(uname)" = "Darwin" ]; then
-            MEM_OUTPUT=$(/usr/bin/time -l "$BINARY" --invoke sieve bench/wasm/sieve.wasm 1000000 2>&1 >/dev/null)
-            MEM_BYTES=$(echo "$MEM_OUTPUT" | grep "maximum resident set size" | awk '{print $1}')
-            MEM_KB=$((MEM_BYTES / 1024))
-          else
-            MEM_OUTPUT=$(/usr/bin/time -v "$BINARY" --invoke sieve bench/wasm/sieve.wasm 1000000 2>&1 >/dev/null)
-            MEM_KB=$(echo "$MEM_OUTPUT" | grep "Maximum resident set size" | awk '{print $NF}')
-          fi
-          MEM_MB=$(python3 -c "print(f'{int(${MEM_KB}) / 1024:.2f}')")
-          echo "Peak memory: ${MEM_MB} MB (${MEM_KB} KB)"
-          if [ "$MEM_KB" -gt "$LIMIT_KB" ]; then
-            echo "FAIL: Peak memory exceeds 4.5 MB limit"
-            exit 1
-          fi
-          echo "PASS: Within 4.5 MB limit"
-
-  test:
-    name: test (windows-latest)
-    runs-on: windows-latest
-    defaults:
-      run:
+      - name: Install Zig 0.16.0 (Unix)
+        if: runner.os != 'Windows' && steps.cache-zig.outputs.cache-hit != 'true'
         shell: bash
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-
-      - name: Provision toolchain (install-tools.ps1)
-        # install-tools.ps1 reads .github/versions.lock and provisions
-        # Zig + WASI SDK + wasm-tools + wasmtime + Go + TinyGo + Rust
-        # (rustup-init.exe with self-contained CARGO_HOME / RUSTUP_HOME)
-        # into %LOCALAPPDATA%\zwasm-tools, exporting PATH / WASI_SDK_PATH
-        # / CARGO_HOME / RUSTUP_HOME via $GITHUB_PATH and $GITHUB_ENV so
-        # subsequent steps see them.
-        shell: pwsh
-        run: pwsh -NoLogo -File scripts/windows/install-tools.ps1
-
-      - name: Cache Zig build artifacts
-        uses: actions/cache@v4
-        with:
-          path: |
-            .zig-cache
-            zig-cache
-            ~/AppData/Local/zig
-          key: zig-Windows-installtools-${{ hashFiles('build.zig', 'build.zig.zon', 'src/**/*.zig') }}
-          restore-keys: |
-            zig-Windows-installtools-
-
-      - name: Sanity-check provisioned toolchain
         run: |
           set -euo pipefail
-          echo "=== install-tools.ps1 toolchain ==="
-          zig version
-          wasm-tools --version
-          wasmtime --version
-          rustc --version
-          rustup target list --installed
-          go version
-          tinygo version
-          echo "WASI_SDK_PATH=$WASI_SDK_PATH"
+          mkdir -p ~/.local
+          curl -fsSL "https://ziglang.org/download/0.16.0/${{ matrix.zig-dir }}.tar.xz" -o /tmp/zig.tar.xz
+          tar -xJf /tmp/zig.tar.xz -C ~/.local
+          mv "$HOME/.local/${{ matrix.zig-dir }}" "$HOME/.local/zig-0.16.0"
 
-      - name: Run Commit Gate
-        run: bash scripts/gate-commit.sh
-
-      # Extras the Commit Gate intentionally skips — same set the
-      # test-nix job runs on Linux/macOS.
-
-      - name: Run C API tests (zig build c-test)
-        run: zig build c-test
-
-      # Order matters on Windows — see test-nix above. cargo run uses
-      # the shared-lib import library at zig-out/lib/zwasm.lib; the
-      # subsequent `zig build static-lib` would otherwise overwrite
-      # it with the static archive (LNK1143 from MSVC link.exe).
-      - name: Run Rust FFI example (dynamic)
-        run: cd examples/rust && cargo run
-
-      - name: Build static library (PIC + compiler_rt)
-        run: zig build static-lib -Dpic=true -Dcompiler-rt=true
-
-      - name: Run static link tests
-        run: bash test/c_api/run_static_link_test.sh
-
-      - name: Memory usage check (Windows)
+      - name: Install Zig 0.16.0 (Windows)
+        if: runner.os == 'Windows' && steps.cache-zig.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          $LIMIT_KB = 4608   # 4.5 MB, same budget as POSIX path
-          $tmpOut   = New-TemporaryFile
-          $proc = Start-Process `
-              -FilePath 'zig-out\bin\zwasm.exe' `
-              -ArgumentList @('--invoke', 'sieve', 'bench\wasm\sieve.wasm', '1000000') `
-              -PassThru -RedirectStandardOutput $tmpOut.FullName
-          $peak = 0
-          while (-not $proc.HasExited) {
-              try { $proc.Refresh() } catch {}
-              if ($proc.PeakWorkingSet64 -gt $peak) { $peak = $proc.PeakWorkingSet64 }
-              Start-Sleep -Milliseconds 50
-          }
-          try { $proc.Refresh() } catch {}
-          if ($proc.PeakWorkingSet64 -gt $peak) { $peak = $proc.PeakWorkingSet64 }
-          Remove-Item $tmpOut -Force -ErrorAction SilentlyContinue
-          if ($proc.ExitCode -ne 0) {
-              Write-Host "zwasm.exe exited $($proc.ExitCode); cannot trust memory measurement"
-              exit 1
-          }
-          $memKb = [int]($peak / 1024)
-          $memMb = ('{0:F2}' -f ($memKb / 1024))
-          Write-Host "Peak memory: $memMb MB ($memKb KB)"
-          if ($memKb -gt $LIMIT_KB) {
-              Write-Host "FAIL: Peak memory exceeds 4.5 MB limit"
-              exit 1
-          }
-          Write-Host "PASS: Within 4.5 MB limit"
+          New-Item -ItemType Directory -Force -Path "$HOME\.local" | Out-Null
+          Invoke-WebRequest -Uri "https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip" -OutFile "$env:TEMP\zig.zip"
+          Expand-Archive -Path "$env:TEMP\zig.zip" -DestinationPath "$HOME\.local" -Force
+          Move-Item -Path "$HOME\.local\zig-x86_64-windows-0.16.0" -Destination "$HOME\.local\zig-0.16.0"
 
-  size-matrix:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: 0.16.0
-
-      - name: Build size variants
-        shell: bash
-        run: |
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            BIN_NAME=zwasm.exe
-          else
-            BIN_NAME=zwasm
-          fi
-          echo "| Variant | Size (stripped) |"
-          echo "|---------|----------------|"
-
-          for variant in \
-            "full:" \
-            "no-jit:-Djit=false" \
-            "no-component:-Dcomponent=false" \
-            "no-wat:-Dwat=false" \
-            "minimal:-Djit=false -Dcomponent=false -Dwat=false"
-          do
-            NAME="${variant%%:*}"
-            FLAGS="${variant#*:}"
-            echo "Building $NAME ($FLAGS)..."
-            rm -rf ".strip-cache-$NAME"
-            zig build -Dstrip=true -Doptimize=ReleaseSafe $FLAGS \
-              --prefix ".strip-cache-$NAME"
-            SIZE=$(wc -c < ".strip-cache-$NAME/bin/$BIN_NAME" | tr -d ' ')
-            SIZE_KB=$((SIZE / 1024))
-            echo "| $NAME | ${SIZE_KB} KB |"
-          done
-
-      - name: Verify minimal build tests pass
-        run: zig build test -Djit=false -Dcomponent=false -Dwat=false
-
-  # Build-only smoke for arm64_32-apple-watchos (ILP32) — see D139.
-  # GitHub Actions runners lack a watchOS SDK so the resulting
-  # archive cannot be linked or run; this job only catches
-  # source-level rot on the ILP32 comptime gates in src/c_api.zig,
-  # src/guard.zig, src/memory.zig, src/types.zig, src/vm.zig and
-  # the build.zig single_threaded gate.
-  watchos-ilp32-build:
-    name: build (aarch64-watchos-ilp32, ILP32 smoke)
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: 0.16.0
-
-      - name: Build static-lib for aarch64-watchos-ilp32
-        run: |
-          zig build static-lib \
-            -Dtarget=aarch64-watchos-ilp32 \
-            -Djit=false -Dcomponent=false -Dwat=false
-          # Zig 0.16 ships an empty .a for this target (SYMDEF only,
-          # ~88 bytes). The .o is the actual artefact; verify it
-          # built and is the right ABI. `file(1)` output varies
-          # across versions ("64_32-bit armv8 object" on local Darwin
-          # 25, "arm64_32_v8" on macos-latest CI), so match the
-          # stable substring `arm64_32` present in both.
-          OBJ=$(find .zig-cache -name 'libzwasm_zcu.o' \
-            -exec file {} + | grep -E 'arm64_32|64_32-bit armv8' | head -1 | cut -d: -f1)
-          if [ -z "$OBJ" ]; then
-            echo "FAIL: no arm64_32 (armv8 ILP32) object produced"
-            find .zig-cache -name 'libzwasm_zcu.o' -exec file {} +
-            exit 1
-          fi
-          echo "PASS: built $OBJ"
-          ls -la "$OBJ"
-
-  # 3-OS bench matrix (C-g step 5, 2026-04-29). Each runner does its
-  # own fresh measurement of base vs PR — never compared across
-  # OSes / architectures because the hardware deltas dwarf any
-  # codegen-level signal we could detect. The durable per-arch
-  # baselines live in bench/history.yaml (see CLAUDE.md Merge Gate
-  # item 10); CI exists to catch *intra-runner* regressions on PRs.
-  benchmark:
-    name: benchmark (${{ matrix.os }})
-    needs: [test-nix, test]
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      # Linux / macOS — nix devshell brings zig + hyperfine.
-      - name: Install Nix
+      - name: Add Zig to PATH (Unix)
         if: runner.os != 'Windows'
-        uses: DeterminateSystems/nix-installer-action@main
+        shell: bash
+        run: echo "$HOME/.local/zig-0.16.0" >> "$GITHUB_PATH"
 
-      - name: Magic Nix cache
-        if: runner.os != 'Windows'
-        uses: DeterminateSystems/magic-nix-cache-action@main
-
-      # Windows — install-tools.ps1 brings zig + hyperfine via
-      # `versions.lock` pins, exposing them through $GITHUB_PATH so
-      # subsequent bash steps see them. `-OnlyTool` arms keep the
-      # bench job from pulling Go / TinyGo / Rust / WASI SDK that
-      # the realworld test job needs but the benchmarks do not.
-      - name: Provision toolchain (Windows)
+      - name: Add Zig to PATH (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: |
-          pwsh -NoLogo -File scripts/windows/install-tools.ps1 -OnlyTool zig
-          pwsh -NoLogo -File scripts/windows/install-tools.ps1 -OnlyTool hyperfine
+        run: Add-Content -Path $env:GITHUB_PATH -Value "$HOME\.local\zig-0.16.0"
 
-      - name: Cache Zig build artifacts
-        uses: actions/cache@v4
-        with:
-          path: |
-            .zig-cache
-            zig-cache
-            ~/.cache/zig
-            ~/AppData/Local/zig
-          key: zig-${{ runner.os }}-bench-${{ hashFiles('build.zig', 'build.zig.zon', 'src/**/*.zig') }}
-          restore-keys: |
-            zig-${{ runner.os }}-bench-
-
-      - name: Build ReleaseSafe
-        run: |
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            zig build -Doptimize=ReleaseSafe
-          else
-            nix develop --command zig build -Doptimize=ReleaseSafe
-          fi
-
-      - name: Benchmark regression check
-        if: github.event_name == 'pull_request'
-        # Soft-fail (continue-on-error) so noisy single-bench wobbles do
-        # not block PRs. Real regressions surface as repeated reds
-        # across PRs and are flagged in the PR check log; the durable
-        # per-arch baselines live in bench/history.yaml (recorded
-        # locally, see CLAUDE.md Merge Gate item 10). Each runner
-        # measures fresh base + PR builds on the same host, so the
-        # comparison is intra-runner only — never mix the three
-        # series.
+      # Reference oracle for the interp-vs-JIT-vs-wasmtime differential. Best
+      # effort: the differential runner degrades to a SKIP when it is absent,
+      # so a download hiccup must not fail the gate.
+      - name: Install wasmtime (reference oracle, best effort)
         continue-on-error: true
+        shell: bash
         run: |
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            bash bench/ci_compare.sh --base=origin/main --threshold=20 --runs=3 --warmup=1 --skip-build
+          set -euo pipefail
+          source .github/versions.lock
+          v="v${WASMTIME_VERSION}"
+          case "${{ runner.os }}" in
+            Linux)   asset="wasmtime-${v}-x86_64-linux";   ext="tar.xz" ;;
+            macOS)   asset="wasmtime-${v}-aarch64-macos";  ext="tar.xz" ;;
+            Windows) asset="wasmtime-${v}-x86_64-windows"; ext="zip"    ;;
+          esac
+          url="https://github.com/bytecodealliance/wasmtime/releases/download/${v}/${asset}.${ext}"
+          mkdir -p "$HOME/.local/bin"
+          cd "$HOME/.local/bin"
+          if [ "$ext" = "zip" ]; then
+            curl -fsSL "$url" -o wasmtime.zip && unzip -j -o wasmtime.zip
           else
-            nix develop --command bash bench/ci_compare.sh --base=origin/main --threshold=20 --runs=3 --warmup=1 --skip-build
+            curl -fsSL "$url" -o wasmtime.tar.xz && tar -xJf wasmtime.tar.xz --strip-components=1 "${asset}/wasmtime"
           fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Benchmark record (main push)
-        if: github.event_name == 'push'
+      # Build-time dependency: `zig build test-all` runs `wasm-tools parse` to
+      # produce spectest.wasm from test/spec/spectest.wat (build.zig). Required
+      # (not best-effort) — test-all cannot build without it.
+      - name: Install wasm-tools (build-time, required for test-all)
+        shell: bash
         run: |
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            bash bench/ci_compare.sh --record-only --runs=3 --warmup=1 --skip-build
+          set -euo pipefail
+          source .github/versions.lock
+          v="${WASM_TOOLS_VERSION}"
+          case "${{ runner.os }}" in
+            Linux)   asset="wasm-tools-${v}-x86_64-linux";   ext="tar.gz" ;;
+            macOS)   asset="wasm-tools-${v}-aarch64-macos";  ext="tar.gz" ;;
+            Windows) asset="wasm-tools-${v}-x86_64-windows"; ext="zip"    ;;
+          esac
+          url="https://github.com/bytecodealliance/wasm-tools/releases/download/v${v}/${asset}.${ext}"
+          mkdir -p "$HOME/.local/bin"
+          cd "$HOME/.local/bin"
+          if [ "$ext" = "zip" ]; then
+            curl -fsSL "$url" -o wt.zip && unzip -j -o wt.zip
           else
-            nix develop --command bash bench/ci_compare.sh --record-only --runs=3 --warmup=1 --skip-build
+            curl -fsSL "$url" -o wt.tar.gz && tar -xzf wt.tar.gz --strip-components=1 "${asset}/wasm-tools"
           fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Verify toolchain
+        shell: bash
+        run: |
+          zig version
+          wasm-tools --version
+          wasmtime --version || echo "wasmtime absent — differential will SKIP"
+
+      # Extended checks (lint + 6-combo build DCE + ReleaseSafe JIT smoke + AOT
+      # cross-compile) are ~10 cold-cache builds and dominate wall-clock, so they
+      # run ONLY on the merge to `main` (push) — not on every PR / dispatch, which
+      # get the fast core gate (fmt + test-all, ~10 min). windows is always core.
+      - name: ci_gate.sh
+        shell: bash
+        env:
+          ZWASM_CI_EXTENDED: ${{ (github.event_name == 'push' && matrix.extended) && '1' || '0' }}
+        run: bash scripts/ci_gate.sh

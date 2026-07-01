@@ -1,0 +1,6 @@
+module m.wasm
+assert_return k () -> i64:244837814094590
+assert_return id i64:42 -> i64:42
+assert_return id i64:-1 -> i64:-1
+assert_return iadd i64:41 -> i64:42
+assert_return ext i32:-1 -> i64:-1

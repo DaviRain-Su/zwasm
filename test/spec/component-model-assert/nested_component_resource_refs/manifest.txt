@@ -1,0 +1,6 @@
+# Official corpus category: "refers to resources not defined in the current
+# component" (resources.wast). Rejects via rule 12 (the REAL generativity
+# rule): the nested-component scan walks inner type-sort outer aliases; one
+# reaching the root's resource def (or a transitively resource-carrying def)
+# is InvalidAlias. Resource defs themselves decode since D-322 narrowed.
+assert_invalid test/spec/component-model-assert/nested_component_resource_refs/outer_alias_resource.wasm

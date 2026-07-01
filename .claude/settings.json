@@ -1,31 +1,114 @@
 {
+  "defaultMode": "acceptEdits",
+  "outputStyle": "Japanese",
   "permissions": {
     "allow": [
+      "Agent",
       "Bash",
       "Read",
       "Edit",
       "Write",
-      "Glob",
-      "Grep",
-      "WebSearch",
-      "WebFetch",
-      "Task",
       "Skill",
-      "mcp__emacs-tools__claude-code-ide-mcp-imenu-list-symbols",
-      "mcp__emacs-tools__claude-code-ide-mcp-xref-find-references",
-      "mcp__ide__getDiagnostics"
+      "ScheduleWakeup",
+      "ToolSearch",
+      "Monitor",
+      "WebFetch",
+      "WebSearch",
+      "AskUserQuestion",
+      "TaskCreate",
+      "TaskUpdate",
+      "TaskList",
+      "TaskGet",
+      "TaskOutput",
+      "TaskStop",
+      "NotebookEdit",
+      "EnterPlanMode",
+      "ExitPlanMode",
+      "EnterWorktree",
+      "ExitWorktree",
+      "ListMcpResourcesTool",
+      "ReadMcpResourceTool",
+      "RemoteTrigger"
     ],
-    "deny": []
+    "deny": [
+      "Bash(rm -rf /:*)",
+      "Bash(rm -rf ~/:*)",
+      "Bash(rm -rf $HOME:*)",
+      "Bash(rm -rf .git:*)"
+    ]
   },
+  "env": {
+    "ZIG_LOCAL_CACHE_DIR": ".zig-cache"
+  },
+  "sandbox": {
+    "allowUnsandboxedCommands": false,
+    "excludedCommands": [
+      "orb:*",
+      "ssh:*",
+      "scp:*",
+      "gh:*",
+      "git push:*",
+      "git fetch:*",
+      "git pull:*",
+      "curl:*",
+      "wget:*",
+      "nix:*"
+    ],
+    "network": {
+      "allowedDomains": [
+        "github.com",
+        "api.github.com",
+        "objects.githubusercontent.com",
+        "raw.githubusercontent.com",
+        "ziglang.org",
+        "*.ziglang.org"
+      ]
+    }
+  },
+  "autoCompactEnabled": true,
   "hooks": {
-    "PostToolUse": [
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $CLAUDE_PROJECT_DIR/scripts/print_handover_brief.sh"
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $CLAUDE_PROJECT_DIR/scripts/print_handover_brief.sh"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $CLAUDE_PROJECT_DIR/scripts/check_md_tables.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash $CLAUDE_PROJECT_DIR/scripts/check_stale_git_lock.sh"
+          }
+        ]
+      },
       {
         "matcher": "Edit|Write",
         "hooks": [
           {
             "type": "command",
-            "command": "if echo \"$CLAUDE_FILE_PATHS\" | grep -qE '\\.zig$'; then cd /Users/shota.508/Documents/MyProducts/zwasm && zig build test 2>&1 | tail -20; fi",
-            "timeout": 60
+            "command": "bash $CLAUDE_PROJECT_DIR/scripts/check_roadmap_amendment.sh"
           }
         ]
       }

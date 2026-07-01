@@ -1,0 +1,3 @@
+module simd_linking.0.wasm
+skip-impl directive-register
+module simd_linking.1.wasm

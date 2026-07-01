@@ -1,0 +1,6 @@
+# Official corpus rule: "name conflicts with previous name" (ADR-0176 validator
+# rule 8 — case-insensitive name uniqueness): export names / record fields /
+# variant cases.
+assert_invalid test/spec/component-model-assert/dup_name/export_dup.wasm
+assert_invalid test/spec/component-model-assert/dup_name/record_field_dup.wasm
+assert_invalid test/spec/component-model-assert/dup_name/variant_case_dup.wasm

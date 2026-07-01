@@ -1,0 +1,144 @@
+# 0155 — Register-homed locals, single-pass (D-265 rework, Phase III — Option B)
+
+- **Status**: Accepted — STAGES 1+2 (arm64) LANDED + 2-host green (1=`a64c72a1` call-free; 2=`5d1dd221` call-site
+  spill; arm64 w45_addi 2.30×→0.97×). **Stage 4 (x86_64) attempted `f31affa1` → REVERTED `9d15daf7`** (ubuntu
+  caught i64+recursive-call homing miscompiles; Mac can't run x86_64). 2026-06-04; D-265 Phase IV; fix A = APPEND.
+  Stage 4 re-attempt pending (Rosetta local x86_64 testing). Stages 2b (GC) + 3 (fp/v128 thin) deferred. Supersedes ADR-0154.
+- **Date**: 2026-06-04
+- **Author**: claude (autonomous, D-265 campaign Phase III redo)
+- **Tags**: Phase 15, perf, regalloc, liveness, emit, single-pass, locals, D-265, ADR-0018, ADR-0149/0150/0151, W54, W45
+- **Amends**: ROADMAP §15.P (parity mechanism). Adds a register-home for wasm locals to `shared/regalloc*.zig` +
+  `arm64/emit.zig` + `x86_64/emit.zig` + `liveness.zig`. Supersedes ADR-0154 (Option A insufficient: ~17%).
+  Re-opens the W45/loop-persistence question ADR-0151 folded (for SCALAR locals).
+
+## Context
+
+D-265 (campaign, `bench/results/s15p_parity_vs_v1.md`): v2-jit is ~2.3× slower than v1 when a loop body reads a
+loop-carried local. Phase-III analysis (ADR-0154 Revision) proved the cost is the **per-iteration loop-top
+reload**: v2 homes locals in a separate `local_base_off` stack region; `local.get $i` = `LDR` from that slot,
+`local.set $i` = `STR`; so a local's value crosses the loop back-edge via MEMORY. v1 homes locals in **registers**
+(vregs 0..N-1, loaded once at prologue, resident across the whole function incl. loop back-edges, spilled only
+around calls) — `local.get`/`set` are register reads/writes, no per-iteration memory. This is a deliberate v2
+simplification (ADR-0018 era: locals → slots) that costs the 2.3×. Per the design priority (ADR-0153) + §1.2
+(parity is the v0.1.0 line), it is fixed now, within P3/P6 single-pass (v1 is the single-pass existence proof).
+
+Phase-II correctness net (the regression guard, 3-host green): `test/edge_cases/p9/regalloc/`
+loop_carried_local_sum=55, local_set_then_get_in_loop=30, multi_local_loop_pressure=84.
+
+## Decision
+
+**Give wasm locals a register home, single-pass (v1-style), replacing the slot-only model.** A local is a
+**mutable register-resident value** for its lifetime (loaded once at prologue, read/written in-register, spilled
+to its `local_base_off` slot only at necessity points), NOT a slot reloaded per access.
+
+This is NOT the temporary-vreg model (those are single-def SSA-ish values from `liveness.zig`'s push-per-op). A
+local is **multi-def mutable** (each `local.set` re-writes it).
+
+**Resolved mechanism (2026-06-04) — pseudo-vreg-per-local, reusing the existing register-resident elision:**
+Allocate **one pseudo-vreg per local** with a **function-spanning live range** (def_pc=0, last_use_pc=function
+end). Regalloc assigns it a slot like any vreg; if the slot < `max_reg_slots_gpr` (8) it is **register-resident**
+the whole function (its range never ends → the free-pool never reclaims it → pinned). Then `local.get $i` /
+`local.set $i` reference that pseudo-vreg via the EXISTING `gprLoadSpilled`/`gprStoreSpilled` helpers — which
+**already elide the LDR/STR for a register-resident vreg** (the ADR-0149 finding: `.reg` branch returns the
+register / is a no-op). So a register-homed local needs **no new emit machinery** — reusing the pseudo-vreg gives
+register residency for free; an overflow local (slot ≥ 8) falls back to today's LDR/STR (the slot IS its home).
+This is lower-W54-risk than a separate local-register file (no parallel allocator) and reuses v2's contract.
+Multi-def is fine: the slot is stable across the whole range, so every `local.set` writes the same home and every
+`local.get` reads it. Cost: K locals pin K slots function-wide → fewer registers for temporaries (v1 has the same
+trade; the first locals get registers, the rest + temporaries overflow). The prologue loads each register-homed
+local's initial value (param or zero) into its pinned register once.
+
+**Mechanism (the four cross-layer touch-points):**
+1. **regalloc** (`shared/regalloc*.zig`): reserve the first K physical GPR/FP slots for the first K locals (by
+   type class); locals beyond K (or beyond pressure) stay slot-homed (overflow). Single-pass pre-reservation
+   before the greedy temporary scan (v1: `regalloc.zig:8-10,39`).
+2. **prologue** (both emit backends): load the register-homed locals from their `local_base_off` slots into their
+   reserved registers once (v1: `computePrologueLoads`, `jit.zig:1997-2002`). Params + zero-inits flow in here.
+3. **`local.get`/`local.set`** (both backends): a register-homed local → read/write the reserved register (no
+   LDR/STR). A slot-homed (overflow) local → today's LDR/STR.
+4. **necessity points** — spill the register-homed local back to its slot, then reload after: (a) **before a
+   call** if the local is in a caller-saved reg (v1: `jit.zig:1705-1719`); (b) **function exit** (store final
+   values if the slot is observable — usually not, but keep correctness); (c) the loop back-edge needs **NO**
+   reload (the whole point — v1 `jit.zig:1639-1646` marks locals live across the back-edge, GPR locals stay put;
+   only FP/SIMD caches flush).
+
+## Anti-regression invariants (MUST hold; W54 lineage)
+
+1. **Mutable-value correctness** — `local.set $i` updates local $i's register; every later `local.get $i` (until
+   the next set) reads that register. The merge/branch correctness: at a control-flow join, a register-homed
+   local holds its current value on ALL paths (it is a persistent home, not a transient vreg) — this is SIMPLER
+   than Option A's merge-fence (no invalidation needed; the home persists). The Phase-II fixtures
+   (write-then-read; loop-carried; multi-local) are the executable proof.
+2. **GcRef slot-visibility (D-261/D-258)** — a reference-typed local in a register is invisible to the
+   conservative GC scan (`scanNativeStackRoots`, native stack only). Today GC-on-JIT is unwired (D-258), so no
+   live collection point exists in JIT code → register-homing a GcRef is currently safe. BUT the design MUST add
+   the hook: at any GC-collection point (when D-258 lands), register-homed GcRef locals spill to their slots
+   first (or are excluded from register-homing). For THIS rework: **GcRef locals stay slot-homed** (conservative;
+   no perf regression vs today; revisit when D-258 + the GcRef adversarial test land). Non-ref locals get the win.
+3. **Caller-saved discipline (ADR-0017 cohort)** — register-homed locals must not collide with the pinned runtime
+   cohort (arm64 X19/X24-X28; x86_64 R15) and must be saved/restored across calls like any caller-saved value.
+4. **Both-backends-equal (P7)** — arm64 + x86_64 get the same model; 3-host verify (D-262 cross-compile≠cross-run).
+
+## Staged migration (Phase IV; full test net + Phase-II fixtures green at EVERY commit)
+
+Big change → stage to keep each commit green + measurable:
+1. **GPR locals, no-call straight-line loops** (the w45_addi case): reserve K GPR registers, prologue-load,
+   local.get/set as reg refs, slot-overflow for the rest. Measure w45_addi. (Spike validates this first.)
+2. **Call-site spill/reload** of caller-saved register-homed locals (realworld fixtures with calls).
+3. **FP/v128 register-homed locals** (the fp class, V16-V28) — same model; re-measures the v128 loop.
+4. **x86_64 parity** of all the above (P7); ubuntu test-all each step.
+Each stage is `architectural`/`emit`-typed; the 3-cycle cap forces a step-back to spike if a stage drifts.
+
+## Exit criterion
+
+w45_addi **2.3× → ≤1.1× vs v1** AND full test net (spec 100% + edge_cases incl. the 3 Phase-II fixtures +
+realworld + differential) green on 3 hosts. Phase V: ADR-0149/0150 Revision note (the regalloc headroom is real
+on loop-locals) + ADR-0151 W45 re-examination (loop-persistence DOES matter for scalar locals).
+
+## Validation spike (before on-branch impl, per ADR-0153 + spike_discipline)
+
+`private/spikes/register-homed-locals/`: implement stage 1 (GPR locals register-homed for the no-call case) on a
+throwaway branch/copy; run the 3 Phase-II fixtures (MUST stay green = correctness) + w45_addi (MUST approach v1 =
+ROI ≤1.1×). Resolves the open design choice (local-register pre-reservation vs multi-def vreg). Green + ROI → land
+stage 1 on-branch per the migration. Broken/thin → revise here before any on-branch code.
+
+## Spike result (2026-06-04) — ROI VALIDATED; one correctness bug to fix before landing
+
+Ran the working-tree spike (reverted clean after). Files touched: new `src/ir/analysis/local_homing.zig` (~120
+LOC, the local-idx→pseudo-vreg map, arch-gated aarch64) + `liveness.zig` (+~35: mint K function-spanning pseudo-
+vregs) + `arm64/emit.zig` (+~55: `next_vreg` starts at K, prologue-load, local.get pushes the pseudo-vreg,
+local.set/tee reg→reg MOV into home) + `regalloc_shape_tags.zig` (+~10: mirror the K-start).
+
+- **ROI: w45_addi v2/v1 = 0.57× — v2-jit is 1.76× FASTER than v1** (7.0ms vs 12.4ms; was 2.30× SLOWER). Decisively
+  past the ≤1.1× target. **The approach + the mutable-register-home model are SOUND** (loop back-edge needs no
+  reload — proven). The 3 Phase-II fixtures pass.
+- **Validated design facts**: (1) liveness↔emit↔`regalloc_shape_tags` numbering must be mirrored in all 3 passes
+  (lockstep). (2) Call-crossing homed locals break (param register clobbered across a call → `rust_fib` hung) →
+  stage 1 correctly gates homing OFF for any function containing a call/trampoline op (matches the staging). (3)
+  x86_64 unchanged → gate K=0 on non-aarch64 (cross-compile green). (4) O(n²) per-op recompute → precomputed map.
+- **BUG (must fix before landing)**: two CALL-FREE i32-local functions miscompile — `clang_O0_arr_sum`
+  (got 133642, want 39) + `clang_O0_fp_sum` (got 10, want 77). A latent liveness↔emit operand-stack numbering
+  divergence on the clang-`-O0` shape (a homed local used as a memory base, read repeatedly, in a loop whose
+  condition is `load; const; lt_s; const; and; eqz; br_if`). The 3 Phase-II fixtures do NOT exercise this → the
+  net is insufficient. Not root-caused in the spike budget.
+
+**Decision: the approach is GO** (ROI proven, model sound). Before landing stage 1: (a) Phase II — ADD a
+clang-`-O0`-shaped fixture (homed local as memory base + multi-step `and/eqz/br_if` loop condition) as the new RED
+test reproducing arr_sum/fp_sum; (b) root-cause the numbering divergence there; (c) fix; (d) re-run the spike →
+green → land. The implementation subagent (id `a89f7df7f111795ec`) retains the full context to continue.
+
+## Rejected alternatives
+
+- **ADR-0154 Option A (value-reuse cache)** — recovers only ~17% (in-body redundant reads); the loop-top reload
+  dominates. Superseded.
+- **Defer past v0.1.0** — contradicts §1.2 + the design priority (ADR-0153).
+- **A general optimising/SSA tier** — permanently out of scope (§3.2); this stays single-pass baseline (P3/P6).
+
+## Consequences
+
+- Closes the D-265 parity gap within P3/P6. The single biggest codegen change of Phase 15; staged + spiked +
+  guarded by the Phase-II net to keep it safe (the campaign discipline, ADR-0153).
+- Revises ADR-0149/0150 (regalloc headroom real on loop-locals) + re-opens ADR-0151 W45 (loop-persistence matters
+  for scalar locals, not just v128) — both get Revision notes at Phase V.
+- GcRef locals stay slot-homed for now (no regression); the register-homed-GcRef + GC-collection-point spill is a
+  follow-on when D-258 (JIT GC trigger) + the D-261 adversarial test land.

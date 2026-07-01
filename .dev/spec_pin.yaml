@@ -1,0 +1,19 @@
+# Wasm spec / testsuite vendoring pin (§14.3 spec-bump).
+#
+# The conformance corpora under `test/spec/` are regenerated (regen_spec_*.sh)
+# from the `WebAssembly/spec` + `WebAssembly/testsuite` upstreams. This pin is
+# the FORWARD baseline: `scripts/check_spec_bump.sh` (the §14.3 nightly leg)
+# alerts when upstream advances BEYOND these SHAs → re-vendor + run the new
+# conformance tests. Scope: Wasm 3.0 (W3C Rec 2025-09); proposal phases are
+# tracked qualitatively in `.dev/proposal_watch.md` (quarterly review).
+#
+# Pinned to the upstream HEAD as of the date below (acknowledged baseline; the
+# vendored corpora may trail it — proposal_watch's review covers re-sync). Bump
+# these SHAs + the date when re-vendoring.
+# 2026-06-14 bump: spec main advanced 21b053f→f3d3448 but the diff is PURELY
+# `[spectec]` formal-spec tooling + editorial/typing-rule fixes (PRs #2180-2186);
+# `test/core/*.wast` had ZERO changes, so the frozen-3.0 conformance corpora are
+# unaffected. No re-vendor needed; pin bumped to silence the benign drift flag.
+pinned: "2026-06-14"
+spec: "f3d344821ae9d030d3dcf8d710e0b62b36032052"
+testsuite: "0dc0343c9876267d99a7577ed4fc2289406a7869"

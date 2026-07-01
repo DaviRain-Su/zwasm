@@ -1,0 +1,5 @@
+# Official corpus category: deep importname/exportname form grammars —
+# "not valid base64" / url / locked-dep / unlocked-dep (import.wast +
+# export.wast, ~12 cases). Representative fixture committed as
+# bad_integrity.{wat,wasm} for when the grammars land.
+assert_invalid test/spec/component-model-assert/extern_name_deep_forms/bad_integrity.wasm

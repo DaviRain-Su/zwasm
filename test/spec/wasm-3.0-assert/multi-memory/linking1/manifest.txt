@@ -1,0 +1,14 @@
+module $Mm linking1.0.wasm
+register Mm
+module $Nm linking1.1.wasm
+assert_return $Mm::load i32:12 -> i32:2
+assert_return $Nm::Mm.load i32:12 -> i32:2
+assert_return $Nm::load i32:12 -> i32:242
+module $Om linking1.2.wasm
+assert_return $Mm::load i32:12 -> i32:167
+assert_return $Nm::Mm.load i32:12 -> i32:167
+assert_return $Nm::load i32:12 -> i32:242
+assert_return $Om::load i32:12 -> i32:167
+module linking1.3.wasm
+assert_uninstantiable linking1.4.wasm
+assert_uninstantiable linking1.5.wasm

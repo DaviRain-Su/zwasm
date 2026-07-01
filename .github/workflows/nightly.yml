@@ -1,85 +1,103 @@
-name: Nightly
+# Nightly CI (§14.3) — overnight fuzz campaign + proposal-watch freshness.
+#
+# Trigger: **manual** (`workflow_dispatch`), consistent with the project's
+# CI-second-line convention (auto-triggers disabled 2026-05-25). To run on a
+# real nightly cadence, uncomment the `schedule:` block below.
+#
+#   # schedule:
+#   #   - cron: "0 6 * * *"   # 06:00 UTC daily
+#
+# Run on demand: `gh workflow run nightly.yml --ref zwasm-from-scratch`.
+#
+# Coverage (the three §14.3 legs): (1) fuzz-campaign — a fresh large
+# `wasm-tools smith` corpus run through the loader (parse + validate +
+# instantiate; a crash is a finding); (2) proposal-watch — quarterly-cadence
+# freshness gate on `.dev/proposal_watch.md`; (3) spec-bump — alert when
+# WebAssembly/{spec,testsuite} upstream advances beyond `.dev/spec_pin.yaml`.
 
-# FROZEN for the zwasm_from_scratch migration: scheduled run disabled.
-# Re-enable by uncommenting the `schedule` block below.
+name: nightly
+
 on:
-  # schedule:
-  #   - cron: '0 3 * * 3'  # Wednesday 03:00 UTC (weekly)
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.sha }}
+  cancel-in-progress: false
+
 jobs:
-  sanitizer:
-    runs-on: ubuntu-latest
+  fuzz-campaign:
+    name: fuzz campaign (x86_64-linux)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Zig
-        uses: goto-bus-stop/setup-zig@v2
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          version: 0.16.0
+          ref: ${{ github.sha }}
 
-      - name: Debug build + unit tests
-        run: zig build test
+      - name: Cache Zig 0.16.0
+        id: cache-zig
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.local/zig-0.16.0
+          key: zig-0.16.0-x86_64-linux
 
-      - name: Install wasm-tools
+      - name: Install Zig 0.16.0
+        if: steps.cache-zig.outputs.cache-hit != 'true'
         run: |
-          source .github/versions.lock
-          ARCH=$(uname -m)
-          curl -L --retry 3 --retry-delay 5 -f -o /tmp/wasm-tools.tar.gz \
-            "https://github.com/bytecodealliance/wasm-tools/releases/download/v${WASM_TOOLS_VERSION}/wasm-tools-${WASM_TOOLS_VERSION}-${ARCH}-linux.tar.gz"
-          tar xzf /tmp/wasm-tools.tar.gz -C /tmp
-          echo "/tmp/wasm-tools-${WASM_TOOLS_VERSION}-${ARCH}-linux" >> "$GITHUB_PATH"
+          set -euo pipefail
+          mkdir -p ~/.local
+          curl -fsSL "https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz" -o /tmp/zig.tar.xz
+          tar -xJf /tmp/zig.tar.xz -C ~/.local
+          mv ~/.local/zig-x86_64-linux-0.16.0 ~/.local/zig-0.16.0
 
-      - name: Download spec testsuite
-        run: git clone --depth 1 https://github.com/WebAssembly/spec.git /tmp/wasm-spec
+      - name: Add Zig to PATH
+        run: echo "$HOME/.local/zig-0.16.0" >> "$GITHUB_PATH"
 
-      - name: Convert spec tests
-        run: bash test/spec/convert.sh /tmp/wasm-spec/test/core
-
-      - name: Spec tests (ReleaseSafe, strict)
-        run: python3 test/spec/run_spec.py --build --summary --strict
-        timeout-minutes: 30
-
-      - name: Download wasmtime misc_testsuite
+      - name: Install wasm-tools 1.247.0
         run: |
-          git clone --depth 1 --filter=blob:none --sparse \
-            https://github.com/bytecodealliance/wasmtime.git /tmp/wasmtime
-          cd /tmp/wasmtime
-          git sparse-checkout set tests/misc_testsuite
+          set -euo pipefail
+          curl -fsSL "https://github.com/bytecodealliance/wasm-tools/releases/download/v1.247.0/wasm-tools-1.247.0-x86_64-linux.tar.gz" -o /tmp/wt.tar.gz
+          tar -xzf /tmp/wt.tar.gz -C /tmp
+          echo "/tmp/wasm-tools-1.247.0-x86_64-linux" >> "$GITHUB_PATH"
 
-      - name: E2E tests (Debug)
-        env:
-          WASMTIME_MISC_DIR: /tmp/wasmtime/tests/misc_testsuite
-        run: python3 test/e2e/run_e2e.py --convert --summary
+      - name: Verify toolchain
+        run: |
+          zig version
+          wasm-tools --version
+          python3 --version
 
-  fuzz:
-    runs-on: ubuntu-latest
+      - name: Generate campaign corpus
+        run: FUZZ_N=2000 bash scripts/gen_fuzz_corpus.sh campaign
+
+      - name: Run fuzz campaign
+        run: zig build fuzz-campaign
+
+  proposal-watch:
+    name: proposal-watch freshness
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Zig
-        uses: goto-bus-stop/setup-zig@v2
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          version: 0.16.0
+          ref: ${{ github.sha }}
 
-      - name: Install wasm-tools
-        run: |
-          source .github/versions.lock
-          ARCH=$(uname -m)
-          curl -L --retry 3 --retry-delay 5 -f -o /tmp/wasm-tools.tar.gz \
-            "https://github.com/bytecodealliance/wasm-tools/releases/download/v${WASM_TOOLS_VERSION}/wasm-tools-${WASM_TOOLS_VERSION}-${ARCH}-linux.tar.gz"
-          tar xzf /tmp/wasm-tools.tar.gz -C /tmp
-          echo "/tmp/wasm-tools-${WASM_TOOLS_VERSION}-${ARCH}-linux" >> "$GITHUB_PATH"
+      - name: Check proposal-watch cadence
+        run: bash scripts/check_proposal_watch.sh --gate
 
-      - name: Generate fuzz corpus
-        run: |
-          bash test/fuzz/gen_corpus.sh 100
-          bash test/fuzz/gen_edge_cases.sh
+  spec-bump:
+    name: spec-bump drift
+    runs-on: ubuntu-22.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.sha }}
 
-      - name: Wasm fuzz campaign (60 min)
-        run: bash test/fuzz/fuzz_campaign.sh --duration=60 --no-coverage
-        timeout-minutes: 75
-
-      - name: WAT fuzz campaign (30 min)
-        run: bash test/fuzz/fuzz_wat_campaign.sh --duration=30
-        timeout-minutes: 45
+      - name: Check spec/testsuite upstream drift
+        run: bash scripts/check_spec_bump.sh --gate

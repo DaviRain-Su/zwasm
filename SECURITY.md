@@ -1,64 +1,56 @@
 # Security Policy
 
-## Supported Versions
+zwasm is a WebAssembly runtime: it loads and executes **untrusted `.wasm`
+bytecode** in the same process as the host. Memory safety and sandbox
+integrity are therefore first-class concerns, and we take reports seriously.
 
-| Version | Supported |
-|---------|-----------|
-| main branch | Yes |
-| Tagged releases (v1.x.x) | Yes |
+## Supported versions
 
-## Reporting a Vulnerability
+zwasm v2 is currently **pre-release** (`v2.0.0-alpha.*`). Security fixes land
+on the `main` branch and the newest pre-release tag. Older `v1.x` tags are
+frozen and no longer receive updates.
 
-If you discover a security vulnerability in zwasm, please report it responsibly:
+| Version        | Supported |
+|----------------|-----------|
+| `v2.0.0-alpha.*` / `main` | ✅ |
+| `v1.x` (frozen) | ❌ |
 
-1. **Do NOT open a public GitHub issue** for security vulnerabilities
-2. Email: **shota.508+zwasm-security@gmail.com**
-3. Include:
-   - Description of the vulnerability
-   - Steps to reproduce (Wasm module or test case if possible)
-   - Impact assessment (crash, memory corruption, sandbox escape, etc.)
-   - Affected component (decoder, validator, JIT, WASI, etc.)
+## Reporting a vulnerability
 
-## Response Timeline
+**Please do not open a public issue or Discussion for security problems.**
 
-- **Acknowledgment**: Within 48 hours
-- **Initial assessment**: Within 1 week
-- **Fix or mitigation**: Depends on severity
-  - Critical (sandbox escape, RCE): As fast as possible
-  - High (crash, denial of service): Within 2 weeks
-  - Medium/Low: Next release cycle
+Report privately via GitHub's **[Private Vulnerability Reporting](https://github.com/clojurewasm/zwasm/security/advisories/new)**
+(the "Report a vulnerability" button under the repository's *Security* tab).
+If that is unavailable to you, open a minimal public Discussion asking a
+maintainer to reach out — **without any exploit detail** — and mention
+`@chaploud`.
+
+Please include, where possible:
+
+- affected version / commit and target (`aarch64-macos`, `x86_64-linux`,
+  `aarch64-linux`, or `x86_64-windows`) and execution mode (interpreter / JIT / AOT);
+- a minimal `.wasm` (or `.wat`) reproducer and the exact CLI / embedding call;
+- the observed impact (host memory corruption, sandbox escape, WASI capability
+  bypass, denial of service, etc.).
+
+We aim to acknowledge a report within a few days. Because this is a
+small, resource-limited project, please allow reasonable time for a fix
+before any public disclosure.
 
 ## Scope
 
-The following are in scope for security reports:
+In scope: host memory corruption from a malformed or adversarial module,
+sandbox / WASI-capability escapes, JIT code-generation bugs with a security
+impact, and unbounded resource use that the documented limits (fuel, timeout,
+memory ceiling) fail to contain.
 
-- Linear memory escape (reading/writing outside Wasm memory bounds)
-- Table bounds or type confusion attacks
-- JIT code injection or W^X violations
-- WASI capability bypass (accessing resources without capability)
-- Sandbox escape (guest code affecting host beyond defined API)
-- Crash from valid or invalid Wasm modules (fuzzer-reproducible)
-- Stack overflow/underflow leading to memory corruption
+Out of scope: behaviour of untrusted guest code that stays *within* the
+sandbox, and misuse of the embedding API in ways the documentation warns
+against.
 
-The following are out of scope:
+## Hardening the host
 
-- Denial of service via resource exhaustion beyond configured limits (fuel and memory limits available)
-- Timing side channels
-- Issues only reproducible with ReleaseFast (use ReleaseSafe for production)
-- Bugs in host-provided import functions
-
-## Security Model
-
-See [docs/security.md](docs/security.md) for the full threat model, including
-what zwasm protects against and what it does not.
-
-## Build Recommendations
-
-For production use with untrusted Wasm modules:
-
-```bash
-zig build -Doptimize=ReleaseSafe
-```
-
-ReleaseSafe preserves bounds checks, overflow detection, and safety assertions.
-Do NOT use ReleaseFast for untrusted code — it strips safety checks.
+zwasm ships deny-by-default WASI capabilities, fuel metering, a wall-clock
+timeout, a memory ceiling, W^X JIT pages, and signal-handled traps. See
+[`docs/tutorial.md`](docs/tutorial.md) for how to configure these limits when
+embedding.

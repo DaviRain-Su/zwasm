@@ -1,0 +1,20 @@
+assert_invalid start.0.wasm
+assert_invalid start.1.wasm
+assert_invalid start.2.wasm
+module start.3.wasm
+assert_return get () -> i32:68
+invoke-action inc ()
+assert_return get () -> i32:69
+invoke-action inc ()
+assert_return get () -> i32:70
+module start.4.wasm
+assert_return get () -> i32:68
+invoke-action inc ()
+assert_return get () -> i32:69
+invoke-action inc ()
+assert_return get () -> i32:70
+module start.5.wasm
+module start.6.wasm
+module start.7.wasm
+assert_uninstantiable start.8.wasm
+skip-adr-skip_text_format_parser directive-assert_malformed-text

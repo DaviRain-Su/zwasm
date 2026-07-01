@@ -1,76 +1,47 @@
-# Zig
+# Zig build artifacts
 zig-out/
-zig-cache/
 .zig-cache/
+zig-pkg/
 
-# OS
-.DS_Store
-
-# Nix / direnv
-.direnv/
-# `nix build` default output symlink
+# Nix build outputs
 result
 result-*
 
-# Python
-__pycache__/
+# direnv local cache
+.direnv/
 
-# Rust example build artifacts
-examples/rust/target/
-examples/rust/Cargo.lock
+# macOS
+.DS_Store
 
-# Editor
+# Editor / IDE
 *.swp
 *~
+.vscode/
+.idea/
 
-# Spec tests: tracked in git (avoids wabt version dependency across platforms)
-
-# E2E tests (generated from wasmtime misc_testsuite)
-test/e2e/json/
-test/e2e/wast/
-
-# Private
+# Local-only docs and scratch (per-developer, not authoritative)
 private/
-.dev/ubuntu-x86_64.md
 
-# WebAssembly spec repos (use ~/Documents/OSS/WebAssembly/ instead)
-WASI/
-component-model/
-design/
-exception-handling/
-function-references/
-gc/
-memory64/
-multi-memory/
-proposals/
-relaxed-simd/
-/threads/
-tool-conventions/
-wabt/
-*.cwasm
+# Claude Code local-only settings (per-developer)
+.claude/settings.local.json
 
-# Clojure
-.lsp/
-.cpcache/
-.clj-kondo/
+# Test data — derivatives are regenerated; see ROADMAP §11.2 and
+# scripts/regen_test_data.sh
+test/spec/json/
+test/e2e/wast/
+test/e2e/json/
+test/fuzz/corpus/*
+!test/fuzz/corpus/seed/
+!test/fuzz/corpus/exec_seed/
 
-# Rust build artifacts (bench, thread tests)
-bench/simd/rust-blake2/target/
-test/threads/*/target/
+# Generated headers (fetched by scripts/fetch_wasm_c_api.sh)
+include/wasm.h.upstream
 
-# Fuzz (generated corpus and artifacts)
-fuzz/corpus/
-fuzz/crashes/
-fuzz/mismatches/
-test/fuzz/corpus/
-test/fuzz/corpus_wat/
+# Bench rolling per-commit results (history.yaml is committed; recent.yaml is local)
+bench/results/recent.yaml
 
-# Overnight fuzz results (machine-generated)
-.dev/fuzz-overnight-result.txt
-.dev/fuzz-overnight-wat-result.txt
-
-# mdBook output (generated)
-docs/book/
-
-# scripts/gate-commit.sh local cache (wasmtime misc_testsuite, etc.)
-.cache/
+# Per-developer windowsmini gate state (recorded by scripts/should_gate_windows.sh
+# --record after a successful windowsmini run; per-clone, not authoritative)
+.dev/last_windowsmini_sha
+scripts/spec_distill/__pycache__/
+test/component/wasip3/target/

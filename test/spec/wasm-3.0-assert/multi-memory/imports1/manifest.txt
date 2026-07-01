@@ -1,0 +1,5 @@
+module imports1.0.wasm
+assert_return load i32:0 -> i32:0
+assert_return load i32:10 -> i32:16
+assert_return load i32:8 -> i32:1048576
+assert_trap load i32:1000000

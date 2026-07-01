@@ -1,0 +1,39 @@
+# Release binary-size history — D-320 (ADR-0181). Append-only (§A9);
+# one row per (commit, variant) via scripts/record_binary_size.sh.
+# variant: "base" = ReleaseFast default (-Dwasi=p2); "lean" = -Dwasi=p1 (ADR-0193; was "component"/-Dcomponent).
+
+- commit: "5defc84e"
+  timestamp: "2026-06-12T15:58:57Z"
+  variant: "base"
+  optimize: "ReleaseFast"
+  zwasm_bytes: 1935128
+
+- commit: "5defc84e"
+  timestamp: "2026-06-12T15:58:57Z"
+  variant: "component"
+  optimize: "ReleaseFast"
+  zwasm_bytes: 1935128
+
+- commit: "6717fe36"
+  timestamp: "2026-06-12T16:03:44Z"
+  variant: "base"
+  optimize: "ReleaseFast"
+  zwasm_bytes: 1935128
+
+- commit: "6717fe36"
+  timestamp: "2026-06-12T16:03:44Z"
+  variant: "lean"
+  optimize: "ReleaseFast"
+  zwasm_bytes: 1775096
+
+- commit: "6979c838"
+  timestamp: "2026-06-12T19:19:56Z"
+  variant: "base"
+  optimize: "ReleaseFast"
+  zwasm_bytes: 1972696
+
+- commit: "6979c838"
+  timestamp: "2026-06-12T19:19:56Z"
+  variant: "lean"
+  optimize: "ReleaseFast"
+  zwasm_bytes: 1775096

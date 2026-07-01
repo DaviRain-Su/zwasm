@@ -1,0 +1,2 @@
+module embenchen_primes.0.wasm as env
+skip-adr-skip_embenchen_emcc_env_imports embenchen_primes.1.wasm

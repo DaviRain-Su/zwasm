@@ -1,0 +1,231 @@
+# Bench CI — runs `scripts/run_bench.sh --quick --phase-record` across
+# Mac aarch64 + Linux x86_64 runners, then aggregates the per-arch
+# fragment YAMLs into a single bot commit that appends to
+# bench/results/history.yaml.
+#
+# Trigger: **manual only** (`workflow_dispatch`). Auto-trigger on push
+# to zwasm-from-scratch was DISABLED 2026-05-25 per user direction —
+# local development is the primary path and CI was not actually
+# consumed; auto-runs were producing noise + failures. To re-run
+# the bench, use `gh workflow run bench.yml --ref zwasm-from-scratch`
+# or trigger via the GitHub Actions UI. To restore auto-trigger,
+# re-add the `push:` block (preserved in git history at commit
+# 4d626f3e^).
+#
+# Jobs: bench-mac + bench-linux run in parallel, each writes a fragment
+# under bench/results/ci/<arch>-<run>.yaml and uploads it as an artifact.
+# bench-aggregate downloads both fragments, appends them in arch-name-
+# sorted order to bench/results/history.yaml, and pushes one bot commit
+# tagged `[skip ci]` (to break recursion) with path-restricted scope.
+
+name: bench
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bench-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  bench-mac:
+    name: bench (aarch64-darwin)
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Cache Zig 0.16.0
+        id: cache-zig
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.local/zig-0.16.0
+          key: zig-0.16.0-aarch64-macos
+
+      - name: Install Zig 0.16.0
+        if: steps.cache-zig.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.local
+          curl -fsSL https://ziglang.org/download/0.16.0/zig-aarch64-macos-0.16.0.tar.xz \
+            -o /tmp/zig.tar.xz
+          tar -xJf /tmp/zig.tar.xz -C ~/.local
+          mv ~/.local/zig-aarch64-macos-0.16.0 ~/.local/zig-0.16.0
+
+      - name: Add Zig to PATH
+        run: echo "$HOME/.local/zig-0.16.0" >> "$GITHUB_PATH"
+
+      - name: Install hyperfine
+        run: brew install hyperfine
+
+      - name: Verify toolchain
+        run: |
+          zig version
+          hyperfine --version
+
+      - name: Snapshot history.yaml (pre-run baseline for diff)
+        run: cp bench/results/history.yaml /tmp/history.before.yaml
+
+      - name: Run bench (--quick --phase-record)
+        run: |
+          set -euo pipefail
+          subject=$(git log -1 --format='%s' | tr -d '"' | cut -c 1-72)
+          short=$(git rev-parse --short HEAD)
+          bash scripts/run_bench.sh --quick --phase-record \
+            --reason="CI: ${subject} (${short})"
+
+      - name: Extract per-arch fragment
+        run: |
+          set -euo pipefail
+          mkdir -p bench/results/ci
+          short=$(git rev-parse --short HEAD)
+          bash scripts/append_bench_to_history.sh extract \
+            /tmp/history.before.yaml \
+            bench/results/history.yaml \
+            "bench/results/ci/aarch64-darwin-${short}.yaml"
+
+      - name: Upload fragment artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bench-fragment-aarch64-darwin
+          path: bench/results/ci/aarch64-darwin-*.yaml
+          if-no-files-found: error
+          retention-days: 7
+
+  bench-linux:
+    name: bench (x86_64-linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Cache Zig 0.16.0
+        id: cache-zig
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.local/zig-0.16.0
+          key: zig-0.16.0-x86_64-linux
+
+      - name: Install Zig 0.16.0
+        if: steps.cache-zig.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.local
+          curl -fsSL https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz \
+            -o /tmp/zig.tar.xz
+          tar -xJf /tmp/zig.tar.xz -C ~/.local
+          mv ~/.local/zig-x86_64-linux-0.16.0 ~/.local/zig-0.16.0
+
+      - name: Add Zig to PATH
+        run: echo "$HOME/.local/zig-0.16.0" >> "$GITHUB_PATH"
+
+      - name: Install hyperfine
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y hyperfine
+
+      - name: Verify toolchain
+        run: |
+          zig version
+          hyperfine --version
+
+      - name: Snapshot history.yaml (pre-run baseline for diff)
+        run: cp bench/results/history.yaml /tmp/history.before.yaml
+
+      - name: Run bench (--quick --phase-record)
+        run: |
+          set -euo pipefail
+          subject=$(git log -1 --format='%s' | tr -d '"' | cut -c 1-72)
+          short=$(git rev-parse --short HEAD)
+          bash scripts/run_bench.sh --quick --phase-record \
+            --reason="CI: ${subject} (${short})"
+
+      - name: Extract per-arch fragment
+        run: |
+          set -euo pipefail
+          mkdir -p bench/results/ci
+          short=$(git rev-parse --short HEAD)
+          bash scripts/append_bench_to_history.sh extract \
+            /tmp/history.before.yaml \
+            bench/results/history.yaml \
+            "bench/results/ci/x86_64-linux-${short}.yaml"
+
+      - name: Upload fragment artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bench-fragment-x86_64-linux
+          path: bench/results/ci/x86_64-linux-*.yaml
+          if-no-files-found: error
+          retention-days: 7
+
+  bench-aggregate:
+    name: aggregate + commit
+    runs-on: ubuntu-latest
+    needs: [bench-mac, bench-linux]
+    timeout-minutes: 10
+    steps:
+      - name: Checkout zwasm-from-scratch
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: zwasm-from-scratch
+          fetch-depth: 1
+          persist-credentials: true
+
+      - name: Download mac fragment
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: bench-fragment-aarch64-darwin
+          path: bench/results/ci/
+
+      - name: Download linux fragment
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: bench-fragment-x86_64-linux
+          path: bench/results/ci/
+
+      - name: Append fragments to history.yaml (arch-sorted)
+        run: |
+          set -euo pipefail
+          # Append in deterministic arch-name-sorted order so that two
+          # parallel jobs produce a stable commit shape. A bash glob expands
+          # in sorted order, so no `ls | sort` is needed (SC2012).
+          for fragment in bench/results/ci/*.yaml; do
+            bash scripts/append_bench_to_history.sh append \
+              "$fragment" bench/results/history.yaml
+          done
+
+      - name: Commit + push (path-restricted, [skip ci])
+        run: |
+          set -euo pipefail
+          git config user.name  "zwasm-bench-bot"
+          git config user.email "zwasm-bench-bot@users.noreply.github.com"
+          # Path-restricted add: only history.yaml. Refuse to land
+          # anything else even if the CI accidentally dirtied the tree.
+          git add bench/results/history.yaml
+          if git diff --cached --quiet; then
+            echo "No bench history changes to commit."
+            exit 0
+          fi
+          short=$(git rev-parse --short "${GITHUB_SHA}")
+          git commit -m "bench(ci): record ${short} [skip ci]"
+          # Retry-once on push race: if another CI run pushed first,
+          # rebase onto remote and try again.
+          for attempt in 1 2 3; do
+            if git push origin zwasm-from-scratch; then
+              exit 0
+            fi
+            echo "[bench-aggregate] push attempt ${attempt} lost race; rebasing"
+            git pull --rebase origin zwasm-from-scratch
+          done
+          echo "[bench-aggregate] giving up after 3 push attempts" >&2
+          exit 1

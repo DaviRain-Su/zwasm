@@ -1,356 +1,111 @@
-/*
- * zwasm — C API for the zwasm WebAssembly runtime
+/* zwasm-specific C extensions, subordinate to the standard wasm.h.
  *
- * Copyright (c) 2026 zwasm contributors. Licensed under the MIT License.
- * See LICENSE at the root of this distribution.
+ * STABILITY: zwasm is pre-1.0. These extension symbols and the wider
+ * C ABI may change between releases until 1.0. The standard wasm.h
+ * surface follows the upstream wasm-c-api interface.
  *
- * This is the single-header C interface. All types are opaque pointers.
- * Error handling: functions return NULL (pointer) or false (bool) on error.
- * Call zwasm_last_error_message() for a human-readable error description.
+ * Instance-level sandboxing setters: per-instance budgets are set
+ * post-instantiate and are mutable mid-workload (fuel, memory/table
+ * ceilings, interrupt). The C API creates interpreter-backed instances
+ * (the hardened default engine); JIT budgets are driven via the CLI.
+ * All functions are null-tolerant (a null instance is a no-op).
  *
- * Values are passed as uint64_t arrays matching the raw Wasm value encoding:
- *   i32: zero-extended to uint64_t
- *   i64: direct uint64_t
- *   f32: IEEE 754 bits zero-extended to uint64_t
- *   f64: IEEE 754 bits as uint64_t
+ * The WASI config family (zwasm_wasi_config_*, zwasm_store_set_wasi) is
+ * declared in wasi.h; zwasm_instance_get_func is declared below.
  */
-
 #ifndef ZWASM_H
 #define ZWASM_H
 
 #include <stdbool.h>
-#include <stddef.h>
 #include <stdint.h>
+
+#include "wasm.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/* ================================================================
- * Opaque types
- * ================================================================ */
+/* ── Fuel (deterministic budget; interp units = instructions) ────────── */
 
-typedef struct zwasm_module_t zwasm_module_t;
-typedef struct zwasm_config_t zwasm_config_t;
-typedef struct zwasm_wasi_config_t zwasm_wasi_config_t;
-typedef struct zwasm_imports_t zwasm_imports_t;
+/* Arm (or re-arm) the fuel budget. Exhaustion traps with kind
+ * ZWASM_TRAP_OUT_OF_FUEL ("all fuel consumed"). */
+WASM_API_EXTERN void zwasm_instance_set_fuel(wasm_instance_t*, uint64_t fuel);
 
-/* ================================================================
- * Host function callback
- * ================================================================ */
+/* Remove the budget (unmetered). */
+WASM_API_EXTERN void zwasm_instance_disable_fuel(wasm_instance_t*);
 
-/**
- * Host function callback signature.
- *
- * @param env     User-provided context pointer (from zwasm_import_add_fn).
- * @param args    Input parameters as uint64_t array (param_count elements).
- * @param results Output buffer as uint64_t array (result_count elements).
- * @return true on success, false on error.
- */
-typedef bool (*zwasm_host_fn_callback_t)(void *env, const uint64_t *args,
-                                         uint64_t *results);
+/* Read the remaining fuel into *out; returns false when unmetered. */
+WASM_API_EXTERN bool zwasm_instance_fuel_remaining(const wasm_instance_t*, uint64_t* out);
 
-/* ================================================================
- * Error handling
- * ================================================================ */
+/* ── Memory cap (host ceiling below the declared/spec max) ───────────── */
 
-/**
- * Return the last error message as a null-terminated string.
- * Returns "" if no error has occurred since the last successful call.
- * The pointer is valid until the next zwasm_* call on the same thread.
- */
-const char *zwasm_last_error_message(void);
+/* memory.grow past `max_pages` (pages of memory 0's page size, 64 KiB by
+ * default) returns the spec grow-failure (-1) — not a trap. */
+WASM_API_EXTERN void zwasm_instance_set_memory_pages_limit(wasm_instance_t*, uint64_t max_pages);
+WASM_API_EXTERN void zwasm_instance_clear_memory_pages_limit(wasm_instance_t*);
 
-/* ================================================================
- * Configuration (optional)
- * ================================================================ */
+/* ── Cooperative interruption (cancel / host-driven timeout) ─────────── */
 
-/**
- * Custom allocator callback types.
- * alignment is in bytes (1, 2, 4, 8, ...).
- */
-typedef void *(*zwasm_alloc_fn_t)(void *ctx, size_t size, size_t alignment);
-typedef void (*zwasm_free_fn_t)(void *ctx, void *ptr, size_t size,
-                                size_t alignment);
+/* Callable from any thread; the running guest traps with kind
+ * ZWASM_TRAP_INTERRUPTED at its next poll (function entry / loop
+ * back-edge). Idempotent; clear before re-invoking. */
+WASM_API_EXTERN void zwasm_instance_interrupt(wasm_instance_t*);
+WASM_API_EXTERN void zwasm_instance_clear_interrupt(wasm_instance_t*);
 
-/** Create a new configuration handle. */
-zwasm_config_t *zwasm_config_new(void);
+/* ── Trap kind introspection ─────────────────────────────────────────── */
 
-/** Free a configuration handle. */
-void zwasm_config_delete(zwasm_config_t *config);
+/* Machine-readable trap kind beside wasm.h's message-only surface; -1 on
+ * NULL. Values mirror the `TrapKind` enum (src/api/trap_surface.zig), which is
+ * append-only stable; a C host can switch on these without string-matching. */
+#define ZWASM_TRAP_BINDING_ERROR 0
+#define ZWASM_TRAP_UNREACHABLE 1
+#define ZWASM_TRAP_DIV_BY_ZERO 2
+#define ZWASM_TRAP_INT_OVERFLOW 3
+#define ZWASM_TRAP_INVALID_CONVERSION 4
+#define ZWASM_TRAP_OOB_MEMORY 5
+#define ZWASM_TRAP_OOB_TABLE 6
+#define ZWASM_TRAP_UNINITIALIZED_ELEM 7
+#define ZWASM_TRAP_INDIRECT_CALL_MISMATCH 8
+#define ZWASM_TRAP_STACK_OVERFLOW 9
+#define ZWASM_TRAP_OUT_OF_MEMORY 10
+#define ZWASM_TRAP_NULL_REFERENCE 11
+#define ZWASM_TRAP_CAST_FAILURE 12
+#define ZWASM_TRAP_UNCAUGHT_EXCEPTION 13
+#define ZWASM_TRAP_UNALIGNED_ATOMIC 14
+#define ZWASM_TRAP_EXPECTED_SHARED_MEMORY 15
+#define ZWASM_TRAP_INTERRUPTED 16
+#define ZWASM_TRAP_OUT_OF_FUEL 17
+WASM_API_EXTERN int32_t zwasm_trap_kind(const wasm_trap_t*);
 
-/**
- * Set a custom allocator for module creation.
- * This controls zwasm's internal bookkeeping memory only.
- * Wasm linear memory (memory.grow) is unaffected.
- *
- * @param config    Configuration handle.
- * @param alloc_fn  Allocation callback: (ctx, size, alignment) -> ptr or NULL.
- * @param free_fn   Deallocation callback: (ctx, ptr, size, alignment).
- * @param ctx       User context pointer passed to callbacks.
- */
-void zwasm_config_set_allocator(zwasm_config_t *config,
-                                zwasm_alloc_fn_t alloc_fn,
-                                zwasm_free_fn_t free_fn, void *ctx);
+/* ── Instance helpers ────────────────────────────────────────────────── */
 
-/**
- * Set the instruction fuel limit. Traps when exhausted.
- */
-void zwasm_config_set_fuel(zwasm_config_t *config, uint64_t fuel);
+/* Resolve an instance + defined-function index into a fresh, owned func
+ * handle — a convenience over wasm_instance_exports + wasm_extern_vec_t
+ * indexing. Returns NULL on a null instance or an out-of-range index. The
+ * caller owns the result and must release it with wasm_func_delete. */
+WASM_API_EXTERN wasm_func_t* zwasm_instance_get_func(wasm_instance_t*, uint32_t idx);
 
-/**
- * Set the execution timeout in milliseconds.
- */
-void zwasm_config_set_timeout(zwasm_config_t *config, uint64_t timeout_ms);
+/* ── Engine selection ────────────────────────────────────────────────── */
 
-/**
- * Set the memory ceiling in bytes (limits memory.grow).
- */
-void zwasm_config_set_max_memory(zwasm_config_t *config, uint64_t max_memory_bytes);
+/* Per-instance engine kind for zwasm_instance_new_ex. AUTO resolves to the
+ * runtime's choice (currently the interpreter until the JIT host-import/WASI
+ * bridge lands; documented to change without an API break). JIT forces the
+ * native JIT (an explicit JIT on a JIT-less arch fails instantiation, returning
+ * NULL — no silent downgrade). INTERP forces the interpreter. */
+#define ZWASM_ENGINE_AUTO 0
+#define ZWASM_ENGINE_JIT 1
+#define ZWASM_ENGINE_INTERP 2
 
-/**
- * Force the use of the interpreter only (bypass RegIR and JIT).
- */
-void zwasm_config_set_force_interpreter(zwasm_config_t *config, bool force_interpreter);
-
-/**
- * Enable or disable periodic JIT cancellation checks (default: true).
- * Disabling this improves performance but makes zwasm_module_cancel()
- * ineffective for JIT-compiled code.
- */
-void zwasm_config_set_cancellable(zwasm_config_t *config, bool enabled);
-
-/* ================================================================
- * Module lifecycle
- * ================================================================ */
-
-/**
- * Create a new Wasm module from binary bytes.
- * The wasm_ptr buffer can be freed after this call returns.
- * Returns NULL on error.
- */
-zwasm_module_t *zwasm_module_new(const uint8_t *wasm_ptr, size_t len);
-
-/**
- * Create a new WASI module from binary bytes.
- * Registers wasi_snapshot_preview1 imports with default capabilities.
- * Returns NULL on error.
- */
-zwasm_module_t *zwasm_module_new_wasi(const uint8_t *wasm_ptr, size_t len);
-
-/**
- * Create a new WASI module with custom configuration.
- * Returns NULL on error.
- */
-zwasm_module_t *zwasm_module_new_wasi_configured(const uint8_t *wasm_ptr,
-                                                  size_t len,
-                                                  zwasm_wasi_config_t *config);
-
-/**
- * Create a new module with host function imports.
- * Returns NULL on error.
- */
-zwasm_module_t *zwasm_module_new_with_imports(const uint8_t *wasm_ptr,
-                                               size_t len,
-                                               zwasm_imports_t *imports);
-
-/**
- * Create a module with optional configuration (custom allocator, etc.).
- * Pass NULL for config to use the default internal allocator.
- * Returns NULL on error.
- */
-zwasm_module_t *zwasm_module_new_configured(const uint8_t *wasm_ptr, size_t len,
-                                             zwasm_config_t *config);
-
-/**
- * Create a WASI module with both WASI config and optional custom allocator.
- * Pass NULL for config to use the default internal allocator.
- * Returns NULL on error.
- */
-zwasm_module_t *zwasm_module_new_wasi_configured2(const uint8_t *wasm_ptr,
-                                                    size_t len,
-                                                    zwasm_wasi_config_t *wasi_config,
-                                                    zwasm_config_t *config);
-
-/**
- * Free all resources held by a module.
- * After this call, the module pointer is invalid.
- */
-void zwasm_module_delete(zwasm_module_t *module);
-
-/**
- * Validate a Wasm binary without instantiation.
- * Returns true if valid, false if invalid or malformed.
- */
-bool zwasm_module_validate(const uint8_t *wasm_ptr, size_t len);
-
-/* ================================================================
- * Function invocation
- * ================================================================ */
-
-/**
- * Invoke an exported function by name.
- *
- * @param module  Module handle.
- * @param name    Null-terminated function name.
- * @param args    Input parameters (nargs uint64_t values), or NULL if nargs==0.
- * @param nargs   Number of input parameters.
- * @param results Output buffer (nresults uint64_t values), or NULL if nresults==0.
- * @param nresults Number of expected results.
- * @return true on success, false on error.
- */
-bool zwasm_module_invoke(zwasm_module_t *module, const char *name,
-                         const uint64_t *args, uint32_t nargs,
-                         uint64_t *results, uint32_t nresults);
-
-/**
- * Invoke the _start function (WASI entry point).
- * Returns false on error.
- */
-bool zwasm_module_invoke_start(zwasm_module_t *module);
-
-/* ================================================================
- * Export introspection
- * ================================================================ */
-
-/** Return the number of exported functions. */
-uint32_t zwasm_module_export_count(zwasm_module_t *module);
-
-/**
- * Return the name of the idx-th exported function.
- * Returns NULL if idx is out of range.
- * The pointer is valid until the next zwasm_module_export_name call.
- */
-const char *zwasm_module_export_name(zwasm_module_t *module, uint32_t idx);
-
-/** Return the parameter count of the idx-th exported function. */
-uint32_t zwasm_module_export_param_count(zwasm_module_t *module, uint32_t idx);
-
-/** Return the result count of the idx-th exported function. */
-uint32_t zwasm_module_export_result_count(zwasm_module_t *module, uint32_t idx);
-
-/**
- * Request cancellation of currently executing Wasm function.
- * Thread-safe for concurrent access. Can be called from a different thread
- * during invoke or invoke_start. Execution stops at the next checkpoint
- * (~1024 instructions or JIT interval). Has no effect if module is idle.
- */
-void zwasm_module_cancel(zwasm_module_t *module);
-
-/* ================================================================
- * Memory access
- * ================================================================ */
-
-/**
- * Return a direct pointer to linear memory (memory index 0).
- * Returns NULL if the module has no memory.
- * WARNING: Pointer is invalidated by memory growth.
- */
-uint8_t *zwasm_module_memory_data(zwasm_module_t *module);
-
-/** Return the current size of linear memory in bytes. */
-size_t zwasm_module_memory_size(zwasm_module_t *module);
-
-/**
- * Read bytes from linear memory into out_buf.
- * Returns false on out-of-bounds access.
- */
-bool zwasm_module_memory_read(zwasm_module_t *module, uint32_t offset,
-                              uint32_t len, uint8_t *out_buf);
-
-/**
- * Write bytes from data into linear memory.
- * Returns false on out-of-bounds access.
- */
-bool zwasm_module_memory_write(zwasm_module_t *module, uint32_t offset,
-                               const uint8_t *data, uint32_t len);
-
-/* ================================================================
- * WASI configuration
- * ================================================================ */
-
-/** Create a new WASI configuration handle. */
-zwasm_wasi_config_t *zwasm_wasi_config_new(void);
-
-/** Free a WASI configuration handle. */
-void zwasm_wasi_config_delete(zwasm_wasi_config_t *config);
-
-/** Set command-line arguments. argv entries are null-terminated C strings. */
-void zwasm_wasi_config_set_argv(zwasm_wasi_config_t *config, uint32_t argc,
-                                const char *const *argv);
-
-/**
- * Set environment variables.
- * keys/vals are arrays of pointers; key_lens/val_lens are their lengths.
- */
-void zwasm_wasi_config_set_env(zwasm_wasi_config_t *config, uint32_t count,
-                               const char *const *keys,
-                               const size_t *key_lens,
-                               const char *const *vals,
-                               const size_t *val_lens);
-
-/** Add a preopened directory mapping. */
-void zwasm_wasi_config_preopen_dir(zwasm_wasi_config_t *config,
-                                   const char *host_path, size_t host_path_len,
-                                   const char *guest_path,
-                                   size_t guest_path_len);
-
-/**
- * Add a preopened entry from an existing host file descriptor.
- *
- * @param config      WASI config handle.
- * @param host_fd     Open host file descriptor.
- * @param guest_path  Guest-visible path.
- * @param guest_path_len Length of guest_path.
- * @param kind        0 = file, 1 = directory.
- * @param ownership   0 = borrow (caller retains fd), 1 = own (runtime closes fd).
- */
-void zwasm_wasi_config_preopen_fd(zwasm_wasi_config_t *config,
-                                  intptr_t host_fd,
-                                  const char *guest_path,
-                                  size_t guest_path_len,
-                                  uint8_t kind, uint8_t ownership);
-
-/**
- * Override a stdio file descriptor (0=stdin, 1=stdout, 2=stderr).
- *
- * @param config      WASI config handle.
- * @param wasi_fd     0, 1, or 2.
- * @param host_fd     Open host file descriptor (fd on POSIX, HANDLE cast on Windows).
- * @param ownership   0 = borrow (caller retains fd), 1 = own (runtime closes fd).
- */
-void zwasm_wasi_config_set_stdio_fd(zwasm_wasi_config_t *config,
-                                    uint32_t wasi_fd,
-                                    intptr_t host_fd, uint8_t ownership);
-
-/* ================================================================
- * Host function imports
- * ================================================================ */
-
-/** Create a new import collection. */
-zwasm_imports_t *zwasm_import_new(void);
-
-/** Free an import collection. */
-void zwasm_import_delete(zwasm_imports_t *imports);
-
-/**
- * Register a host function in the import collection.
- *
- * @param imports      Import collection handle.
- * @param module_name  Null-terminated Wasm module name (e.g., "env").
- * @param func_name    Null-terminated function name.
- * @param callback     C callback function.
- * @param env          User context pointer passed to callback.
- * @param param_count  Number of parameters the function expects.
- * @param result_count Number of results the function returns.
- */
-void zwasm_import_add_fn(zwasm_imports_t *imports, const char *module_name,
-                         const char *func_name,
-                         zwasm_host_fn_callback_t callback, void *env,
-                         uint32_t param_count, uint32_t result_count);
+/* wasm_instance_new with a trailing per-instance engine selector (the stock
+ * wasm_instance_new is AUTO). Same ownership/trap contract as wasm_instance_new:
+ * NULL on null input / instantiation failure / OOM; a start-function trap is
+ * written through trap_out (when non-NULL) with a NULL return. */
+WASM_API_EXTERN wasm_instance_t* zwasm_instance_new_ex(
+    wasm_store_t*, const wasm_module_t*, const wasm_extern_vec_t*,
+    wasm_trap_t**, uint8_t engine_kind);
 
 #ifdef __cplusplus
-}
+}  /* extern "C" */
 #endif
 
-#endif /* ZWASM_H */
+#endif  /* ZWASM_H */

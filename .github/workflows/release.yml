@@ -1,109 +1,81 @@
-name: Release
+# Release — build ReleaseSafe binaries for all supported targets and publish a
+# GitHub Release. Zig cross-compiles every target from a single Linux runner,
+# so no cross-job artifact plumbing is needed (only the pinned checkout action).
+#
+# TRIGGER: a maintainer pushing a `v*` tag (a deliberate, human act — the
+# autonomous loop never tags or releases; ADR-0156), or manual dispatch.
+#
+# NOTE: aarch64-macos is cross-linked from Linux using Zig's bundled macOS
+# libSystem stubs. Validate the macOS artifact on the first real release; if the
+# cross-link is unsatisfactory, split that target onto a native macos runner.
 
-# FROZEN for the zwasm_from_scratch migration: tag-triggered release disabled.
-# Re-enable by uncommenting the `push` block below.
+name: release
+
 on:
-  # push:
-  #   tags: ['v*']
+  push:
+    tags: ['v*']
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build:
-    defaults:
-      run:
-        shell: bash
-    strategy:
-      matrix:
-        include:
-          - os: macos-latest
-            target: aarch64-macos
-            artifact: zwasm-macos-aarch64
-            package: tar.gz
-          - os: ubuntu-latest
-            target: x86_64-linux
-            artifact: zwasm-linux-x86_64
-            package: tar.gz
-          - os: ubuntu-latest
-            target: aarch64-linux
-            artifact: zwasm-linux-aarch64
-            package: tar.gz
-          - os: windows-latest
-            target: x86_64-windows
-            artifact: zwasm-windows-x86_64
-            package: zip
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Zig
-        uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: 0.16.0
-
-      - name: Build ReleaseSafe
-        env:
-          ZIG_TARGET: ${{ matrix.target }}
-        run: zig build -Doptimize=ReleaseSafe -Dtarget="$ZIG_TARGET"
-
-      - name: Package binary
-        env:
-          ARTIFACT_NAME: ${{ matrix.artifact }}
-          PACKAGE_EXT: ${{ matrix.package }}
-        run: |
-          mkdir -p dist
-          checksum() {
-            if command -v sha256sum >/dev/null 2>&1; then
-              sha256sum "$1" > "$1.sha256"
-            else
-              shasum -a 256 "$1" > "$1.sha256"
-            fi
-          }
-          if [ "${{ runner.os }}" = "Windows" ]; then
-            cp zig-out/bin/zwasm.exe dist/zwasm.exe
-            cd dist
-            powershell -Command "Compress-Archive -Path zwasm.exe -DestinationPath '${ARTIFACT_NAME}.zip'"
-            checksum "${ARTIFACT_NAME}.zip"
-          else
-            cp zig-out/bin/zwasm dist/zwasm
-            cd dist
-            tar czf "${ARTIFACT_NAME}.tar.gz" zwasm
-            checksum "${ARTIFACT_NAME}.tar.gz"
-          fi
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          path: dist/${{ matrix.artifact }}.*
-
   release:
-    needs: build
-    runs-on: ubuntu-latest
+    # Only cut a Release for FINAL version tags (v2.0.0). Pre-release tags
+    # (-rc/-alpha/-beta) are tag-only — no build, no Release, Latest unchanged —
+    # matching the v2 pre-release strategy. Manual dispatch always runs.
+    if: ${{ github.event_name == 'workflow_dispatch' || !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Create checksums
+      - name: Install Zig 0.16.0
+        shell: bash
         run: |
-          cd artifacts
-          find . -name '*.sha256' -exec cat {} \; > ../SHA256SUMS
-          cd ..
-          find artifacts -name '*.tar.gz' -exec mv {} . \;
-          find artifacts -name '*.zip' -exec mv {} . \;
+          set -euo pipefail
+          source .github/versions.lock
+          mkdir -p ~/.local
+          dir="zig-x86_64-linux-${ZIG_VERSION}"
+          curl -fsSL "https://ziglang.org/download/${ZIG_VERSION}/${dir}.tar.xz" -o /tmp/zig.tar.xz
+          tar -xJf /tmp/zig.tar.xz -C ~/.local
+          echo "$HOME/.local/${dir}" >> "$GITHUB_PATH"
+
+      - name: Build + package all targets (ReleaseSafe)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          build_one() {
+            local target="$1" artifact="$2" pkg="$3"
+            echo "::group::build $target"
+            rm -rf zig-out
+            zig build -Doptimize=ReleaseSafe -Dtarget="$target"
+            if [ "$pkg" = zip ]; then
+              cp zig-out/bin/zwasm.exe dist/zwasm.exe
+              ( cd dist && zip -q "${artifact}.zip" zwasm.exe && rm zwasm.exe )
+            else
+              cp zig-out/bin/zwasm dist/zwasm
+              ( cd dist && tar czf "${artifact}.tar.gz" zwasm && rm zwasm )
+            fi
+            echo "::endgroup::"
+          }
+          build_one aarch64-macos   zwasm-macos-aarch64   tar.gz
+          build_one x86_64-linux    zwasm-linux-x86_64    tar.gz
+          build_one aarch64-linux   zwasm-linux-aarch64   tar.gz
+          build_one x86_64-windows  zwasm-windows-x86_64  zip
+          ( cd dist && for f in *.tar.gz *.zip; do sha256sum "$f"; done > SHA256SUMS )
+          ls -l dist
 
       - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
           TAG_NAME: ${{ github.ref_name }}
+        shell: bash
         run: |
           gh release create "$TAG_NAME" \
             --title "$TAG_NAME" \
             --generate-notes \
-            *.tar.gz *.zip SHA256SUMS
+            dist/*.tar.gz dist/*.zip dist/SHA256SUMS

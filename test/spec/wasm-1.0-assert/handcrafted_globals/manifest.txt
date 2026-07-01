@@ -1,0 +1,5 @@
+module m.wasm
+assert_return get () -> i32:0
+assert_return set_get i32:42 -> i32:43
+assert_return get () -> i32:42
+assert_return set_get i32:99 -> i32:100

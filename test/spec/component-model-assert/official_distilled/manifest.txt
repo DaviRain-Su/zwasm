@@ -1,0 +1,274 @@
+# Distilled VERBATIM from the official WebAssembly/component-model
+# test/wasm-tools corpus: assert_invalid cases in the categories the
+# ADR-0176 validator implements (rules 1-8). Encoded via `wasm-tools
+# parse` (no validation); zwasm must REJECT each.
+# adapt.wast: "memory index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/adapt_01.wasm
+# alias.wast: "invalid outer alias count of 100"
+assert_invalid test/spec/component-model-assert/official_distilled/alias_01.wasm
+# alias.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/alias_02.wasm
+# alias.wast: "invalid outer alias count of 100"
+assert_invalid test/spec/component-model-assert/official_distilled/alias_03.wasm
+# alias.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/alias_04.wasm
+# alias.wast: "invalid outer alias count of 100"
+assert_invalid test/spec/component-model-assert/official_distilled/alias_05.wasm
+# alias.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/alias_06.wasm
+# definedtypes.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/definedtypes_01.wasm
+# definedtypes.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/definedtypes_02.wasm
+# definedtypes.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/definedtypes_03.wasm
+# definedtypes.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/definedtypes_04.wasm
+# definedtypes.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/definedtypes_05.wasm
+# definedtypes.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/definedtypes_06.wasm
+# definedtypes.wast: "record field name `A-b-C-d` conflicts with previous field name `a-B-c-D`"
+assert_invalid test/spec/component-model-assert/official_distilled/definedtypes_07.wasm
+# definedtypes.wast: "variant case name `x` conflicts with previous case name `x`"
+assert_invalid test/spec/component-model-assert/official_distilled/definedtypes_08.wasm
+# definedtypes.wast: "flag name `X` conflicts with previous flag name `x`"
+assert_invalid test/spec/component-model-assert/official_distilled/definedtypes_09.wasm
+# definedtypes.wast: "enum tag name `X` conflicts with previous tag name `x`"
+assert_invalid test/spec/component-model-assert/official_distilled/definedtypes_10.wasm
+# export.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/export_01.wasm
+# export.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/export_02.wasm
+# export.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/export_03.wasm
+# export.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/export_04.wasm
+# func.wast: "function parameter name `FOO` conflicts with previous parameter name `foo`"
+assert_invalid test/spec/component-model-assert/official_distilled/func_01.wasm
+# import.wast: "import name `a` conflicts with previous name `a`"
+assert_invalid test/spec/component-model-assert/official_distilled/import_01.wasm
+# import.wast: "import name `a` conflicts with previous name `a`"
+assert_invalid test/spec/component-model-assert/official_distilled/import_02.wasm
+# import.wast: "type index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/import_03.wasm
+# import.wast: "type index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/import_04.wasm
+# import.wast: "conflicts with previous name"
+assert_invalid test/spec/component-model-assert/official_distilled/import_05.wasm
+# import.wast: "`` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/import_06.wasm
+# import.wast: "`` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/import_07.wasm
+# import.wast: "not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/import_08.wasm
+# import.wast: "not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/import_09.wasm
+# import.wast: "`wasi/http` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/import_10.wasm
+# import.wast: "`TyPeS` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/import_11.wasm
+# import.wast: "`WaSi` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/import_12.wasm
+# import.wast: "`HtTp` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/import_13.wasm
+# import.wast: "`` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/import_14.wasm
+# import.wast: "`` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/import_15.wasm
+# import.wast: "`` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/import_16.wasm
+# import.wast: "`` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/import_17.wasm
+# import.wast: "`` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/import_18.wasm
+# import.wast: "`` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/import_19.wasm
+# import.wast: "`` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/import_20.wasm
+# import.wast: "`` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/import_21.wasm
+# import.wast: "`` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/import_22.wasm
+# import.wast: "`` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/import_23.wasm
+# instance-type.wast: "export name `a` conflicts with previous name `a`"
+assert_invalid test/spec/component-model-assert/official_distilled/instance-type_01.wasm
+# instantiate.wast: "function index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/instantiate_01.wasm
+# instantiate.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/instantiate_02.wasm
+# instantiate.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/instantiate_03.wasm
+# instantiate.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/instantiate_04.wasm
+# instantiate.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/instantiate_05.wasm
+# instantiate.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/instantiate_06.wasm
+# instantiate.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/instantiate_07.wasm
+# instantiate.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/instantiate_08.wasm
+# instantiate.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/instantiate_09.wasm
+# instantiate.wast: "instantiation argument `a` conflicts with previous argument `a`"
+assert_invalid test/spec/component-model-assert/official_distilled/instantiate_10.wasm
+# instantiate.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/instantiate_11.wasm
+# instantiate.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/instantiate_12.wasm
+# instantiate.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/instantiate_13.wasm
+# instantiate.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/instantiate_14.wasm
+# instantiate.wast: "export name `a` conflicts with previous name `a`"
+assert_invalid test/spec/component-model-assert/official_distilled/instantiate_15.wasm
+# instantiate.wast: "index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/instantiate_16.wasm
+# invalid.wast: "type index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/invalid_01.wasm
+# naming.wast: "`1` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/naming_01.wasm
+# naming.wast: "enum tag name `NevEr` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/naming_02.wasm
+# naming.wast: "record field name `GoNnA` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/naming_03.wasm
+# naming.wast: "variant case name `GIVe` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/naming_04.wasm
+# naming.wast: "function parameter name `yOu` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/naming_05.wasm
+# naming.wast: "`NevEr` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/naming_06.wasm
+# naming.wast: "`GonnA` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/naming_07.wasm
+# naming.wast: "`lET` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/naming_08.wasm
+# naming.wast: "`YoU` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/naming_09.wasm
+# naming.wast: "`DOWn` is not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/naming_10.wasm
+# naming.wast: "import name `[method]a.a` conflicts with previous name `a`"
+assert_invalid test/spec/component-model-assert/official_distilled/naming_11.wasm
+# naming.wast: "import name `[static]a.a` conflicts with previous name `a`"
+assert_invalid test/spec/component-model-assert/official_distilled/naming_12.wasm
+# resources.wast: "type index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/resources_01.wasm
+# resources.wast: "type index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/resources_02.wasm
+# resources.wast: "type index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/resources_03.wasm
+# resources.wast: "function index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/resources_04.wasm
+# resources.wast: "not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/resources_05.wasm
+# resources.wast: "not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/resources_06.wasm
+# resources.wast: "not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/resources_07.wasm
+# resources.wast: "not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/resources_08.wasm
+# resources.wast: "not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/resources_09.wasm
+# resources.wast: "not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/resources_10.wasm
+# resources.wast: "not in kebab case"
+assert_invalid test/spec/component-model-assert/official_distilled/resources_11.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_01.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_02.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_03.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_04.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_05.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_06.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_07.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_08.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_09.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_10.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_11.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_12.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_13.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_14.wasm
+# type-export-restrictions.wast: "type not valid to be used as export"
+assert_invalid test/spec/component-model-assert/official_distilled/type-export-restrictions_15.wasm
+# types.wast: "module index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/types_01.wasm
+# types.wast: "instance index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/types_02.wasm
+# types.wast: "type index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/types_03.wasm
+# types.wast: "type index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/types_04.wasm
+# types.wast: "export name `A` conflicts with previous name `a`"
+assert_invalid test/spec/component-model-assert/official_distilled/types_05.wasm
+# types.wast: "import name `a` conflicts with previous name `A`"
+assert_invalid test/spec/component-model-assert/official_distilled/types_06.wasm
+# types.wast: "type index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/types_07.wasm
+# types.wast: "type index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/types_08.wasm
+# types.wast: "invalid outer alias count of 100"
+assert_invalid test/spec/component-model-assert/official_distilled/types_09.wasm
+# types.wast: "type index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/types_10.wasm
+# types.wast: "export name `FOO-bar-BAZ` conflicts with previous name `foo-BAR-baz`"
+assert_invalid test/spec/component-model-assert/official_distilled/types_11.wasm
+# types.wast: "type index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/types_12.wasm
+# types.wast: "invalid outer alias count of 100"
+assert_invalid test/spec/component-model-assert/official_distilled/types_13.wasm
+# types.wast: "type index out of bounds"
+assert_invalid test/spec/component-model-assert/official_distilled/types_14.wasm
+# export.wast: "not a valid export name"
+assert_invalid test/spec/component-model-assert/official_distilled/export_101.wasm
+# export.wast: "not a valid export name"
+assert_invalid test/spec/component-model-assert/official_distilled/export_102.wasm
+# export.wast: "not a valid extern name"
+assert_invalid test/spec/component-model-assert/official_distilled/export_103.wasm
+# export.wast: "not a valid export name"
+assert_invalid test/spec/component-model-assert/official_distilled/export_104.wasm
+# export.wast: "not a valid export name"
+assert_invalid test/spec/component-model-assert/official_distilled/export_105.wasm
+# import.wast: "empty identifier segment"
+assert_invalid test/spec/component-model-assert/official_distilled/import_101.wasm
+# import.wast: "empty identifier segment"
+assert_invalid test/spec/component-model-assert/official_distilled/import_102.wasm
+# import.wast: "trailing characters found: `/qux`"
+assert_invalid test/spec/component-model-assert/official_distilled/import_103.wasm
+# import.wast: "trailing characters found: `x`"
+assert_invalid test/spec/component-model-assert/official_distilled/import_104.wasm
+# import.wast: "url cannot contain `<`"
+assert_invalid test/spec/component-model-assert/official_distilled/import_105.wasm
+# import.wast: "not a valid extern name"
+assert_invalid test/spec/component-model-assert/official_distilled/import_106.wasm
+# import.wast: "not a valid extern name"
+assert_invalid test/spec/component-model-assert/official_distilled/import_107.wasm
+# import.wast: "not a valid extern name"
+assert_invalid test/spec/component-model-assert/official_distilled/import_108.wasm
+# import.wast: "not a valid extern name"
+assert_invalid test/spec/component-model-assert/official_distilled/import_109.wasm
+# import.wast: "not valid base64"
+assert_invalid test/spec/component-model-assert/official_distilled/import_110.wasm
+# import.wast: "not valid base64"
+assert_invalid test/spec/component-model-assert/official_distilled/import_111.wasm
+# import.wast: "not valid base64"
+assert_invalid test/spec/component-model-assert/official_distilled/import_112.wasm
+# import.wast: "not valid base64"
+assert_invalid test/spec/component-model-assert/official_distilled/import_113.wasm
+# import.wast: "not valid base64"
+assert_invalid test/spec/component-model-assert/official_distilled/import_114.wasm
+# import.wast: "unrecognized hash algorithm"
+assert_invalid test/spec/component-model-assert/official_distilled/import_115.wasm

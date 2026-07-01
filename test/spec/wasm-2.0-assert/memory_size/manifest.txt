@@ -1,0 +1,42 @@
+module memory_size.0.wasm
+assert_return size () -> i32:0
+assert_return grow i32:1 -> ()
+assert_return size () -> i32:1
+assert_return grow i32:4 -> ()
+assert_return size () -> i32:5
+assert_return grow i32:0 -> ()
+assert_return size () -> i32:5
+module memory_size.1.wasm
+assert_return size () -> i32:1
+assert_return grow i32:1 -> ()
+assert_return size () -> i32:2
+assert_return grow i32:4 -> ()
+assert_return size () -> i32:6
+assert_return grow i32:0 -> ()
+assert_return size () -> i32:6
+module memory_size.2.wasm
+assert_return size () -> i32:0
+assert_return grow i32:3 -> ()
+assert_return size () -> i32:0
+assert_return grow i32:1 -> ()
+assert_return size () -> i32:1
+assert_return grow i32:0 -> ()
+assert_return size () -> i32:1
+assert_return grow i32:4 -> ()
+assert_return size () -> i32:1
+assert_return grow i32:1 -> ()
+assert_return size () -> i32:2
+module memory_size.3.wasm
+assert_return size () -> i32:3
+assert_return grow i32:1 -> ()
+assert_return size () -> i32:4
+assert_return grow i32:3 -> ()
+assert_return size () -> i32:7
+assert_return grow i32:0 -> ()
+assert_return size () -> i32:7
+assert_return grow i32:2 -> ()
+assert_return size () -> i32:7
+assert_return grow i32:1 -> ()
+assert_return size () -> i32:8
+assert_invalid memory_size.4.wasm
+assert_invalid memory_size.5.wasm

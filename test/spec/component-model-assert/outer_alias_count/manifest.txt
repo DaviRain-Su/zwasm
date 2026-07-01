@@ -1,0 +1,4 @@
+# Official corpus rule: "invalid outer alias count" (ADR-0176 validator rule 6):
+# the count must not exceed the number of enclosing component scopes.
+assert_invalid test/spec/component-model-assert/outer_alias_count/top_level.wasm
+assert_invalid test/spec/component-model-assert/outer_alias_count/nested_type.wasm

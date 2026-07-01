@@ -1,0 +1,26 @@
+//! x86_64 emit handler for `global.set` — Zone 2 per-arch op
+//! file per ADR-0074 + ADR-0075.
+//!
+//! Identity anchor at `src/instruction/wasm_1_0/global_set.zig`.
+//! Delegates to `op_globals.emitGlobalSetCtx`, which dispatches
+//! on the global's valtype to the appropriate per-shape emit path.
+//!
+//! Wasm spec §4.4.5 (global.set N) — pop and store into global N.
+//! Per-shape via `globals_valtypes[N]`.
+//!
+//! Registered in `dispatch_collector.collected_x86_64_ctx_ops`.
+//!
+//! Zone 2 (`src/engine/codegen/x86_64/ops/`).
+
+const meta = @import("../../../../../instruction/wasm_1_0/global_set.zig");
+const ctx_mod = @import("../../ctx.zig");
+const op_globals = @import("../../op_globals.zig");
+const zir = @import("../../../../../ir/zir.zig");
+
+pub const op_tag = meta.op_tag;
+pub const wasm_level = meta.wasm_level;
+pub const wasi_level = meta.wasi_level;
+
+pub fn emit(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) ctx_mod.Error!void {
+    return op_globals.emitGlobalSetCtx(ctx, ins);
+}

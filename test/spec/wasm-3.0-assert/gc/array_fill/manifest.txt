@@ -1,0 +1,17 @@
+assert_invalid array_fill.0.wasm
+assert_invalid array_fill.1.wasm
+assert_invalid array_fill.2.wasm
+module array_fill.3.wasm
+assert_trap array_fill-null ()
+assert_trap array_fill i32:13 i32:0 i32:0
+assert_trap array_fill i32:0 i32:0 i32:13
+assert_return array_fill i32:12 i32:0 i32:0 -> ()
+assert_return array_get_nth i32:0 -> i32:0
+assert_return array_get_nth i32:5 -> i32:0
+assert_return array_get_nth i32:11 -> i32:0
+assert_trap array_get_nth i32:12
+assert_return array_fill i32:2 i32:11 i32:2 -> ()
+assert_return array_get_nth i32:1 -> i32:0
+assert_return array_get_nth i32:2 -> i32:11
+assert_return array_get_nth i32:3 -> i32:11
+assert_return array_get_nth i32:4 -> i32:0

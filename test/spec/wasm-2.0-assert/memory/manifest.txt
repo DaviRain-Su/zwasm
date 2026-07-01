@@ -1,0 +1,88 @@
+module memory.0.wasm
+module memory.1.wasm
+module memory.2.wasm
+module memory.3.wasm
+module memory.4.wasm
+module memory.5.wasm
+assert_invalid memory.6.wasm
+assert_invalid memory.7.wasm
+module memory.8.wasm
+assert_return memsize () -> i32:0
+module memory.9.wasm
+assert_return memsize () -> i32:0
+module memory.10.wasm
+assert_return memsize () -> i32:1
+assert_invalid memory.11.wasm
+assert_invalid memory.12.wasm
+assert_invalid memory.13.wasm
+assert_invalid memory.14.wasm
+assert_invalid memory.15.wasm
+assert_invalid memory.16.wasm
+assert_invalid memory.17.wasm
+assert_invalid memory.18.wasm
+assert_invalid memory.19.wasm
+assert_invalid memory.20.wasm
+assert_invalid memory.21.wasm
+assert_invalid memory.22.wasm
+assert_invalid memory.23.wasm
+assert_invalid memory.24.wasm
+assert_invalid memory.25.wasm
+assert_invalid memory.26.wasm
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+module memory.30.wasm
+assert_return data () -> i32:1
+assert_return cast () -> f64:4631107791820423168
+assert_return i32_load8_s i32:4294967295 -> i32:4294967295
+assert_return i32_load8_u i32:4294967295 -> i32:255
+assert_return i32_load16_s i32:4294967295 -> i32:4294967295
+assert_return i32_load16_u i32:4294967295 -> i32:65535
+assert_return i32_load8_s i32:100 -> i32:100
+assert_return i32_load8_u i32:200 -> i32:200
+assert_return i32_load16_s i32:20000 -> i32:20000
+assert_return i32_load16_u i32:40000 -> i32:40000
+assert_return i32_load8_s i32:4275856707 -> i32:67
+assert_return i32_load8_s i32:878104047 -> i32:4294967279
+assert_return i32_load8_u i32:4275856707 -> i32:67
+assert_return i32_load8_u i32:878104047 -> i32:239
+assert_return i32_load16_s i32:4275856707 -> i32:25923
+assert_return i32_load16_s i32:878104047 -> i32:4294954479
+assert_return i32_load16_u i32:4275856707 -> i32:25923
+assert_return i32_load16_u i32:878104047 -> i32:52719
+assert_return i64_load8_s i64:18446744073709551615 -> i64:18446744073709551615
+assert_return i64_load8_u i64:18446744073709551615 -> i64:255
+assert_return i64_load16_s i64:18446744073709551615 -> i64:18446744073709551615
+assert_return i64_load16_u i64:18446744073709551615 -> i64:65535
+assert_return i64_load32_s i64:18446744073709551615 -> i64:18446744073709551615
+assert_return i64_load32_u i64:18446744073709551615 -> i64:4294967295
+assert_return i64_load8_s i64:100 -> i64:100
+assert_return i64_load8_u i64:200 -> i64:200
+assert_return i64_load16_s i64:20000 -> i64:20000
+assert_return i64_load16_u i64:40000 -> i64:40000
+assert_return i64_load32_s i64:20000 -> i64:20000
+assert_return i64_load32_u i64:40000 -> i64:40000
+assert_return i64_load8_s i64:18364758543954109763 -> i64:67
+assert_return i64_load8_s i64:3771275841602506223 -> i64:18446744073709551599
+assert_return i64_load8_u i64:18364758543954109763 -> i64:67
+assert_return i64_load8_u i64:3771275841602506223 -> i64:239
+assert_return i64_load16_s i64:18364758543954109763 -> i64:25923
+assert_return i64_load16_s i64:3771275841602506223 -> i64:18446744073709538799
+assert_return i64_load16_u i64:18364758543954109763 -> i64:25923
+assert_return i64_load16_u i64:3771275841602506223 -> i64:52719
+assert_return i64_load32_s i64:18364758543954109763 -> i64:1446274371
+assert_return i64_load32_s i64:3771275841602506223 -> i64:18446744071976963567
+assert_return i64_load32_u i64:18364758543954109763 -> i64:1446274371
+assert_return i64_load32_u i64:3771275841602506223 -> i64:2562379247
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+skip-adr-skip_text_format_parser directive-assert_malformed-text
+module memory.34.wasm
+assert_return load i32:0 -> i32:0
+assert_return load i32:10000 -> i32:0
+assert_return load i32:20000 -> i32:0
+assert_return load i32:30000 -> i32:0
+assert_return load i32:40000 -> i32:0
+assert_return load i32:50000 -> i32:0
+assert_return load i32:60000 -> i32:0
+assert_return load i32:65535 -> i32:0

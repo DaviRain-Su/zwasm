@@ -1,0 +1,30 @@
+module float_memory0.0.wasm
+assert_return i32.load () -> i32:2141192192
+assert_return f32.load () -> f32:2141192192
+invoke reset ()
+assert_return i32.load () -> i32:0
+assert_return f32.load () -> f32:0
+invoke f32.store ()
+assert_return i32.load () -> i32:2141192192
+assert_return f32.load () -> f32:2141192192
+invoke reset ()
+assert_return i32.load () -> i32:0
+assert_return f32.load () -> f32:0
+invoke i32.store ()
+assert_return i32.load () -> i32:2141192192
+assert_return f32.load () -> f32:2141192192
+module float_memory0.1.wasm
+assert_return i64.load () -> i64:9219994337134247936
+assert_return f64.load () -> f64:9219994337134247936
+invoke reset ()
+assert_return i64.load () -> i64:0
+assert_return f64.load () -> f64:0
+invoke f64.store ()
+assert_return i64.load () -> i64:9219994337134247936
+assert_return f64.load () -> f64:9219994337134247936
+invoke reset ()
+assert_return i64.load () -> i64:0
+assert_return f64.load () -> f64:0
+invoke i64.store ()
+assert_return i64.load () -> i64:9219994337134247936
+assert_return f64.load () -> f64:9219994337134247936

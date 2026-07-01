@@ -1,0 +1,7 @@
+module m.wasm
+assert_return fid f32:1080033280 -> f32:1080033280
+assert_return fid f32:0 -> f32:0
+assert_return did f64:4614256656552045848 -> f64:4614256656552045848
+assert_return did f64:4607182418800017408 -> f64:4607182418800017408
+assert_return fk () -> f32:1080033280
+assert_return dk () -> f64:4614256656552045848

@@ -1,0 +1,6 @@
+;; value 0x70000 must survive the rmw BLR/CALL (caller-saved clobber test)
+(module (memory 1)
+  (func (export "test") (result i32)
+    (i32.atomic.store (i32.const 12) (i32.const 0x100))
+    (i32.add (i32.const 0x70000)
+             (i32.atomic.rmw.add (i32.const 12) (i32.const 0x23)))))

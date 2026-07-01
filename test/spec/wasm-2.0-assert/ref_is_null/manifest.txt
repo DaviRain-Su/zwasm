@@ -1,0 +1,16 @@
+module ref_is_null.0.wasm
+assert_return funcref i64:0 -> i32:1
+assert_return externref i64:0 -> i32:1
+assert_return externref i64:9223372036854775810 -> i32:0
+invoke-action init i64:9223372036854775809
+assert_return funcref-elem i32:0 -> i32:1
+assert_return externref-elem i32:0 -> i32:1
+assert_return funcref-elem i32:1 -> i32:0
+assert_return externref-elem i32:1 -> i32:0
+invoke-action deinit ()
+assert_return funcref-elem i32:0 -> i32:1
+assert_return externref-elem i32:0 -> i32:1
+assert_return funcref-elem i32:1 -> i32:1
+assert_return externref-elem i32:1 -> i32:1
+assert_invalid ref_is_null.1.wasm
+assert_invalid ref_is_null.2.wasm
