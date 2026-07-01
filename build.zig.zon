@@ -17,5 +17,6 @@
         "LICENSE",
         "THIRD_PARTY.md",
         "README.md",
+        "CHANGELOG.md",
     },
 }
