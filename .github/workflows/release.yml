@@ -21,6 +21,10 @@ permissions:
 
 jobs:
   release:
+    # Only cut a Release for FINAL version tags (v2.0.0). Pre-release tags
+    # (-rc/-alpha/-beta) are tag-only — no build, no Release, Latest unchanged —
+    # matching the v2 pre-release strategy. Manual dispatch always runs.
+    if: ${{ github.event_name == 'workflow_dispatch' || !contains(github.ref_name, '-') }}
     runs-on: ubuntu-22.04
     timeout-minutes: 60
     steps:
