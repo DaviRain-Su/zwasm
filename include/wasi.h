@@ -4,9 +4,9 @@
  * zwasm WASI 0.1 host-setup C API (project extension, not
  * upstream-portable).
  *
- * Per ADR-0005, this header is hand-authored — there is no
- * single canonical upstream `wasi.h` for host-side WASI
- * embedding (`WebAssembly/wasm-c-api` does not ship one;
+ * This header is hand-authored — there is no single canonical
+ * upstream `wasi.h` for host-side WASI embedding
+ * (`WebAssembly/wasm-c-api` does not ship one;
  * runtime-specific `wasi.h`s like wasmtime's depend on
  * runtime-private build-config headers and are not "verbatim
  * vendorable").
@@ -33,8 +33,7 @@
  * Names use the `zwasm_` prefix to signal that these are
  * project extensions, not cross-runtime portable.
  *
- * Implementation lives in `src/wasi/host.zig` (Zone 2);
- * §9.4 / 4.1+ populates it.
+ * Implementation lives in `src/wasi/host.zig`.
  */
 
 #ifndef ZWASM_WASI_H
@@ -63,9 +62,9 @@ WASM_API_EXTERN void                 zwasm_wasi_config_delete(zwasm_wasi_config_
  * process's stdio. This is the default (`Host.init` installs the
  * three stdio fds), kept for API parity.
  *
- * Process argv inheritance (`inherit_argv`) remains deferred:
+ * Process argv inheritance (`inherit_argv`) is not provided:
  * Zig 0.16 offers no library-side cross-platform process-args
- * read (ADR-0184). Use the explicit `set_args` below instead.
+ * read. Use the explicit `set_args` below instead.
  */
 WASM_API_EXTERN void zwasm_wasi_config_inherit_stdio(zwasm_wasi_config_t*);
 
@@ -100,7 +99,7 @@ WASM_API_EXTERN void zwasm_wasi_config_set_envs(
  * the config copies them.
  *
  * The directory is opened at `wasm_instance_new` time via the
- * engine-owned io (ADR-0184); an unopenable path makes
+ * engine-owned io; an unopenable path makes
  * `wasm_instance_new` return NULL. Returns true when queued,
  * false on NULL args or allocation failure.
  */

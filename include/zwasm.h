@@ -1,15 +1,17 @@
-/* zwasm-specific C extensions, subordinate to wasm.h.
+/* zwasm-specific C extensions, subordinate to the standard wasm.h.
  *
- * ADR-0179 #3a-4 (D-314): instance-level sandboxing setters. v1 zwasm
- * exposed CONFIG-level knobs (zwasm_config_set_fuel/...); v2 deliberately
- * mirrors its Zig facade instead — post-instantiate, mid-workload-mutable
- * per-instance budgets. The C API creates interpreter-backed instances
- * (the hardened default engine); `--engine jit` budgets are the CLI
- * surface. All functions are null-tolerant (null instance = no-op).
+ * STABILITY: zwasm is pre-1.0. These extension symbols and the wider
+ * C ABI may change between releases until 1.0. The standard wasm.h
+ * surface follows the upstream wasm-c-api interface.
+ *
+ * Instance-level sandboxing setters: per-instance budgets are set
+ * post-instantiate and are mutable mid-workload (fuel, memory/table
+ * ceilings, interrupt). The C API creates interpreter-backed instances
+ * (the hardened default engine); JIT budgets are driven via the CLI.
+ * All functions are null-tolerant (a null instance is a no-op).
  *
  * The WASI config family (zwasm_wasi_config_*, zwasm_store_set_wasi) is
- * declared in wasi.h; zwasm_instance_get_func is declared below — the
- * Phase-16 C-surface audit completed this header.
+ * declared in wasi.h; zwasm_instance_get_func is declared below.
  */
 #ifndef ZWASM_H
 #define ZWASM_H
@@ -83,7 +85,7 @@ WASM_API_EXTERN int32_t zwasm_trap_kind(const wasm_trap_t*);
  * caller owns the result and must release it with wasm_func_delete. */
 WASM_API_EXTERN wasm_func_t* zwasm_instance_get_func(wasm_instance_t*, uint32_t idx);
 
-/* ── Engine selection (ADR-0200) ─────────────────────────────────────── */
+/* ── Engine selection ────────────────────────────────────────────────── */
 
 /* Per-instance engine kind for zwasm_instance_new_ex. AUTO resolves to the
  * runtime's choice (currently the interpreter until the JIT host-import/WASI
