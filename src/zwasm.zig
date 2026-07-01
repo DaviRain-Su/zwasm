@@ -1008,3 +1008,24 @@ test "zwasm facade T1.16: Module.instantiate surfaces a start-function trap (D-2
     // now-wired `wasm_instance_new` `trap_out` (D-275).
     try std.testing.expectError(error.StartTrapped, mod.instantiate(.{}));
 }
+
+test "public API contract — pinned dogfooding consumers" {
+    // Compile-time guard on the exact `zwasm`-module symbols a pinned embedder
+    // (ClojureWasm) imports. Renaming/removing any of these is a breaking change
+    // for that consumer; referencing them here turns a silent downstream break
+    // (surfacing only at their next pin bump) into a local CI failure.
+    _ = Engine.init;
+    _ = Instance;
+    _ = Value;
+    _ = Module.Budget;
+    _ = Module.InstantiateOpts;
+    _ = cli.run.PreopenDir;
+    _ = cli.run.runWasmCapturedFull;
+    _ = ir.zir.FuncType;
+    _ = ir.zir.ValType;
+    _ = wasi.host.Host;
+    if (@import("build_options").enable_component) {
+        _ = feature.component.host;
+        _ = feature.component.types;
+    }
+}
