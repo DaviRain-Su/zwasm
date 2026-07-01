@@ -49,7 +49,9 @@ set -u
 LOG_PATH="${1:-/tmp/orb.log}"
 MACHINE="${ORB_MACHINE:-my-ubuntu-amd64}"
 MAX_RETRIES="${D134_MAX_RETRIES:-5}"
-REPO_PATH="${REPO_PATH:-/Users/shota.508/Documents/MyProducts/zwasm_from_scratch}"
+# Default to this checkout's root (OrbStack's Linux VM sees the same Mac
+# home-mounted path); override with REPO_PATH if your layout differs.
+REPO_PATH="${REPO_PATH:-$(cd "$(dirname "$0")/.." && pwd)}"
 
 attempt=1
 last_exit=1

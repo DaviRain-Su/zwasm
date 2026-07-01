@@ -4,6 +4,15 @@
 
 Project-level design and operational metadata. Tracked in git. English.
 
+> **For readers browsing the repo:** this directory is zwasm's **development
+> and decision record** — the ROADMAP, Architectural Decision Records
+> (`decisions/`), design notes, a technical-debt ledger (`debt.yaml`), and
+> observational lessons (`lessons/`). None of it is required to build, use, or
+> embed zwasm (see the top-level README for that). It is kept public for
+> transparency into how and why the runtime was designed the way it is; some
+> files also carry maintainer-workflow bookkeeping (gate hosts, session
+> handover) that only concerns day-to-day development.
+
 ## Always present (load-bearing)
 
 - [`ROADMAP.md`](./ROADMAP.md) — **the** authoritative mission, principles,
