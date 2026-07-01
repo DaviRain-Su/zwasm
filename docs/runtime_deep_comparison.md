@@ -393,7 +393,8 @@ this synthesis doc has the conclusions.
 ## §7 — Revision history
 
 - 2026-05-24 — Initial audit at cycle 37, post-cycle-36 user
-  reframe ("c_api が非標準なのが一番よくない / 疲れて妥協"
-  suspicion). 3 parallel subagent audits → synthesis here.
+  reframe ("the c_api being non-standard is the worst part /
+  compromised out of fatigue" suspicion). 3 parallel subagent
+  audits → synthesis here.
   Triggers: ADR-0052 re-evaluation, ADR-0107 review,
   ADR-0109 validation.

@@ -14,7 +14,7 @@ Read this BEFORE touching code that any contract gates.
 CW v1 (ClojureWasmFromScratch `cw-from-scratch` branch)
 submitted a deep consumer review of zwasm v2's
 `docs/zig_api_design.md` (ADR-0109 spec) on 2026-05-24.
-Their review surfaced **3 ★必須 contracts + 6 answered
+Their review surfaced **3 REQUIRED contracts + 6 answered
 open questions + 2 long-term commitments + 1 persistence
 requirement** that, if not enforced during Phase A-F
 execution, will silently drift and break the CW v1
@@ -26,7 +26,7 @@ verification mechanism. **The list is load-bearing**:
 Phase A-F execution must honor every item, or file an
 ADR for any explicit deviation.
 
-## §1 — ★必須 contracts (3 items)
+## §1 — REQUIRED contracts (3 items)
 
 ### C-1 — `*const FuncEntity` is `align(8)`
 

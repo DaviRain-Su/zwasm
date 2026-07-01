@@ -10,7 +10,7 @@ SemVer compatibility guarantees start at the first `v0.1.0` tag.
 
 ## [Unreleased]
 
-The v2 redesign is feature-complete (Phase 16 — 完成形) and verified on the
+The v2 redesign is feature-complete (Phase 16) and verified on the
 3-host gate (Mac aarch64 + Linux x86_64 + Windows x86_64); a `v0.1.0` tag
 has not yet been cut.
 
@@ -47,7 +47,7 @@ has not yet been cut.
 
 ### Changed (from v1)
 
-- Breaking redesign of the C / Zig / CLI surfaces to the あるべき論,
+- Breaking redesign of the C / Zig / CLI surfaces to the first-principles,
   industry-standard shape (not v1 parity). The CLI drops v1's
   `validate` / `inspect` / `features` / `wat` / `wasm` subcommands and
   capability-flag sprawl — validation is programmatic; conversion and

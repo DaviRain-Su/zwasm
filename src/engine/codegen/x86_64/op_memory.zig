@@ -50,7 +50,7 @@ const Error = types.Error;
 ///   MOV RAX, [R15 + vm_base_off]
 ///   MOV EDX, idx_r              ; zero-extend idx → 64-bit RDX (= ea base)
 ///   ADD RDX, offset             ; (skipped if offset == 0)
-///   LEA RCX, [RDX + access_size]; RCX = ea + size, RDX 無修正 (load addressing 用)
+///   LEA RCX, [RDX + access_size]; RCX = ea + size, RDX unchanged (for load addressing)
 ///   CMP RCX, [R15 + mem_limit_off]
 ///   JA  trap_stub               ; unsigned > ; oob_fixups append
 ///   MOV[ZX|SX] dst, ... [RAX + RDX]
@@ -60,13 +60,13 @@ const Error = types.Error;
 ///
 /// Per Wasm 1.0 spec §4.4.7: trap iff
 /// `eff_addr + access_size > mem_limit` where access_size ∈
-/// {1, 2, 4, 8}. u64 演算で overflow 不可 (max ≈ 2^33+7).
+/// {1, 2, 4, 8}. No overflow possible in u64 arithmetic (max ≈ 2^33+7).
 ///
-/// RAX/RCX/RDX は regalloc pool 外 (allocatable_caller_saved_
-/// scratch_gprs = R10+R11 のみ; RAX/RCX/RDX は scratch 用に reserved)。
-/// shifts は RCX を CL として使うが、shift handler と memory handler
-/// は同一 op 内で交差しないため、RCX を bounds-check scratch として
-/// 使うのは安全。
+/// RAX/RCX/RDX are outside the regalloc pool (allocatable_caller_saved_
+/// scratch_gprs = R10+R11 only; RAX/RCX/RDX are reserved for scratch).
+/// Shifts use RCX as CL, but the shift handler and the memory handler
+/// never overlap within a single op, so using RCX as bounds-check
+/// scratch is safe.
 pub fn emitMemOp(
     allocator: Allocator,
     buf: *std.ArrayList(u8),
@@ -137,9 +137,10 @@ pub fn emitMemOp(
     }
     const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
 
-    // Per-op access size in bytes (Wasm spec memory.{load,store} 系)。
-    // exhaustive switch (`require_exhaustive_enum_switch` lint gate);
-    // dispatcher が memory op 以外を渡すことはないので else は unreachable。
+    // Per-op access size in bytes (Wasm spec memory.{load,store} family).
+    // Exhaustive switch (`require_exhaustive_enum_switch` lint gate);
+    // the dispatcher never passes anything other than a memory op, so
+    // `else` is unreachable.
     const access_size: i8 = switch (op) {
         .@"i32.load8_s",
         .@"i32.load8_u",
@@ -180,8 +181,8 @@ pub fn emitMemOp(
     };
 
     // Shared eff-addr + spec-strict bounds-check prologue.
-    // ea = idx_r (zero-extended u32) + offset; trap iff ea + size > mem_limit。
-    // u64 演算で overflow 不可: max(ea + size) = 2^33 + 7 << 2^64。
+    // ea = idx_r (zero-extended u32) + offset; trap iff ea + size > mem_limit.
+    // No overflow possible in u64 arithmetic: max(ea + size) = 2^33 + 7 << 2^64.
     try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.vm_base_off).slice());
     try buf.appendSlice(allocator, inst.encMovRR(.d, .rdx, idx_r).slice());
     if (offset != 0) {

@@ -21,13 +21,13 @@
 //!   B.HI trap_stub         ; placeholder + bounds_fixups append
 //!   LDR/STR <op-specific>, [X28, X16]
 //!
-//! IP1 (X17) は本 emitMemOp 内でのみ scratch として使う。
-//! op_call.zig の call_indirect も X17 を使うが、両者は同一
-//! op handler 内で交差しない (emitMemOp 終了 → push_vreg 後に
-//! 別 op として call_indirect が始まる) ので衝突しない。
-//! abi.zig の spill_stage_gprs は X16/X17 を call_indirect が
-//! mid-op で占有することを記述しているが、op handler 境界では
-//! どちらの handler も自由に scratch 利用可。
+//! IP1 (X17) is used as scratch only within this emitMemOp.
+//! call_indirect in op_call.zig also uses X17, but the two never
+//! overlap within a single op handler (emitMemOp finishes → after
+//! push_vreg, call_indirect starts as a separate op), so they do
+//! not conflict. abi.zig's spill_stage_gprs documents that
+//! call_indirect occupies X16/X17 mid-op, but at op-handler
+//! boundaries either handler is free to use them as scratch.
 //!
 //! The B.HS fixup is appended to `ctx.bounds_fixups`; emit.zig's
 //! function-final `end` patches all of them to the trap stub
@@ -148,10 +148,10 @@ pub fn emitMemOp(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
     // The MOVZ/MOVK pair stages the offset into ip1=X17 since ip1 is
     // not yet live (the bounds-check `ADD X17, X16, #access_size`
     // emits AFTER the offset add, reusing X17 cleanly).
-    // Per-op access size in bytes (Wasm spec memory.{load,store} 系)。
-    // exhaustive switch (`require_exhaustive_enum_switch` lint gate)
-    // のため else => unreachable で「memory op 以外が来たら型システム
-    // 違反」として落とす。
+    // Per-op access size in bytes (Wasm spec memory.{load,store} family).
+    // Exhaustive switch (for the `require_exhaustive_enum_switch` lint gate),
+    // so `else => unreachable` trips as a type-system violation if anything
+    // other than a memory op reaches here.
     const access_size: u12 = switch (ins.op) {
         .@"i32.load8_s",
         .@"i32.load8_u",
@@ -215,7 +215,7 @@ pub fn emitMemOp(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 
     // Effective-address + spec-strict bounds prologue.
     // ea = idx (zero-extended u32) + offset; trap iff ea + size > mem_limit.
-    // u64 演算で overflow 不可: max(ea + size) = 2^33 + 7 << 2^64。
+    // No overflow possible in u64 arithmetic: max(ea + size) = 2^33 + 7 << 2^64.
     try gpr.writeU32(ctx.allocator, ctx.buf, inst.encOrrRegW(ip0, 31, w_addr));
     if (offset_imm != 0) {
         if (offset_imm <= 0xFFFFFF) {
@@ -581,19 +581,20 @@ fn emitMemOpI64(ctx: *EmitCtx, ins: *const ZirInstr) Error!void {
 ///   ; freely usable here because op-handlers don't observe pool
 ///   ; lifetimes mid-handler — handlers run as one IR instruction's
 ///   ; emission window, with no concurrent vreg reads of W12/W13
-///   ; in flight)。注意: W12/W13 は regalloc pool に含まれる
-///   ; (slot 3, 4) ので、その vreg を持っているかは alloc.slot で
-///   ; 見える。Phase 7 の現状では bulk-mem は call_indirect 等の
-///   ; pre-existing 衝突パターンと同居しないため安全だが、長期的
-///   ; には専用 reservation を導入すべき。Phase 8 の最適化で再考。
+///   ; in flight). NOTE: W12/W13 ARE in the regalloc pool
+///   ; (slots 3, 4), so whether a vreg currently holds them is
+///   ; visible via alloc.slot. As of Phase 7 this is safe because
+///   ; bulk-mem never co-occurs with pre-existing conflict patterns
+///   ; such as call_indirect, but a dedicated reservation should be
+///   ; introduced long-term. Revisit in the Phase 8 optimization.
 ///
-/// Implementation note: 操作は3つのオペランドを必要とする一方、
-/// `spill_stage_gprs` は2スロット (X14/X15) しかない。そのため、
-/// 3番目以降のオペランドを安全に保持するため、ロード直後に
-/// 私的ホルダ (X16/X17) へ MOV してから次のロードに進む。
-/// Bounds-check は X16/X17 を書き換える可能性があるため、bounds-
-/// check より前に必要な値を私的ホルダから別の場所へ退避する手順を
-/// 注意深く順序付けている。
+/// Implementation note: the operation needs three operands, whereas
+/// `spill_stage_gprs` has only two slots (X14/X15). To hold the third
+/// and later operands safely, each is MOVed into a private holder
+/// (X16/X17) immediately after being loaded, before proceeding to the
+/// next load. Because the bounds-check may clobber X16/X17, the steps
+/// that evacuate the needed values out of the private holders before
+/// the bounds-check are carefully ordered.
 pub fn emitMemoryFill(ctx: *EmitCtx) Error!void {
     if (ctx.pushed_vregs.items.len < 3) return Error.AllocationMissing;
     const n_v = ctx.pushed_vregs.pop().?;

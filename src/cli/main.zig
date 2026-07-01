@@ -28,7 +28,7 @@
 //!                             <file.cwasm>` loads + executes it.
 //!
 //! The surface is `run` + `compile` only (ADR-0159, §16.4): the
-//! wasmtime/wazero-aligned あるべき論 shape for a runtime. Validation
+//! wasmtime/wazero-aligned first-principles shape for a runtime. Validation
 //! is programmatic (C-API `wasm_module_validate` / Zig `Engine.compile`);
 //! introspection + wat↔wasm conversion are `wasm-tools` / `wabt`'s job —
 //! zwasm deliberately does NOT ship `validate`/`inspect`/`features`/

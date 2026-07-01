@@ -17,7 +17,7 @@
 //! Until 10.G lands, this runner reports "skeleton (10.G impl
 //! pending)" + exits 0 so `test-all` stays green regardless.
 //!
-//! Per ROADMAP §10 / 10.T-3 + design plan §3.5 "テスト戦略".
+//! Per ROADMAP §10 / 10.T-3 + design plan §3.5 "test strategy".
 
 const std = @import("std");
 

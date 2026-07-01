@@ -2,7 +2,7 @@
 
 A from-scratch WebAssembly runtime in Zig 0.16.0.
 
-> **Status: feature-complete (完成形) and green on the 3-host gate**
+> **Status: feature-complete and green on the 3-host gate**
 > (Mac aarch64 + Linux x86_64 + Windows x86_64). Full WebAssembly 3.0 + WASI
 > preview1 & preview2 (Component Model), interpreter + JIT (arm64 / x86_64) +
 > AOT (`.cwasm`), and the C / Zig / CLI surfaces are settled. Completion is the

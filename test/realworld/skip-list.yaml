@@ -1,6 +1,6 @@
 # test/realworld/skip-list.yaml — per-fixture skip allow-list
-# (10.T-5 skeleton; wasmtime per-file header model per Phase 10
-# design plan §4.4 採用).
+# (10.T-5 skeleton; wasmtime per-file header model adopted per
+# Phase 10 design plan §4.4).
 #
 # Format (per fixture):
 #   <fixture-rel-path>:

@@ -9,7 +9,7 @@ library (ClojureWasm v1 dogfooding, and any other Zig project).
 10.J rewrite is complete — the native facade (`Engine` / `Module` /
 `Linker` / `Instance` / `TypedFunc` / `Memory` / `Global` / `Table` /
 `Caller` + full 12-variant `Trap` + allocator strict-pass) lives in
-`src/zwasm/*.zig` and is the primary surface. Phase-16 (完成形)
+`src/zwasm/*.zig` and is the primary surface. Phase-16 (feature-complete)
 follow-ups added module introspection (`Module.imports`/`.exports`),
 `Memory.grow`/`.sliceAt`, `Engine.linker()`, and
 `Linker.defineInstance`. The signatures below are the original
@@ -598,7 +598,7 @@ Estimated 6-8 cycles of autonomous work, parallelizable.
    Snapshot is simpler + matches Wasm spec (each `memory.grow`
    may relocate); growth-tracking slice would require pointer
    dereference per access.
-4. **WasiConfig granularity**: full `defineWasi(cfg)` 一括 vs
+4. **WasiConfig granularity**: full `defineWasi(cfg)` all-at-once vs
    per-syscall `defineWasiFd / defineWasiClock / ...`. CW likely
    wants the bulk path; embedded/restricted hosts might want
    per-syscall.

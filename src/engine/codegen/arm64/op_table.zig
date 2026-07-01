@@ -36,7 +36,7 @@
 //! silently clobbered. The remaining op_table sites
 //! (emitTableFill / emitTableGrow / emitTableCopy / emitTableInit)
 //! still hardcode X10/X11/X12 — those need >2 scratch slots and
-//! are queued for the Phase 9 完備 substrate audit's unified
+//! are queued for the Phase 9 completeness substrate audit's unified
 //! comptime-disjointness mechanism (Q5). X17 remains the
 //! bounds-check scratch (already disjoint from regalloc pool
 //! per the ip_gprs reservation).

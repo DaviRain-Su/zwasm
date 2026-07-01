@@ -13,7 +13,7 @@ count covers the 4 proposal axes:
 | `clang_wasm64/` | memory64 | > 4 GiB allocate + memcpy (host 64-bit only) |
 
 Per-fixture skip-list managed via per-file header (wasmtime
-shape per §4.4 採用). `.wasm` artifacts land cycle-by-cycle as
+shape adopted per §4.4). `.wasm` artifacts land cycle-by-cycle as
 the corresponding impl rows (10.M / 10.TC / 10.E / 10.G) exercise
 each toolchain.
 
@@ -23,7 +23,7 @@ in 10.D).
 
 ## Skip-list
 
-Per-file header convention (wasmtime model, §4.4 採用):
+Per-file header convention (wasmtime model, adopted per §4.4):
 
 ```wat
 ;; ZWASM-SKIP: SKIP-P10-GC-GAP (10.G impl pending)

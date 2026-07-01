@@ -1,4 +1,4 @@
-# wasm_of_ocaml toolchain fixtures (Phase 10 / GC + EH + TC; 三冠)
+# wasm_of_ocaml toolchain fixtures (Phase 10 / GC + EH + TC; triple crown)
 
 **Toolchain**: `wasm_of_ocaml` 6.0.1+ — the OCaml-to-Wasm compiler.
 Exercises all 3 Phase 10 proposals simultaneously (GC for OCaml
