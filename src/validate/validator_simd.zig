@@ -32,8 +32,7 @@ const ValType = zir.ValType;
 /// foundational op shapes; remaining sub-opcodes extend
 /// across §9.4 IR + 9.5-9.8 emit chunks per ADR-0041's
 /// chunk plan. Sub-opcode numbering follows the Wasm SIMD
-/// proposal (`~/Documents/OSS/WebAssembly/testsuite/
-/// proposals/simd/*.wast`).
+/// proposal (WebAssembly/testsuite `proposals/simd/*.wast`).
 pub fn dispatchPrefixFD(self: *Validator) Error!void {
     const sub = try leb128.readUleb128(u32, self.body, &self.pos);
     switch (sub) {

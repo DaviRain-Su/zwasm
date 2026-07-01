@@ -327,9 +327,8 @@ pub fn emitPrefixFD(self: *Lowerer) Error!void {
         // (BinarySIMD.md authoritative numbering, NOT the
         // misleading lower.zig comment that misnumbered these
         // 134..137 / 166..169 / 199..202 — verified via
-        // `~/Documents/OSS/WebAssembly/simd/proposals/simd/
-        // BinarySIMD.md` which gives 0x87..0x8A / 0xA7..0xAA /
-        // 0xC7..0xCA).
+        // WebAssembly/simd `proposals/simd/BinarySIMD.md` which
+        // gives 0x87..0x8A / 0xA7..0xAA / 0xC7..0xCA).
         //   135..138 i16x8.extend_{low,high}_i8x16_{s,u}
         //   167..170 i32x4.extend_{low,high}_i16x8_{s,u}
         //   199..202 i64x2.extend_{low,high}_i32x4_{s,u}

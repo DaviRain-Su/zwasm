@@ -2,11 +2,15 @@
 
 > **Doc-state**: ACTIVE — load-bearing reference (Phase 9+ scope).
 
-Pointed to from `CLAUDE.md` and mirrored in
-`.claude/settings.json` (`additionalDirectories` /
-`Edit(...)` / `Write(...)` allow-lists). Never edit or commit
-from any of these paths — they are reference material, not
-project state.
+Pointed to from `CLAUDE.md` and mirrored in the maintainer's
+gitignored `.claude/settings.local.json` (`additionalDirectories`).
+Never edit or commit from any of these paths — they are reference
+material, not project state.
+
+> **Author-local layout.** The absolute paths below reflect one
+> maintainer's checkout layout and are **not required to build, test,
+> or use zwasm** — an external clone needs none of them. They only
+> position the read-only textbook clones for local development.
 
 | Path                                             | What it is                                                             |
 |--------------------------------------------------|------------------------------------------------------------------------|

@@ -63,22 +63,27 @@ bash scripts/check_jit_releasesafe.sh
 echo "[gate_merge] AOT cross-compile portability (§12.3) ..."
 bash scripts/check_aot_cross_compile.sh
 
-# ---- ubuntunote (native Linux x86_64) via SSH ----
-if ssh -o ConnectTimeout=5 -o BatchMode=yes ubuntunote "echo ok" >/dev/null 2>&1; then
-    echo "[gate_merge] zig build test-all on ubuntunote (native x86_64) ..."
+# The Linux/Windows SSH hosts default to the maintainer's aliases; override
+# with ZWASM_UBUNTU_HOST / ZWASM_WINDOWS_HOST to run the gate on your own hosts.
+UBUNTU_HOST="${ZWASM_UBUNTU_HOST:-ubuntunote}"
+WINDOWS_HOST="${ZWASM_WINDOWS_HOST:-windowsmini}"
+
+# ---- native Linux x86_64 via SSH ----
+if ssh -o ConnectTimeout=5 -o BatchMode=yes "$UBUNTU_HOST" "echo ok" >/dev/null 2>&1; then
+    echo "[gate_merge] zig build test-all on $UBUNTU_HOST (native x86_64) ..."
     bash scripts/run_remote_ubuntu.sh test-all
 else
-    SKIPPED_HOSTS+=("ubuntunote (Linux x86_64) — SSH unreachable; see .dev/ubuntunote_setup.md")
-    echo "[gate_merge] WARN: ubuntunote SSH unreachable; skipping Linux gate." >&2
+    SKIPPED_HOSTS+=("$UBUNTU_HOST (Linux x86_64) — SSH unreachable; see .dev/ubuntunote_setup.md")
+    echo "[gate_merge] WARN: $UBUNTU_HOST SSH unreachable; skipping Linux gate." >&2
 fi
 
-# ---- Windows x86_64 via SSH (windowsmini) ----
-if ssh -o ConnectTimeout=5 -o BatchMode=yes windowsmini "echo ok" >/dev/null 2>&1; then
-    echo "[gate_merge] zig build test-all on windowsmini SSH ..."
+# ---- Windows x86_64 via SSH ----
+if ssh -o ConnectTimeout=5 -o BatchMode=yes "$WINDOWS_HOST" "echo ok" >/dev/null 2>&1; then
+    echo "[gate_merge] zig build test-all on $WINDOWS_HOST SSH ..."
     bash scripts/run_remote_windows.sh test-all
 else
-    SKIPPED_HOSTS+=("windowsmini (Windows x86_64) — SSH unreachable; see .dev/windows_ssh_setup.md")
-    echo "[gate_merge] WARN: windowsmini SSH unreachable; skipping Windows gate." >&2
+    SKIPPED_HOSTS+=("$WINDOWS_HOST (Windows x86_64) — SSH unreachable; see .dev/windows_ssh_setup.md")
+    echo "[gate_merge] WARN: $WINDOWS_HOST SSH unreachable; skipping Windows gate." >&2
 fi
 
 if [ -f scripts/sync_versions.sh ]; then

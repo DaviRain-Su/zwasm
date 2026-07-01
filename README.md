@@ -15,17 +15,20 @@ dual-backend (interpreter + JIT-arm64 + JIT-x86) differential testing.
 v1 ABI compatibility is out of scope — see the
 [migration guide](docs/migration_v1_to_v2.md).
 
-## Supported platforms (verified hosts)
+## Supported platforms
 
-| Role         | Machine                 | OS                                          | Arch    | CPU                     | RAM   |
-|--------------|-------------------------|---------------------------------------------|---------|-------------------------|-------|
-| Development  | MacBook Pro (Mac16,8)   | macOS                                       | aarch64 | Apple M4 Pro            | 48 GB |
-| Linux gate   | `ubuntunote` (mini PC)  | Ubuntu (Determinate Nix + flake-pinned Zig) | x86_64  | Intel i7-1195G7 (4C/8T) | 32 GB |
-| Windows gate | `windowsmini` (mini PC) | Windows 11 Pro (native, MSVC ABI)           | x86_64  | Intel N100 (4C/4T)      | 16 GB |
+zwasm is built and tested on these host targets:
 
-These are the only machines on which CI/dev runs are verified. Windows
-ARM64, Linux aarch64, and 2nd-Windows-machine cross-validation are
-out of scope (demand-driven; ADR-0181 — no version-line planning anchors).
+| Platform | Arch    | Notes                          |
+|----------|---------|--------------------------------|
+| macOS    | aarch64 | primary development target     |
+| Linux    | x86_64  | native, spec + full test gate  |
+| Linux    | aarch64 | supported target               |
+| Windows  | x86_64  | native, MSVC ABI               |
+
+Each release is verified on native macOS-aarch64, Linux-x86_64, and
+Windows-x86_64 hosts. Windows ARM64 and other targets are out of scope for
+now (demand-driven; ADR-0181).
 
 ## Coverage
 
@@ -153,21 +156,20 @@ FFI-capable language, not just C.
 ## Quick start
 
 ```sh
-# Mac native
-zig build              # compile zwasm binary
+zig build              # compile the zwasm binary
 zig build test         # unit tests
-zig build test-all     # all enabled layers
+zig build test-all     # all enabled test layers
 
-# Cross-compile sanity check from Mac (catches Win64 compile errors in ~3s)
+# Cross-compile sanity check (catches, e.g., Win64 compile errors in ~3s)
 zig build -Dtarget=x86_64-windows-gnu
-
-# Linux x86_64 via SSH (see .dev/ubuntunote_setup.md)
-bash scripts/run_remote_ubuntu.sh test-all
-
-# Windows x86_64 via SSH (see .dev/windows_ssh_setup.md;
-# tools provisioned by scripts/windows/install_tools.ps1)
-bash scripts/run_remote_windows.sh test-all
 ```
+
+Run `zig build test-all` on each platform you care about — macOS, Linux,
+and Windows are all first-class. Multi-OS verification is handled
+automatically by CI; the `scripts/run_remote_*.sh` helpers are a
+maintainer convenience for driving the gate across a personal host farm
+over SSH (host aliases are configurable via `ZWASM_UBUNTU_HOST` /
+`ZWASM_WINDOWS_HOST`).
 
 Nix + direnv is the supported dev environment. `direnv allow` loads
 the pinned Zig 0.16.0 and tool surface (`flake.nix`: hyperfine,

@@ -1,7 +1,7 @@
 # CW v1 consumer contracts — enforceable rails for Phase A-F
 
 **Date**: 2026-05-24 cycle 37 (post-CW-v1 deep feedback review)
-**Source**: `~/Documents/MyProducts/ClojureWasmFromScratch/private/notes/zwasm_v2_feedback.md`
+**Source**: ClojureWasmFromScratch consumer feedback (maintainer-local notes)
 (CW v1 private; gitignored on their side)
 **Status**: Active rail for Phase A-F execution
 (`.dev/phase9_remaining_flow.md`). Each contract item maps
@@ -281,7 +281,7 @@ amendment documenting the deviation.
 
 ## §9 — References
 
-- Source: `~/Documents/MyProducts/ClojureWasmFromScratch/private/notes/zwasm_v2_feedback.md`
+- Source: ClojureWasmFromScratch consumer feedback (maintainer-local notes)
   (CW v1 side; gitignored)
 - [`docs/zig_api_design.md`](./zig_api_design.md) — spec
   doc that CW v1 reviewed

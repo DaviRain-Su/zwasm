@@ -4,8 +4,9 @@
 //! ROADMAP §4.2's `ZirFunc` pseudocode. Per ROADMAP §P13 ("type
 //! up-front, slots over flags") every `?T` analysis / regalloc /
 //! optimisation slot is reserved day 1; later phases populate the
-//! fields without touching the struct shape (the W54 lesson —
-//! see `~/Documents/MyProducts/zwasm/.dev/archive/w54-redesign-postmortem.md`).
+//! fields without touching the struct shape (the v1 "W54" redesign
+//! lesson: retrofitting analysis slots onto a live IR struct churns
+//! every downstream pass).
 //!
 //! `ZirOp` itself is an open enum here; task 1.2 declares the full
 //! Wasm 3.0 + JIT pseudo-op catalogue per ROADMAP §4.2.

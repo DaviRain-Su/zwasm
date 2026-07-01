@@ -41,7 +41,11 @@ cd "$(dirname "$0")/.."
 # where Defender scan stalls have wedged runs — D-028).
 SSH_OPTS="-o ServerAliveInterval=30 -o ServerAliveCountMax=4"
 
-REMOTE_DIR="Documents/MyProducts/zwasm_from_scratch"
+# Maintainer SSH gate — the Windows x86_64 host and its clone path are
+# env-configurable (defaults are the project maintainer's hosts). Point
+# ZWASM_WINDOWS_HOST at your own SSH alias to run the gate elsewhere.
+HOST="${ZWASM_WINDOWS_HOST:-windowsmini}"
+REMOTE_DIR="${ZWASM_REMOTE_DIR:-Documents/MyProducts/zwasm_from_scratch}"
 REMOTE_BRANCH="zwasm-from-scratch"
 if [ "${1:-}" = "--branch" ]; then
     if [ -z "${2:-}" ]; then
@@ -54,7 +58,7 @@ fi
 STEP="${1:-test-all}"
 
 echo "[run_remote_windows] sync windowsmini:~/$REMOTE_DIR to origin/$REMOTE_BRANCH ..."
-ssh $SSH_OPTS windowsmini bash -lc "'cd $REMOTE_DIR && git fetch origin $REMOTE_BRANCH && git checkout $REMOTE_BRANCH && git reset --hard origin/$REMOTE_BRANCH'"
+ssh $SSH_OPTS "$HOST" bash -lc "'cd $REMOTE_DIR && git fetch origin $REMOTE_BRANCH && git checkout $REMOTE_BRANCH && git reset --hard origin/$REMOTE_BRANCH'"
 
 # `build` is the implicit (default) step in build.zig — invoking
 # `zig build build` errors. Map the human-friendly arg to no step.
@@ -65,6 +69,6 @@ else
 fi
 
 echo "[run_remote_windows] $REMOTE_CMD ..."
-ssh $SSH_OPTS windowsmini bash -lc "'cd $REMOTE_DIR && $REMOTE_CMD'"
+ssh $SSH_OPTS "$HOST" bash -lc "'cd $REMOTE_DIR && $REMOTE_CMD'"
 
 echo "[run_remote_windows] OK."

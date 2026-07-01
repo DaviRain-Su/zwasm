@@ -14,10 +14,9 @@
 //! `Fstflags` are u16 bit-flags; `Filetype` / `Whence` /
 //! `Advice` are u8.
 //!
-//! Reference shapes (read, never copy):
-//! - `~/Documents/OSS/wasi-rs/crates/wasip1/src/lib_generated.rs`
-//! - `~/Documents/OSS/wasmtime/crates/wasi-common`
-//! Spec source of truth:
+//! Reference shapes (read, never copy): the `wasi-rs` bindings
+//! (`crates/wasip1/src/lib_generated.rs`) and wasmtime's
+//! `crates/wasi-common`. Spec source of truth:
 //! `WebAssembly/WASI/legacy/preview1/witx/typenames.witx`.
 //!
 //! Zone 2 (`src/wasi/`) — may import Zone 0 (`util/`) and

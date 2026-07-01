@@ -2,12 +2,6 @@
   "defaultMode": "acceptEdits",
   "outputStyle": "Japanese",
   "permissions": {
-    "additionalDirectories": [
-      "~/Documents/MyProducts/zwasm",
-      "~/Documents/MyProducts/ClojureWasmFromScratch",
-      "~/Documents/OSS",
-      "~/zwasm/private"
-    ],
     "allow": [
       "Agent",
       "Bash",

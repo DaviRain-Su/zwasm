@@ -54,7 +54,11 @@ cd "$(dirname "$0")/.."
 # running on ubuntunote (the "timeout does NOT propagate" caveat).
 SSH_OPTS="-o ServerAliveInterval=30 -o ServerAliveCountMax=4"
 
-REMOTE_DIR="Documents/MyProducts/zwasm_from_scratch"
+# Maintainer SSH gate — the Linux x86_64 host and its clone path are
+# env-configurable (defaults are the project maintainer's hosts). Point
+# ZWASM_UBUNTU_HOST at your own SSH alias to run the gate elsewhere.
+HOST="${ZWASM_UBUNTU_HOST:-ubuntunote}"
+REMOTE_DIR="${ZWASM_REMOTE_DIR:-Documents/MyProducts/zwasm_from_scratch}"
 REMOTE_BRANCH="zwasm-from-scratch"
 if [ "${1:-}" = "--branch" ]; then
     if [ -z "${2:-}" ]; then
@@ -78,7 +82,7 @@ die_step() {
 #    so the remote `nix` command resolves from a non-interactive
 #    SSH session without relying on user .bashrc.
 echo "[run_remote_ubuntu] preflight (clone + nix reachable) ..."
-ssh $SSH_OPTS ubuntunote bash -lc "'
+ssh $SSH_OPTS "$HOST" bash -lc "'
     test -d $REMOTE_DIR || exit 11
     command -v nix >/dev/null 2>&1 || exit 12
 '" || {
@@ -95,7 +99,7 @@ ssh $SSH_OPTS ubuntunote bash -lc "'
 #    `reset --hard` failure (concurrent mod) are distinguished
 #    by exit code below.
 echo "[run_remote_ubuntu] sync ubuntunote:~/$REMOTE_DIR to origin/$REMOTE_BRANCH ..."
-remote_sha="$(ssh $SSH_OPTS ubuntunote bash -lc "'
+remote_sha="$(ssh $SSH_OPTS "$HOST" bash -lc "'
     cd $REMOTE_DIR || exit 21
     git fetch origin $REMOTE_BRANCH >&2 || exit 22
     git checkout $REMOTE_BRANCH >&2 || exit 23
@@ -136,7 +140,7 @@ esac
 # `flake.nix`, guaranteeing bit-identical toolchain with Mac
 # and any other host.
 echo "[run_remote_ubuntu] $REMOTE_CMD ..."
-ssh $SSH_OPTS ubuntunote bash -lc "'
+ssh $SSH_OPTS "$HOST" bash -lc "'
     cd $REMOTE_DIR && nix develop --command bash -c \"$REMOTE_CMD\"
 '" || die_step "build — '$REMOTE_CMD' failed on ubuntunote (HEAD=$remote_sha)"
 
