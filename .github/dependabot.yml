@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # Keep pinned GitHub Actions (SHA-pinned) up to date. Zig-package and
+  # system-tool pins (flake.nix / versions.lock) are updated manually.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
+    labels:
+      - dependencies
+    open-pull-requests-limit: 5

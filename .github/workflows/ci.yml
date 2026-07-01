@@ -1,0 +1,131 @@
+# CI — the host-local gate on the 3 supported OSes, mirroring the local
+# 3-host gate (Mac aarch64 + Linux x86_64 + Windows x86_64). Each matrix leg
+# runs `scripts/ci_gate.sh` so CI verifies exactly what the maintainer runs
+# per host (single source of truth); the differential oracle uses wasmtime
+# when the install step succeeds.
+#
+# Triggers: pull_request (any target) + push to `main` + manual dispatch.
+# NOTE: intentionally NOT `push` on `zwasm-from-scratch` — the maintainer's
+# development branch receives frequent pushes and local verification is the
+# primary path; gating there would storm the runners.
+#
+# The Windows leg is advisory (continue-on-error): the authoritative Windows
+# verification is the maintainer's native windowsmini host, and the hosted
+# `windows-2022` runner has shown seed-dependent Debug flakiness (D-245).
+# Mac/Linux are blocking.
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: gate (${{ matrix.name }})
+    runs-on: ${{ matrix.runs-on }}
+    continue-on-error: ${{ matrix.advisory || false }}
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: aarch64-macos
+            runs-on: macos-15
+            zig-dir: zig-aarch64-macos-0.16.0
+            extended: true
+          - name: x86_64-linux
+            runs-on: ubuntu-22.04
+            zig-dir: zig-x86_64-linux-0.16.0
+            extended: true
+          - name: x86_64-windows
+            runs-on: windows-2022
+            zig-dir: zig-x86_64-windows-0.16.0
+            advisory: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Cache Zig 0.16.0
+        id: cache-zig
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.local/zig-0.16.0
+          key: zig-0.16.0-${{ matrix.name }}
+
+      - name: Install Zig 0.16.0 (Unix)
+        if: runner.os != 'Windows' && steps.cache-zig.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.local
+          curl -fsSL "https://ziglang.org/download/0.16.0/${{ matrix.zig-dir }}.tar.xz" -o /tmp/zig.tar.xz
+          tar -xJf /tmp/zig.tar.xz -C ~/.local
+          mv "$HOME/.local/${{ matrix.zig-dir }}" "$HOME/.local/zig-0.16.0"
+
+      - name: Install Zig 0.16.0 (Windows)
+        if: runner.os == 'Windows' && steps.cache-zig.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "$HOME\.local" | Out-Null
+          Invoke-WebRequest -Uri "https://ziglang.org/download/0.16.0/zig-x86_64-windows-0.16.0.zip" -OutFile "$env:TEMP\zig.zip"
+          Expand-Archive -Path "$env:TEMP\zig.zip" -DestinationPath "$HOME\.local" -Force
+          Move-Item -Path "$HOME\.local\zig-x86_64-windows-0.16.0" -Destination "$HOME\.local\zig-0.16.0"
+
+      - name: Add Zig to PATH (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: echo "$HOME/.local/zig-0.16.0" >> "$GITHUB_PATH"
+
+      - name: Add Zig to PATH (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Add-Content -Path $env:GITHUB_PATH -Value "$HOME\.local\zig-0.16.0"
+
+      # Reference oracle for the interp-vs-JIT-vs-wasmtime differential. Best
+      # effort: the differential runner degrades to a SKIP when it is absent,
+      # so a download hiccup must not fail the gate.
+      - name: Install wasmtime (reference oracle, best effort)
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          source .github/versions.lock
+          v="v${WASMTIME_VERSION}"
+          case "${{ runner.os }}" in
+            Linux)   asset="wasmtime-${v}-x86_64-linux";   ext="tar.xz" ;;
+            macOS)   asset="wasmtime-${v}-aarch64-macos";  ext="tar.xz" ;;
+            Windows) asset="wasmtime-${v}-x86_64-windows"; ext="zip"    ;;
+          esac
+          url="https://github.com/bytecodealliance/wasmtime/releases/download/${v}/${asset}.${ext}"
+          mkdir -p "$HOME/.local/bin"
+          cd "$HOME/.local/bin"
+          if [ "$ext" = "zip" ]; then
+            curl -fsSL "$url" -o wasmtime.zip && unzip -j -o wasmtime.zip
+          else
+            curl -fsSL "$url" -o wasmtime.tar.xz && tar -xJf wasmtime.tar.xz --strip-components=1 "${asset}/wasmtime"
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Verify toolchain
+        shell: bash
+        run: |
+          zig version
+          wasmtime --version || echo "wasmtime absent — differential will SKIP"
+
+      - name: ci_gate.sh
+        shell: bash
+        env:
+          ZWASM_CI_EXTENDED: ${{ matrix.extended && '1' || '0' }}
+        run: bash scripts/ci_gate.sh

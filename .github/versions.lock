@@ -1,0 +1,19 @@
+# versions.lock — mirror of the pinned tool versions used by zwasm CI.
+#
+# Source of truth: flake.nix (Linux/macOS via the nix devshell + direnv).
+# This file mirrors the same pins for environments that cannot use Nix —
+# primarily the GitHub-hosted CI runners and Windows native installs that
+# need a version string before nix is available. Sourced as a bash file
+# (`source .github/versions.lock`) by workflow steps.
+#
+# IMPORTANT: do NOT add inline comments after a value — keep comments on
+# their own line above each entry (bash strips trailing `# ...` when
+# sourcing, but a plain split('=', 1) reader would pull the comment in).
+#
+# Update process:
+#   1. Bump the value below.
+#   2. If the pin also lives in flake.nix (Zig), update flake.nix too.
+#   3. Run `bash scripts/ci_gate.sh` locally, then let CI confirm on all 3 OSes.
+
+ZIG_VERSION=0.16.0
+WASMTIME_VERSION=45.0.0
