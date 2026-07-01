@@ -2,21 +2,25 @@
 
 Thanks for your interest in zwasm.
 
-## Status: Issues and Pull Requests are paused
+## How to contribute
 
-zwasm v2 is a small, resource-limited project currently finishing its
-from-scratch v2 line. To keep the maintenance load sustainable, we are
-**not accepting issues or pull requests at this time.**
+zwasm v2 has reached its first release candidate and welcomes contributions.
+This is a small, resource-limited project, so please keep the following in mind
+to make review sustainable:
 
-If you hit a bug, have a question, or want to propose something:
+- **Bugs / feature requests** — open an
+  [Issue](https://github.com/clojurewasm/zwasm/issues/new/choose) using the
+  templates. A minimal `.wasm` / `.wat` reproducer helps enormously.
+- **Questions & ideas** — start a thread in
+  [Discussions](https://github.com/clojurewasm/zwasm/discussions).
+- **Pull requests** — welcome. For anything non-trivial, please open an issue
+  or discussion first so we can agree on the approach before you invest time.
+  Keep PRs focused; make sure `zig build test-all` and `zig fmt src/` are clean.
+- **Security** — do **not** post exploit details publicly; follow
+  [`SECURITY.md`](SECURITY.md) (private vulnerability reporting).
 
-- Open a thread in **[Discussions](https://github.com/clojurewasm/zwasm/discussions)**
-  and mention **@chaploud**.
-- For **security** problems, follow [`SECURITY.md`](SECURITY.md) — please do
-  **not** post exploit details in public.
-
-We still very much want to hear about real-world breakage; Discussions is the
-right channel while PRs are closed.
+Response times may vary since this is maintained in spare time — thanks for
+your patience.
 
 ## Building and testing (for trying it locally / forking)
 

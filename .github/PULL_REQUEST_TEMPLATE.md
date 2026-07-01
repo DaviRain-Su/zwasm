@@ -1,13 +1,19 @@
-<!--
-  Pull Requests are currently PAUSED for zwasm v2.
+<!-- Thanks for contributing to zwasm! Keep this short. -->
 
-  zwasm is a small, resource-limited project and cannot review external PRs
-  right now. Please close this PR and instead start a thread in Discussions:
+## Summary
 
-      https://github.com/clojurewasm/zwasm/discussions
+<!-- What does this change and why? -->
 
-  and mention @chaploud. Thanks for understanding — we do want to hear about
-  real-world breakage, just through Discussions while PRs are closed.
+## Related
 
-  For security issues, see SECURITY.md (do not post exploit details publicly).
--->
+<!-- Link any related issue / discussion (e.g. "Closes #123"). -->
+
+## Checklist
+
+- [ ] `zig build test-all` passes locally
+- [ ] `zig fmt src/` is clean
+- [ ] Tests / fixtures added or updated for the change (if applicable)
+- [ ] Docs updated (if user-facing behavior changed)
+
+<!-- For security-sensitive changes, see SECURITY.md — do not post exploit
+     details in a public PR. -->

@@ -1,14 +1,16 @@
-# Issues are paused for zwasm v2 (small, resource-limited project).
-# Route everything to Discussions; disable blank issues.
+# Structured issue templates are provided (bug report / feature request).
+# Route open-ended questions to Discussions and security reports to the
+# private advisory flow.
 blank_issues_enabled: false
 contact_links:
-  - name: 💬 Questions, bugs & feature ideas → Discussions
+  - name: 💬 Questions & general discussion
     url: https://github.com/clojurewasm/zwasm/discussions
     about: >-
-      Issues and Pull Requests are currently paused. Please start a Discussion
-      and mention @chaploud. Real-world breakage reports are welcome here.
+      For questions, ideas, and general discussion, please start a Discussion.
+      Use the issue templates above for concrete bug reports and feature
+      requests.
   - name: 🔒 Report a security vulnerability (private)
     url: https://github.com/clojurewasm/zwasm/security/advisories/new
     about: >-
-      Do NOT report security problems in public. Use private vulnerability
-      reporting — see SECURITY.md.
+      Do NOT report security problems in public issues. Use private
+      vulnerability reporting — see SECURITY.md.
