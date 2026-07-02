@@ -89,7 +89,9 @@ jobs:
     if: needs.changes.outputs.code == 'true'
     runs-on: ${{ matrix.runs-on }}
     continue-on-error: ${{ matrix.advisory || false }}
-    timeout-minutes: 75
+    # 120: the extended (main-push) gate runs the full DCE matrix (~50-70min
+    # alone); a cold zig cache pushed the total past the previous 75min cap.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
@@ -204,8 +206,9 @@ jobs:
           wasm-tools --version
           wasmtime --version || echo "wasmtime absent — differential will SKIP"
 
-      # Extended checks (lint + 6-combo build DCE + ReleaseSafe JIT smoke + AOT
-      # cross-compile) are ~10 cold-cache builds and dominate wall-clock, so they
+      # Extended checks (lint + 9-combo × 2-arch build-DCE matrix + ReleaseSafe
+      # JIT smoke + AOT cross-compile) are up to ~20 cold-cache ReleaseSafe builds
+      # and dominate wall-clock (~2.5-4.5 min/build on hosted runners), so they
       # run ONLY on the merge to `main` (push) — not on every PR / dispatch, which
       # get the fast core gate (fmt + test-all, ~10 min). windows is always core.
       - name: ci_gate.sh
