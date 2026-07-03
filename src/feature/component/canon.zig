@@ -269,20 +269,42 @@ pub const BorrowRepError = error{ NoResourceContext, InvalidHandle };
 /// 28 bits (leaves the high bit free as the latin1/utf16 tag).
 pub const MAX_STRING_BYTE_LENGTH: u32 = (1 << 28) - 1;
 
+/// `CanonicalABI.md` UTF16_TAG — bit 31 of the packed length. Set on a
+/// latin1+utf16 string that had to be stored as utf16 (a code point ≥ 0x100);
+/// clear means the payload is latin1 (1 byte per code point).
+pub const UTF16_TAG: u32 = 1 << 31;
+
+pub const LoweredString = struct { ptr: u32, packed_length: u32 };
+
 pub const StringError = error{
     OutOfBounds,
     InvalidUtf8,
+    /// A lone/mismatched UTF-16 surrogate encountered while lifting a utf16 /
+    /// latin1+utf16 guest string.
+    InvalidUtf16,
     StringTooLong,
-    /// utf16 / latin1+utf16 lowering/lifting — implemented in the next chunk.
+    /// The host arena allocation backing a lifted (transcoded) string failed.
+    OutOfMemory,
+    /// A `string-encoding` a higher layer (e.g. `invokeStringExport`) doesn't
+    /// yet thread through; the canon codec itself supports all three encodings.
     UnsupportedEncoding,
 } || ReallocError;
 
-/// Lower a host UTF-8 string into guest memory (`store_string_into_range`):
-/// allocate `len` bytes via the guest realloc, copy the bytes, and return the
-/// `(ptr, packed_length)` pair the canonical ABI flattens to two i32s. For
-/// utf8 `packed_length == byte_length` (no tag bit).
-pub fn lowerString(cx: CanonContext, s: []const u8) StringError!struct { ptr: u32, packed_length: u32 } {
-    if (cx.string_encoding != .utf8) return StringError.UnsupportedEncoding;
+/// Lower a host UTF-8 string into guest memory per the component's declared
+/// `string-encoding` (`CanonicalABI.md` `store_string`). The host source is
+/// ALWAYS validated UTF-8, so this is the 3-destination subset of the spec
+/// (utf8 → {utf8, utf16, latin1+utf16}); there is no utf16-source machinery.
+/// Returns the `(ptr, packed_length)` pair the canonical ABI flattens to two i32s.
+pub fn lowerString(cx: CanonContext, s: []const u8) StringError!LoweredString {
+    return switch (cx.string_encoding) {
+        .utf8 => lowerUtf8(cx, s),
+        .utf16 => lowerUtf16(cx, s),
+        .latin1_utf16 => lowerLatin1OrUtf16(cx, s),
+    };
+}
+
+/// utf8 dest: copy bytes verbatim, align 1, `packed_length == byte_length`.
+fn lowerUtf8(cx: CanonContext, s: []const u8) StringError!LoweredString {
     if (s.len > MAX_STRING_BYTE_LENGTH) return StringError.StringTooLong;
     const byte_len: u32 = @intCast(s.len);
     const ptr = try cx.realloc(0, 0, 1, byte_len);
@@ -291,17 +313,147 @@ pub fn lowerString(cx: CanonContext, s: []const u8) StringError!struct { ptr: u3
     return .{ .ptr = ptr, .packed_length = byte_len };
 }
 
-/// Lift a guest UTF-8 string (`load_string_from_range`): bounds-check + UTF-8
-/// validate the `[ptr, ptr+byte_length)` range. Returns a slice BORROWING
-/// guest memory (valid until the memory is mutated).
-pub fn liftString(cx: CanonContext, ptr: u32, packed_length: u32) StringError![]const u8 {
-    if (cx.string_encoding != .utf8) return StringError.UnsupportedEncoding;
-    const byte_length = packed_length; // utf8: code units == bytes, no tag bit
+/// utf16 dest (`store_utf8_to_utf16`): host UTF-8 is validated, so the exact
+/// code-unit count is known up front (no worst-case-alloc + shrink). align 2,
+/// `packed_length == code_units` (no tag).
+fn lowerUtf16(cx: CanonContext, s: []const u8) StringError!LoweredString {
+    const units = std.unicode.calcUtf16LeLen(s) catch return StringError.InvalidUtf8;
+    if (units > MAX_STRING_BYTE_LENGTH) return StringError.StringTooLong;
+    const code_units: u32 = @intCast(units);
+    const byte_len = code_units * 2;
+    const ptr = try cx.realloc(0, 0, 2, byte_len);
+    if (@as(usize, ptr) + byte_len > cx.mem().len) return StringError.OutOfBounds;
+    writeUtf16LeInto(cx.mem()[ptr..][0..byte_len], s);
+    return .{ .ptr = ptr, .packed_length = code_units };
+}
+
+/// latin1+utf16 dest (`store_string_to_latin1_or_utf16`): latin1 (1 byte/char)
+/// iff every code point < 0x100, else utf16 with `UTF16_TAG` set. We SCAN the
+/// source first — the observable result (bytes + packed length) is identical to
+/// the spec's in-place inflate, with fewer footguns.
+fn lowerLatin1OrUtf16(cx: CanonContext, s: []const u8) StringError!LoweredString {
+    if (!std.unicode.utf8ValidateSlice(s)) return StringError.InvalidUtf8;
+    var latin1_able = true;
+    var n_cps: usize = 0;
+    var scan = std.unicode.Utf8View.initUnchecked(s).iterator();
+    while (scan.nextCodepoint()) |cp| {
+        n_cps += 1;
+        if (cp >= 0x100) {
+            latin1_able = false;
+            break;
+        }
+    }
+    if (latin1_able) {
+        if (n_cps > MAX_STRING_BYTE_LENGTH) return StringError.StringTooLong;
+        const byte_len: u32 = @intCast(n_cps);
+        const ptr = try cx.realloc(0, 0, 2, byte_len);
+        if (@as(usize, ptr) + byte_len > cx.mem().len) return StringError.OutOfBounds;
+        var w: usize = ptr;
+        var it = std.unicode.Utf8View.initUnchecked(s).iterator();
+        while (it.nextCodepoint()) |cp| : (w += 1) cx.mem()[w] = @intCast(cp); // cp < 0x100
+        return .{ .ptr = ptr, .packed_length = byte_len };
+    }
+    const units = std.unicode.calcUtf16LeLen(s) catch return StringError.InvalidUtf8;
+    if (units > MAX_STRING_BYTE_LENGTH) return StringError.StringTooLong;
+    const code_units: u32 = @intCast(units);
+    const byte_len = code_units * 2;
+    const ptr = try cx.realloc(0, 0, 2, byte_len);
+    if (@as(usize, ptr) + byte_len > cx.mem().len) return StringError.OutOfBounds;
+    writeUtf16LeInto(cx.mem()[ptr..][0..byte_len], s);
+    return .{ .ptr = ptr, .packed_length = code_units | UTF16_TAG };
+}
+
+/// Transcode validated UTF-8 `s` into UTF-16LE bytes in `dst` (len == 2×units).
+/// Alignment-safe: `writeInt` is byte-wise, so a merely 2-aligned guest ptr is fine.
+fn writeUtf16LeInto(dst: []u8, s: []const u8) void {
+    var w: usize = 0;
+    var it = std.unicode.Utf8View.initUnchecked(s).iterator();
+    while (it.nextCodepoint()) |cp| {
+        if (cp <= 0xFFFF) {
+            std.mem.writeInt(u16, dst[w..][0..2], @intCast(cp), .little);
+            w += 2;
+        } else {
+            const c = cp - 0x10000;
+            const hi: u16 = @intCast(0xD800 + (c >> 10));
+            const lo: u16 = @intCast(0xDC00 + (c & 0x3FF));
+            std.mem.writeInt(u16, dst[w..][0..2], hi, .little);
+            std.mem.writeInt(u16, dst[w + 2 ..][0..2], lo, .little);
+            w += 4;
+        }
+    }
+}
+
+/// Lift a guest string into HOST UTF-8 per the component's `string-encoding`
+/// (`CanonicalABI.md` `load_string_from_range`). The result is ALWAYS allocated
+/// from `arena` (uniform ownership): utf8 is validated + copied; utf16 /
+/// latin1+utf16 are transcoded. (utf8 alone could borrow guest memory, but the
+/// two non-utf8 encodings MUST allocate to transcode, so a uniform arena-owned
+/// contract avoids a mixed borrow/owned return the callers would have to reason
+/// about.)
+pub fn liftString(cx: CanonContext, arena: std.mem.Allocator, ptr: u32, packed_length: u32) StringError![]u8 {
+    switch (cx.string_encoding) {
+        .utf8 => {
+            const byte_length = packed_length; // code units == bytes, no tag bit
+            if (byte_length > MAX_STRING_BYTE_LENGTH) return StringError.StringTooLong;
+            if (@as(usize, ptr) + byte_length > cx.mem().len) return StringError.OutOfBounds;
+            const bytes = cx.mem()[ptr..][0..byte_length];
+            if (!std.unicode.utf8ValidateSlice(bytes)) return StringError.InvalidUtf8;
+            return arena.dupe(u8, bytes) catch return StringError.OutOfMemory;
+        },
+        .utf16 => return liftUtf16(cx, arena, ptr, packed_length),
+        .latin1_utf16 => {
+            if (packed_length & UTF16_TAG != 0)
+                return liftUtf16(cx, arena, ptr, packed_length & ~UTF16_TAG);
+            return liftLatin1(cx, arena, ptr, packed_length);
+        },
+    }
+}
+
+/// utf16 lift: `packed_length` is the code-unit count, byte_length = 2×units,
+/// guest ptr must be 2-aligned. Decode UTF-16LE (surrogate pairs) → host UTF-8.
+fn liftUtf16(cx: CanonContext, arena: std.mem.Allocator, ptr: u32, code_units: u32) StringError![]u8 {
+    if (code_units > MAX_STRING_BYTE_LENGTH) return StringError.StringTooLong;
+    const byte_length: usize = @as(usize, code_units) * 2;
+    if (ptr % 2 != 0) return StringError.OutOfBounds; // spec: utf16 range is 2-aligned
+    if (@as(usize, ptr) + byte_length > cx.mem().len) return StringError.OutOfBounds;
+    const src = cx.mem()[ptr..][0..byte_length];
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(arena);
+    var i: usize = 0;
+    while (i < byte_length) {
+        const unit = std.mem.readInt(u16, src[i..][0..2], .little);
+        i += 2;
+        var cp: u21 = undefined;
+        if (unit >= 0xD800 and unit <= 0xDBFF) {
+            if (i + 2 > byte_length) return StringError.InvalidUtf16; // dangling high surrogate
+            const lo = std.mem.readInt(u16, src[i..][0..2], .little);
+            if (lo < 0xDC00 or lo > 0xDFFF) return StringError.InvalidUtf16;
+            i += 2;
+            cp = 0x10000 + (@as(u21, unit - 0xD800) << 10) + (lo - 0xDC00);
+        } else if (unit >= 0xDC00 and unit <= 0xDFFF) {
+            return StringError.InvalidUtf16; // lone low surrogate
+        } else cp = unit;
+        var buf: [4]u8 = undefined;
+        const n = std.unicode.utf8Encode(cp, &buf) catch return StringError.InvalidUtf16;
+        out.appendSlice(arena, buf[0..n]) catch return StringError.OutOfMemory;
+    }
+    return out.toOwnedSlice(arena) catch return StringError.OutOfMemory;
+}
+
+/// latin1 lift: one byte per code point (each < 0x100 → always a valid scalar),
+/// transcode to host UTF-8.
+fn liftLatin1(cx: CanonContext, arena: std.mem.Allocator, ptr: u32, byte_length: u32) StringError![]u8 {
     if (byte_length > MAX_STRING_BYTE_LENGTH) return StringError.StringTooLong;
     if (@as(usize, ptr) + byte_length > cx.mem().len) return StringError.OutOfBounds;
-    const bytes = cx.mem()[ptr..][0..byte_length];
-    if (!std.unicode.utf8ValidateSlice(bytes)) return StringError.InvalidUtf8;
-    return bytes;
+    const src = cx.mem()[ptr..][0..byte_length];
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(arena);
+    for (src) |b| {
+        var buf: [2]u8 = undefined;
+        const n = std.unicode.utf8Encode(@as(u21, b), &buf) catch unreachable; // b < 0x100
+        out.appendSlice(arena, buf[0..n]) catch return StringError.OutOfMemory;
+    }
+    return out.toOwnedSlice(arena) catch return StringError.OutOfMemory;
 }
 
 pub const LiftError = error{
@@ -491,7 +643,7 @@ pub fn load(cx: CanonContext, arena: std.mem.Allocator, ty: CanonType, ptr: u32)
             .string => {
                 const sptr: u32 = @intCast(try loadInt(cx, ptr, 4));
                 const slen: u32 = @intCast(try loadInt(cx, ptr + 4, 4));
-                return .{ .string = try liftString(cx, sptr, slen) };
+                return .{ .string = try liftString(cx, arena, sptr, slen) };
             },
             .bool, .s8, .u8, .s16, .u16, .s32, .u32, .s64, .u64, .f32, .f64, .char, .error_context => return lift(coreFromBits(try loadInt(cx, ptr, primSize(p)), p), p),
         },
@@ -693,7 +845,8 @@ test "round-trip: utf8 string guest↔host via realloc + memory" {
 
     const lowered = try lowerString(cx, "héllo, 世界"); // multibyte utf8
     try testing.expect(lowered.ptr >= 8);
-    const back = try liftString(cx, lowered.ptr, lowered.packed_length);
+    const back = try liftString(cx, testing.allocator, lowered.ptr, lowered.packed_length);
+    defer testing.allocator.free(back);
     try testing.expectEqualStrings("héllo, 世界", back);
 }
 
@@ -704,7 +857,9 @@ test "round-trip: empty string" {
     const cx = CanonContext{ .memory_ctx = @ptrCast(&mem_slice), .memory_fn = CanonContext.sliceMemoryFn, .realloc_ctx = @ptrCast(&bump), .realloc_fn = Bump.realloc };
     const lowered = try lowerString(cx, "");
     try testing.expectEqual(@as(u32, 0), lowered.packed_length);
-    try testing.expectEqualStrings("", try liftString(cx, lowered.ptr, lowered.packed_length));
+    const back = try liftString(cx, testing.allocator, lowered.ptr, lowered.packed_length);
+    defer testing.allocator.free(back);
+    try testing.expectEqualStrings("", back);
 }
 
 test "lift: out-of-bounds range rejected" {
@@ -712,7 +867,7 @@ test "lift: out-of-bounds range rejected" {
     var bump = Bump{ .next = 0 };
     var mem_slice: []u8 = &mem;
     const cx = CanonContext{ .memory_ctx = @ptrCast(&mem_slice), .memory_fn = CanonContext.sliceMemoryFn, .realloc_ctx = @ptrCast(&bump), .realloc_fn = Bump.realloc };
-    try testing.expectError(StringError.OutOfBounds, liftString(cx, 4, 100));
+    try testing.expectError(StringError.OutOfBounds, liftString(cx, testing.allocator, 4, 100));
 }
 
 test "lift: invalid utf8 rejected" {
@@ -720,15 +875,81 @@ test "lift: invalid utf8 rejected" {
     var bump = Bump{ .next = 0 };
     var mem_slice: []u8 = &mem;
     const cx = CanonContext{ .memory_ctx = @ptrCast(&mem_slice), .memory_fn = CanonContext.sliceMemoryFn, .realloc_ctx = @ptrCast(&bump), .realloc_fn = Bump.realloc };
-    try testing.expectError(StringError.InvalidUtf8, liftString(cx, 0, 2));
+    try testing.expectError(StringError.InvalidUtf8, liftString(cx, testing.allocator, 0, 2));
 }
 
-test "string: non-utf8 encoding deferred" {
+test "lowerString utf16: BMP + supplementary (surrogate pair)" {
+    var mem = [_]u8{0} ** 32;
+    var bump = Bump{ .next = 0 };
+    var mem_slice: []u8 = &mem;
+    const cx = CanonContext{ .memory_ctx = @ptrCast(&mem_slice), .memory_fn = CanonContext.sliceMemoryFn, .realloc_ctx = @ptrCast(&bump), .realloc_fn = Bump.realloc, .string_encoding = .utf16 };
+    // "A𐐷" = U+0041 + U+10437 (one BMP unit + a surrogate pair = 3 code units).
+    const lowered = try lowerString(cx, "A\u{10437}");
+    try testing.expectEqual(@as(u32, 3), lowered.packed_length); // 3 code units, no tag
+    const b = mem[lowered.ptr..][0..6];
+    try testing.expectEqualSlices(u8, &[_]u8{ 0x41, 0x00, 0x01, 0xD8, 0x37, 0xDC }, b);
+}
+
+test "lowerString latin1+utf16: all-latin1 stays latin1, mixed flips to tagged utf16" {
+    var mem = [_]u8{0} ** 64;
+    var bump = Bump{ .next = 0 };
+    var mem_slice: []u8 = &mem;
+    const cx = CanonContext{ .memory_ctx = @ptrCast(&mem_slice), .memory_fn = CanonContext.sliceMemoryFn, .realloc_ctx = @ptrCast(&bump), .realloc_fn = Bump.realloc, .string_encoding = .latin1_utf16 };
+    // "Aÿ" — U+0041 + U+00FF, both < 0x100 → latin1, 1 byte each, no tag.
+    const l1 = try lowerString(cx, "A\u{00FF}");
+    try testing.expectEqual(@as(u32, 2), l1.packed_length);
+    try testing.expectEqualSlices(u8, &[_]u8{ 0x41, 0xFF }, mem[l1.ptr..][0..2]);
+    // "Aλ" — U+03BB ≥ 0x100 → utf16 with UTF16_TAG, 2 code units.
+    const l2 = try lowerString(cx, "A\u{03BB}");
+    try testing.expectEqual(@as(u32, 2 | UTF16_TAG), l2.packed_length);
+    try testing.expectEqualSlices(u8, &[_]u8{ 0x41, 0x00, 0xBB, 0x03 }, mem[l2.ptr..][0..4]);
+}
+
+test "round-trip utf16: host↔guest via lower + lift (incl. supplementary)" {
+    var mem = [_]u8{0} ** 64;
+    var bump = Bump{ .next = 0 };
+    var mem_slice: []u8 = &mem;
+    const cx = CanonContext{ .memory_ctx = @ptrCast(&mem_slice), .memory_fn = CanonContext.sliceMemoryFn, .realloc_ctx = @ptrCast(&bump), .realloc_fn = Bump.realloc, .string_encoding = .utf16 };
+    const s = "Aé世\u{10437}"; // 1/2/3-byte utf8 + a supplementary (surrogate-pair) code point
+    const lowered = try lowerString(cx, s);
+    const back = try liftString(cx, testing.allocator, lowered.ptr, lowered.packed_length);
+    defer testing.allocator.free(back);
+    try testing.expectEqualStrings(s, back);
+}
+
+test "round-trip latin1+utf16: latin1 path and tagged-utf16 path both survive" {
+    var mem = [_]u8{0} ** 64;
+    var bump = Bump{ .next = 0 };
+    var mem_slice: []u8 = &mem;
+    const cx = CanonContext{ .memory_ctx = @ptrCast(&mem_slice), .memory_fn = CanonContext.sliceMemoryFn, .realloc_ctx = @ptrCast(&bump), .realloc_fn = Bump.realloc, .string_encoding = .latin1_utf16 };
+    const latin1 = "A\u{00FF}"; // all < 0x100 → latin1, no tag
+    const l1 = try lowerString(cx, latin1);
+    try testing.expectEqual(@as(u32, 0), l1.packed_length & UTF16_TAG);
+    const b1 = try liftString(cx, testing.allocator, l1.ptr, l1.packed_length);
+    defer testing.allocator.free(b1);
+    try testing.expectEqualStrings(latin1, b1);
+    const mixed = "A\u{03BB}世"; // ≥ 0x100 → tagged utf16
+    const l2 = try lowerString(cx, mixed);
+    try testing.expect(l2.packed_length & UTF16_TAG != 0);
+    const b2 = try liftString(cx, testing.allocator, l2.ptr, l2.packed_length);
+    defer testing.allocator.free(b2);
+    try testing.expectEqualStrings(mixed, b2);
+}
+
+test "lift utf16: dangling high surrogate rejected" {
+    var mem = [_]u8{ 0x00, 0xD8, 0, 0, 0, 0, 0, 0 }; // lone high surrogate U+D800 (LE)
+    var bump = Bump{ .next = 0 };
+    var mem_slice: []u8 = &mem;
+    const cx = CanonContext{ .memory_ctx = @ptrCast(&mem_slice), .memory_fn = CanonContext.sliceMemoryFn, .realloc_ctx = @ptrCast(&bump), .realloc_fn = Bump.realloc, .string_encoding = .utf16 };
+    try testing.expectError(StringError.InvalidUtf16, liftString(cx, testing.allocator, 0, 1));
+}
+
+test "lift utf16: unaligned ptr rejected" {
     var mem = [_]u8{0} ** 8;
     var bump = Bump{ .next = 0 };
     var mem_slice: []u8 = &mem;
     const cx = CanonContext{ .memory_ctx = @ptrCast(&mem_slice), .memory_fn = CanonContext.sliceMemoryFn, .realloc_ctx = @ptrCast(&bump), .realloc_fn = Bump.realloc, .string_encoding = .utf16 };
-    try testing.expectError(StringError.UnsupportedEncoding, lowerString(cx, "x"));
+    try testing.expectError(StringError.OutOfBounds, liftString(cx, testing.allocator, 1, 1)); // ptr=1 not 2-aligned
 }
 
 test "store/load round-trip: list<u32>" {
@@ -1138,7 +1359,7 @@ pub fn liftFlat(cx: CanonContext, arena: std.mem.Allocator, t: CanonType, flats:
             .string => {
                 const ptr: u32 = @bitCast((try takeFlat(flats, idx, .i32)).i32);
                 const plen: u32 = @bitCast((try takeFlat(flats, idx, .i32)).i32);
-                return .{ .string = try liftString(cx, ptr, plen) };
+                return .{ .string = try liftString(cx, arena, ptr, plen) };
             },
             .bool, .s8, .u8, .s16, .u16, .s32, .u32, .s64, .u64, .f32, .f64, .char, .error_context => {
                 const ct = flatCoreType(p) orelse return LiftFlatError.ValueTypeMismatch;
