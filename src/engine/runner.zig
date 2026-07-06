@@ -159,13 +159,6 @@ pub const Error = error{
     /// called. An unsatisfied import MUST fail instantiation regardless
     /// of whether it is reached at runtime (D-451).
     ImportUnsatisfied,
-    /// D-475 — a module declares an i64-indexed table (table64, the memory64
-    /// proposal's table extension). The validator + interp runtime support
-    /// these, but the JIT codegen still indexes tables at i32 width, so
-    /// compiling one would silently miscompile a >2^32 index. The JIT compile
-    /// path rejects it (clean failure) until the i64 table-bounds codegen lands
-    /// (D-475 slice 4); the interp path runs table64 modules correctly.
-    JitTable64Unsupported,
 } || compile_func.Error || parser.Error || sections.Error || linker.Error || entry.Error || validator_mod.Error || rv.Error;
 // `InvalidGlobalInitExpr` / `UnsupportedEntrySignature` /
 // `UnsupportedConstExpr` originate in `runner_validate.zig`
@@ -1192,7 +1185,8 @@ pub const JitInstance = struct {
 
     /// D-496 — slot count of table `idx` (full index space, matching
     /// `JitRuntime.tables_ptr`), backing C-API `wasm_table_size`. Null if OOB.
-    pub fn tableLen(self: *JitInstance, idx: u32) ?u32 {
+    /// u64 per D-475 (table64); the u32-shaped wasm-c-api boundary saturates.
+    pub fn tableLen(self: *JitInstance, idx: u32) ?u64 {
         if (idx >= self.owned.rt.tables_count) return null;
         return self.owned.rt.tables_ptr[idx].len;
     }
@@ -1271,7 +1265,7 @@ pub const JitInstance = struct {
     /// fail-safe (the host `init` may be a forged ref, never dereferenced) — a
     /// callable grown funcref slot then needs `wasm_table_set` (mirror-aware). Grow
     /// is bounded by the pre-allocated capacity (a no-max table has no headroom).
-    pub fn growTable(self: *JitInstance, tableidx: u32, init_ref: u64, delta: u32) ?u32 {
+    pub fn growTable(self: *JitInstance, tableidx: u32, init_ref: u64, delta: u32) ?u64 {
         if (tableidx >= self.owned.rt.tables_count) return null;
         const old = setup_mod.jitTableGrowHost(&self.owned.rt, tableidx, init_ref, delta);
         if (old < 0) return null;

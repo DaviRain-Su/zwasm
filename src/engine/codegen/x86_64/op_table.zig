@@ -11,10 +11,10 @@
 //!
 //!   table.get x:
 //!     MOV  RAX, [R15 + tables_ptr_off]            ; tables_ptr
-//!     MOV  R11, [RAX + (tableidx*16)]             ; refs ptr
-//!     MOV  R10d, [RAX + (tableidx*16)+8]          ; len (zero-ext to 64)
+//!     MOV  R11, [RAX + (tableidx*32)]             ; refs ptr
+//!     MOV  R10, [RAX + (tableidx*32)+8]           ; len (u64, D-475)
 //!     MOV  EDX, W_idx                              ; stage idx in EDX
-//!     CMP  EDX, R10d
+//!     CMP  RDX, R10                                ; .q width (D-475)
 //!     JAE  trap_stub                               ; oobtable_fixups
 //!     MOV  Rdst, [R11 + RDX*8]                     ; refs[idx]
 //!     (store back to spill slot if needed)
@@ -25,7 +25,7 @@
 //!
 //!   table.size x:
 //!     MOV  RAX, [R15 + tables_ptr_off]
-//!     MOV  Rdst_d, [RAX + (tableidx*16)+8]         ; push len as i32
+//!     MOV  Rdst, [RAX + (tableidx*32)+8]           ; push len
 //!
 //! RAX / R10 / R11 / RDX are private scratch within the handler
 //! (RAX is global scratch outside the regalloc pool; R10/R11 are
@@ -66,6 +66,7 @@ pub fn emitTableGetCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!vo
         ctx.spill_base_off,
         ctx.func_idx,
         @as(u32, @intCast(ins.payload)),
+        ctx.func.tableIdxType(@intCast(ins.payload)) == .i64,
     );
 }
 
@@ -79,6 +80,7 @@ pub fn emitTableSetCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!vo
         ctx.spill_base_off,
         ctx.func_idx,
         @as(u32, @intCast(ins.payload)),
+        ctx.func.tableIdxType(@intCast(ins.payload)) == .i64,
     );
 }
 
@@ -104,6 +106,7 @@ pub fn emitTableGrowCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!v
         ctx.spill_base_off,
         ctx.outgoing_max_bytes,
         @as(u32, @intCast(ins.payload)),
+        ctx.func.tableIdxType(@intCast(ins.payload)) == .i64,
     );
 }
 
@@ -117,6 +120,7 @@ pub fn emitTableFillCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!v
         ctx.spill_base_off,
         ctx.func_idx,
         @as(u32, @intCast(ins.payload)),
+        ctx.func.tableIdxType(@intCast(ins.payload)) == .i64,
     );
 }
 
@@ -131,6 +135,8 @@ pub fn emitTableCopyCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!v
         ctx.func_idx,
         @as(u32, @intCast(ins.payload)),
         ins.extra,
+        ctx.func.tableIdxType(@intCast(ins.payload)) == .i64,
+        ctx.func.tableIdxType(ins.extra) == .i64,
     );
 }
 
@@ -145,6 +151,8 @@ pub fn emitTableInitCtx(ctx: *ctx_mod.EmitCtx, ins: *const zir.ZirInstr) Error!v
         ctx.func_idx,
         @as(u32, @intCast(ins.payload)),
         ins.extra,
+        // ins.extra = tableidx (dst); ins.payload = elemidx.
+        ctx.func.tableIdxType(ins.extra) == .i64,
     );
 }
 const func_mod = @import("../../../runtime/instance/func.zig");
@@ -229,28 +237,29 @@ pub fn emitTableGet(
     spill_base_off: u32,
     func_idx: u32,
     tableidx: u32,
+    idx64: bool,
 ) Error!void {
     // TODO(9.12-audit): table storage shape — see D-126 / ADR-0068.
     // Encoding-budget guard. disp32 always suffices; cap matches
-    // arm64's 512 (lowered from 1024 when TableSlice stride moved
-    // from 16 → 24 per ADR-0068).
+    // arm64's 512 (stride 24 per ADR-0068, 32 after D-475).
     if (tableidx >= 512) return Error.UnsupportedOp;
     const tbl_disp: i32 = @intCast(tableidx * jit_abi.table_slice_size);
 
     if (pushed_vregs.items.len < 1) return Error.AllocationMissing;
     const idx_v = pushed_vregs.pop().?;
 
-    // Load tables_ptr → RAX; refs → R11; len → R10d.
+    // Load tables_ptr → RAX; refs → R11; len → R10 (u64, D-475).
     try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.tables_ptr_off).slice());
     try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.r11, .rax, tbl_disp).slice());
-    try buf.appendSlice(allocator, inst.encMovR32FromMemDisp32(.r10, .rax, tbl_disp + 8).slice());
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.r10, .rax, tbl_disp + @as(i32, @intCast(jit_abi.tableslice_len_off))).slice());
 
-    // Stage idx in EDX (32-bit MOV zero-extends to RDX implicitly).
+    // Stage idx in EDX (32-bit MOV zero-extends to RDX implicitly);
+    // an i64 table stages the full 64-bit index (.q, D-475).
     const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
-    try buf.appendSlice(allocator, inst.encMovRR(.d, .rdx, idx_r).slice());
+    try buf.appendSlice(allocator, inst.encMovRR(if (idx64) .q else .d, .rdx, idx_r).slice());
 
-    // CMP EDX, R10d ; JAE trap.
-    try buf.appendSlice(allocator, inst.encCmpRR(.d, .rdx, .r10).slice());
+    // CMP RDX, R10 ; JAE trap. .q width (D-475: len is u64).
+    try buf.appendSlice(allocator, inst.encCmpRR(.q, .rdx, .r10).slice());
     {
         const fixup_at: u32 = @intCast(buf.items.len);
         try buf.appendSlice(allocator, inst.encJccRel32(.ae, 0).slice());
@@ -281,6 +290,7 @@ pub fn emitTableSet(
     spill_base_off: u32,
     func_idx: u32,
     tableidx: u32,
+    idx64: bool,
 ) Error!void {
     if (tableidx >= 512) return Error.UnsupportedOp;
     const tbl_disp: i32 = @intCast(tableidx * jit_abi.table_slice_size);
@@ -299,17 +309,17 @@ pub fn emitTableSet(
     // R9 is not allocatable, not a spill stage, untouched by the descriptor
     // loads and the funcptr/typeidx mirror below).
     const idx_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, idx_v, 0);
-    try buf.appendSlice(allocator, inst.encMovRR(.d, .rdx, idx_r).slice());
+    try buf.appendSlice(allocator, inst.encMovRR(if (idx64) .q else .d, .rdx, idx_r).slice());
     const val_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, val_v, 1);
     try buf.appendSlice(allocator, inst.encMovRR(.q, .r9, val_r).slice());
 
-    // Load tables_ptr → RAX; refs → R11; len → R10d (r10/r11 free now).
+    // Load tables_ptr → RAX; refs → R11; len → R10 (u64, D-475; r10/r11 free now).
     try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.tables_ptr_off).slice());
     try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.r11, .rax, tbl_disp).slice());
-    try buf.appendSlice(allocator, inst.encMovR32FromMemDisp32(.r10, .rax, tbl_disp + 8).slice());
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.r10, .rax, tbl_disp + @as(i32, @intCast(jit_abi.tableslice_len_off))).slice());
 
-    // CMP EDX, R10d ; JAE trap.
-    try buf.appendSlice(allocator, inst.encCmpRR(.d, .rdx, .r10).slice());
+    // CMP RDX, R10 ; JAE trap. .q width (D-475: len is u64).
+    try buf.appendSlice(allocator, inst.encCmpRR(.q, .rdx, .r10).slice());
     {
         const fixup_at: u32 = @intCast(buf.items.len);
         try buf.appendSlice(allocator, inst.encJccRel32(.ae, 0).slice());
@@ -326,7 +336,7 @@ pub fn emitTableSet(
     // derive into RCX; STR. Then derive typeidx into RCX and STR
     // to typeidx_base from tables_jit_ci_ptr.
     try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.tables_ptr_off).slice());
-    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, .rax, tbl_disp + 16).slice());
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, .rax, tbl_disp + @as(i32, @intCast(jit_abi.tableslice_funcptrs_off))).slice());
     try buf.appendSlice(allocator, inst.encTestRR(.q, .rax, .rax).slice());
     const skip_at: u32 = @intCast(buf.items.len);
     try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice());
@@ -354,7 +364,7 @@ pub fn emitTableSize(
     tableidx: u32,
 ) Error!void {
     if (tableidx >= 512) return Error.UnsupportedOp;
-    const len_disp: i32 = @intCast(tableidx * jit_abi.table_slice_size + 8);
+    const len_disp: i32 = @intCast(tableidx * jit_abi.table_slice_size + jit_abi.tableslice_len_off);
 
     try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.tables_ptr_off).slice());
 
@@ -363,8 +373,9 @@ pub fn emitTableSize(
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
     const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
 
-    // MOV Rdst_d, [RAX + len_disp] (32-bit, zero-ext to 64).
-    try buf.appendSlice(allocator, inst.encMovR32FromMemDisp32(dst_r, .rax, len_disp).slice());
+    // MOV Rdst, [RAX + len_disp] (64-bit, D-475: len is u64; an i32
+    // table's len < 2^32 so the value matches the old 32-bit load).
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(dst_r, .rax, len_disp).slice());
     try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
 }
@@ -385,6 +396,7 @@ pub fn emitTableGrow(
     spill_base_off: u32,
     outgoing_max_bytes: u32,
     tableidx: u32,
+    idx64: bool,
 ) Error!void {
     if (tableidx >= 512) return Error.UnsupportedOp;
 
@@ -398,9 +410,11 @@ pub fn emitTableGrow(
 
     // Stage delta into arg3 (Cc-dependent). gprLoadSpilled may park
     // it in R10 (spill-stage); MOV to arg3 if needed.
+    // D-475: an i64 table's delta is a full u64 (.q); i32 keeps the
+    // zero-extending .d (the callback takes u64 — transparent).
     const delta_src = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, delta_v, 0);
     if (delta_src != arg3) {
-        try buf.appendSlice(allocator, inst.encMovRR(.d, arg3, delta_src).slice());
+        try buf.appendSlice(allocator, inst.encMovRR(if (idx64) .q else .d, arg3, delta_src).slice());
     }
 
     // Stage init into arg2 (full 8-byte ref). Stage 1 to avoid
@@ -423,13 +437,15 @@ pub fn emitTableGrow(
     try buf.appendSlice(allocator, inst.encCallReg(.rax).slice());
     try emitShadowFree(allocator, buf, outgoing_max_bytes);
 
-    // Capture EAX → result vreg.
+    // Capture EAX/RAX → result vreg. D-475: an i64 table's grow result
+    // is a full i64 (.q); the i32 .d capture truncates -1 / the
+    // sub-2^32 old size to the correct i32 bit pattern.
     const result_v = next_vreg.*;
     next_vreg.* += 1;
     if (result_v >= alloc.slots.len) return Error.SlotOverflow;
     const dst_r = try gpr.gprDefSpilled(alloc, result_v, 0);
     if (dst_r != abi.return_gpr) {
-        try buf.appendSlice(allocator, inst.encMovRR(.d, dst_r, abi.return_gpr).slice());
+        try buf.appendSlice(allocator, inst.encMovRR(if (idx64) .q else .d, dst_r, abi.return_gpr).slice());
     }
     try gpr.gprStoreSpilled(allocator, buf, alloc, spill_base_off, result_v, 0);
     try pushed_vregs.append(allocator, result_v);
@@ -452,6 +468,7 @@ pub fn emitTableFill(
     spill_base_off: u32,
     func_idx: u32,
     tableidx: u32,
+    idx64: bool,
 ) Error!void {
     if (tableidx >= 512) return Error.UnsupportedOp;
     const tbl_disp: i32 = @intCast(tableidx * jit_abi.table_slice_size);
@@ -467,17 +484,17 @@ pub fn emitTableFill(
     // this snapshot pass is technically unnecessary for safety;
     // doing it explicitly mirrors the arm64 path's invariant.
     const dst_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, dst_v, 0);
-    try buf.appendSlice(allocator, inst.encMovRR(.d, .rdx, dst_r).slice());
+    try buf.appendSlice(allocator, inst.encMovRR(if (idx64) .q else .d, .rdx, dst_r).slice());
     const val_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, val_v, 1);
     try buf.appendSlice(allocator, inst.encMovRR(.q, .r8, val_r).slice());
     const n_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, n_v, 0);
-    try buf.appendSlice(allocator, inst.encMovRR(.d, .r10, n_r).slice());
+    try buf.appendSlice(allocator, inst.encMovRR(if (idx64) .q else .d, .r10, n_r).slice());
 
     // Step B: read TableSlice[tableidx]. RAX = tables_ptr; R11 = refs;
-    // R9d = len (using R9 since R10/R11/RDX/R8 are already in use).
+    // R9 = len (u64, D-475; using R9 since R10/R11/RDX/R8 are already in use).
     try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.tables_ptr_off).slice());
     try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.r11, .rax, tbl_disp).slice());
-    try buf.appendSlice(allocator, inst.encMovR32FromMemDisp32(.r9, .rax, tbl_disp + 8).slice());
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.r9, .rax, tbl_disp + @as(i32, @intCast(jit_abi.tableslice_len_off))).slice());
 
     // Step C: bounds check — RAX = dst + n; CMP RAX, R9; JA trap.
     //   MOV  RAX, RDX
@@ -486,6 +503,14 @@ pub fn emitTableFill(
     //   JA   trap_stub
     try buf.appendSlice(allocator, inst.encMovRR(.q, .rax, .rdx).slice());
     try buf.appendSlice(allocator, inst.encAddRR(.q, .rax, .r10).slice());
+    if (idx64) {
+        // D-475: raw u64 dst+n can wrap past 2^64 — JC (carry) traps
+        // the wrap before the length compare (memory64 pattern).
+        const wrap_fixup_at: u32 = @intCast(buf.items.len);
+        try buf.appendSlice(allocator, inst.encJccRel32(.b, 0).slice());
+        try oobtable_fixups.append(allocator, wrap_fixup_at);
+        trace.writeBounds(func_idx, wrap_fixup_at);
+    }
     try buf.appendSlice(allocator, inst.encCmpRR(.q, .rax, .r9).slice());
     {
         const fixup_at: u32 = @intCast(buf.items.len);
@@ -499,7 +524,7 @@ pub fn emitTableFill(
     // For funcref tables, derive funcptr from R8 (val) into RCX,
     // derive typeidx into RSI, and load typeidx_base into RDI.
     try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.tables_ptr_off).slice());
-    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.r9, .rax, tbl_disp + 16).slice());
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.r9, .rax, tbl_disp + @as(i32, @intCast(jit_abi.tableslice_funcptrs_off))).slice());
     try buf.appendSlice(allocator, inst.encTestRR(.q, .r9, .r9).slice());
     const derive_skip_at: u32 = @intCast(buf.items.len);
     try buf.appendSlice(allocator, inst.encJccRel32(.e, 0).slice());
@@ -572,6 +597,8 @@ pub fn emitTableCopy(
     func_idx: u32,
     dst_tbl: u32,
     src_tbl: u32,
+    dst64: bool,
+    src64: bool,
 ) Error!void {
     if (dst_tbl >= 512 or src_tbl >= 512) return Error.UnsupportedOp;
     const dst_tbl_disp: i32 = @intCast(dst_tbl * jit_abi.table_slice_size);
@@ -583,24 +610,34 @@ pub fn emitTableCopy(
     const src_v = pushed_vregs.pop().?;
     const dst_v = pushed_vregs.pop().?;
 
-    // Step A: capture operands into private holders.
+    // Step A: capture operands into private holders. D-475 widths per
+    // table (validator §3.3.6 table64): dst uses the DST table's
+    // idx_type, src the SRC table's, n the narrower of the two.
+    const n64 = dst64 and src64;
     const dst_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, dst_v, 0);
-    try buf.appendSlice(allocator, inst.encMovRR(.d, .rdx, dst_r).slice());
+    try buf.appendSlice(allocator, inst.encMovRR(if (dst64) .q else .d, .rdx, dst_r).slice());
     const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
-    try buf.appendSlice(allocator, inst.encMovRR(.d, .r8, src_r).slice());
+    try buf.appendSlice(allocator, inst.encMovRR(if (src64) .q else .d, .r8, src_r).slice());
     const n_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, n_v, 0);
-    try buf.appendSlice(allocator, inst.encMovRR(.d, .r10, n_r).slice());
+    try buf.appendSlice(allocator, inst.encMovRR(if (n64) .q else .d, .r10, n_r).slice());
 
     // Step B: load tables_ptr → RAX.
     try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.tables_ptr_off).slice());
 
     // Step C1: bounds dst_idx + n vs tables[x].len.
-    // R11 = dst_refs ; R9d = dst_len ; bounds via R12 scratch (use
-    // RDI which is not in the regalloc pool — caller-side scratch).
+    // R11 = dst_refs ; R9 = dst_len (u64, D-475) ; bounds via RDI
+    // scratch (not in the regalloc pool — caller-side scratch).
     try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.r11, .rax, dst_tbl_disp).slice());
-    try buf.appendSlice(allocator, inst.encMovR32FromMemDisp32(.r9, .rax, dst_tbl_disp + 8).slice());
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.r9, .rax, dst_tbl_disp + @as(i32, @intCast(jit_abi.tableslice_len_off))).slice());
     try buf.appendSlice(allocator, inst.encMovRR(.q, .rdi, .rdx).slice());
     try buf.appendSlice(allocator, inst.encAddRR(.q, .rdi, .r10).slice());
+    if (dst64) {
+        // D-475: raw u64 dst+n can wrap — JC traps the wrap.
+        const wrap_fixup_at: u32 = @intCast(buf.items.len);
+        try buf.appendSlice(allocator, inst.encJccRel32(.b, 0).slice());
+        try oobtable_fixups.append(allocator, wrap_fixup_at);
+        trace.writeBounds(func_idx, wrap_fixup_at);
+    }
     try buf.appendSlice(allocator, inst.encCmpRR(.q, .rdi, .r9).slice());
     {
         const fixup_at: u32 = @intCast(buf.items.len);
@@ -610,11 +647,18 @@ pub fn emitTableCopy(
     }
 
     // Step C2: bounds src_idx + n vs tables[y].len.
-    // RCX = src_refs ; R9d = src_len (reused).
+    // RCX = src_refs ; R9 = src_len (u64, reused).
     try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rcx, .rax, src_tbl_disp).slice());
-    try buf.appendSlice(allocator, inst.encMovR32FromMemDisp32(.r9, .rax, src_tbl_disp + 8).slice());
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.r9, .rax, src_tbl_disp + @as(i32, @intCast(jit_abi.tableslice_len_off))).slice());
     try buf.appendSlice(allocator, inst.encMovRR(.q, .rdi, .r8).slice());
     try buf.appendSlice(allocator, inst.encAddRR(.q, .rdi, .r10).slice());
+    if (src64) {
+        // D-475: raw u64 src+n can wrap — JC traps the wrap.
+        const wrap_fixup_at: u32 = @intCast(buf.items.len);
+        try buf.appendSlice(allocator, inst.encJccRel32(.b, 0).slice());
+        try oobtable_fixups.append(allocator, wrap_fixup_at);
+        trace.writeBounds(func_idx, wrap_fixup_at);
+    }
     try buf.appendSlice(allocator, inst.encCmpRR(.q, .rdi, .r9).slice());
     {
         const fixup_at: u32 = @intCast(buf.items.len);
@@ -628,9 +672,9 @@ pub fn emitTableCopy(
     // (long-lived). For different-tables case also RDI =
     // src_funcptrs_base. RAX still holds tables_ptr from Step B.
     try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.tables_ptr_off).slice());
-    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rsi, .rax, dst_tbl_disp + 16).slice());
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rsi, .rax, dst_tbl_disp + @as(i32, @intCast(jit_abi.tableslice_funcptrs_off))).slice());
     if (!same_table) {
-        try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rdi, .rax, src_tbl_disp + 16).slice());
+        try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rdi, .rax, src_tbl_disp + @as(i32, @intCast(jit_abi.tableslice_funcptrs_off))).slice());
     }
 
     // Step D: if n == 0, skip.
@@ -779,8 +823,9 @@ pub fn emitTableInit(
     func_idx: u32,
     elemidx: u32,
     tableidx: u32,
+    dst64: bool,
 ) Error!void {
-    // tableidx cap = 512 (TableSlice stride 24 per ADR-0068);
+    // tableidx cap = 512 (TableSlice stride 32 per D-475);
     // elemidx cap stays 1024 (ElemSlice stride still 16).
     if (elemidx >= 1024 or tableidx >= 512) return Error.UnsupportedOp;
     const tbl_disp: i32 = @intCast(tableidx * jit_abi.table_slice_size);
@@ -791,18 +836,20 @@ pub fn emitTableInit(
     const src_v = pushed_vregs.pop().?;
     const dst_v = pushed_vregs.pop().?;
 
-    // Step A: capture operands.
+    // Step A: capture operands. D-475: dst uses the table's idx_type
+    // (.q for i64); src + n are ALWAYS i32 (elem segments are
+    // 32-bit-indexed, validator §3.3.6).
     const dst_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, dst_v, 0);
-    try buf.appendSlice(allocator, inst.encMovRR(.d, .rdx, dst_r).slice());
+    try buf.appendSlice(allocator, inst.encMovRR(if (dst64) .q else .d, .rdx, dst_r).slice());
     const src_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, src_v, 0);
     try buf.appendSlice(allocator, inst.encMovRR(.d, .r8, src_r).slice());
     const n_r = try gpr.gprLoadSpilled(allocator, buf, alloc, spill_base_off, n_v, 0);
     try buf.appendSlice(allocator, inst.encMovRR(.d, .r10, n_r).slice());
 
-    // Step B1: tables[x] descriptor — R11 = dst_refs, R9d = dst_len.
+    // Step B1: tables[x] descriptor — R11 = dst_refs, R9 = dst_len (u64, D-475).
     try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.tables_ptr_off).slice());
     try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.r11, .rax, tbl_disp).slice());
-    try buf.appendSlice(allocator, inst.encMovR32FromMemDisp32(.r9, .rax, tbl_disp + 8).slice());
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.r9, .rax, tbl_disp + @as(i32, @intCast(jit_abi.tableslice_len_off))).slice());
 
     // Step B2: elems[y] descriptor — RCX = elem_refs, RSI = elem_len.
     try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.elem_segments_ptr_off).slice());
@@ -834,9 +881,16 @@ pub fn emitTableInit(
         trace.writeBounds(func_idx, fixup_at);
     }
 
-    // Step C2: bounds dst+n > dst_len (R9).
+    // Step C2: bounds dst+n > dst_len (R9). A 64-bit dst can wrap the
+    // sum (n is zero-extended u32) — JC traps the wrap (D-475).
     try buf.appendSlice(allocator, inst.encMovRR(.q, .rdi, .rdx).slice());
     try buf.appendSlice(allocator, inst.encAddRR(.q, .rdi, .r10).slice());
+    if (dst64) {
+        const wrap_fixup_at: u32 = @intCast(buf.items.len);
+        try buf.appendSlice(allocator, inst.encJccRel32(.b, 0).slice());
+        try oobtable_fixups.append(allocator, wrap_fixup_at);
+        trace.writeBounds(func_idx, wrap_fixup_at);
+    }
     try buf.appendSlice(allocator, inst.encCmpRR(.q, .rdi, .r9).slice());
     {
         const fixup_at: u32 = @intCast(buf.items.len);
@@ -850,7 +904,7 @@ pub fn emitTableInit(
     // (RAX currently holds elem_dropped_ptr from Step B3; reload
     // tables_ptr first.)
     try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rax, abi.runtime_ptr_save_gpr, jit_abi.tables_ptr_off).slice());
-    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rdi, .rax, tbl_disp + 16).slice());
+    try buf.appendSlice(allocator, inst.encMovR64FromMemDisp32(.rdi, .rax, tbl_disp + @as(i32, @intCast(jit_abi.tableslice_funcptrs_off))).slice());
 
     // Step D: if n == 0, skip.
     try buf.appendSlice(allocator, inst.encTestRR(.q, .r10, .r10).slice());

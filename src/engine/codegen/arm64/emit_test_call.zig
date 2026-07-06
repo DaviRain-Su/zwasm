@@ -296,6 +296,74 @@ test "compile: call N — i32 result in spill slot lands STR W0 (spill-aware)" {
     try testing.expect(found);
 }
 
+test "compile: table.grow i64-table — spilled result stores X-form STR X0 (D-475 boundary)" {
+    // D-475 boundary fixture: an i64 table's grow result is a full i64
+    // in X0; a spilled result vreg MUST be stored X-form (STR X0), or
+    // the X-form spill reload picks up stale upper 32 bits (the -1
+    // failure sentinel becomes a garbage positive). The i32 twin below
+    // pins the byte-identical W-form fast path.
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i64} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    f.table_idx_types = &.{.i64};
+    try f.instrs.append(testing.allocator, .{ .op = .@"i64.const", .payload = 0, .extra = 0 }); // init ref (null)
+    try f.instrs.append(testing.allocator, .{ .op = .@"i64.const", .payload = 5, .extra = 0 }); // delta
+    try f.instrs.append(testing.allocator, .{ .op = .@"table.grow", .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .end });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 2 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+        .{ .def_pc = 2, .last_use_pc = 3 },
+    } };
+    // Result vreg → slot 8 = first spill slot (max_reg_slots_gpr = 8).
+    const slots = [_]u16{ 0, 1, 8 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 9 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32, &.{}, false);
+    defer deinit(testing.allocator, out);
+    const expected_x = inst.encStrImm(0, 31, 0); // STR X0, [SP, #0]
+    const wrong_w = inst.encStrImmW(0, 31, 0); // the D-475 F1 bug shape
+    var found_x = false;
+    var found_w = false;
+    var i: usize = 0;
+    while (i + 4 <= out.bytes.len) : (i += 4) {
+        const word = std.mem.readInt(u32, out.bytes[i..][0..4], .little);
+        if (word == expected_x) found_x = true;
+        if (word == wrong_w) found_w = true;
+    }
+    try testing.expect(found_x);
+    try testing.expect(!found_w);
+}
+
+test "compile: table.grow i32-table — spilled result keeps W-form STR W0 (byte-identical fast path)" {
+    const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i32} };
+    var f = ZirFunc.init(0, sig, &.{});
+    defer f.deinit(testing.allocator);
+    // No table_idx_types → tableIdxType defaults .i32.
+    try f.instrs.append(testing.allocator, .{ .op = .@"i64.const", .payload = 0, .extra = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"i32.const", .payload = 5 });
+    try f.instrs.append(testing.allocator, .{ .op = .@"table.grow", .payload = 0 });
+    try f.instrs.append(testing.allocator, .{ .op = .end });
+    f.liveness = .{ .ranges = &[_]zir.LiveRange{
+        .{ .def_pc = 0, .last_use_pc = 2 },
+        .{ .def_pc = 1, .last_use_pc = 2 },
+        .{ .def_pc = 2, .last_use_pc = 3 },
+    } };
+    const slots = [_]u16{ 0, 1, 8 };
+    const alloc: regalloc.Allocation = .{ .slots = &slots, .n_slots = 9 };
+    const out = try compile(testing.allocator, &f, alloc, &.{}, &.{}, 0, &.{}, &.{}, .i32, &.{}, false);
+    defer deinit(testing.allocator, out);
+    const expected_w = inst.encStrImmW(0, 31, 0); // STR W0, [SP, #0]
+    var found_w = false;
+    var i: usize = 0;
+    while (i + 4 <= out.bytes.len) : (i += 4) {
+        if (std.mem.readInt(u32, out.bytes[i..][0..4], .little) == expected_w) {
+            found_w = true;
+            break;
+        }
+    }
+    try testing.expect(found_w);
+}
+
 test "compile: call_indirect — bounds (CMP/B.HS) + sig (LDR/CMP/B.NE) + funcptr (LDR-LSL3/BLR)" {
     const sig: zir.FuncType = .{ .params = &.{}, .results = &.{.i32} };
     var f = ZirFunc.init(0, sig, &.{});
@@ -320,7 +388,7 @@ test "compile: call_indirect — bounds (CMP/B.HS) + sig (LDR/CMP/B.NE) + funcpt
     // between the sig load and the sig CMP):
     //   [32..36] MOVZ W9, #5                   ; idx const
     //   [36..40] ORR W17, WZR, W9              ; zero-extend idx
-    //   [40..44] CMP W17, W25                  ; bounds
+    //   [40..44] CMP X17, X25                  ; bounds (X-width, D-475)
     //   [44..48] B.HS trap_stub                ; placeholder
     //   [48..52] LDR W16, [X24, X17, LSL #2]   ; sig load
     //   [52..56] CMN W16, #1                   ; D-294 null check (W16 == maxInt?)
@@ -333,7 +401,7 @@ test "compile: call_indirect — bounds (CMP/B.HS) + sig (LDR/CMP/B.NE) + funcpt
     //   [80..84] ORR W9, WZR, W0               ; capture
     const body0 = prologue.body_start_offset(false);
     try testing.expectEqual(@as(u32, inst.encOrrRegW(17, 31, 9)), std.mem.readInt(u32, out.bytes[body0 + 4 ..][0..4], .little));
-    try testing.expectEqual(@as(u32, inst.encCmpRegW(17, 25)), std.mem.readInt(u32, out.bytes[body0 + 8 ..][0..4], .little));
+    try testing.expectEqual(@as(u32, inst.encCmpRegX(17, 25)), std.mem.readInt(u32, out.bytes[body0 + 8 ..][0..4], .little));
     const bhs = std.mem.readInt(u32, out.bytes[body0 + 12 ..][0..4], .little);
     try testing.expectEqual(@as(u32, 0x2), bhs & 0xF); // cond=.hs
     try testing.expectEqual(@as(u32, inst.encLdrWRegLsl2(16, 24, 17)), std.mem.readInt(u32, out.bytes[body0 + 16 ..][0..4], .little));
@@ -479,7 +547,7 @@ test "compile: return_call_indirect — bounds + sig + funcptr-to-X16 + frame_te
     const body0 = prologue.body_start_offset(false);
     // After MOVZ W9 #5 (body+0):
     //   [+4]  ORR W17, WZR, W9               ; zero-extend idx
-    //   [+8]  CMP W17, W25                   ; bounds
+    //   [+8]  CMP X17, X25                   ; bounds (X-width, D-475)
     //   [+12] B.HS trap_stub                 ; placeholder
     //   [+16] LDR W16, [X24, X17, LSL #2]    ; sig load
     //   [+20] CMN W16, #1                    ; D-294 null check (W16 == maxInt?)
@@ -491,7 +559,7 @@ test "compile: return_call_indirect — bounds + sig + funcptr-to-X16 + frame_te
     //   [+44] LDP X29, X30, [SP], #16        ; frame_teardown (frame_bytes=0)
     //   [+48] BR X16                         ; tail-jump
     try testing.expectEqual(@as(u32, inst.encOrrRegW(17, 31, 9)), std.mem.readInt(u32, out.bytes[body0 + 4 ..][0..4], .little));
-    try testing.expectEqual(@as(u32, inst.encCmpRegW(17, 25)), std.mem.readInt(u32, out.bytes[body0 + 8 ..][0..4], .little));
+    try testing.expectEqual(@as(u32, inst.encCmpRegX(17, 25)), std.mem.readInt(u32, out.bytes[body0 + 8 ..][0..4], .little));
     const bhs = std.mem.readInt(u32, out.bytes[body0 + 12 ..][0..4], .little);
     try testing.expectEqual(@as(u32, 0x2), bhs & 0xF); // cond=.hs
     try testing.expectEqual(@as(u32, inst.encLdrWRegLsl2(16, 24, 17)), std.mem.readInt(u32, out.bytes[body0 + 16 ..][0..4], .little));
@@ -535,10 +603,11 @@ test "compile: return_call_indirect — multi-table (table_idx > 0) loads size+b
     const body0 = prologue.body_start_offset(false);
     const rt = abi.runtime_ptr_save_gpr;
     // After MOVZ idx (body+0) + ORR W17,WZR,W9 (body+4), the multi-table
-    // tell: load tables_ptr, then table-1 size, then CMP W17,W16 (NOT W25).
+    // tell: load tables_ptr, then table-1 size (u64 X-form, D-475), then
+    // CMP X17,X16 (NOT X25).
     try testing.expectEqual(@as(u32, inst.encLdrImm(16, rt, jit_abi.tables_ptr_off)), std.mem.readInt(u32, out.bytes[body0 + 8 ..][0..4], .little));
-    try testing.expectEqual(@as(u32, inst.encLdrImmW(16, 16, 1 * jit_abi.table_slice_size + 8)), std.mem.readInt(u32, out.bytes[body0 + 12 ..][0..4], .little));
-    try testing.expectEqual(@as(u32, inst.encCmpRegW(17, 16)), std.mem.readInt(u32, out.bytes[body0 + 16 ..][0..4], .little));
+    try testing.expectEqual(@as(u32, inst.encLdrImm(16, 16, 1 * jit_abi.table_slice_size + jit_abi.tableslice_len_off)), std.mem.readInt(u32, out.bytes[body0 + 12 ..][0..4], .little));
+    try testing.expectEqual(@as(u32, inst.encCmpRegX(17, 16)), std.mem.readInt(u32, out.bytes[body0 + 16 ..][0..4], .little));
     // BR X16 (tail-jump) is present in the body (trap stubs follow it, so it
     // is not the final word). End-to-end execution is covered by the
     // runner_test "return_call_indirect on a non-zero table index" case.
