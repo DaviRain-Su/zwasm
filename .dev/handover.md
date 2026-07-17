@@ -5,14 +5,13 @@
 
 ## Current state — MAINTENANCE MODE (post-v2.0.0)
 
-**v2.2.1 is Latest** (tag `v2.2.1` @62b13a6c9, 2026-07-16 — binary-size
-campaign ADR-0204: CLI −21% ReleaseSafe via D-522 stage 1; release.yml
-auto-built Release + 5 assets; tag USER-GRANTED in-session per ADR-0156.
-v2.2.0 = the 2026-07-09 AOT-full-fidelity line). v1 frozen at `v1.11.1`. Dev model: cut
+**v2.3.0 is the release line** (tag cut 2026-07-17, USER-GRANTED in-session
+per ADR-0156 — WASI-0.3.0-official sweep + system-clock + Homebrew tap
+`brew install clojurewasm/tap/zwasm`; v2.2.1 = 2026-07-16 binary-size line,
+v2.2.0 = 2026-07-09 AOT line). v1 frozen at `v1.11.1`. Dev model: cut
 a `develop/<slug>` branch from `main` → PR → CI `ci-required` 3-OS gate must be
 green to merge. **Release stays user-only (ADR-0156)** — never autonomously tag /
-publish / cut over (v2.2.1 tag was user-granted 2026-07-16 in-session). No
-active campaign; no cron self-re-arm.
+publish / cut over. No active campaign; no cron self-re-arm.
 
 ## Binary-size campaign — CLOSED 2026-07-16 (ADR-0204 Implemented, v2.2.1)
 
@@ -35,18 +34,18 @@ DA-critique 20/20) · close #146 (refutation record + v2.2.1). Key outcomes:
 
 ## AOT-full-fidelity campaign — CLOSED 2026-07-09 (ADR-0203 Implemented)
 
-Kickoff #136 (phases I–III) · stage 1 #137 (36 helper bakes → `[rt+off]`
-slots, D-516) · stage 2 #138 (format v0.5 + `load_compiled.zig`
-deserializer, D-519) · stage 3 #139 (run-path swap, mini-runtime DELETED,
-§4.5.4 start-func JIT bug fixed, D-517+D-518, D-520 CI hole) · stage 4
-#140 (elision serialization D-515(1)) · stage 5 #141 (`--cache` D-508;
-DA-critique failure-path fixes: HIT header-gate + self-heal, refusal =
-BYPASS, interp bypass) · stage V #142 (retro: bench parity record, docs,
-`.cwasm --engine interp` loud refusal, lesson
-failure-path-tests-certified-the-defect). Net: `zig build test-aot-diff`
-cross-process differential 63/63 incl. cache lanes. **Residual =
-D-515(2)** (spec-assert corpus under elision; harness memory
-provisioning) + D-514 (SIMD elision symmetry) — both in debt.yaml.
+PRs #136-#142: format v0.5 full-fidelity, run-path swap (mini-runtime
+DELETED), elision serialization, `--cache` (D-508). `zig build
+test-aot-diff` 63/63 incl. cache lanes. Residual = D-515(2) + D-514
+(debt.yaml). Details: ADR-0203 + CHANGELOG 2.2.0.
+
+## WASI-0.3.0-official sweep — 2026-07-17 (branch develop/wasm30-wasi03-inventory-sweep)
+
+**WASI 0.3.0 released 2026-06-11** (spec at `~/Documents/OSS/WASI/`, clones
+pulled). Docs truth-sweep (README 0.3 row, --help/canon.zig/3.0-runner lies,
+`-Dgc` is INERT → D-525) + `system-clock`/`get-resolution` host support
+(instant{s64,u32}, DA check #12). Fixtures import 0.2.6 → D-523; async
+wait-until/wait-for → D-524. Full diff = proposal_watch 2026-07-17 entry.
 
 ## Active front — G-senior-gap (2026-07-06, /continue entry point)
 

@@ -12,6 +12,55 @@ SemVer compatibility guarantees start at the first stable `v2.0.0` tag.
 
 _No changes yet._
 
+## [2.3.0] - 2026-07-17
+
+Inventory sweep against the officially released **WASI 0.3.0**
+(2026-06-11): the first slice of the official interface set, plus a
+docs truth-sweep and Homebrew packaging.
+
+### Added
+
+- **Official WASI 0.3.0 clocks surface** — `wasi:clocks/system-clock`
+  (0.3.0's renamed `wall-clock`; `instant{seconds: s64, nanoseconds:
+  u32}`, pre-1970 instants representable with the floored split) and
+  `get-resolution` on both clocks, served on the component host. The
+  async `wait-until` / `wait-for` need scheduler-wired timer waitables
+  and are tracked as debt (D-524).
+- **Homebrew**: `brew install clojurewasm/tap/zwasm` (macOS arm64,
+  Linux x86_64 / aarch64), packaging the release binaries.
+
+### Changed
+
+- **wasip3 fixture toolchain repinned** nightly-2026-06-14 →
+  nightly-2026-06-24 (the newest nightly that can still `-Z build-std`
+  wasm32-wasip3 — 2026-07-08/-16 hit an upstream std regression) and
+  the conformance fixtures regenerated. Measured: the emitted imports
+  are unchanged (wasi 0.2.6) because they come from the borrowed
+  wasip2 wasi-libc, not the nightly's std bindings — the official-WIT
+  fixture gap remains open as D-523.
+
+### Fixed
+
+- **`zwasm --help` engine wording**: the usage text claimed
+  `interp (default)`; the real default (since 2.0.0) is `auto` — prefers
+  the JIT with transparent interpreter fallback. The help now matches
+  `docs/reference/cli.md` and the README, and also lists the `--cache` /
+  `--cache-clear` flags shipped in 2.2.0.
+
+### Documentation
+
+- **WASI 0.3 documented**: README gains a WASI 0.3 row (Component-Model
+  native-async core, opt-in `-Dwasi=p3`; official WASI 0.3.0 released
+  2026-06-11 — `wasi:filesystem`/`wasi:sockets` data-plane and `wasi:http`
+  pending), and the migration guide's "until it settles" framing is
+  replaced accordingly.
+- **GC build default corrected in the migration guide**: WasmGC is
+  compiled in and executes by default (part of `-Dwasm=v3_0`); the guide
+  previously described it as opt-in via `-Dgc`, which is inert (tracked
+  as debt).
+- **README gains an Install section** (Homebrew + prebuilt release
+  binaries).
+
 ## [2.2.1] - 2026-07-16
 
 Binary-size campaign (ADR-0204, PRs #144-#146), triggered by downstream
@@ -139,7 +188,7 @@ Windows x86_64). Earlier pre-releases were tagged `v2.0.0-alpha.*`.
 
 - **WebAssembly 3.0** — all 9 proposals: GC, exception handling, tail
   calls, memory64, multi-memory, typed function references,
-  extended-const, relaxed-SIMD. Plus full Wasm 1.0 + 2.0 (multi-value,
+  extended-const, relaxed-SIMD, custom annotations. Plus full Wasm 1.0 + 2.0 (multi-value,
   SIMD-128, bulk-memory, reference-types, non-trapping FP→int conversion,
   sign-extension, mutable globals). Spec testsuite green, `skip-impl == 0`.
 - **Execution backends** — interpreter (full WASI), JIT for ARM64
